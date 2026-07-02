@@ -3,13 +3,15 @@ local cache = April.require("core.cache")
 local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_npc_enabled"
 
 function M.register_menu()
+    menu_util.ensure_group(G.NPCS)
     menu.add_checkbox(T, G.NPCS, "april_npc_enabled", "Enable NPC ESP", true, { key = 0, colorpicker = { 1, 0.3, 0.3, 1 } })
     menu.add_checkbox(T, G.NPCS, "april_npc_soldiers", "Soldiers", true, { parent = P, colorpicker = { 1, 0.3, 0.3, 1 } })
     menu.add_combo(T, G.NPCS, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 1, { parent = P })

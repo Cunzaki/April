@@ -1,13 +1,12 @@
 --[[
-    Vector script menus use one tab ("full" mode) with named groups in the left sidebar.
-    Groups must be registered in order before any elements are added.
+    Menu layout: register each group once, right before its elements (not all upfront).
+    Vector uses the left sidebar for groups; options appear when a group is selected.
 ]]
 
 local M = {}
 
 M.TAB = "April"
 
--- Sidebar order (matches original Fallen layout)
 M.GROUPS = {
     "Aimbot",
     "Visuals",
@@ -22,25 +21,22 @@ M.GROUPS = {
     "Config",
 }
 
-M.G = {}
-for _, name in ipairs(M.GROUPS) do
-    M.G[name:gsub(" ", "_"):upper()] = name
-    -- Aimbot -> AIMBOT, Recoil Control -> RECOIL_CONTROL
-end
-M.G.AIMBOT = "Aimbot"
-M.G.VISUALS = "Visuals"
-M.G.WORLD = "World"
-M.G.RECOIL = "Recoil Control"
-M.G.WAYPOINTS = "Waypoints"
-M.G.LOOT = "Loot"
-M.G.NPCS = "NPCs"
-M.G.BASE = "Base"
-M.G.MAP = "Tactical Map"
-M.G.MISC = "Misc"
-M.G.CONFIG = "Config"
+M.G = {
+    AIMBOT = "Aimbot",
+    VISUALS = "Visuals",
+    WORLD = "World",
+    RECOIL = "Recoil Control",
+    WAYPOINTS = "Waypoints",
+    LOOT = "Loot",
+    NPCS = "NPCs",
+    BASE = "Base",
+    MAP = "Tactical Map",
+    MISC = "Misc",
+    CONFIG = "Config",
+}
 
 M._tab_ready = false
-M._groups_ready = false
+M._groups_done = {}
 
 function M.ensure_tab()
     if M._tab_ready then return end
@@ -50,13 +46,11 @@ function M.ensure_tab()
     M._tab_ready = true
 end
 
-function M.ensure_groups()
+function M.ensure_group(name)
     M.ensure_tab()
-    if M._groups_ready then return end
-    for _, name in ipairs(M.GROUPS) do
-        menu.add_group(M.TAB, name)
-    end
-    M._groups_ready = true
+    if M._groups_done[name] then return end
+    menu.add_group(M.TAB, name)
+    M._groups_done[name] = true
 end
 
 function M.tab()

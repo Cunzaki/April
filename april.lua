@@ -4,7 +4,7 @@
 
     This is the final bundled script. Load or execute this file in Vector.
     Source modules live in src/ — rebuild with: node scripts/bundle.mjs
-    Built: 2026-07-02T06:18:41.456Z
+    Built: 2026-07-02T06:25:25.944Z
 ]]
 
 if menu and menu.add_tab then
@@ -364,15 +364,14 @@ end)()
 -- ── core/menu_util.lua ──
 April._mods["core.menu_util"] = (function()
 --[[
-    Vector script menus use one tab ("full" mode) with named groups in the left sidebar.
-    Groups must be registered in order before any elements are added.
+    Menu layout: register each group once, right before its elements (not all upfront).
+    Vector uses the left sidebar for groups; options appear when a group is selected.
 ]]
 
 local M = {}
 
 M.TAB = "April"
 
--- Sidebar order (matches original Fallen layout)
 M.GROUPS = {
     "Aimbot",
     "Visuals",
@@ -387,25 +386,22 @@ M.GROUPS = {
     "Config",
 }
 
-M.G = {}
-for _, name in ipairs(M.GROUPS) do
-    M.G[name:gsub(" ", "_"):upper()] = name
-    -- Aimbot -> AIMBOT, Recoil Control -> RECOIL_CONTROL
-end
-M.G.AIMBOT = "Aimbot"
-M.G.VISUALS = "Visuals"
-M.G.WORLD = "World"
-M.G.RECOIL = "Recoil Control"
-M.G.WAYPOINTS = "Waypoints"
-M.G.LOOT = "Loot"
-M.G.NPCS = "NPCs"
-M.G.BASE = "Base"
-M.G.MAP = "Tactical Map"
-M.G.MISC = "Misc"
-M.G.CONFIG = "Config"
+M.G = {
+    AIMBOT = "Aimbot",
+    VISUALS = "Visuals",
+    WORLD = "World",
+    RECOIL = "Recoil Control",
+    WAYPOINTS = "Waypoints",
+    LOOT = "Loot",
+    NPCS = "NPCs",
+    BASE = "Base",
+    MAP = "Tactical Map",
+    MISC = "Misc",
+    CONFIG = "Config",
+}
 
 M._tab_ready = false
-M._groups_ready = false
+M._groups_done = {}
 
 function M.ensure_tab()
     if M._tab_ready then return end
@@ -415,13 +411,11 @@ function M.ensure_tab()
     M._tab_ready = true
 end
 
-function M.ensure_groups()
+function M.ensure_group(name)
     M.ensure_tab()
-    if M._groups_ready then return end
-    for _, name in ipairs(M.GROUPS) do
-        menu.add_group(M.TAB, name)
-    end
-    M._groups_ready = true
+    if M._groups_done[name] then return end
+    menu.add_group(M.TAB, name)
+    M._groups_done[name] = true
 end
 
 function M.tab()
@@ -572,14 +566,32 @@ local env = April.require("core.env")
 
 local M = {}
 local loaded = false
-local weapons = {}
+local toolinfo = {}
+local recoil_weapons = {}
+local originals = {}
+local patched = {}
 
-local FALLBACK = {
-    ["Salvaged M14"] = {
-        Weapon = { RPM = 370, Auto = false },
-        Bullet = { Speed = 2100, Gravity = 0.55, MaxRange = 1100 },
-    },
+local FALLBACK_STATS = {
+    ["Salvaged M14"] = { speed = 850, gravity = 18 },
+    ["Salvaged AK47"] = { speed = 800, gravity = 15 },
+    ["Military M4A1"] = { speed = 950, gravity = 18 },
+    ["Military MP7"] = { speed = 750, gravity = 15 },
+    ["Military PKM"] = { speed = 850, gravity = 18 },
+    ["Bruno's M4A1"] = { speed = 1000, gravity = 18 },
+    ["Salvaged Pump Action"] = { speed = 550, gravity = 15 },
+    ["Salvaged Skorpion"] = { speed = 650, gravity = 12 },
+    ["Salvaged SMG"] = { speed = 700, gravity = 12 },
+    ["Salvaged AK74u"] = { speed = 750, gravity = 15 },
+    ["Salvaged AK4"] = { speed = 800, gravity = 15 },
+    ["Military Barrett"] = { speed = 1500, gravity = 25 },
+    ["Military Barret"] = { speed = 1500, gravity = 25 },
+    ["Crossbow"] = { speed = 400, gravity = 35 },
+    ["Wooden Bow"] = { speed = 300, gravity = 40 },
 }
+
+function M.slug(name)
+    return "april_rc_" .. (name or ""):gsub("[^%w]", "_")
+end
 
 function M.load()
     if loaded then return true end
@@ -589,29 +601,229 @@ function M.load()
     local tool_mod = modules and env.safe_call(function() return modules:find_first_child("ToolInfo") end)
     if not tool_mod then return false end
     local ok, data = pcall(function() return require(tool_mod) end)
-    if ok and type(data) == "table" then
-        weapons = data
-        loaded = true
+    if not ok or type(data) ~= "table" then return false end
+
+    toolinfo = data
+    recoil_weapons = {}
+    for name, entry in pairs(data) do
+        if type(entry) == "table" and entry.Recoil and entry.Recoil.Camera then
+            table.insert(recoil_weapons, name)
+        end
+    end
+    table.sort(recoil_weapons)
+    loaded = true
+    return true
+end
+
+function M.get(name)
+    if not loaded then M.load() end
+    return toolinfo[name]
+end
+
+function M.recoil_weapon_names()
+    if not loaded then M.load() end
+    return recoil_weapons
+end
+
+function M.get_held_weapon_name()
+    local lp = env.get_local_player()
+    if not lp then return nil end
+
+    local char = lp.character
+    if char and env.is_valid(char) then
+        for _, child in ipairs(env.safe_call(function() return char:get_children() end) or {}) do
+            if child and toolinfo[child.Name] and toolinfo[child.Name].Recoil then
+                return child.Name
+            end
+            if child and child.ClassName == "Tool" and toolinfo[child.Name] then
+                return child.Name
+            end
+        end
+    end
+
+    local ws = env.get_workspace()
+    if ws then
+        local vms = env.safe_call(function() return ws:find_first_child("Viewmodels") end)
+        if vms then
+            for _, vm in ipairs(env.safe_call(function() return vms:get_children() end) or {}) do
+                if vm and vm.Name == "Viewmodel" then
+                    for _, item in ipairs(env.safe_call(function() return vm:get_children() end) or {}) do
+                        if item and item.ClassName == "Model" and toolinfo[item.Name] then
+                            return item.Name
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if lp.tool_name and lp.tool_name ~= "" and toolinfo[lp.tool_name] then
+        return lp.tool_name
+    end
+    return nil
+end
+
+function M.get_weapon_stats(name)
+    name = name or M.get_held_weapon_name()
+    if not name then return nil end
+
+    local entry = M.get(name)
+    if entry and entry.Bullet then
+        return {
+            speed = entry.Bullet.Speed or 1000,
+            gravity = entry.Bullet.Gravity or 35,
+            name = name,
+        }
+    end
+
+    local fb = FALLBACK_STATS[name]
+    if fb then
+        return { speed = fb.speed, gravity = fb.gravity, name = name }
+    end
+    return { speed = 1000, gravity = 35, name = name }
+end
+
+local function copy_shake(shake)
+    if not shake then return nil end
+    local out = {}
+    for k, v in pairs(shake) do out[k] = v end
+    return out
+end
+
+local function scale_range(r, scale)
+    if type(r) == "table" and r[1] and r[2] then
+        return { r[1] * scale, r[2] * scale }
+    end
+    if type(r) == "number" then return r * scale end
+    return r
+end
+
+local function store_original(name, entry)
+    if originals[name] then return end
+    local cam = entry.Recoil.Camera
+    originals[name] = {
+        RecoilStart = cam.RecoilStart,
+        RecoilFinish = cam.RecoilFinish,
+        Shake = copy_shake(cam.Shake),
+        ScreenShake = entry.Shake and {
+            sx = entry.Shake.Strength and (entry.Shake.Strength.x or entry.Shake.Strength.X),
+            sy = entry.Shake.Strength and (entry.Shake.Strength.y or entry.Shake.Strength.Y),
+            sz = entry.Shake.Strength and (entry.Shake.Strength.z or entry.Shake.Strength.Z),
+            Speed = entry.Shake.Speed,
+        } or nil,
+        VM = entry.Recoil.VM and {
+            Pos = entry.Recoil.VM.Pos and {
+                X = entry.Recoil.VM.Pos.X,
+                Y = entry.Recoil.VM.Pos.Y,
+                Z = entry.Recoil.VM.Pos.Z,
+            } or nil,
+            Rot = entry.Recoil.VM.Rot and {
+                X = entry.Recoil.VM.Rot.X,
+                Y = entry.Recoil.VM.Rot.Y,
+                Z = entry.Recoil.VM.Rot.Z,
+            } or nil,
+        } or nil,
+    }
+end
+
+function M.restore_recoil(name)
+    local entry = toolinfo[name]
+    local orig = originals[name]
+    if not entry or not orig or not entry.Recoil then return end
+    local cam = entry.Recoil.Camera
+    cam.RecoilStart = orig.RecoilStart
+    cam.RecoilFinish = orig.RecoilFinish
+    cam.Shake = copy_shake(orig.Shake)
+    if orig.ScreenShake and entry.Shake and orig.ScreenShake.sx then
+        if Vector3 then
+            entry.Shake.Strength = Vector3.new(orig.ScreenShake.sx, orig.ScreenShake.sy, orig.ScreenShake.sz)
+        end
+        entry.Shake.Speed = orig.ScreenShake.Speed
+    end
+    if orig.VM and entry.Recoil.VM then
+        if orig.VM.Pos and entry.Recoil.VM.Pos then
+            entry.Recoil.VM.Pos.X = orig.VM.Pos.X
+            entry.Recoil.VM.Pos.Y = orig.VM.Pos.Y
+            entry.Recoil.VM.Pos.Z = orig.VM.Pos.Z
+        end
+        if orig.VM.Rot and entry.Recoil.VM.Rot then
+            entry.Recoil.VM.Rot.X = orig.VM.Rot.X
+            entry.Recoil.VM.Rot.Y = orig.VM.Rot.Y
+            entry.Recoil.VM.Rot.Z = orig.VM.Rot.Z
+        end
+    end
+    patched[name] = nil
+end
+
+-- reduction_percent: 0 = stock recoil, 100 = no recoil (client ToolInfo only — server spread unchanged)
+function M.set_recoil_reduction(name, reduction_percent)
+    if not loaded then M.load() end
+    local entry = toolinfo[name]
+    if not entry or not entry.Recoil or not entry.Recoil.Camera then return false end
+
+    reduction_percent = math.max(0, math.min(100, reduction_percent or 0))
+    if reduction_percent <= 0 then
+        M.restore_recoil(name)
         return true
     end
-    return false
+
+    store_original(name, entry)
+    local scale = 1 - (reduction_percent / 100)
+    local cam = entry.Recoil.Camera
+    local orig = originals[name]
+
+    cam.RecoilStart = function(...)
+        local pitch, yaw = orig.RecoilStart(...)
+        return (pitch or 0) * scale, (yaw or 0) * scale
+    end
+    cam.RecoilFinish = function(...)
+        local pitch, yaw = orig.RecoilFinish(...)
+        return (pitch or 0) * scale, (yaw or 0) * scale
+    end
+
+    if cam.Shake and orig.Shake then
+        cam.Shake = {
+            X = scale_range(orig.Shake.X, scale),
+            Y = scale_range(orig.Shake.Y, scale),
+        }
+    end
+
+    if entry.Shake and orig.ScreenShake and orig.ScreenShake.Strength then
+        local s = orig.ScreenShake.Strength
+        local sx = s.x or s.X or 0
+        local sy = s.y or s.Y or 0
+        local sz = s.z or s.Z or 0
+        if Vector3 then
+            entry.Shake.Strength = Vector3.new(sx * scale, sy * scale, sz * scale)
+        end
+    end
+
+    if entry.Recoil.VM and orig.VM then
+        local vm = entry.Recoil.VM
+        if vm.Pos and orig.VM.Pos then
+            if type(vm.Pos.X) == "number" then vm.Pos.X = (orig.VM.Pos.X or 0) * scale end
+            if type(vm.Pos.Y) == "number" then vm.Pos.Y = (orig.VM.Pos.Y or 0) * scale end
+            if type(vm.Pos.Z) == "number" then vm.Pos.Z = (orig.VM.Pos.Z or 0) * scale end
+        end
+        if vm.Rot and orig.VM.Rot then
+            vm.Rot.Y = (type(orig.VM.Rot.Y) == "number" and orig.VM.Rot.Y or 0) * scale
+            vm.Rot.X = scale_range(orig.VM.Rot.X, scale)
+            vm.Rot.Z = scale_range(orig.VM.Rot.Z, scale)
+        end
+    end
+
+    patched[name] = reduction_percent
+    return true
 end
 
-function M.get(weapon_name)
-    if not loaded then M.load() end
-    return weapons[weapon_name] or FALLBACK[weapon_name]
-end
-
-function M.bullet_speed(weapon_name)
-    local w = M.get(weapon_name)
-    if w and w.Bullet and w.Bullet.Speed then return w.Bullet.Speed end
-    return 1000
-end
-
-function M.bullet_gravity(weapon_name)
-    local w = M.get(weapon_name)
-    if w and w.Bullet and w.Bullet.Gravity then return w.Bullet.Gravity end
-    return 0.5
+function M.apply_all_recoil_from_menu()
+    if not menu or not menu.get then return end
+    for _, name in ipairs(recoil_weapons) do
+        local id = M.slug(name)
+        local val = menu.get(id)
+        if val == nil then val = 0 end
+        M.set_recoil_reduction(name, tonumber(val) or 0)
+    end
 end
 
 return M
@@ -673,32 +885,46 @@ end)()
 -- ── features/combat/aimbot.lua ──
 April._mods["features.combat.aimbot"] = (function()
 local settings = April.require("core.settings")
-local cache = April.require("core.cache")
+local weapons = April.require("game.weapons")
 local env = April.require("core.env")
 local draw_util = April.require("core.draw_util")
 local math_util = April.require("core.math_util")
-local G = April.require("core.menu_util").G
-local T = April.require("core.menu_util").tab()
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
+local T = menu_util.tab()
 
 local M = {}
 local locked_target = nil
 local BONES = { "Head", "UpperTorso", "LowerTorso", "HumanoidRootPart" }
 local P = "april_aimbot_enabled"
 
-function M.register_menu()
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_enabled", "Enable Aimbot", false, { key = 0 })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_players", "Target Players", true, { parent = P })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_npcs", "Target NPCs", false, { parent = P })
-    menu.add_slider_int(T, G.AIMBOT, "april_aimbot_fov", "FOV Radius", 50, 500, 150, { parent = P })
-    menu.add_slider_int(T, G.AIMBOT, "april_aimbot_smooth", "Smoothing", 1, 100, 5, { parent = P })
-    menu.add_combo(T, G.AIMBOT, "april_aimbot_bone", "Target Bone", { "Head", "UpperTorso", "LowerTorso" }, 0, { parent = P })
-    menu.add_combo(T, G.AIMBOT, "april_aimbot_priority", "Target Priority", { "Distance", "Crosshair (FOV)" }, 1, { parent = P })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_sticky", "Sticky Aim", true, { parent = P })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_visible", "Visibility Check", true, { parent = P })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_prediction", "Velocity Prediction", true, { parent = P })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_draw_fov", "Show FOV Circle", true, { parent = P, colorpicker = { 1, 1, 1, 1 } })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_fov_fill", "Fill FOV Circle", false, { parent = "april_aimbot_draw_fov", colorpicker = { 1, 1, 1, 0.2 } })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_target_line", "Target Line", false, { parent = P, colorpicker = { 1, 0, 0, 1 } })
+local function screen_center()
+    if draw and draw.get_screen_size then
+        return draw.get_screen_size()
+    end
+    return draw_util.screen_size()
+end
+
+local function w2s(x, y, z)
+    if draw and draw.world_to_screen then
+        return draw.world_to_screen(x, y, z)
+    end
+    if utility and utility.world_to_screen then
+        return utility.world_to_screen(x, y, z)
+    end
+    return 0, 0, false
+end
+
+local function aim_key_down()
+    if not menu or not menu.get_key then return false end
+    local vk = menu.get_key(P)
+    if vk and vk > 0 and input and input.is_key_down then
+        return input.is_key_down(vk)
+    end
+    if input and input.is_key_down then
+        return input.is_key_down(0x02)
+    end
+    return false
 end
 
 local function get_bone_name()
@@ -706,43 +932,83 @@ local function get_bone_name()
     return BONES[(idx or 0) + 1] or "Head"
 end
 
-local function key_active()
-    if input and input.is_key_down then
-        return input.is_key_down(0x02)
+local function get_aim_point(target, bone)
+    if not target or not target.is_alive then return nil end
+    local sx, sy, vis = target:get_bone_screen(bone)
+    if not vis then return nil end
+
+    local pos = target.head_position or target.position
+    if not pos then return nil end
+
+    local ax, ay, az = pos.x, pos.y, pos.z
+
+    if settings.bool("april_aimbot_prediction", true) and target.velocity then
+        local cam = camera and camera.get_position and camera.get_position()
+        if cam then
+            local stats = weapons.get_weapon_stats()
+            if settings.bool("april_aimbot_auto_weapon", true) then
+                stats = weapons.get_weapon_stats()
+            end
+            if not stats or not settings.bool("april_aimbot_auto_weapon", true) then
+                stats = {
+                    speed = settings.num("april_aimbot_bullet_speed", 1000),
+                    gravity = settings.num("april_aimbot_gravity", 35),
+                }
+            end
+            local speed = (stats and stats.speed) or 1000
+            local dx = ax - cam.x
+            local dy = ay - cam.y
+            local dz = az - cam.z
+            local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+            local t = dist / math.max(speed, 1)
+            local lead = settings.num("april_aimbot_lead_scale", 1.0)
+            ax = ax + target.velocity.x * t * lead
+            ay = ay + target.velocity.y * t * lead
+            az = az + target.velocity.z * t * lead
+        end
     end
-    return false
+
+    if settings.bool("april_aimbot_drop_prediction", false) then
+        local stats = weapons.get_weapon_stats()
+        local grav = (stats and stats.gravity) or settings.num("april_aimbot_gravity", 35)
+        local cam = camera and camera.get_position and camera.get_position()
+        if cam and stats then
+            local dist = math_util.distance3(ax - cam.x, ay - cam.y, az - cam.z)
+            local t = dist / math.max(stats.speed, 1)
+            ay = ay + 0.5 * grav * t * t
+        end
+    end
+
+    return { x = ax, y = ay, z = az }
 end
 
-local function find_target(cx, cy, fov)
+local function find_target(cx, cy, fov_px)
     if not entity or not entity.get_players then return nil end
     if not settings.bool("april_aimbot_players", true) then return nil end
+
     local bone = get_bone_name()
-    local priority_fov = settings.num("april_aimbot_priority", 1) == 1
-    local best, best_score = nil, priority_fov and fov or math.huge
-    local me = entity.get_local_player()
+    local use_fov_priority = settings.num("april_aimbot_priority", 1) == 1
+    local best, best_score = nil, use_fov_priority and fov_px or math.huge
+    local cam = camera and camera.get_position and camera.get_position()
 
     for _, p in ipairs(entity.get_players()) do
         if p.is_local or not p.is_alive then goto continue end
-        local sx, sy, vis = p:get_bone_screen(bone)
-        if not vis then goto continue end
-        if settings.bool("april_aimbot_visible", true) and raycast and raycast.is_visible then
-            local cam = camera and camera.get_position and camera.get_position()
-            local head = p.head_position
-            if cam and head and not raycast.is_visible(cam.x, cam.y, cam.z, head.x, head.y, head.z) then
+        local aim = get_aim_point(p, bone)
+        if not aim then goto continue end
+
+        if settings.bool("april_aimbot_visible", true) and raycast and raycast.is_visible and cam then
+            if not raycast.is_visible(cam.x, cam.y, cam.z, aim.x, aim.y, aim.z) then
                 goto continue
             end
         end
-        local score
-        if priority_fov then
-            score = math_util.screen_fov_dist(sx, sy, cx, cy)
-        elseif me and p.position and me.position then
-            local dx = p.position.x - me.position.x
-            local dy = p.position.y - me.position.y
-            local dz = p.position.z - me.position.z
-            score = math.sqrt(dx * dx + dy * dy + dz * dz)
-        else
-            score = math_util.screen_fov_dist(sx, sy, cx, cy)
-        end
+
+        local sx, sy, on_screen = w2s(aim.x, aim.y, aim.z)
+        if not on_screen then goto continue end
+
+        local fov_dist = math_util.screen_fov_dist(sx, sy, cx, cy)
+        if fov_dist > fov_px then goto continue end
+
+        local score = use_fov_priority and fov_dist or (p.distance_to and cam and p:distance_to(cam) or fov_dist)
         if score < best_score then
             best_score = score
             best = p
@@ -752,69 +1018,90 @@ local function find_target(cx, cy, fov)
     return best
 end
 
+function M.register_menu()
+    menu_util.ensure_group(G.AIMBOT)
+    menu.add_checkbox(T, G.AIMBOT, P, "Enable Aimbot", false, { key = 0x02 })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_players", "Target Players", true, { parent = P })
+    menu.add_slider_int(T, G.AIMBOT, "april_aimbot_fov", "FOV Radius (px)", 50, 500, 150, { parent = P })
+    menu.add_slider_int(T, G.AIMBOT, "april_aimbot_smooth", "Smoothing (frames)", 1, 100, 5, { parent = P })
+    menu.add_combo(T, G.AIMBOT, "april_aimbot_bone", "Target Bone", { "Head", "UpperTorso", "LowerTorso" }, 0, { parent = P })
+    menu.add_combo(T, G.AIMBOT, "april_aimbot_priority", "Target Priority", { "Distance", "Crosshair (FOV)" }, 1, { parent = P })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_sticky", "Sticky Aim", true, { parent = P })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_visible", "Visibility Check", true, { parent = P })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_prediction", "Velocity Prediction", true, { parent = P })
+    menu.add_slider_float(T, G.AIMBOT, "april_aimbot_lead_scale", "Lead Scale", 0.5, 2.0, 1.0, "%.2f", { parent = "april_aimbot_prediction" })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_drop_prediction", "Bullet Drop Prediction", false, { parent = P })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_auto_weapon", "Automatic Weapon Stats", true, { parent = P })
+    menu.add_slider_int(T, G.AIMBOT, "april_aimbot_bullet_speed", "Manual Bullet Speed", 100, 5000, 1000, { parent = P })
+    menu.add_slider_int(T, G.AIMBOT, "april_aimbot_gravity", "Manual Bullet Gravity", 0, 200, 35, { parent = P })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_draw_fov", "Show FOV Circle", true, { parent = P, colorpicker = { 1, 1, 1, 1 } })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_fov_fill", "Fill FOV Circle", false, { parent = "april_aimbot_draw_fov", colorpicker = { 1, 1, 1, 0.2 } })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_target_line", "Target Line", false, { parent = P, colorpicker = { 1, 0, 0, 1 } })
+end
+
 function M.update(dt)
-    if not settings.bool("april_aimbot_enabled", false) then
+    if not settings.bool(P, false) then
         locked_target = nil
         return
     end
-    if not key_active() then
+    if not aim_key_down() then
         if not settings.bool("april_aimbot_sticky", true) then locked_target = nil end
         return
     end
 
-    local sw, sh = draw_util.screen_size()
+    local sw, sh = screen_center()
     local cx, cy = sw * 0.5, sh * 0.5
     local fov = settings.num("april_aimbot_fov", 150)
 
     if settings.bool("april_aimbot_sticky", true) and locked_target and locked_target.is_alive then
-        -- keep lock
+        -- keep
     else
         locked_target = find_target(cx, cy, fov)
     end
 
     if locked_target and camera and camera.look_at then
-        local bone = get_bone_name()
-        local sx, sy, vis = locked_target:get_bone_screen(bone)
-        if vis then
-            local pos = locked_target.head_position or locked_target.position
-            if pos then
-                local smooth = math.max(1, settings.num("april_aimbot_smooth", 5))
-                camera.look_at(pos.x, pos.y, pos.z, smooth)
-            end
+        local aim = get_aim_point(locked_target, get_bone_name())
+        if aim then
+            local smooth = math.max(1, settings.num("april_aimbot_smooth", 5))
+            camera.look_at(aim.x, aim.y, aim.z, smooth)
         end
     end
 end
 
 function M.draw()
-    if not settings.bool("april_aimbot_enabled", false) then return end
-    local sw, sh = draw_util.screen_size()
+    local sw, sh = screen_center()
     local cx, cy = sw * 0.5, sh * 0.5
-    local fov = settings.num("april_aimbot_fov", 150)
 
-    if settings.bool("april_aimbot_draw_fov", true) then
+    if settings.bool("april_aimbot_draw_fov", true) and settings.bool(P, false) then
+        local fov = settings.num("april_aimbot_fov", 150)
         local col = settings.color("april_aimbot_draw_fov", { 1, 1, 1, 1 })
-        if menu and menu.get_color then
-            local c = menu.get_color("april_aimbot_draw_fov")
-            if c then col = c end
+        if settings.bool("april_aimbot_fov_fill", false) and draw and draw.circle_filled then
+            local fill = settings.color("april_aimbot_fov_fill", { 1, 1, 1, 0.2 })
+            draw.circle_filled(cx, cy, fov, fill, 64)
         end
-        draw_util.circle(cx, cy, fov, col, settings.bool("april_aimbot_fov_fill", false))
+        if draw and draw.circle then
+            draw.circle(cx, cy, fov, col, 64, 1)
+        else
+            draw_util.circle(cx, cy, fov, col, false)
+        end
     end
 
-    if locked_target and locked_target.is_alive then
-        local b = locked_target:get_bounds()
-        if b and b.valid then
-            draw_util.box_esp(b.x, b.y, b.w, b.h, { 1, 0.2, 0.2, 1 }, 1)
-        end
-        if settings.bool("april_aimbot_target_line", false) and utility and utility.world_to_screen then
-            local pos = locked_target.head_position or locked_target.position
-            if pos then
-                local tx, ty, vis = utility.world_to_screen(pos.x, pos.y, pos.z)
-                if vis then
-                    local col = settings.color("april_aimbot_target_line", { 1, 0, 0, 1 })
-                    draw_util.line(cx, cy, tx, ty, col, 1.5)
-                end
+    if not settings.bool(P, false) or not locked_target or not locked_target.is_alive then return end
+
+    if settings.bool("april_aimbot_target_line", false) then
+        local aim = get_aim_point(locked_target, get_bone_name())
+        if aim then
+            local tx, ty, vis = w2s(aim.x, aim.y, aim.z)
+            if vis then
+                local col = settings.color("april_aimbot_target_line", { 1, 0, 0, 1 })
+                draw_util.line(cx, cy, tx, ty, col, 1.5)
             end
         end
+    end
+
+    local b = locked_target:get_bounds()
+    if b and b.valid then
+        draw_util.box_esp(b.x, b.y, b.w, b.h, { 1, 0.2, 0.2, 1 }, 1)
     end
 end
 
@@ -825,40 +1112,85 @@ end)()
 -- ── features/combat/recoil.lua ──
 April._mods["features.combat.recoil"] = (function()
 local settings = April.require("core.settings")
-local G = April.require("core.menu_util").G
-local T = April.require("core.menu_util").tab()
+local weapons = April.require("game.weapons")
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
+local T = menu_util.tab()
 
 local M = {}
 local P = "april_recoil_enabled"
+local last_apply = 0
 
 function M.register_menu()
-    menu.add_checkbox(T, G.RECOIL, "april_recoil_enabled", "Enable Recoil Control", false, { key = 0 })
-    menu.add_slider_float(T, G.RECOIL, "april_recoil_strength", "Global Strength (Y)", 0, 10, 1.0, "%.1f", { parent = P })
-    menu.add_slider_float(T, G.RECOIL, "april_recoil_strength_x", "Global Strength (X)", -10, 10, 0, "%.1f", { parent = P })
-    menu.add_checkbox(T, G.RECOIL, "april_recoil_auto", "Scale With Fire Rate", true, { parent = P })
+    weapons.load()
+    menu_util.ensure_group(G.RECOIL)
+
+    menu.add_checkbox(T, G.RECOIL, P, "Enable Recoil Reduction", false, { key = 0 })
+    menu.add_label(T, G.RECOIL, "Scales ToolInfo recoil client-side (same table the game uses).")
+    menu.add_label(T, G.RECOIL, "0% = stock  |  100% = no kick. Server spread unchanged.")
+    menu.add_slider_int(T, G.RECOIL, "april_recoil_global", "Global Reduction %", 0, 100, 0, { parent = P })
+    menu.add_checkbox(T, G.RECOIL, "april_recoil_use_global", "Apply Global To All Guns", false, { parent = P })
     menu.add_separator(T, G.RECOIL)
-    menu.add_label(T, G.RECOIL, "Per-weapon overrides (0 = use global)")
-    menu.add_slider_float(T, G.RECOIL, "april_rc_ak47_y", "AK47 (Y)", 0, 10, 0, "%.1f", { parent = P })
-    menu.add_slider_float(T, G.RECOIL, "april_rc_ak47_x", "AK47 (X)", -10, 10, 0, "%.1f", { parent = P })
-    menu.add_slider_float(T, G.RECOIL, "april_rc_m4_y", "M4A1 (Y)", 0, 10, 0, "%.1f", { parent = P })
-    menu.add_slider_float(T, G.RECOIL, "april_rc_m4_x", "M4A1 (X)", -10, 10, 0, "%.1f", { parent = P })
-    menu.add_slider_float(T, G.RECOIL, "april_rc_smg_y", "SMG (Y)", 0, 10, 0, "%.1f", { parent = P })
-    menu.add_slider_float(T, G.RECOIL, "april_rc_smg_x", "SMG (X)", -10, 10, 0, "%.1f", { parent = P })
+
+    local names = weapons.recoil_weapon_names()
+    for _, name in ipairs(names) do
+        local id = weapons.slug(name)
+        menu.add_slider_int(T, G.RECOIL, id, name .. " %", 0, 100, 0, { parent = P })
+        if menu.set_callback then
+            menu.set_callback(id, function()
+                M.sync_patches()
+            end)
+        end
+    end
+
+    if menu.set_callback then
+        menu.set_callback("april_recoil_global", function() M.sync_patches() end)
+        menu.set_callback("april_recoil_use_global", function() M.sync_patches() end)
+        menu.set_callback(P, function() M.sync_patches() end)
+    end
+end
+
+function M.sync_patches()
+    if not settings.bool(P, false) then
+        for _, name in ipairs(weapons.recoil_weapon_names()) do
+            weapons.set_recoil_reduction(name, 0)
+        end
+        return
+    end
+
+    local global_pct = settings.num("april_recoil_global", 0)
+    local use_global = settings.bool("april_recoil_use_global", false)
+
+    for _, name in ipairs(weapons.recoil_weapon_names()) do
+        local pct = global_pct
+        if not use_global then
+            local id = weapons.slug(name)
+            pct = settings.num(id, 0)
+        end
+        weapons.set_recoil_reduction(name, pct)
+    end
 end
 
 function M.update(dt)
-    if not settings.bool("april_recoil_enabled", false) then return end
-    if not input or not input.is_key_down or not input.move_mouse then return end
-    if not input.is_key_down(0x01) then return end
-    local y = settings.num("april_recoil_strength", 1.0)
-    local x = settings.num("april_recoil_strength_x", 0)
-    if settings.bool("april_recoil_auto", true) then
-        y = y * (dt and (1 / math.max(dt, 0.008)) or 1) * 0.016
+    local now = utility and utility.get_tick_count and utility.get_tick_count() or 0
+    if now - last_apply > 500 then
+        last_apply = now
+        M.sync_patches()
     end
-    input.move_mouse(x, y * 2)
 end
 
-function M.draw() end
+function M.draw()
+    if not settings.bool(P, false) then return end
+    if not draw or not draw.text then return end
+    local held = weapons.get_held_weapon_name()
+    if held then
+        local id = weapons.slug(held)
+        local pct = settings.bool("april_recoil_use_global", false)
+            and settings.num("april_recoil_global", 0)
+            or settings.num(id, 0)
+        draw.text(10, 24, "Weapon: " .. held .. "  RC: " .. pct .. "%", { 0.5, 1, 0.7, 0.9 }, 12)
+    end
+end
 
 return M
 
@@ -869,13 +1201,15 @@ April._mods["features.visuals.player_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
 local draw_util = April.require("core.draw_util")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_esp_enabled"
 
 function M.register_menu()
+    menu_util.ensure_group(G.VISUALS)
     menu.add_checkbox(T, G.VISUALS, "april_esp_enabled", "Player ESP", true, { key = 0 })
     menu.add_combo(T, G.VISUALS, "april_esp_box_mode", "Box Mode", { "None", "2D", "Corner" }, 1, { parent = P })
     menu.add_checkbox(T, G.VISUALS, "april_esp_name", "Name", true, { parent = P, colorpicker = { 1, 1, 1, 1 } })
@@ -951,13 +1285,15 @@ end)()
 April._mods["features.visuals.crosshair"] = (function()
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_crosshair_enabled"
 
 function M.register_menu()
+    menu_util.ensure_group(G.VISUALS)
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_enabled", "Enable Custom Crosshair", true, { key = 0 })
     menu.add_combo(T, G.VISUALS, "april_crosshair_type", "Crosshair Type", { "Cross", "Circle", "Dot", "T-Shape" }, 0, { parent = P })
     menu.add_slider_int(T, G.VISUALS, "april_crosshair_size", "Size", 1, 50, 10, { parent = P })
@@ -1019,7 +1355,8 @@ end)()
 April._mods["features.visuals.feedback"] = (function()
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
@@ -1027,6 +1364,7 @@ local hit_time = 0
 local P = "april_hitmarker_enabled"
 
 function M.register_menu()
+    menu_util.ensure_group(G.VISUALS)
     menu.add_checkbox(T, G.VISUALS, "april_hitmarker_enabled", "Hitmarker", true, { colorpicker = { 1, 1, 1, 1 } })
     menu.add_checkbox(T, G.VISUALS, "april_hitmarker_glow", "Hitmarker Glow", false, { parent = P })
     menu.add_slider_int(T, G.VISUALS, "april_hitmarker_size", "Hitmarker Size", 1, 20, 5, { parent = P })
@@ -1075,7 +1413,8 @@ local cache = April.require("core.cache")
 local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
@@ -1093,6 +1432,7 @@ local TOGGLES = {
 }
 
 function M.register_menu()
+    menu_util.ensure_group(G.WORLD)
     menu.add_checkbox(T, G.WORLD, "april_world_enabled", "Enable World ESP", true, { key = 0 })
     for _, t in ipairs(TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, true, { parent = P, colorpicker = t.color })
@@ -1147,7 +1487,8 @@ local cache = April.require("core.cache")
 local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
@@ -1165,6 +1506,7 @@ local TOGGLES = {
 }
 
 function M.register_menu()
+    menu_util.ensure_group(G.LOOT)
     menu.add_checkbox(T, G.LOOT, "april_loot_enabled", "Enable Loot ESP", true, { key = 0 })
     for _, t in ipairs(TOGGLES) do
         menu.add_checkbox(T, G.LOOT, t.id, t.label, true, { parent = P, colorpicker = t.color })
@@ -1219,7 +1561,8 @@ local cache = April.require("core.cache")
 local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
@@ -1235,6 +1578,7 @@ local TOGGLES = {
 }
 
 function M.register_menu()
+    menu_util.ensure_group(G.BASE)
     menu.add_checkbox(T, G.BASE, "april_base_enabled", "Enable Base ESP", true, { key = 0 })
     for _, t in ipairs(TOGGLES) do
         menu.add_checkbox(T, G.BASE, t.id, t.label, true, { parent = P, colorpicker = t.color })
@@ -1295,13 +1639,15 @@ local cache = April.require("core.cache")
 local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_npc_enabled"
 
 function M.register_menu()
+    menu_util.ensure_group(G.NPCS)
     menu.add_checkbox(T, G.NPCS, "april_npc_enabled", "Enable NPC ESP", true, { key = 0, colorpicker = { 1, 0.3, 0.3, 1 } })
     menu.add_checkbox(T, G.NPCS, "april_npc_soldiers", "Soldiers", true, { parent = P, colorpicker = { 1, 0.3, 0.3, 1 } })
     menu.add_combo(T, G.NPCS, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 1, { parent = P })
@@ -1349,13 +1695,15 @@ April._mods["features.movement.exploits"] = (function()
 local settings = April.require("core.settings")
 local env = April.require("core.env")
 local math_util = April.require("core.math_util")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_noclip_enabled"
 
 function M.register_menu()
+    menu_util.ensure_group(G.MISC)
     menu.add_slider_int(T, G.MISC, "april_esp_text_size", "ESP Text Size", 8, 24, 14)
 
     menu.add_checkbox(T, G.MISC, "april_noclip_enabled", "Noclip", false, { key = 0x12 })
@@ -1422,13 +1770,15 @@ local settings = April.require("core.settings")
 local cache = April.require("core.cache")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_waypoints_enabled"
 
 function M.register_menu()
+    menu_util.ensure_group(G.WAYPOINTS)
     menu.add_checkbox(T, G.WAYPOINTS, "april_waypoints_enabled", "Enable Waypoints", true, { key = 0 })
     menu.add_checkbox(T, G.WAYPOINTS, "april_wp_dist", "Show Distance", true, { parent = P })
     menu.add_checkbox(T, G.WAYPOINTS, "april_wp_line", "Draw Line", true, { parent = P })
@@ -1495,13 +1845,15 @@ local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
 local math_util = April.require("core.math_util")
 local env = April.require("core.env")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_map_enabled"
 
 function M.register_menu()
+    menu_util.ensure_group(G.MAP)
     menu.add_checkbox(T, G.MAP, "april_map_enabled", "Enable Tactical Map", false, { key = 0x28 })
     menu.add_slider_float(T, G.MAP, "april_map_zoom", "Zoom Level", 0.05, 5.0, 1.0, "%.2f", { parent = P })
     menu.add_colorpicker(T, G.MAP, "april_map_bg", "Background Color", { 0.05, 0.05, 0.08, 0.95 }, { parent = P })
@@ -1568,7 +1920,8 @@ end)()
 -- ── features/utility/config.lua ──
 April._mods["features.utility.config"] = (function()
 local settings = April.require("core.settings")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
@@ -1628,6 +1981,7 @@ function M.load_slot(slot)
 end
 
 function M.register_menu()
+    menu_util.ensure_group(G.CONFIG)
     menu.add_label(T, G.CONFIG, "April v3 — Fallen Survival")
     menu.add_button(T, G.CONFIG, "april_cfg_save_1", "Save Config Slot 1", function() M.save_slot(1) end)
     menu.add_button(T, G.CONFIG, "april_cfg_load_1", "Load Config Slot 1", function() M.load_slot(1) end)
@@ -1685,7 +2039,6 @@ M.FEATURE_ORDER = {
 }
 
 function M.register_all()
-    menu_util.ensure_groups()
     April.TAB = menu_util.TAB
 
     M.features = {}

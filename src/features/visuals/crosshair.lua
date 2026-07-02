@@ -1,12 +1,14 @@
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_crosshair_enabled"
 
 function M.register_menu()
+    menu_util.ensure_group(G.VISUALS)
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_enabled", "Enable Custom Crosshair", true, { key = 0 })
     menu.add_combo(T, G.VISUALS, "april_crosshair_type", "Crosshair Type", { "Cross", "Circle", "Dot", "T-Shape" }, 0, { parent = P })
     menu.add_slider_int(T, G.VISUALS, "april_crosshair_size", "Size", 1, 50, 10, { parent = P })

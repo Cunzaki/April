@@ -1,13 +1,15 @@
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
 local draw_util = April.require("core.draw_util")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_esp_enabled"
 
 function M.register_menu()
+    menu_util.ensure_group(G.VISUALS)
     menu.add_checkbox(T, G.VISUALS, "april_esp_enabled", "Player ESP", true, { key = 0 })
     menu.add_combo(T, G.VISUALS, "april_esp_box_mode", "Box Mode", { "None", "2D", "Corner" }, 1, { parent = P })
     menu.add_checkbox(T, G.VISUALS, "april_esp_name", "Name", true, { parent = P, colorpicker = { 1, 1, 1, 1 } })

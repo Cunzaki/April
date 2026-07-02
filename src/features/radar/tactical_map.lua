@@ -2,13 +2,15 @@ local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
 local math_util = April.require("core.math_util")
 local env = April.require("core.env")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_map_enabled"
 
 function M.register_menu()
+    menu_util.ensure_group(G.MAP)
     menu.add_checkbox(T, G.MAP, "april_map_enabled", "Enable Tactical Map", false, { key = 0x28 })
     menu.add_slider_float(T, G.MAP, "april_map_zoom", "Zoom Level", 0.05, 5.0, 1.0, "%.2f", { parent = P })
     menu.add_colorpicker(T, G.MAP, "april_map_bg", "Background Color", { 0.05, 0.05, 0.08, 0.95 }, { parent = P })

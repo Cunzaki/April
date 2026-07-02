@@ -3,7 +3,8 @@ local cache = April.require("core.cache")
 local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
@@ -19,6 +20,7 @@ local TOGGLES = {
 }
 
 function M.register_menu()
+    menu_util.ensure_group(G.BASE)
     menu.add_checkbox(T, G.BASE, "april_base_enabled", "Enable Base ESP", true, { key = 0 })
     for _, t in ipairs(TOGGLES) do
         menu.add_checkbox(T, G.BASE, t.id, t.label, true, { parent = P, colorpicker = t.color })

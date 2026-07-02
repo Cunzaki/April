@@ -24,7 +24,6 @@ M.FEATURE_ORDER = {
 }
 
 function M.register_all()
-    menu_util.ensure_groups()
     April.TAB = menu_util.TAB
 
     M.features = {}

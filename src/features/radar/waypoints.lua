@@ -2,13 +2,15 @@ local settings = April.require("core.settings")
 local cache = April.require("core.cache")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
-local G = April.require("core.menu_util").G
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
 local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_waypoints_enabled"
 
 function M.register_menu()
+    menu_util.ensure_group(G.WAYPOINTS)
     menu.add_checkbox(T, G.WAYPOINTS, "april_waypoints_enabled", "Enable Waypoints", true, { key = 0 })
     menu.add_checkbox(T, G.WAYPOINTS, "april_wp_dist", "Show Distance", true, { parent = P })
     menu.add_checkbox(T, G.WAYPOINTS, "april_wp_line", "Draw Line", true, { parent = P })
