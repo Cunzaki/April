@@ -1,30 +1,38 @@
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
+local T = menu_util.tab()
+
 local M = {}
 
 M.features = {}
 
+-- Registration order = sidebar group order (groups pre-registered in menu_util)
+M.FEATURE_ORDER = {
+    "features.combat.aimbot",
+    "features.visuals.crosshair",
+    "features.visuals.player_esp",
+    "features.visuals.feedback",
+    "features.world.world_esp",
+    "features.combat.recoil",
+    "features.radar.waypoints",
+    "features.world.loot_esp",
+    "features.world.npc_esp",
+    "features.world.base_esp",
+    "features.radar.tactical_map",
+    "features.movement.exploits",
+    "features.utility.config",
+}
+
 function M.register_all()
-    local menu_util = April.require("core.menu_util")
+    menu_util.ensure_groups()
     April.TAB = menu_util.TAB
-    menu_util.ensure_tab()
 
-    M.features = {
-        April.require("features.combat.aimbot"),
-        April.require("features.combat.recoil"),
-        April.require("features.visuals.player_esp"),
-        April.require("features.visuals.crosshair"),
-        April.require("features.visuals.feedback"),
-        April.require("features.world.world_esp"),
-        April.require("features.world.loot_esp"),
-        April.require("features.world.base_esp"),
-        April.require("features.world.npc_esp"),
-        April.require("features.movement.exploits"),
-        April.require("features.radar.waypoints"),
-        April.require("features.radar.tactical_map"),
-        April.require("features.utility.config"),
-    }
-
+    M.features = {}
     local registered = 0
-    for i, feat in ipairs(M.features) do
+
+    for _, path in ipairs(M.FEATURE_ORDER) do
+        local feat = April.require(path)
+        table.insert(M.features, feat)
         local ok, err = pcall(function()
             if feat.register_menu then
                 feat.register_menu()
@@ -32,10 +40,11 @@ function M.register_all()
             end
         end)
         if not ok then
-            print("[April] menu register failed (#" .. i .. "): " .. tostring(err))
+            print("[April] menu register failed (" .. path .. "): " .. tostring(err))
         end
     end
-    print("[April] Menu groups registered: " .. registered)
+
+    print("[April] Menu sections registered: " .. registered .. " / " .. #menu_util.GROUPS .. " groups")
 end
 
 function M.setup_scans()

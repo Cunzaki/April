@@ -4,7 +4,7 @@
 
     This is the final bundled script. Load or execute this file in Vector.
     Source modules live in src/ — rebuild with: node scripts/bundle.mjs
-    Built: 2026-07-02T06:13:17.026Z
+    Built: 2026-07-02T06:18:41.456Z
 ]]
 
 if menu and menu.add_tab then
@@ -364,26 +364,68 @@ end)()
 -- ── core/menu_util.lua ──
 April._mods["core.menu_util"] = (function()
 --[[
-    Vector binds per-script menu UI to a single tab registered with mode "full".
-    All April menu elements must use April.TAB as their tab name.
+    Vector script menus use one tab ("full" mode) with named groups in the left sidebar.
+    Groups must be registered in order before any elements are added.
 ]]
 
 local M = {}
 
 M.TAB = "April"
-M._registered = false
+
+-- Sidebar order (matches original Fallen layout)
+M.GROUPS = {
+    "Aimbot",
+    "Visuals",
+    "World",
+    "Recoil Control",
+    "Waypoints",
+    "Loot",
+    "NPCs",
+    "Base",
+    "Tactical Map",
+    "Misc",
+    "Config",
+}
+
+M.G = {}
+for _, name in ipairs(M.GROUPS) do
+    M.G[name:gsub(" ", "_"):upper()] = name
+    -- Aimbot -> AIMBOT, Recoil Control -> RECOIL_CONTROL
+end
+M.G.AIMBOT = "Aimbot"
+M.G.VISUALS = "Visuals"
+M.G.WORLD = "World"
+M.G.RECOIL = "Recoil Control"
+M.G.WAYPOINTS = "Waypoints"
+M.G.LOOT = "Loot"
+M.G.NPCS = "NPCs"
+M.G.BASE = "Base"
+M.G.MAP = "Tactical Map"
+M.G.MISC = "Misc"
+M.G.CONFIG = "Config"
+
+M._tab_ready = false
+M._groups_ready = false
 
 function M.ensure_tab()
-    if M._registered then return end
+    if M._tab_ready then return end
     if menu and menu.add_tab then
         menu.add_tab(M.TAB, "A", "full")
     end
-    M._registered = true
+    M._tab_ready = true
 end
 
-function M.group(name)
+function M.ensure_groups()
     M.ensure_tab()
-    menu.add_group(M.TAB, name)
+    if M._groups_ready then return end
+    for _, name in ipairs(M.GROUPS) do
+        menu.add_group(M.TAB, name)
+    end
+    M._groups_ready = true
+end
+
+function M.tab()
+    return M.TAB
 end
 
 return M
@@ -635,21 +677,28 @@ local cache = April.require("core.cache")
 local env = April.require("core.env")
 local draw_util = April.require("core.draw_util")
 local math_util = April.require("core.math_util")
+local G = April.require("core.menu_util").G
+local T = April.require("core.menu_util").tab()
 
 local M = {}
 local locked_target = nil
 local BONES = { "Head", "UpperTorso", "LowerTorso", "HumanoidRootPart" }
+local P = "april_aimbot_enabled"
 
 function M.register_menu()
-    menu.add_group(April.TAB, "Aimbot")
-    menu.add_checkbox(April.TAB, "Aimbot", "april_aimbot_enabled", "Enable Aimbot", false)
-    menu.add_hotkey(April.TAB, "Aimbot", "april_aimbot_key", "Aim Key", 0x02)
-    menu.add_slider_int(April.TAB, "Aimbot", "april_aimbot_fov", "FOV", 10, 600, 120)
-    menu.add_combo(April.TAB, "Aimbot", "april_aimbot_bone", "Bone", { "Head", "UpperTorso", "LowerTorso" }, 0)
-    menu.add_checkbox(April.TAB, "Aimbot", "april_aimbot_sticky", "Sticky Aim", true)
-    menu.add_checkbox(April.TAB, "Aimbot", "april_aimbot_visible", "Visibility Check", true)
-    menu.add_checkbox(April.TAB, "Aimbot", "april_aimbot_draw_fov", "Draw FOV", true)
-    menu.add_colorpicker(April.TAB, "Aimbot", "april_aimbot_fov_color", "FOV Color", { 1, 1, 1, 0.35 })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_enabled", "Enable Aimbot", false, { key = 0 })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_players", "Target Players", true, { parent = P })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_npcs", "Target NPCs", false, { parent = P })
+    menu.add_slider_int(T, G.AIMBOT, "april_aimbot_fov", "FOV Radius", 50, 500, 150, { parent = P })
+    menu.add_slider_int(T, G.AIMBOT, "april_aimbot_smooth", "Smoothing", 1, 100, 5, { parent = P })
+    menu.add_combo(T, G.AIMBOT, "april_aimbot_bone", "Target Bone", { "Head", "UpperTorso", "LowerTorso" }, 0, { parent = P })
+    menu.add_combo(T, G.AIMBOT, "april_aimbot_priority", "Target Priority", { "Distance", "Crosshair (FOV)" }, 1, { parent = P })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_sticky", "Sticky Aim", true, { parent = P })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_visible", "Visibility Check", true, { parent = P })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_prediction", "Velocity Prediction", true, { parent = P })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_draw_fov", "Show FOV Circle", true, { parent = P, colorpicker = { 1, 1, 1, 1 } })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_fov_fill", "Fill FOV Circle", false, { parent = "april_aimbot_draw_fov", colorpicker = { 1, 1, 1, 0.2 } })
+    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_target_line", "Target Line", false, { parent = P, colorpicker = { 1, 0, 0, 1 } })
 end
 
 local function get_bone_name()
@@ -658,15 +707,20 @@ local function get_bone_name()
 end
 
 local function key_active()
-    local vk = settings.num("april_aimbot_key", 0x02)
-    if input and input.is_key_down then return input.is_key_down(vk) end
+    if input and input.is_key_down then
+        return input.is_key_down(0x02)
+    end
     return false
 end
 
 local function find_target(cx, cy, fov)
     if not entity or not entity.get_players then return nil end
+    if not settings.bool("april_aimbot_players", true) then return nil end
     local bone = get_bone_name()
-    local best, best_dist = nil, fov
+    local priority_fov = settings.num("april_aimbot_priority", 1) == 1
+    local best, best_score = nil, priority_fov and fov or math.huge
+    local me = entity.get_local_player()
+
     for _, p in ipairs(entity.get_players()) do
         if p.is_local or not p.is_alive then goto continue end
         local sx, sy, vis = p:get_bone_screen(bone)
@@ -678,9 +732,19 @@ local function find_target(cx, cy, fov)
                 goto continue
             end
         end
-        local d = math_util.screen_fov_dist(sx, sy, cx, cy)
-        if d < best_dist then
-            best_dist = d
+        local score
+        if priority_fov then
+            score = math_util.screen_fov_dist(sx, sy, cx, cy)
+        elseif me and p.position and me.position then
+            local dx = p.position.x - me.position.x
+            local dy = p.position.y - me.position.y
+            local dz = p.position.z - me.position.z
+            score = math.sqrt(dx * dx + dy * dy + dz * dz)
+        else
+            score = math_util.screen_fov_dist(sx, sy, cx, cy)
+        end
+        if score < best_score then
+            best_score = score
             best = p
         end
         ::continue::
@@ -700,7 +764,7 @@ function M.update(dt)
 
     local sw, sh = draw_util.screen_size()
     local cx, cy = sw * 0.5, sh * 0.5
-    local fov = settings.num("april_aimbot_fov", 120)
+    local fov = settings.num("april_aimbot_fov", 150)
 
     if settings.bool("april_aimbot_sticky", true) and locked_target and locked_target.is_alive then
         -- keep lock
@@ -714,24 +778,42 @@ function M.update(dt)
         if vis then
             local pos = locked_target.head_position or locked_target.position
             if pos then
-                camera.look_at(pos.x, pos.y, pos.z, 8)
+                local smooth = math.max(1, settings.num("april_aimbot_smooth", 5))
+                camera.look_at(pos.x, pos.y, pos.z, smooth)
             end
         end
     end
 end
 
 function M.draw()
-    if not settings.bool("april_aimbot_draw_fov", true) then return end
+    if not settings.bool("april_aimbot_enabled", false) then return end
     local sw, sh = draw_util.screen_size()
     local cx, cy = sw * 0.5, sh * 0.5
-    local fov = settings.num("april_aimbot_fov", 120)
-    local col = settings.color("april_aimbot_fov_color", { 1, 1, 1, 0.35 })
-    draw_util.circle(cx, cy, fov, col, false)
+    local fov = settings.num("april_aimbot_fov", 150)
+
+    if settings.bool("april_aimbot_draw_fov", true) then
+        local col = settings.color("april_aimbot_draw_fov", { 1, 1, 1, 1 })
+        if menu and menu.get_color then
+            local c = menu.get_color("april_aimbot_draw_fov")
+            if c then col = c end
+        end
+        draw_util.circle(cx, cy, fov, col, settings.bool("april_aimbot_fov_fill", false))
+    end
 
     if locked_target and locked_target.is_alive then
         local b = locked_target:get_bounds()
         if b and b.valid then
             draw_util.box_esp(b.x, b.y, b.w, b.h, { 1, 0.2, 0.2, 1 }, 1)
+        end
+        if settings.bool("april_aimbot_target_line", false) and utility and utility.world_to_screen then
+            local pos = locked_target.head_position or locked_target.position
+            if pos then
+                local tx, ty, vis = utility.world_to_screen(pos.x, pos.y, pos.z)
+                if vis then
+                    local col = settings.color("april_aimbot_target_line", { 1, 0, 0, 1 })
+                    draw_util.line(cx, cy, tx, ty, col, 1.5)
+                end
+            end
         end
     end
 end
@@ -743,21 +825,37 @@ end)()
 -- ── features/combat/recoil.lua ──
 April._mods["features.combat.recoil"] = (function()
 local settings = April.require("core.settings")
+local G = April.require("core.menu_util").G
+local T = April.require("core.menu_util").tab()
 
 local M = {}
+local P = "april_recoil_enabled"
 
 function M.register_menu()
-    menu.add_group(April.TAB, "Recoil")
-    menu.add_checkbox(April.TAB, "Recoil", "april_recoil_enabled", "Enable Recoil Control", false)
-    menu.add_slider_float(April.TAB, "Recoil", "april_recoil_strength", "Strength", 0, 5, 1.0, "%.1f")
+    menu.add_checkbox(T, G.RECOIL, "april_recoil_enabled", "Enable Recoil Control", false, { key = 0 })
+    menu.add_slider_float(T, G.RECOIL, "april_recoil_strength", "Global Strength (Y)", 0, 10, 1.0, "%.1f", { parent = P })
+    menu.add_slider_float(T, G.RECOIL, "april_recoil_strength_x", "Global Strength (X)", -10, 10, 0, "%.1f", { parent = P })
+    menu.add_checkbox(T, G.RECOIL, "april_recoil_auto", "Scale With Fire Rate", true, { parent = P })
+    menu.add_separator(T, G.RECOIL)
+    menu.add_label(T, G.RECOIL, "Per-weapon overrides (0 = use global)")
+    menu.add_slider_float(T, G.RECOIL, "april_rc_ak47_y", "AK47 (Y)", 0, 10, 0, "%.1f", { parent = P })
+    menu.add_slider_float(T, G.RECOIL, "april_rc_ak47_x", "AK47 (X)", -10, 10, 0, "%.1f", { parent = P })
+    menu.add_slider_float(T, G.RECOIL, "april_rc_m4_y", "M4A1 (Y)", 0, 10, 0, "%.1f", { parent = P })
+    menu.add_slider_float(T, G.RECOIL, "april_rc_m4_x", "M4A1 (X)", -10, 10, 0, "%.1f", { parent = P })
+    menu.add_slider_float(T, G.RECOIL, "april_rc_smg_y", "SMG (Y)", 0, 10, 0, "%.1f", { parent = P })
+    menu.add_slider_float(T, G.RECOIL, "april_rc_smg_x", "SMG (X)", -10, 10, 0, "%.1f", { parent = P })
 end
 
 function M.update(dt)
     if not settings.bool("april_recoil_enabled", false) then return end
     if not input or not input.is_key_down or not input.move_mouse then return end
-    if not input.is_key_down(0x01) or not input.is_key_down(0x02) then return end
-    local strength = settings.num("april_recoil_strength", 1.0)
-    input.move_mouse(0, strength * 2)
+    if not input.is_key_down(0x01) then return end
+    local y = settings.num("april_recoil_strength", 1.0)
+    local x = settings.num("april_recoil_strength_x", 0)
+    if settings.bool("april_recoil_auto", true) then
+        y = y * (dt and (1 / math.max(dt, 0.008)) or 1) * 0.016
+    end
+    input.move_mouse(x, y * 2)
 end
 
 function M.draw() end
@@ -771,17 +869,21 @@ April._mods["features.visuals.player_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
 local draw_util = April.require("core.draw_util")
+local G = April.require("core.menu_util").G
+local T = April.require("core.menu_util").tab()
 
 local M = {}
+local P = "april_esp_enabled"
 
 function M.register_menu()
-    menu.add_group(April.TAB, "Players")
-    menu.add_checkbox(April.TAB, "Players", "april_esp_enabled", "Player ESP", true)
-    menu.add_checkbox(April.TAB, "Players", "april_esp_name", "Name", true)
-    menu.add_checkbox(April.TAB, "Players", "april_esp_health", "Health Bar", true)
-    menu.add_checkbox(April.TAB, "Players", "april_esp_distance", "Distance", true)
-    menu.add_slider_int(April.TAB, "Players", "april_esp_max_dist", "Max Distance", 50, 2000, 800)
-    menu.add_colorpicker(April.TAB, "Players", "april_esp_color", "ESP Color", { 0.3, 1, 0.5, 1 })
+    menu.add_checkbox(T, G.VISUALS, "april_esp_enabled", "Player ESP", true, { key = 0 })
+    menu.add_combo(T, G.VISUALS, "april_esp_box_mode", "Box Mode", { "None", "2D", "Corner" }, 1, { parent = P })
+    menu.add_checkbox(T, G.VISUALS, "april_esp_name", "Name", true, { parent = P, colorpicker = { 1, 1, 1, 1 } })
+    menu.add_checkbox(T, G.VISUALS, "april_esp_health", "Health Bar", true, { parent = P })
+    menu.add_checkbox(T, G.VISUALS, "april_esp_distance", "Distance", true, { parent = P, colorpicker = { 0.7, 0.7, 0.7, 1 } })
+    menu.add_checkbox(T, G.VISUALS, "april_esp_held_item", "Held Item", false, { parent = P, colorpicker = { 0.2, 0.8, 1, 1 } })
+    menu.add_slider_int(T, G.VISUALS, "april_esp_max_dist", "Max Distance", 50, 5000, 1000, { parent = P })
+    menu.add_checkbox(T, G.VISUALS, "april_esp_color", "Box Color", true, { parent = P, colorpicker = { 0.3, 1, 0.5, 1 } })
 end
 
 function M.scan()
@@ -797,9 +899,11 @@ function M.update(dt) end
 
 function M.draw()
     if not settings.bool("april_esp_enabled", true) then return end
-    local max_dist = settings.num("april_esp_max_dist", 800)
+    local max_dist = settings.num("april_esp_max_dist", 1000)
     local col = settings.color("april_esp_color", { 0.3, 1, 0.5, 1 })
+    local box_mode = settings.num("april_esp_box_mode", 1)
     local me = entity and entity.get_local_player and entity.get_local_player()
+    local text_size = settings.num("april_esp_text_size", 13)
 
     for _, p in ipairs(cache.players) do
         if p.is_local or not p.is_alive then goto continue end
@@ -807,14 +911,18 @@ function M.draw()
             local dx = p.position.x - me.position.x
             local dy = p.position.y - me.position.y
             local dz = p.position.z - me.position.z
-            local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+            local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
             if dist > max_dist then goto continue end
         end
 
         local b = p:get_bounds()
         if not b or not b.valid then goto continue end
 
-        draw_util.box_esp(b.x, b.y, b.w, b.h, col, 0)
+        if box_mode == 1 then
+            draw_util.box_esp(b.x, b.y, b.w, b.h, col, 0)
+        elseif box_mode == 2 then
+            draw_util.box_esp(b.x, b.y, b.w, b.h, col, 1)
+        end
 
         if settings.bool("april_esp_health", true) then
             draw_util.health_bar(b.x - 4, b.y, b.h, p.health, p.max_health)
@@ -827,7 +935,8 @@ function M.draw()
             label = label .. (label ~= "" and " " or "") .. "[" .. d .. "m]"
         end
         if label ~= "" then
-            draw_util.text_centered(b.x + b.w * 0.5, b.y - 14, label, { 1, 1, 1, 1 }, 13)
+            local nc = settings.color("april_esp_name", { 1, 1, 1, 1 })
+            draw_util.text_centered(b.x + b.w * 0.5, b.y - 14, label, nc, text_size)
         end
 
         ::continue::
@@ -842,15 +951,32 @@ end)()
 April._mods["features.visuals.crosshair"] = (function()
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
+local G = April.require("core.menu_util").G
+local T = April.require("core.menu_util").tab()
 
 local M = {}
+local P = "april_crosshair_enabled"
 
 function M.register_menu()
-    menu.add_group(April.TAB, "Crosshair")
-    menu.add_checkbox(April.TAB, "Crosshair", "april_crosshair_enabled", "Crosshair", true)
-    menu.add_slider_int(April.TAB, "Crosshair", "april_crosshair_size", "Size", 2, 40, 8)
-    menu.add_slider_int(April.TAB, "Crosshair", "april_crosshair_gap", "Gap", 0, 20, 4)
-    menu.add_colorpicker(April.TAB, "Crosshair", "april_crosshair_color", "Color", { 1, 1, 1, 1 })
+    menu.add_checkbox(T, G.VISUALS, "april_crosshair_enabled", "Enable Custom Crosshair", true, { key = 0 })
+    menu.add_combo(T, G.VISUALS, "april_crosshair_type", "Crosshair Type", { "Cross", "Circle", "Dot", "T-Shape" }, 0, { parent = P })
+    menu.add_slider_int(T, G.VISUALS, "april_crosshair_size", "Size", 1, 50, 10, { parent = P })
+    menu.add_slider_int(T, G.VISUALS, "april_crosshair_gap", "Gap", 0, 20, 5, { parent = P })
+    menu.add_slider_int(T, G.VISUALS, "april_crosshair_thickness", "Thickness", 1, 10, 2, { parent = P })
+    menu.add_checkbox(T, G.VISUALS, "april_crosshair_color", "Crosshair Color", true, { parent = P, colorpicker = { 0, 1, 0, 1 } })
+    menu.add_checkbox(T, G.VISUALS, "april_crosshair_dot", "Center Dot", false, { parent = P, colorpicker = { 1, 1, 1, 1 } })
+    menu.add_checkbox(T, G.VISUALS, "april_crosshair_outline", "Outline", true, { parent = P, colorpicker = { 0, 0, 0, 1 } })
+    menu.add_checkbox(T, G.VISUALS, "april_crosshair_rainbow", "Rainbow Crosshair", false, { parent = P })
+    menu.add_slider_int(T, G.VISUALS, "april_crosshair_rainbow_speed", "Rainbow Speed", 1, 100, 10, { parent = "april_crosshair_rainbow" })
+end
+
+local function crosshair_color()
+    if settings.bool("april_crosshair_rainbow", false) then
+        local t = (utility and utility.get_tick_count and utility.get_tick_count() or 0) * 0.001
+        local speed = settings.num("april_crosshair_rainbow_speed", 10) * 0.1
+        return { (math.sin(t * speed) + 1) * 0.5, (math.sin(t * speed + 2) + 1) * 0.5, (math.sin(t * speed + 4) + 1) * 0.5, 1 }
+    end
+    return settings.color("april_crosshair_color", { 0, 1, 0, 1 })
 end
 
 function M.update(dt) end
@@ -859,14 +985,30 @@ function M.draw()
     if not settings.bool("april_crosshair_enabled", true) then return end
     local sw, sh = draw_util.screen_size()
     local cx, cy = sw * 0.5, sh * 0.5
-    local size = settings.num("april_crosshair_size", 8)
-    local gap = settings.num("april_crosshair_gap", 4)
-    local col = settings.color("april_crosshair_color", { 1, 1, 1, 1 })
+    local size = settings.num("april_crosshair_size", 10)
+    local gap = settings.num("april_crosshair_gap", 5)
+    local thick = settings.num("april_crosshair_thickness", 2)
+    local col = crosshair_color()
+    local kind = settings.num("april_crosshair_type", 0)
 
-    draw_util.line(cx - gap - size, cy, cx - gap, cy, col, 1)
-    draw_util.line(cx + gap, cy, cx + gap + size, cy, col, 1)
-    draw_util.line(cx, cy - gap - size, cx, cy - gap, col, 1)
-    draw_util.line(cx, cy + gap, cx, cy + gap + size, col, 1)
+    if kind == 1 then
+        draw_util.circle(cx, cy, size, col, false)
+    elseif kind == 2 then
+        draw_util.circle(cx, cy, size * 0.5, col, true)
+    elseif kind == 3 then
+        draw_util.line(cx - size, cy, cx + size, cy, col, thick)
+        draw_util.line(cx, cy, cx, cy + size, col, thick)
+    else
+        draw_util.line(cx - gap - size, cy, cx - gap, cy, col, thick)
+        draw_util.line(cx + gap, cy, cx + gap + size, cy, col, thick)
+        draw_util.line(cx, cy - gap - size, cx, cy - gap, col, thick)
+        draw_util.line(cx, cy + gap, cx, cy + gap + size, col, thick)
+    end
+
+    if settings.bool("april_crosshair_dot", false) then
+        local dc = settings.color("april_crosshair_dot", { 1, 1, 1, 1 })
+        draw_util.circle(cx, cy, 2, dc, true)
+    end
 end
 
 return M
@@ -877,35 +1019,49 @@ end)()
 April._mods["features.visuals.feedback"] = (function()
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
+local G = April.require("core.menu_util").G
+local T = April.require("core.menu_util").tab()
 
 local M = {}
-local last_hit_time = 0
+local hit_time = 0
+local P = "april_hitmarker_enabled"
 
 function M.register_menu()
-    menu.add_group(April.TAB, "Feedback")
-    menu.add_checkbox(April.TAB, "Feedback", "april_hitmarker_enabled", "Hitmarkers", true)
-    menu.add_colorpicker(April.TAB, "Feedback", "april_hitmarker_color", "Hit Color", { 1, 0.3, 0.3, 1 })
+    menu.add_checkbox(T, G.VISUALS, "april_hitmarker_enabled", "Hitmarker", true, { colorpicker = { 1, 1, 1, 1 } })
+    menu.add_checkbox(T, G.VISUALS, "april_hitmarker_glow", "Hitmarker Glow", false, { parent = P })
+    menu.add_slider_int(T, G.VISUALS, "april_hitmarker_size", "Hitmarker Size", 1, 20, 5, { parent = P })
+    menu.add_slider_int(T, G.VISUALS, "april_hitmarker_duration", "Duration (ms)", 100, 2000, 500, { parent = P })
+    menu.add_checkbox(T, G.VISUALS, "april_hit_notifier", "Hit Notifier", true)
 end
 
-function M.notify_hit()
-    last_hit_time = utility and utility.get_time and utility.get_time() or 0
+function M.trigger_hit()
+    hit_time = utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
 function M.update(dt) end
 
 function M.draw()
     if not settings.bool("april_hitmarker_enabled", true) then return end
-    local now = utility and utility.get_time and utility.get_time() or 0
-    if now - last_hit_time > 0.35 then return end
+    if hit_time == 0 then return end
+    local now = utility and utility.get_tick_count and utility.get_tick_count() or 0
+    local dur = settings.num("april_hitmarker_duration", 500)
+    if now - hit_time > dur then return end
 
     local sw, sh = draw_util.screen_size()
     local cx, cy = sw * 0.5, sh * 0.5
-    local col = settings.color("april_hitmarker_color", { 1, 0.3, 0.3, 1 })
-    local s = 8
-    draw_util.line(cx - s, cy - s, cx - 3, cy - 3, col, 2)
-    draw_util.line(cx + s, cy - s, cx + 3, cy - 3, col, 2)
-    draw_util.line(cx - s, cy + s, cx - 3, cy + 3, col, 2)
-    draw_util.line(cx + s, cy + s, cx + 3, cy + 3, col, 2)
+    local size = settings.num("april_hitmarker_size", 5)
+    local col = settings.color("april_hitmarker_enabled", { 1, 1, 1, 1 })
+    local alpha = 1 - (now - hit_time) / dur
+    col = { col[1], col[2], col[3], (col[4] or 1) * alpha }
+
+    draw_util.line(cx - size, cy - size, cx - size * 0.3, cy - size * 0.3, col, 2)
+    draw_util.line(cx + size, cy - size, cx + size * 0.3, cy - size * 0.3, col, 2)
+    draw_util.line(cx - size, cy + size, cx - size * 0.3, cy + size * 0.3, col, 2)
+    draw_util.line(cx + size, cy + size, cx + size * 0.3, cy + size * 0.3, col, 2)
+
+    if settings.bool("april_hitmarker_glow", false) then
+        draw_util.circle(cx, cy, size * 1.5, { col[1], col[2], col[3], col[4] * 0.3 }, false)
+    end
 end
 
 return M
@@ -919,42 +1075,47 @@ local cache = April.require("core.cache")
 local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
+local G = April.require("core.menu_util").G
+local T = April.require("core.menu_util").tab()
 
 local M = {}
+local P = "april_world_enabled"
 
-local RESOURCE_NAMES = {
-    "Stone", "Metal", "Phosphate", "Hemp", "Corn", "Pumpkin", "Wheat",
-    "Deer", "Boar", "Wolf", "Node",
+local TOGGLES = {
+    { id = "april_stone_node", label = "Stone Node", match = "Stone", color = { 0.5, 0.5, 0.5, 1 } },
+    { id = "april_metal_node", label = "Metal Node", match = "Metal", color = { 0.7, 0.5, 0.3, 1 } },
+    { id = "april_phosphate_node", label = "Phosphate Node", match = "Phosphate", color = { 0.2, 0.8, 0.2, 1 } },
+    { id = "april_corn_plant", label = "Corn Plant", match = "Corn", color = { 1, 0.9, 0.3, 1 } },
+    { id = "april_deer", label = "Deer", match = "Deer", color = { 0.6, 0.4, 0.2, 1 } },
+    { id = "april_boar", label = "Wild Boar", match = "Boar", color = { 0.4, 0.3, 0.2, 1 } },
+    { id = "april_wolf", label = "Wolf", match = "Wolf", color = { 0.5, 0.5, 0.5, 1 } },
+    { id = "april_dropped_item", label = "Dropped Items", match = "Drop", color = { 1, 0.8, 0, 1 } },
 }
 
 function M.register_menu()
-    menu.add_group(April.TAB, "Resources")
-    menu.add_checkbox(April.TAB, "Resources", "april_world_enabled", "Resource ESP", true)
-    menu.add_slider_int(April.TAB, "Resources", "april_world_range", "Range", 50, 1500, 400)
-    menu.add_colorpicker(April.TAB, "Resources", "april_world_color", "Color", { 0.8, 0.8, 0.2, 1 })
+    menu.add_checkbox(T, G.WORLD, "april_world_enabled", "Enable World ESP", true, { key = 0 })
+    for _, t in ipairs(TOGGLES) do
+        menu.add_checkbox(T, G.WORLD, t.id, t.label, true, { parent = P, colorpicker = t.color })
+    end
+    menu.add_slider_int(T, G.WORLD, "april_world_range", "World Range", 50, 2000, 500, { parent = P })
+end
+
+local function matches_toggle(name)
+    name = name or ""
+    for _, t in ipairs(TOGGLES) do
+        if settings.bool(t.id, true) and name:find(t.match) then
+            return settings.color(t.id, t.color)
+        end
+    end
+    return nil
 end
 
 function M.scan()
     cache.world = {}
-    local max = 300
     folders.iter_workspace_folders({ "drops", "plants", "vegetation", "nodes", "animals" }, function(key, folder)
-        local children = folders.scan_descendants(folder, RESOURCE_NAMES, max)
-        for _, inst in ipairs(children) do
-            table.insert(cache.world, {
-                inst = inst,
-                name = inst.Name,
-                class = inst.ClassName,
-                category = key,
-            })
-        end
-        local direct = folders.scan_children(folder, nil, 80)
-        for _, inst in ipairs(direct) do
-            table.insert(cache.world, {
-                inst = inst,
-                name = inst.Name,
-                class = inst.ClassName,
-                category = key,
-            })
+        local found = folders.scan_descendants(folder, nil, 400)
+        for _, inst in ipairs(found) do
+            table.insert(cache.world, { inst = inst, name = inst.Name, category = key })
         end
     end)
     cache.stats.last_world_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -964,12 +1125,13 @@ function M.update(dt) end
 
 function M.draw()
     if not settings.bool("april_world_enabled", true) then return end
-    local range = settings.num("april_world_range", 400)
-    local col = settings.color("april_world_color", { 0.8, 0.8, 0.2, 1 })
+    local range = settings.num("april_world_range", 500)
     for _, entry in ipairs(cache.world) do
         if env.is_valid(entry.inst) then
-            local label = entry.name or entry.class
-            draw_util.world_label(entry.inst, label, col, range)
+            local col = matches_toggle(entry.name)
+            if col then
+                draw_util.world_label(entry.inst, entry.name or "?", col, range)
+            end
         end
     end
 end
@@ -985,24 +1147,45 @@ local cache = April.require("core.cache")
 local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
+local G = April.require("core.menu_util").G
+local T = April.require("core.menu_util").tab()
 
 local M = {}
+local P = "april_loot_enabled"
 
-local LOOT_PATTERNS = {
-    "Crate", "Barrel", "Egg", "Care", "Boat", "Flycopter", "Loner", "Loot",
+local TOGGLES = {
+    { id = "april_wooden_crate", label = "Wooden Crate", match = "Wooden", color = { 0.6, 0.4, 0.2, 1 } },
+    { id = "april_metal_crate", label = "Metal Crate", match = "Metal", color = { 0.5, 0.5, 0.6, 1 } },
+    { id = "april_steel_crate", label = "Steel Crate", match = "Steel", color = { 0.7, 0.7, 0.8, 1 } },
+    { id = "april_food_crate", label = "Food Crate", match = "Food", color = { 0.2, 0.8, 0.2, 1 } },
+    { id = "april_timed_crate", label = "Timed Crate", match = "Timed", color = { 1, 0.5, 0, 1 } },
+    { id = "april_care_package", label = "Care Package", match = "Care", color = { 1, 0.2, 0.2, 1 } },
+    { id = "april_body_bag", label = "Body Bag", match = "Body", color = { 0.3, 0.3, 0.3, 1 } },
+    { id = "april_sleeper", label = "Sleepers", match = "Sleeper", color = { 0.8, 0.4, 0.8, 1 } },
 }
 
 function M.register_menu()
-    menu.add_group(April.TAB, "Loot")
-    menu.add_checkbox(April.TAB, "Loot", "april_loot_enabled", "Loot ESP", true)
-    menu.add_slider_int(April.TAB, "Loot", "april_loot_range", "Range", 50, 2000, 600)
-    menu.add_colorpicker(April.TAB, "Loot", "april_loot_color", "Color", { 1, 0.6, 0.2, 1 })
+    menu.add_checkbox(T, G.LOOT, "april_loot_enabled", "Enable Loot ESP", true, { key = 0 })
+    for _, t in ipairs(TOGGLES) do
+        menu.add_checkbox(T, G.LOOT, t.id, t.label, true, { parent = P, colorpicker = t.color })
+    end
+    menu.add_slider_int(T, G.LOOT, "april_loot_range", "Loot Range", 50, 2000, 300, { parent = P })
+end
+
+local function matches_toggle(name)
+    name = name or ""
+    for _, t in ipairs(TOGGLES) do
+        if settings.bool(t.id, true) and name:find(t.match) then
+            return settings.color(t.id, t.color)
+        end
+    end
+    return nil
 end
 
 function M.scan()
     cache.loot = {}
-    folders.iter_workspace_folders({ "loners", "military", "events" }, function(key, folder)
-        local found = folders.scan_descendants(folder, LOOT_PATTERNS, 400)
+    folders.iter_workspace_folders({ "loners", "military", "events", "drops" }, function(key, folder)
+        local found = folders.scan_descendants(folder, nil, 400)
         for _, inst in ipairs(found) do
             table.insert(cache.loot, { inst = inst, name = inst.Name, category = key })
         end
@@ -1014,11 +1197,13 @@ function M.update(dt) end
 
 function M.draw()
     if not settings.bool("april_loot_enabled", true) then return end
-    local range = settings.num("april_loot_range", 600)
-    local col = settings.color("april_loot_color", { 1, 0.6, 0.2, 1 })
+    local range = settings.num("april_loot_range", 300)
     for _, entry in ipairs(cache.loot) do
         if env.is_valid(entry.inst) then
-            draw_util.world_label(entry.inst, entry.name or "Loot", col, range)
+            local col = matches_toggle(entry.name)
+            if col then
+                draw_util.world_label(entry.inst, entry.name or "Loot", col, range)
+            end
         end
     end
 end
@@ -1034,26 +1219,50 @@ local cache = April.require("core.cache")
 local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
+local G = April.require("core.menu_util").G
+local T = April.require("core.menu_util").tab()
 
 local M = {}
+local P = "april_base_enabled"
 
-local BASE_PATTERNS = {
-    "Cabinet", "Door", "Turret", "Battery", "Solar", "Windmill", "Sleeping", "Box",
+local TOGGLES = {
+    { id = "april_base_cabinet", label = "Base Cabinet", match = "Cabinet", color = { 1, 0.8, 0, 1 } },
+    { id = "april_storage_cabinet", label = "Storage Cabinet", match = "Storage", color = { 0.6, 0.4, 0.2, 1 } },
+    { id = "april_sleeping_bag", label = "Sleeping Bag", match = "Sleeping", color = { 0.8, 0.2, 0.2, 1 } },
+    { id = "april_auto_turret", label = "Auto Turret", match = "Turret", color = { 1, 0.2, 0.2, 1 } },
+    { id = "april_wooden_door", label = "Wooden Door", match = "Wooden Door", color = { 0.5, 0.3, 0.1, 1 } },
+    { id = "april_metal_door", label = "Metal Door", match = "Metal Door", color = { 0.5, 0.5, 0.6, 1 } },
 }
 
 function M.register_menu()
-    menu.add_group(April.TAB, "Base")
-    menu.add_checkbox(April.TAB, "Base", "april_base_enabled", "Base ESP", true)
-    menu.add_slider_int(April.TAB, "Base", "april_base_range", "Range", 50, 2000, 800)
-    menu.add_colorpicker(April.TAB, "Base", "april_base_color", "Color", { 0.4, 0.7, 1, 1 })
+    menu.add_checkbox(T, G.BASE, "april_base_enabled", "Enable Base ESP", true, { key = 0 })
+    for _, t in ipairs(TOGGLES) do
+        menu.add_checkbox(T, G.BASE, t.id, t.label, true, { parent = P, colorpicker = t.color })
+    end
+    menu.add_checkbox(T, G.BASE, "april_base_distance", "Show Distance", true, { parent = P })
+    menu.add_button(T, G.BASE, "april_base_rescan", "Force Base Scan", function()
+        M.scan()
+        print("[April] Base scan forced")
+    end)
+    menu.add_slider_int(T, G.BASE, "april_base_range", "Base Range", 50, 500, 150, { parent = P })
+end
+
+local function matches_toggle(name)
+    name = name or ""
+    for _, t in ipairs(TOGGLES) do
+        if settings.bool(t.id, true) and name:find(t.match) then
+            return settings.color(t.id, t.color)
+        end
+    end
+    return nil
 end
 
 function M.scan()
     cache.base = {}
-    folders.iter_workspace_folders({ "bases" }, function(key, folder)
-        local found = folders.scan_descendants(folder, BASE_PATTERNS, 500)
+    folders.iter_workspace_folders({ "bases", "deployables" }, function(key, folder)
+        local found = folders.scan_descendants(folder, nil, 300)
         for _, inst in ipairs(found) do
-            table.insert(cache.base, { inst = inst, name = inst.Name })
+            table.insert(cache.base, { inst = inst, name = inst.Name, category = key })
         end
     end)
     cache.stats.last_base_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -1063,11 +1272,14 @@ function M.update(dt) end
 
 function M.draw()
     if not settings.bool("april_base_enabled", true) then return end
-    local range = settings.num("april_base_range", 800)
-    local col = settings.color("april_base_color", { 0.4, 0.7, 1, 1 })
+    local range = settings.num("april_base_range", 150)
     for _, entry in ipairs(cache.base) do
         if env.is_valid(entry.inst) then
-            draw_util.world_label(entry.inst, entry.name or "Base", col, range)
+            local col = matches_toggle(entry.name)
+            if col then
+                local label = entry.name or "Base"
+                draw_util.world_label(entry.inst, label, col, range)
+            end
         end
     end
 end
@@ -1083,43 +1295,32 @@ local cache = April.require("core.cache")
 local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
+local G = April.require("core.menu_util").G
+local T = April.require("core.menu_util").tab()
 
 local M = {}
-
-local NPC_PATTERNS = {
-    "Soldier", "Bruno", "Boris", "Brutus", "BTR", "NPC", "Zombie",
-}
+local P = "april_npc_enabled"
 
 function M.register_menu()
-    menu.add_group(April.TAB, "NPCs")
-    menu.add_checkbox(April.TAB, "NPCs", "april_npc_enabled", "NPC ESP", true)
-    menu.add_slider_int(April.TAB, "NPCs", "april_npc_range", "Range", 50, 2000, 1000)
-    menu.add_colorpicker(April.TAB, "NPCs", "april_npc_color", "Color", { 1, 0.2, 0.2, 1 })
+    menu.add_checkbox(T, G.NPCS, "april_npc_enabled", "Enable NPC ESP", true, { key = 0, colorpicker = { 1, 0.3, 0.3, 1 } })
+    menu.add_checkbox(T, G.NPCS, "april_npc_soldiers", "Soldiers", true, { parent = P, colorpicker = { 1, 0.3, 0.3, 1 } })
+    menu.add_combo(T, G.NPCS, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 1, { parent = P })
+    menu.add_checkbox(T, G.NPCS, "april_npc_health", "Health Bar", true, { parent = P })
+    menu.add_checkbox(T, G.NPCS, "april_npc_name", "Name", true, { parent = P, colorpicker = { 1, 1, 1, 1 } })
+    menu.add_checkbox(T, G.NPCS, "april_npc_distance", "Distance", true, { parent = P, colorpicker = { 0.7, 0.7, 0.7, 1 } })
+    menu.add_checkbox(T, G.NPCS, "april_npc_skeleton", "Skeleton", false, { parent = P, colorpicker = { 1, 1, 1, 1 } })
+    menu.add_checkbox(T, G.NPCS, "april_npc_offscreen", "Offscreen Arrows", false, { parent = P, colorpicker = { 1, 0.3, 0.3, 1 } })
+    menu.add_slider_int(T, G.NPCS, "april_npc_range", "NPC Range", 50, 2000, 500, { parent = P })
 end
 
 function M.scan()
     cache.npcs = {}
-    folders.iter_workspace_folders({ "military", "events", "animals" }, function(key, folder)
-        local found = folders.scan_descendants(folder, NPC_PATTERNS, 200)
+    folders.iter_workspace_folders({ "animals", "military", "npcs" }, function(key, folder)
+        local found = folders.scan_descendants(folder, { "Soldier", "NPC", "Zombie", "BTR" }, 200)
         for _, inst in ipairs(found) do
-            local hum = env.safe_call(function() return inst:find_first_child_of_class("Humanoid") end)
-            if hum or inst.ClassName == "Model" then
-                table.insert(cache.npcs, { inst = inst, name = inst.Name, category = key })
-            end
+            table.insert(cache.npcs, { inst = inst, name = inst.Name, category = key })
         end
     end)
-
-    if entity and entity.get_players then
-        for _, p in ipairs(entity.get_players()) do
-            if p.is_workspace_entity then
-                table.insert(cache.npcs, {
-                    entity = p,
-                    name = p.name,
-                    category = "workspace_entity",
-                })
-            end
-        end
-    end
     cache.stats.last_npc_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
@@ -1127,20 +1328,13 @@ function M.update(dt) end
 
 function M.draw()
     if not settings.bool("april_npc_enabled", true) then return end
-    local range = settings.num("april_npc_range", 1000)
-    local col = settings.color("april_npc_color", { 1, 0.2, 0.2, 1 })
+    if not settings.bool("april_npc_soldiers", true) then return end
+    local range = settings.num("april_npc_range", 500)
+    local col = settings.color("april_npc_enabled", { 1, 0.3, 0.3, 1 })
+    local box_mode = settings.num("april_npc_box_mode", 1)
 
     for _, entry in ipairs(cache.npcs) do
-        if entry.entity then
-            local p = entry.entity
-            if p.is_alive then
-                local b = p:get_bounds()
-                if b and b.valid then
-                    draw_util.box_esp(b.x, b.y, b.w, b.h, col, 1)
-                    draw_util.text_centered(b.x + b.w * 0.5, b.y - 12, entry.name or "NPC", { 1, 1, 1, 1 }, 12)
-                end
-            end
-        elseif env.is_valid(entry.inst) then
+        if env.is_valid(entry.inst) then
             draw_util.world_label(entry.inst, entry.name or "NPC", col, range)
         end
     end
@@ -1155,58 +1349,63 @@ April._mods["features.movement.exploits"] = (function()
 local settings = April.require("core.settings")
 local env = April.require("core.env")
 local math_util = April.require("core.math_util")
+local G = April.require("core.menu_util").G
+local T = April.require("core.menu_util").tab()
 
 local M = {}
-local sprint_speed = 24
+local P = "april_noclip_enabled"
 
 function M.register_menu()
-    menu.add_group(April.TAB, "Exploits")
-    menu.add_checkbox(April.TAB, "Exploits", "april_noclip_enabled", "Noclip", false)
-    menu.add_hotkey(April.TAB, "Exploits", "april_noclip_key", "Noclip Key", 0x12)
-    menu.add_checkbox(April.TAB, "Exploits", "april_omnisprint_enabled", "Omnisprint", false)
-    menu.add_slider_int(April.TAB, "Exploits", "april_omnisprint_speed", "Sprint Speed", 16, 80, 32)
+    menu.add_slider_int(T, G.MISC, "april_esp_text_size", "ESP Text Size", 8, 24, 14)
+
+    menu.add_checkbox(T, G.MISC, "april_noclip_enabled", "Noclip", false, { key = 0x12 })
+    menu.add_combo(T, G.MISC, "april_noclip_mode", "Noclip Mode", { "Toggle", "Hold" }, 1, { parent = P })
+    menu.add_slider_int(T, G.MISC, "april_noclip_speed", "Noclip Speed", 1, 50, 16, { parent = P })
+
+    menu.add_checkbox(T, G.MISC, "april_omnisprint_enabled", "Omnisprint", false, { key = 0 })
+    menu.add_combo(T, G.MISC, "april_omnisprint_mode", "Sprint Mode", { "Toggle", "Hold" }, 0, { parent = "april_omnisprint_enabled" })
+    menu.add_slider_int(T, G.MISC, "april_omnisprint_speed", "Sprint Speed", 16, 80, 32, { parent = "april_omnisprint_enabled" })
+
+    menu.add_checkbox(T, G.MISC, "april_spider_enabled", "Spider Climb", false, { key = 0 })
+    menu.add_slider_int(T, G.MISC, "april_spider_speed", "Wall Speed", 1, 50, 20, { parent = "april_spider_enabled" })
 end
 
 local function noclip_active()
     if not settings.bool("april_noclip_enabled", false) then return false end
-    local vk = settings.num("april_noclip_key", 0x12)
-    return input and input.is_key_down and input.is_key_down(vk)
+    local vk = 0x12
+    if input and input.is_key_down then
+        local mode = settings.num("april_noclip_mode", 1)
+        if mode == 0 then
+            return utility and utility.is_key_toggled and utility.is_key_toggled(vk)
+        end
+        return input.is_key_down(vk)
+    end
+    return false
 end
 
 function M.update(dt)
+    dt = dt or 0.016
     local lp = env.get_local_player()
-    if not lp or not lp.character then return end
-    local char = lp.character
-    if not env.is_valid(char) then return end
+    if not lp then return end
 
-    if noclip_active() then
-        for _, p in ipairs(env.safe_call(function() return char:get_children() end) or {}) do
-            if p.ClassName == "MeshPart" or p.ClassName == "Part" then
-                if _G.part and part.set_can_collide then
-                    part.set_can_collide(p, false)
-                else
-                    p.CanCollide = false
-                end
-            end
-        end
-        if lp.humanoid and env.is_valid(lp.humanoid) then
-            lp.state = 6
+    if noclip_active() and lp.character then
+        local hum = lp.character:FindFirstChildOfClass("Humanoid")
+        if hum and hum.SetProperty then
+            pcall(function() hum:SetProperty("PlatformStand", true) end)
         end
     end
 
     if settings.bool("april_omnisprint_enabled", false) and camera and camera.get_look_vector then
         local look = camera.get_look_vector()
-        local right = camera.get_look_vector and look
-        if not look or not lp.position then return end
-        local speed = settings.num("april_omnisprint_speed", 32) * (dt or 0.016)
-        local dx, dz = 0, 0
-        if input.is_key_down(0x57) then dx = dx + look.x * speed; dz = dz + look.z * speed end
-        if input.is_key_down(0x53) then dx = dx - look.x * speed; dz = dz - look.z * speed end
-        if input.is_key_down(0x41) then dx = dx - look.z * speed; dz = dz + look.x * speed end
-        if input.is_key_down(0x44) then dx = dx + look.z * speed; dz = dz - look.x * speed end
-        if dx ~= 0 or dz ~= 0 then
-            local pos = lp.position
-            lp.position = Vector3.new(pos.x + dx, pos.y, pos.z + dz)
+        local speed = settings.num("april_omnisprint_speed", 32) * dt
+        if input and input.is_key_down then
+            if input.is_key_down(0x57) then -- W
+                pcall(function()
+                    if lp.set_velocity then
+                        lp:set_velocity(look.x * speed, look.y * speed, look.z * speed)
+                    end
+                end)
+            end
         end
     end
 end
@@ -1223,41 +1422,64 @@ local settings = April.require("core.settings")
 local cache = April.require("core.cache")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
+local G = April.require("core.menu_util").G
+local T = April.require("core.menu_util").tab()
 
 local M = {}
+local P = "april_waypoints_enabled"
 
 function M.register_menu()
-    menu.add_group(April.TAB, "Waypoints")
-    menu.add_button(April.TAB, "Waypoints", "april_wp_set", "Set Waypoint 1", function()
-        local lp = env.get_local_player()
-        if lp and lp.position then
-            cache.waypoints[1] = { name = "Waypoint 1", pos = { x = lp.position.x, y = lp.position.y, z = lp.position.z } }
-            print("[April] Waypoint 1 set")
-        end
-    end)
-    menu.add_button(April.TAB, "Waypoints", "april_wp_clear", "Clear Waypoint 1", function()
-        cache.waypoints[1] = nil
-        print("[April] Waypoint 1 cleared")
-    end)
-    menu.add_checkbox(April.TAB, "Waypoints", "april_wp_draw", "Draw Waypoints", true)
-    menu.add_colorpicker(April.TAB, "Waypoints", "april_wp_color", "Color", { 0.2, 1, 0.8, 1 })
+    menu.add_checkbox(T, G.WAYPOINTS, "april_waypoints_enabled", "Enable Waypoints", true, { key = 0 })
+    menu.add_checkbox(T, G.WAYPOINTS, "april_wp_dist", "Show Distance", true, { parent = P })
+    menu.add_checkbox(T, G.WAYPOINTS, "april_wp_line", "Draw Line", true, { parent = P })
+    menu.add_checkbox(T, G.WAYPOINTS, "april_wp_draw", "Draw Markers", true, { parent = P, colorpicker = { 0.2, 1, 0.8, 1 } })
+
+    for i = 1, 5 do
+        menu.add_button(T, G.WAYPOINTS, "april_wp_set_" .. i, "Set Waypoint " .. i, function()
+            local lp = env.get_local_player()
+            if lp and lp.position then
+                cache.waypoints[i] = {
+                    name = "Waypoint " .. i,
+                    pos = { x = lp.position.x, y = lp.position.y, z = lp.position.z },
+                }
+                print("[April] Waypoint " .. i .. " set")
+            end
+        end)
+        menu.add_button(T, G.WAYPOINTS, "april_wp_clear_" .. i, "Clear Waypoint " .. i, function()
+            cache.waypoints[i] = nil
+            print("[April] Waypoint " .. i .. " cleared")
+        end)
+    end
 end
 
 function M.update(dt) end
 
 function M.draw()
+    if not settings.bool("april_waypoints_enabled", true) then return end
     if not settings.bool("april_wp_draw", true) then return end
     if not utility or not utility.world_to_screen then return end
-    local col = settings.color("april_wp_color", { 0.2, 1, 0.8, 1 })
+
+    local col = settings.color("april_wp_draw", { 0.2, 1, 0.8, 1 })
     local sw, sh = draw_util.screen_size()
+    local me = env.get_local_player()
 
     for i, wp in pairs(cache.waypoints) do
         if wp and wp.pos then
             local sx, sy, vis = utility.world_to_screen(wp.pos.x, wp.pos.y, wp.pos.z)
             if vis then
                 draw_util.circle(sx, sy, 6, col, true)
-                draw_util.text_centered(sx, sy - 16, wp.name or ("WP" .. i), col, 12)
-                draw_util.line(sw * 0.5, sh, sx, sy, { col[1], col[2], col[3], 0.25 }, 1)
+                local label = wp.name or ("WP" .. i)
+                if settings.bool("april_wp_dist", true) and me and me.position then
+                    local dx = wp.pos.x - me.position.x
+                    local dy = wp.pos.y - me.position.y
+                    local dz = wp.pos.z - me.position.z
+                    local d = math.floor(math.sqrt(dx * dx + dy * dy + dz * dz))
+                    label = label .. " [" .. d .. "m]"
+                end
+                draw_util.text_centered(sx, sy - 16, label, col, 12)
+                if settings.bool("april_wp_line", true) then
+                    draw_util.line(sw * 0.5, sh, sx, sy, { col[1], col[2], col[3], 0.25 }, 1)
+                end
             end
         end
     end
@@ -1273,54 +1495,69 @@ local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
 local math_util = April.require("core.math_util")
 local env = April.require("core.env")
+local G = April.require("core.menu_util").G
+local T = April.require("core.menu_util").tab()
 
 local M = {}
+local P = "april_map_enabled"
 
 function M.register_menu()
-    menu.add_group(April.TAB, "Map")
-    menu.add_checkbox(April.TAB, "Map", "april_map_enabled", "Minimap Shell", false)
-    menu.add_slider_int(April.TAB, "Map", "april_map_size", "Size", 120, 500, 220)
-    menu.add_hotkey(April.TAB, "Map", "april_map_key", "Toggle Key", 0x28)
+    menu.add_checkbox(T, G.MAP, "april_map_enabled", "Enable Tactical Map", false, { key = 0x28 })
+    menu.add_slider_float(T, G.MAP, "april_map_zoom", "Zoom Level", 0.05, 5.0, 1.0, "%.2f", { parent = P })
+    menu.add_colorpicker(T, G.MAP, "april_map_bg", "Background Color", { 0.05, 0.05, 0.08, 0.95 }, { parent = P })
+    menu.add_colorpicker(T, G.MAP, "april_map_grid", "Grid Color", { 1, 1, 1, 0.04 }, { parent = P })
+    menu.add_colorpicker(T, G.MAP, "april_map_local", "Local Player Color", { 0.2, 0.8, 1, 1 }, { parent = P })
+    menu.add_checkbox(T, G.MAP, "april_map_labels", "Show Labels", false, { parent = P })
+    menu.add_checkbox(T, G.MAP, "april_map_coords", "Show Coordinates", true, { parent = P })
+    menu.add_checkbox(T, G.MAP, "april_map_compass", "Compass Overlay", true, { parent = P, colorpicker = { 0.2, 0.8, 1, 0.8 } })
+    menu.add_slider_int(T, G.MAP, "april_map_size", "Map Size", 120, 500, 220, { parent = P })
 end
 
-local function map_open()
-    if not settings.bool("april_map_enabled", false) then return false end
+local function key_active()
     local vk = settings.num("april_map_key", 0x28)
-    return input and input.is_key_down and input.is_key_down(vk)
+    if input and input.is_key_down then return input.is_key_down(vk) end
+    return settings.bool("april_map_enabled", false)
 end
 
 function M.update(dt) end
 
 function M.draw()
-    if not map_open() then return end
+    if not settings.bool("april_map_enabled", false) and not key_active() then return end
+
     local size = settings.num("april_map_size", 220)
     local sw, sh = draw_util.screen_size()
     local x, y = sw - size - 20, 20
+    local bg = settings.color("april_map_bg", { 0.05, 0.05, 0.08, 0.95 })
+    local grid = settings.color("april_map_grid", { 1, 1, 1, 0.04 })
+    local local_col = settings.color("april_map_local", { 0.2, 0.8, 1, 1 })
 
-    if draw and draw.rect then
-        draw.rect(x, y, size, size, { 0.1, 0.1, 0.1, 0.85 }, 4, 1)
-    end
     if draw and draw.rect_filled then
-        draw.rect_filled(x + 2, y + 2, size - 4, size - 4, { 0.05, 0.12, 0.08, 0.9 }, 2)
+        draw.rect_filled(x, y, size, size, bg)
+        draw.rect(x, y, size, size, { 1, 1, 1, 0.15 }, 1)
     end
 
-    local cx, cy = x + size * 0.5, y + size * 0.5
-    draw_util.circle(cx, cy, 4, { 0.2, 1, 0.4, 1 }, true)
-    draw_util.text_centered(x + size * 0.5, y + size - 14, "Tactical Map (WIP)", { 1, 1, 1, 0.7 }, 11)
+    local step = size / 8
+    for i = 1, 7 do
+        draw_util.line(x + step * i, y, x + step * i, y + size, grid, 1)
+        draw_util.line(x, y + step * i, x + size, y + step * i, grid, 1)
+    end
 
-    if entity and entity.get_players then
-        for _, p in ipairs(entity.get_players()) do
-            if not p.is_local and p.is_alive and p.position then
-                local lp = env.get_local_player()
-                if lp and lp.position then
-                    local dx = (p.position.x - lp.position.x) * 0.15
-                    local dz = (p.position.z - lp.position.z) * 0.15
-                    local px = math_util.clamp(cx + dx, x + 6, x + size - 6)
-                    local py = math_util.clamp(cy + dz, y + 6, y + size - 6)
-                    draw_util.circle(px, py, 3, { 1, 0.3, 0.3, 1 }, true)
-                end
-            end
+    local lp = env.get_local_player()
+    if lp and lp.position then
+        local cx, cy = x + size * 0.5, y + size * 0.5
+        draw_util.circle(cx, cy, 4, local_col, true)
+        if settings.bool("april_map_coords", true) then
+            local px, py, pz = lp.position.x, lp.position.y, lp.position.z
+            draw_util.text(x + 6, y + size + 4, string.format("%.0f, %.0f, %.0f", px, py, pz), { 1, 1, 1, 0.8 }, 11)
         end
+        if settings.bool("april_map_labels", false) then
+            draw_util.text(x + 6, y + 4, "Tactical Map", { 1, 1, 1, 0.9 }, 12)
+        end
+    end
+
+    if settings.bool("april_map_compass", true) then
+        local cc = settings.color("april_map_compass", { 0.2, 0.8, 1, 0.8 })
+        draw_util.text_centered(x + size * 0.5, y - 14, "N", cc, 12)
     end
 end
 
@@ -1331,12 +1568,10 @@ end)()
 -- ── features/utility/config.lua ──
 April._mods["features.utility.config"] = (function()
 local settings = April.require("core.settings")
+local G = April.require("core.menu_util").G
+local T = April.require("core.menu_util").tab()
 
 local M = {}
-local CONFIG_KEYS = {
-    "april_aimbot_enabled", "april_aimbot_fov", "april_esp_enabled",
-    "april_world_enabled", "april_loot_enabled", "april_noclip_enabled",
-}
 
 function M.get_config_path(name)
     local base = os.getenv and os.getenv("LOCALAPPDATA") or ""
@@ -1346,10 +1581,20 @@ end
 
 function M.save_slot(slot)
     slot = slot or 1
+    local keys = {}
+    -- collect known april_ ids from menu if possible; fallback list
+    local CONFIG_KEYS = {
+        "april_aimbot_enabled", "april_aimbot_fov", "april_aimbot_smooth",
+        "april_esp_enabled", "april_world_enabled", "april_loot_enabled",
+        "april_npc_enabled", "april_base_enabled", "april_noclip_enabled",
+        "april_crosshair_enabled", "april_map_enabled",
+    }
     local lines = {}
     for _, id in ipairs(CONFIG_KEYS) do
-        local v = menu.get(id)
-        table.insert(lines, id .. "=" .. tostring(v))
+        if menu and menu.get then
+            local v = menu.get(id)
+            if v ~= nil then table.insert(lines, id .. "=" .. tostring(v)) end
+        end
     end
     local path = M.get_config_path("April_Slot_" .. slot .. ".txt")
     local f = io.open(path, "w")
@@ -1367,7 +1612,7 @@ function M.load_slot(slot)
     if not f then return false end
     for line in f:lines() do
         local id, val = line:match("^([^=]+)=(.+)$")
-        if id and val then
+        if id and val and menu and menu.set then
             if val == "true" then menu.set(id, true)
             elseif val == "false" then menu.set(id, false)
             else
@@ -1383,16 +1628,13 @@ function M.load_slot(slot)
 end
 
 function M.register_menu()
-    menu.add_group(April.TAB, "Config")
-    menu.add_label(April.TAB, "Config", "April v3 — modular rewrite")
-    menu.add_button(April.TAB, "Config", "april_cfg_save", "Save Slot 1", function()
-        M.save_slot(1)
-    end)
-    menu.add_button(April.TAB, "Config", "april_cfg_load", "Load Slot 1", function()
-        M.load_slot(1)
-    end)
-    menu.add_group(April.TAB, "Debug")
-    menu.add_checkbox(April.TAB, "Debug", "april_debug_overlay", "Debug Overlay", false)
+    menu.add_label(T, G.CONFIG, "April v3 — Fallen Survival")
+    menu.add_button(T, G.CONFIG, "april_cfg_save_1", "Save Config Slot 1", function() M.save_slot(1) end)
+    menu.add_button(T, G.CONFIG, "april_cfg_load_1", "Load Config Slot 1", function() M.load_slot(1) end)
+    menu.add_button(T, G.CONFIG, "april_cfg_save_2", "Save Config Slot 2", function() M.save_slot(2) end)
+    menu.add_button(T, G.CONFIG, "april_cfg_load_2", "Load Config Slot 2", function() M.load_slot(2) end)
+    menu.add_separator(T, G.CONFIG)
+    menu.add_checkbox(T, G.CONFIG, "april_debug_overlay", "Debug Overlay", false)
 end
 
 function M.update(dt) end
@@ -1406,10 +1648,9 @@ function M.draw()
     y = y + 16
     draw.text(10, y, "Players: " .. #cache.players, { 1, 1, 1, 0.9 }, 12)
     y = y + 14
-    draw.text(10, y, "World: " .. #cache.world .. " Loot: " .. #cache.loot, { 1, 1, 1, 0.9 }, 12)
+    draw.text(10, y, "World: " .. #cache.world .. "  Loot: " .. #cache.loot, { 1, 1, 1, 0.9 }, 12)
     y = y + 14
-    local st = settings.stats()
-    draw.text(10, y, "Settings reads: " .. (st.reads or 0), { 1, 1, 1, 0.9 }, 12)
+    draw.text(10, y, "NPCs: " .. #(cache.npcs or {}) .. "  Base: " .. #(cache.base or {}), { 1, 1, 1, 0.9 }, 12)
 end
 
 return M
@@ -1418,33 +1659,41 @@ end)()
 
 -- ── menu/tabs.lua ──
 April._mods["menu.tabs"] = (function()
+local menu_util = April.require("core.menu_util")
+local G = menu_util.G
+local T = menu_util.tab()
+
 local M = {}
 
 M.features = {}
 
+-- Registration order = sidebar group order (groups pre-registered in menu_util)
+M.FEATURE_ORDER = {
+    "features.combat.aimbot",
+    "features.visuals.crosshair",
+    "features.visuals.player_esp",
+    "features.visuals.feedback",
+    "features.world.world_esp",
+    "features.combat.recoil",
+    "features.radar.waypoints",
+    "features.world.loot_esp",
+    "features.world.npc_esp",
+    "features.world.base_esp",
+    "features.radar.tactical_map",
+    "features.movement.exploits",
+    "features.utility.config",
+}
+
 function M.register_all()
-    local menu_util = April.require("core.menu_util")
+    menu_util.ensure_groups()
     April.TAB = menu_util.TAB
-    menu_util.ensure_tab()
 
-    M.features = {
-        April.require("features.combat.aimbot"),
-        April.require("features.combat.recoil"),
-        April.require("features.visuals.player_esp"),
-        April.require("features.visuals.crosshair"),
-        April.require("features.visuals.feedback"),
-        April.require("features.world.world_esp"),
-        April.require("features.world.loot_esp"),
-        April.require("features.world.base_esp"),
-        April.require("features.world.npc_esp"),
-        April.require("features.movement.exploits"),
-        April.require("features.radar.waypoints"),
-        April.require("features.radar.tactical_map"),
-        April.require("features.utility.config"),
-    }
-
+    M.features = {}
     local registered = 0
-    for i, feat in ipairs(M.features) do
+
+    for _, path in ipairs(M.FEATURE_ORDER) do
+        local feat = April.require(path)
+        table.insert(M.features, feat)
         local ok, err = pcall(function()
             if feat.register_menu then
                 feat.register_menu()
@@ -1452,10 +1701,11 @@ function M.register_all()
             end
         end)
         if not ok then
-            print("[April] menu register failed (#" .. i .. "): " .. tostring(err))
+            print("[April] menu register failed (" .. path .. "): " .. tostring(err))
         end
     end
-    print("[April] Menu groups registered: " .. registered)
+
+    print("[April] Menu sections registered: " .. registered .. " / " .. #menu_util.GROUPS .. " groups")
 end
 
 function M.setup_scans()
