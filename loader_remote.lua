@@ -10,7 +10,7 @@ end
 April = April or {
     version = "3.0.0",
     TAB = "April",
-    repo = "https://raw.githubusercontent.com/cunzaki/April/main/",
+    repo = "https://raw.githubusercontent.com/Cunzaki/April/main/",
     debug = false,
     _mods = {},
     remote = true,

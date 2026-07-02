@@ -8,6 +8,8 @@ if menu and menu.add_tab then
     menu.add_tab("April", "A", "full")
 end
 
+print("[April] loader starting...")
+
 April = April or {
     version = "3.0.0",
     TAB = "April",
