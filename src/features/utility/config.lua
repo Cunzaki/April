@@ -1,7 +1,5 @@
 local settings = April.require("core.settings")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = April.require("core.menu_util").tab()
 
 local M = {}
 
@@ -60,14 +58,14 @@ function M.load_slot(slot)
 end
 
 function M.register_menu()
-    menu_util.ensure_group(G.CONFIG)
-    menu.add_label(T, G.CONFIG, "April v3 — Fallen Survival")
-    menu.add_button(T, G.CONFIG, "april_cfg_save_1", "Save Config Slot 1", function() M.save_slot(1) end)
-    menu.add_button(T, G.CONFIG, "april_cfg_load_1", "Load Config Slot 1", function() M.load_slot(1) end)
-    menu.add_button(T, G.CONFIG, "april_cfg_save_2", "Save Config Slot 2", function() M.save_slot(2) end)
-    menu.add_button(T, G.CONFIG, "april_cfg_load_2", "Load Config Slot 2", function() M.load_slot(2) end)
-    menu.add_separator(T, G.CONFIG)
-    menu.add_checkbox(T, G.CONFIG, "april_debug_overlay", "Debug Overlay", false)
+    local T, G = menu_util.bind("config")
+    menu.add_label(T, G, "April v3 — Fallen Survival")
+    menu.add_button(T, G, "april_cfg_save_1", "Save Config Slot 1", function() M.save_slot(1) end)
+    menu.add_button(T, G, "april_cfg_load_1", "Load Config Slot 1", function() M.load_slot(1) end)
+    menu.add_button(T, G, "april_cfg_save_2", "Save Config Slot 2", function() M.save_slot(2) end)
+    menu.add_button(T, G, "april_cfg_load_2", "Load Config Slot 2", function() M.load_slot(2) end)
+    menu.add_separator(T, G)
+    menu.add_checkbox(T, G, "april_debug_overlay", "Debug Overlay", false)
 end
 
 function M.update(dt) end

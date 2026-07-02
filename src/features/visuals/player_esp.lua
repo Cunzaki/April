@@ -2,22 +2,20 @@ local settings = April.require("core.settings")
 local cache = April.require("core.cache")
 local draw_util = April.require("core.draw_util")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_esp_enabled"
 
 function M.register_menu()
-    menu_util.ensure_group(G.VISUALS)
-    menu.add_checkbox(T, G.VISUALS, "april_esp_enabled", "Player ESP", true, { key = 0 })
-    menu.add_combo(T, G.VISUALS, "april_esp_box_mode", "Box Mode", { "None", "2D", "Corner" }, 1, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, "april_esp_name", "Name", true, { parent = P, colorpicker = { 1, 1, 1, 1 } })
-    menu.add_checkbox(T, G.VISUALS, "april_esp_health", "Health Bar", true, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, "april_esp_distance", "Distance", true, { parent = P, colorpicker = { 0.7, 0.7, 0.7, 1 } })
-    menu.add_checkbox(T, G.VISUALS, "april_esp_held_item", "Held Item", false, { parent = P, colorpicker = { 0.2, 0.8, 1, 1 } })
-    menu.add_slider_int(T, G.VISUALS, "april_esp_max_dist", "Max Distance", 50, 5000, 1000, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, "april_esp_color", "Box Color", true, { parent = P, colorpicker = { 0.3, 1, 0.5, 1 } })
+    local T, G = menu_util.bind("player_esp")
+    menu.add_checkbox(T, G, "april_esp_enabled", "Player ESP", true, { key = 0 })
+    menu.add_combo(T, G, "april_esp_box_mode", "Box Mode", { "None", "2D", "Corner" }, 1, { parent = P })
+    menu.add_checkbox(T, G, "april_esp_name", "Name", true, { parent = P, colorpicker = { 1, 1, 1, 1 } })
+    menu.add_checkbox(T, G, "april_esp_health", "Health Bar", true, { parent = P })
+    menu.add_checkbox(T, G, "april_esp_distance", "Distance", true, { parent = P, colorpicker = { 0.7, 0.7, 0.7, 1 } })
+    menu.add_checkbox(T, G, "april_esp_held_item", "Held Item", false, { parent = P, colorpicker = { 0.2, 0.8, 1, 1 } })
+    menu.add_slider_int(T, G, "april_esp_max_dist", "Max Distance", 50, 5000, 1000, { parent = P })
+    menu.add_checkbox(T, G, "april_esp_color", "Box Color", true, { parent = P, colorpicker = { 0.3, 1, 0.5, 1 } })
 end
 
 function M.scan()

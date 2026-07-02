@@ -45,18 +45,12 @@ const header = `--[[
     April — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
 
-    This is the final bundled script. Load or execute this file in Vector.
-    Source modules live in src/ — rebuild with: node scripts/bundle.mjs
+    Feature options register on Vector's top menu tabs (Aimbot, Player ESP, Crosshair, etc.)
     Built: ${new Date().toISOString()}
 ]]
 
-if menu and menu.add_tab then
-    menu.add_tab("April", "A", "full")
-end
-
 April = {
     version = "3.0.0",
-    TAB = "April",
     debug = false,
     _mods = {},
     bundled = true,

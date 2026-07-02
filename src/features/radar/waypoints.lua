@@ -3,21 +3,19 @@ local cache = April.require("core.cache")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_waypoints_enabled"
 
 function M.register_menu()
-    menu_util.ensure_group(G.WAYPOINTS)
-    menu.add_checkbox(T, G.WAYPOINTS, "april_waypoints_enabled", "Enable Waypoints", true, { key = 0 })
-    menu.add_checkbox(T, G.WAYPOINTS, "april_wp_dist", "Show Distance", true, { parent = P })
-    menu.add_checkbox(T, G.WAYPOINTS, "april_wp_line", "Draw Line", true, { parent = P })
-    menu.add_checkbox(T, G.WAYPOINTS, "april_wp_draw", "Draw Markers", true, { parent = P, colorpicker = { 0.2, 1, 0.8, 1 } })
+    local T, G = menu_util.bind("waypoints")
+    menu.add_checkbox(T, G, "april_waypoints_enabled", "Enable Waypoints", true, { key = 0 })
+    menu.add_checkbox(T, G, "april_wp_dist", "Show Distance", true, { parent = P })
+    menu.add_checkbox(T, G, "april_wp_line", "Draw Line", true, { parent = P })
+    menu.add_checkbox(T, G, "april_wp_draw", "Draw Markers", true, { parent = P, colorpicker = { 0.2, 1, 0.8, 1 } })
 
     for i = 1, 5 do
-        menu.add_button(T, G.WAYPOINTS, "april_wp_set_" .. i, "Set Waypoint " .. i, function()
+        menu.add_button(T, G, "april_wp_set_" .. i, "Set Waypoint " .. i, function()
             local lp = env.get_local_player()
             if lp and lp.position then
                 cache.waypoints[i] = {
@@ -27,7 +25,7 @@ function M.register_menu()
                 print("[April] Waypoint " .. i .. " set")
             end
         end)
-        menu.add_button(T, G.WAYPOINTS, "april_wp_clear_" .. i, "Clear Waypoint " .. i, function()
+        menu.add_button(T, G, "april_wp_clear_" .. i, "Clear Waypoint " .. i, function()
             cache.waypoints[i] = nil
             print("[April] Waypoint " .. i .. " cleared")
         end)

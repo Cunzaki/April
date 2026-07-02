@@ -2,18 +2,12 @@
     April — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
 
-    This is the final bundled script. Load or execute this file in Vector.
-    Source modules live in src/ — rebuild with: node scripts/bundle.mjs
-    Built: 2026-07-02T06:25:25.944Z
+    Feature options register on Vector's top menu tabs (Aimbot, Player ESP, Crosshair, etc.)
+    Built: 2026-07-02T06:31:16.215Z
 ]]
-
-if menu and menu.add_tab then
-    menu.add_tab("April", "A", "full")
-end
 
 April = {
     version = "3.0.0",
-    TAB = "April",
     debug = false,
     _mods = {},
     bundled = true,
@@ -364,63 +358,82 @@ end)()
 -- ── core/menu_util.lua ──
 April._mods["core.menu_util"] = (function()
 --[[
-    Menu layout: register each group once, right before its elements (not all upfront).
-    Vector uses the left sidebar for groups; options appear when a group is selected.
+    April registers each feature on its own Vector top-level tab (horizontal bar:
+    AIMBOT, VISUALS, WORLD, etc.) instead of stacking everything under Scripts/April.
+
+    Scripts/April "full" tab is only a loader marker — options live on feature tabs.
 ]]
 
 local M = {}
 
-M.TAB = "April"
+M.SCRIPT_TAB = "April"
+M.SCRIPT_GROUP = "Info"
 
-M.GROUPS = {
-    "Aimbot",
-    "Visuals",
-    "World",
-    "Recoil Control",
-    "Waypoints",
-    "Loot",
-    "NPCs",
-    "Base",
-    "Tactical Map",
-    "Misc",
-    "Config",
+-- Each slot = one top-level tab in Vector's main menu bar
+M.SLOTS = {
+    aimbot     = { tab = "Aimbot",      icon = "A", group = "April" },
+    recoil     = { tab = "Aimbot",      icon = "A", group = "Recoil Control" },
+    player_esp = { tab = "Player ESP",  icon = "P", group = "April" },
+    crosshair  = { tab = "Crosshair",   icon = "C", group = "April" },
+    hitmarkers = { tab = "Visuals",     icon = "V", group = "Hitmarkers" },
+    world      = { tab = "World",       icon = "W", group = "Resources" },
+    loot       = { tab = "World",       icon = "W", group = "Loot" },
+    npcs       = { tab = "World",       icon = "W", group = "NPCs" },
+    base       = { tab = "World",       icon = "W", group = "Base" },
+    waypoints  = { tab = "Features",    icon = "F", group = "Waypoints" },
+    map        = { tab = "Features",    icon = "F", group = "Tactical Map" },
+    misc       = { tab = "Features",    icon = "F", group = "Movement" },
+    config     = { tab = "Settings",    icon = "S", group = "April Config" },
 }
 
-M.G = {
-    AIMBOT = "Aimbot",
-    VISUALS = "Visuals",
-    WORLD = "World",
-    RECOIL = "Recoil Control",
-    WAYPOINTS = "Waypoints",
-    LOOT = "Loot",
-    NPCS = "NPCs",
-    BASE = "Base",
-    MAP = "Tactical Map",
-    MISC = "Misc",
-    CONFIG = "Config",
-}
+M._tabs = {}
+M._groups = {}
+M._script_ready = false
 
-M._tab_ready = false
-M._groups_done = {}
-
-function M.ensure_tab()
-    if M._tab_ready then return end
+function M.ensure_script_marker()
+    if M._script_ready then return end
     if menu and menu.add_tab then
-        menu.add_tab(M.TAB, "A", "full")
+        menu.add_tab(M.SCRIPT_TAB, "A", "full")
+        menu.add_group(M.SCRIPT_TAB, M.SCRIPT_GROUP)
+        menu.add_label(M.SCRIPT_TAB, M.SCRIPT_GROUP, "April v3 loaded — use the top tabs above.")
+        menu.add_label(M.SCRIPT_TAB, M.SCRIPT_GROUP, "Aimbot | Player ESP | Crosshair | World | Features | Settings")
     end
-    M._tab_ready = true
+    M._script_ready = true
 end
 
-function M.ensure_group(name)
-    M.ensure_tab()
-    if M._groups_done[name] then return end
-    menu.add_group(M.TAB, name)
-    M._groups_done[name] = true
+function M.bind(slot)
+    M.ensure_script_marker()
+    local s = M.SLOTS[slot]
+    if not s then error("[April] unknown menu slot: " .. tostring(slot)) end
+
+    if not M._tabs[s.tab] and menu and menu.add_tab then
+        menu.add_tab(s.tab, s.icon)
+        M._tabs[s.tab] = true
+    end
+
+    local gkey = s.tab .. "\0" .. s.group
+    if not M._groups[gkey] and menu and menu.add_group then
+        menu.add_group(s.tab, s.group)
+        M._groups[gkey] = true
+    end
+
+    return s.tab, s.group
 end
 
-function M.tab()
-    return M.TAB
-end
+-- Legacy aliases
+M.G = {
+    AIMBOT = "aimbot",
+    RECOIL = "recoil",
+    VISUALS = "hitmarkers",
+    WORLD = "world",
+    LOOT = "loot",
+    NPCS = "npcs",
+    BASE = "base",
+    WAYPOINTS = "waypoints",
+    MAP = "map",
+    MISC = "misc",
+    CONFIG = "config",
+}
 
 return M
 
@@ -890,8 +903,6 @@ local env = April.require("core.env")
 local draw_util = April.require("core.draw_util")
 local math_util = April.require("core.math_util")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = menu_util.tab()
 
 local M = {}
 local locked_target = nil
@@ -1019,24 +1030,24 @@ local function find_target(cx, cy, fov_px)
 end
 
 function M.register_menu()
-    menu_util.ensure_group(G.AIMBOT)
-    menu.add_checkbox(T, G.AIMBOT, P, "Enable Aimbot", false, { key = 0x02 })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_players", "Target Players", true, { parent = P })
-    menu.add_slider_int(T, G.AIMBOT, "april_aimbot_fov", "FOV Radius (px)", 50, 500, 150, { parent = P })
-    menu.add_slider_int(T, G.AIMBOT, "april_aimbot_smooth", "Smoothing (frames)", 1, 100, 5, { parent = P })
-    menu.add_combo(T, G.AIMBOT, "april_aimbot_bone", "Target Bone", { "Head", "UpperTorso", "LowerTorso" }, 0, { parent = P })
-    menu.add_combo(T, G.AIMBOT, "april_aimbot_priority", "Target Priority", { "Distance", "Crosshair (FOV)" }, 1, { parent = P })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_sticky", "Sticky Aim", true, { parent = P })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_visible", "Visibility Check", true, { parent = P })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_prediction", "Velocity Prediction", true, { parent = P })
-    menu.add_slider_float(T, G.AIMBOT, "april_aimbot_lead_scale", "Lead Scale", 0.5, 2.0, 1.0, "%.2f", { parent = "april_aimbot_prediction" })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_drop_prediction", "Bullet Drop Prediction", false, { parent = P })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_auto_weapon", "Automatic Weapon Stats", true, { parent = P })
-    menu.add_slider_int(T, G.AIMBOT, "april_aimbot_bullet_speed", "Manual Bullet Speed", 100, 5000, 1000, { parent = P })
-    menu.add_slider_int(T, G.AIMBOT, "april_aimbot_gravity", "Manual Bullet Gravity", 0, 200, 35, { parent = P })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_draw_fov", "Show FOV Circle", true, { parent = P, colorpicker = { 1, 1, 1, 1 } })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_fov_fill", "Fill FOV Circle", false, { parent = "april_aimbot_draw_fov", colorpicker = { 1, 1, 1, 0.2 } })
-    menu.add_checkbox(T, G.AIMBOT, "april_aimbot_target_line", "Target Line", false, { parent = P, colorpicker = { 1, 0, 0, 1 } })
+    local T, G = menu_util.bind("aimbot")
+    menu.add_checkbox(T, G, P, "Enable Aimbot", false, { key = 0x02 })
+    menu.add_checkbox(T, G, "april_aimbot_players", "Target Players", true, { parent = P })
+    menu.add_slider_int(T, G, "april_aimbot_fov", "FOV Radius (px)", 50, 500, 150, { parent = P })
+    menu.add_slider_int(T, G, "april_aimbot_smooth", "Smoothing (frames)", 1, 100, 5, { parent = P })
+    menu.add_combo(T, G, "april_aimbot_bone", "Target Bone", { "Head", "UpperTorso", "LowerTorso" }, 0, { parent = P })
+    menu.add_combo(T, G, "april_aimbot_priority", "Target Priority", { "Distance", "Crosshair (FOV)" }, 1, { parent = P })
+    menu.add_checkbox(T, G, "april_aimbot_sticky", "Sticky Aim", true, { parent = P })
+    menu.add_checkbox(T, G, "april_aimbot_visible", "Visibility Check", true, { parent = P })
+    menu.add_checkbox(T, G, "april_aimbot_prediction", "Velocity Prediction", true, { parent = P })
+    menu.add_slider_float(T, G, "april_aimbot_lead_scale", "Lead Scale", 0.5, 2.0, 1.0, "%.2f", { parent = "april_aimbot_prediction" })
+    menu.add_checkbox(T, G, "april_aimbot_drop_prediction", "Bullet Drop Prediction", false, { parent = P })
+    menu.add_checkbox(T, G, "april_aimbot_auto_weapon", "Automatic Weapon Stats", true, { parent = P })
+    menu.add_slider_int(T, G, "april_aimbot_bullet_speed", "Manual Bullet Speed", 100, 5000, 1000, { parent = P })
+    menu.add_slider_int(T, G, "april_aimbot_gravity", "Manual Bullet Gravity", 0, 200, 35, { parent = P })
+    menu.add_checkbox(T, G, "april_aimbot_draw_fov", "Show FOV Circle", true, { parent = P, colorpicker = { 1, 1, 1, 1 } })
+    menu.add_checkbox(T, G, "april_aimbot_fov_fill", "Fill FOV Circle", false, { parent = "april_aimbot_draw_fov", colorpicker = { 1, 1, 1, 0.2 } })
+    menu.add_checkbox(T, G, "april_aimbot_target_line", "Target Line", false, { parent = P, colorpicker = { 1, 0, 0, 1 } })
 end
 
 function M.update(dt)
@@ -1114,28 +1125,26 @@ April._mods["features.combat.recoil"] = (function()
 local settings = April.require("core.settings")
 local weapons = April.require("game.weapons")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = menu_util.tab()
 
 local M = {}
 local P = "april_recoil_enabled"
 local last_apply = 0
 
 function M.register_menu()
+    local T, G = menu_util.bind("recoil")
     weapons.load()
-    menu_util.ensure_group(G.RECOIL)
 
-    menu.add_checkbox(T, G.RECOIL, P, "Enable Recoil Reduction", false, { key = 0 })
-    menu.add_label(T, G.RECOIL, "Scales ToolInfo recoil client-side (same table the game uses).")
-    menu.add_label(T, G.RECOIL, "0% = stock  |  100% = no kick. Server spread unchanged.")
-    menu.add_slider_int(T, G.RECOIL, "april_recoil_global", "Global Reduction %", 0, 100, 0, { parent = P })
-    menu.add_checkbox(T, G.RECOIL, "april_recoil_use_global", "Apply Global To All Guns", false, { parent = P })
-    menu.add_separator(T, G.RECOIL)
+    menu.add_checkbox(T, G, P, "Enable Recoil Reduction", false, { key = 0 })
+    menu.add_label(T, G, "Scales ToolInfo recoil client-side (same table the game uses).")
+    menu.add_label(T, G, "0% = stock  |  100% = no kick. Server spread unchanged.")
+    menu.add_slider_int(T, G, "april_recoil_global", "Global Reduction %", 0, 100, 0, { parent = P })
+    menu.add_checkbox(T, G, "april_recoil_use_global", "Apply Global To All Guns", false, { parent = P })
+    menu.add_separator(T, G)
 
     local names = weapons.recoil_weapon_names()
     for _, name in ipairs(names) do
         local id = weapons.slug(name)
-        menu.add_slider_int(T, G.RECOIL, id, name .. " %", 0, 100, 0, { parent = P })
+        menu.add_slider_int(T, G, id, name .. " %", 0, 100, 0, { parent = P })
         if menu.set_callback then
             menu.set_callback(id, function()
                 M.sync_patches()
@@ -1202,22 +1211,20 @@ local settings = April.require("core.settings")
 local cache = April.require("core.cache")
 local draw_util = April.require("core.draw_util")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_esp_enabled"
 
 function M.register_menu()
-    menu_util.ensure_group(G.VISUALS)
-    menu.add_checkbox(T, G.VISUALS, "april_esp_enabled", "Player ESP", true, { key = 0 })
-    menu.add_combo(T, G.VISUALS, "april_esp_box_mode", "Box Mode", { "None", "2D", "Corner" }, 1, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, "april_esp_name", "Name", true, { parent = P, colorpicker = { 1, 1, 1, 1 } })
-    menu.add_checkbox(T, G.VISUALS, "april_esp_health", "Health Bar", true, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, "april_esp_distance", "Distance", true, { parent = P, colorpicker = { 0.7, 0.7, 0.7, 1 } })
-    menu.add_checkbox(T, G.VISUALS, "april_esp_held_item", "Held Item", false, { parent = P, colorpicker = { 0.2, 0.8, 1, 1 } })
-    menu.add_slider_int(T, G.VISUALS, "april_esp_max_dist", "Max Distance", 50, 5000, 1000, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, "april_esp_color", "Box Color", true, { parent = P, colorpicker = { 0.3, 1, 0.5, 1 } })
+    local T, G = menu_util.bind("player_esp")
+    menu.add_checkbox(T, G, "april_esp_enabled", "Player ESP", true, { key = 0 })
+    menu.add_combo(T, G, "april_esp_box_mode", "Box Mode", { "None", "2D", "Corner" }, 1, { parent = P })
+    menu.add_checkbox(T, G, "april_esp_name", "Name", true, { parent = P, colorpicker = { 1, 1, 1, 1 } })
+    menu.add_checkbox(T, G, "april_esp_health", "Health Bar", true, { parent = P })
+    menu.add_checkbox(T, G, "april_esp_distance", "Distance", true, { parent = P, colorpicker = { 0.7, 0.7, 0.7, 1 } })
+    menu.add_checkbox(T, G, "april_esp_held_item", "Held Item", false, { parent = P, colorpicker = { 0.2, 0.8, 1, 1 } })
+    menu.add_slider_int(T, G, "april_esp_max_dist", "Max Distance", 50, 5000, 1000, { parent = P })
+    menu.add_checkbox(T, G, "april_esp_color", "Box Color", true, { parent = P, colorpicker = { 0.3, 1, 0.5, 1 } })
 end
 
 function M.scan()
@@ -1286,24 +1293,22 @@ April._mods["features.visuals.crosshair"] = (function()
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_crosshair_enabled"
 
 function M.register_menu()
-    menu_util.ensure_group(G.VISUALS)
-    menu.add_checkbox(T, G.VISUALS, "april_crosshair_enabled", "Enable Custom Crosshair", true, { key = 0 })
-    menu.add_combo(T, G.VISUALS, "april_crosshair_type", "Crosshair Type", { "Cross", "Circle", "Dot", "T-Shape" }, 0, { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_crosshair_size", "Size", 1, 50, 10, { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_crosshair_gap", "Gap", 0, 20, 5, { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_crosshair_thickness", "Thickness", 1, 10, 2, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, "april_crosshair_color", "Crosshair Color", true, { parent = P, colorpicker = { 0, 1, 0, 1 } })
-    menu.add_checkbox(T, G.VISUALS, "april_crosshair_dot", "Center Dot", false, { parent = P, colorpicker = { 1, 1, 1, 1 } })
-    menu.add_checkbox(T, G.VISUALS, "april_crosshair_outline", "Outline", true, { parent = P, colorpicker = { 0, 0, 0, 1 } })
-    menu.add_checkbox(T, G.VISUALS, "april_crosshair_rainbow", "Rainbow Crosshair", false, { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_crosshair_rainbow_speed", "Rainbow Speed", 1, 100, 10, { parent = "april_crosshair_rainbow" })
+    local T, G = menu_util.bind("crosshair")
+    menu.add_checkbox(T, G, "april_crosshair_enabled", "Enable Custom Crosshair", true, { key = 0 })
+    menu.add_combo(T, G, "april_crosshair_type", "Crosshair Type", { "Cross", "Circle", "Dot", "T-Shape" }, 0, { parent = P })
+    menu.add_slider_int(T, G, "april_crosshair_size", "Size", 1, 50, 10, { parent = P })
+    menu.add_slider_int(T, G, "april_crosshair_gap", "Gap", 0, 20, 5, { parent = P })
+    menu.add_slider_int(T, G, "april_crosshair_thickness", "Thickness", 1, 10, 2, { parent = P })
+    menu.add_checkbox(T, G, "april_crosshair_color", "Crosshair Color", true, { parent = P, colorpicker = { 0, 1, 0, 1 } })
+    menu.add_checkbox(T, G, "april_crosshair_dot", "Center Dot", false, { parent = P, colorpicker = { 1, 1, 1, 1 } })
+    menu.add_checkbox(T, G, "april_crosshair_outline", "Outline", true, { parent = P, colorpicker = { 0, 0, 0, 1 } })
+    menu.add_checkbox(T, G, "april_crosshair_rainbow", "Rainbow Crosshair", false, { parent = P })
+    menu.add_slider_int(T, G, "april_crosshair_rainbow_speed", "Rainbow Speed", 1, 100, 10, { parent = "april_crosshair_rainbow" })
 end
 
 local function crosshair_color()
@@ -1356,20 +1361,18 @@ April._mods["features.visuals.feedback"] = (function()
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = April.require("core.menu_util").tab()
 
 local M = {}
 local hit_time = 0
 local P = "april_hitmarker_enabled"
 
 function M.register_menu()
-    menu_util.ensure_group(G.VISUALS)
-    menu.add_checkbox(T, G.VISUALS, "april_hitmarker_enabled", "Hitmarker", true, { colorpicker = { 1, 1, 1, 1 } })
-    menu.add_checkbox(T, G.VISUALS, "april_hitmarker_glow", "Hitmarker Glow", false, { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_hitmarker_size", "Hitmarker Size", 1, 20, 5, { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_hitmarker_duration", "Duration (ms)", 100, 2000, 500, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, "april_hit_notifier", "Hit Notifier", true)
+    local T, G = menu_util.bind("hitmarkers")
+    menu.add_checkbox(T, G, "april_hitmarker_enabled", "Hitmarker", true, { colorpicker = { 1, 1, 1, 1 } })
+    menu.add_checkbox(T, G, "april_hitmarker_glow", "Hitmarker Glow", false, { parent = P })
+    menu.add_slider_int(T, G, "april_hitmarker_size", "Hitmarker Size", 1, 20, 5, { parent = P })
+    menu.add_slider_int(T, G, "april_hitmarker_duration", "Duration (ms)", 100, 2000, 500, { parent = P })
+    menu.add_checkbox(T, G, "april_hit_notifier", "Hit Notifier", true)
 end
 
 function M.trigger_hit()
@@ -1414,8 +1417,6 @@ local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_world_enabled"
@@ -1432,12 +1433,12 @@ local TOGGLES = {
 }
 
 function M.register_menu()
-    menu_util.ensure_group(G.WORLD)
-    menu.add_checkbox(T, G.WORLD, "april_world_enabled", "Enable World ESP", true, { key = 0 })
+    local T, G = menu_util.bind("world")
+    menu.add_checkbox(T, G, "april_world_enabled", "Enable World ESP", true, { key = 0 })
     for _, t in ipairs(TOGGLES) do
-        menu.add_checkbox(T, G.WORLD, t.id, t.label, true, { parent = P, colorpicker = t.color })
+        menu.add_checkbox(T, G, t.id, t.label, true, { parent = P, colorpicker = t.color })
     end
-    menu.add_slider_int(T, G.WORLD, "april_world_range", "World Range", 50, 2000, 500, { parent = P })
+    menu.add_slider_int(T, G, "april_world_range", "World Range", 50, 2000, 500, { parent = P })
 end
 
 local function matches_toggle(name)
@@ -1488,8 +1489,6 @@ local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_loot_enabled"
@@ -1506,12 +1505,12 @@ local TOGGLES = {
 }
 
 function M.register_menu()
-    menu_util.ensure_group(G.LOOT)
-    menu.add_checkbox(T, G.LOOT, "april_loot_enabled", "Enable Loot ESP", true, { key = 0 })
+    local T, G = menu_util.bind("loot")
+    menu.add_checkbox(T, G, "april_loot_enabled", "Enable Loot ESP", true, { key = 0 })
     for _, t in ipairs(TOGGLES) do
-        menu.add_checkbox(T, G.LOOT, t.id, t.label, true, { parent = P, colorpicker = t.color })
+        menu.add_checkbox(T, G, t.id, t.label, true, { parent = P, colorpicker = t.color })
     end
-    menu.add_slider_int(T, G.LOOT, "april_loot_range", "Loot Range", 50, 2000, 300, { parent = P })
+    menu.add_slider_int(T, G, "april_loot_range", "Loot Range", 50, 2000, 300, { parent = P })
 end
 
 local function matches_toggle(name)
@@ -1562,8 +1561,6 @@ local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_base_enabled"
@@ -1578,17 +1575,17 @@ local TOGGLES = {
 }
 
 function M.register_menu()
-    menu_util.ensure_group(G.BASE)
-    menu.add_checkbox(T, G.BASE, "april_base_enabled", "Enable Base ESP", true, { key = 0 })
+    local T, G = menu_util.bind("base")
+    menu.add_checkbox(T, G, "april_base_enabled", "Enable Base ESP", true, { key = 0 })
     for _, t in ipairs(TOGGLES) do
-        menu.add_checkbox(T, G.BASE, t.id, t.label, true, { parent = P, colorpicker = t.color })
+        menu.add_checkbox(T, G, t.id, t.label, true, { parent = P, colorpicker = t.color })
     end
-    menu.add_checkbox(T, G.BASE, "april_base_distance", "Show Distance", true, { parent = P })
-    menu.add_button(T, G.BASE, "april_base_rescan", "Force Base Scan", function()
+    menu.add_checkbox(T, G, "april_base_distance", "Show Distance", true, { parent = P })
+    menu.add_button(T, G, "april_base_rescan", "Force Base Scan", function()
         M.scan()
         print("[April] Base scan forced")
     end)
-    menu.add_slider_int(T, G.BASE, "april_base_range", "Base Range", 50, 500, 150, { parent = P })
+    menu.add_slider_int(T, G, "april_base_range", "Base Range", 50, 500, 150, { parent = P })
 end
 
 local function matches_toggle(name)
@@ -1640,23 +1637,21 @@ local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_npc_enabled"
 
 function M.register_menu()
-    menu_util.ensure_group(G.NPCS)
-    menu.add_checkbox(T, G.NPCS, "april_npc_enabled", "Enable NPC ESP", true, { key = 0, colorpicker = { 1, 0.3, 0.3, 1 } })
-    menu.add_checkbox(T, G.NPCS, "april_npc_soldiers", "Soldiers", true, { parent = P, colorpicker = { 1, 0.3, 0.3, 1 } })
-    menu.add_combo(T, G.NPCS, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 1, { parent = P })
-    menu.add_checkbox(T, G.NPCS, "april_npc_health", "Health Bar", true, { parent = P })
-    menu.add_checkbox(T, G.NPCS, "april_npc_name", "Name", true, { parent = P, colorpicker = { 1, 1, 1, 1 } })
-    menu.add_checkbox(T, G.NPCS, "april_npc_distance", "Distance", true, { parent = P, colorpicker = { 0.7, 0.7, 0.7, 1 } })
-    menu.add_checkbox(T, G.NPCS, "april_npc_skeleton", "Skeleton", false, { parent = P, colorpicker = { 1, 1, 1, 1 } })
-    menu.add_checkbox(T, G.NPCS, "april_npc_offscreen", "Offscreen Arrows", false, { parent = P, colorpicker = { 1, 0.3, 0.3, 1 } })
-    menu.add_slider_int(T, G.NPCS, "april_npc_range", "NPC Range", 50, 2000, 500, { parent = P })
+    local T, G = menu_util.bind("npcs")
+    menu.add_checkbox(T, G, "april_npc_enabled", "Enable NPC ESP", true, { key = 0, colorpicker = { 1, 0.3, 0.3, 1 } })
+    menu.add_checkbox(T, G, "april_npc_soldiers", "Soldiers", true, { parent = P, colorpicker = { 1, 0.3, 0.3, 1 } })
+    menu.add_combo(T, G, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 1, { parent = P })
+    menu.add_checkbox(T, G, "april_npc_health", "Health Bar", true, { parent = P })
+    menu.add_checkbox(T, G, "april_npc_name", "Name", true, { parent = P, colorpicker = { 1, 1, 1, 1 } })
+    menu.add_checkbox(T, G, "april_npc_distance", "Distance", true, { parent = P, colorpicker = { 0.7, 0.7, 0.7, 1 } })
+    menu.add_checkbox(T, G, "april_npc_skeleton", "Skeleton", false, { parent = P, colorpicker = { 1, 1, 1, 1 } })
+    menu.add_checkbox(T, G, "april_npc_offscreen", "Offscreen Arrows", false, { parent = P, colorpicker = { 1, 0.3, 0.3, 1 } })
+    menu.add_slider_int(T, G, "april_npc_range", "NPC Range", 50, 2000, 500, { parent = P })
 end
 
 function M.scan()
@@ -1696,26 +1691,24 @@ local settings = April.require("core.settings")
 local env = April.require("core.env")
 local math_util = April.require("core.math_util")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_noclip_enabled"
 
 function M.register_menu()
-    menu_util.ensure_group(G.MISC)
-    menu.add_slider_int(T, G.MISC, "april_esp_text_size", "ESP Text Size", 8, 24, 14)
+    local T, G = menu_util.bind("misc")
+    menu.add_slider_int(T, G, "april_esp_text_size", "ESP Text Size", 8, 24, 14)
 
-    menu.add_checkbox(T, G.MISC, "april_noclip_enabled", "Noclip", false, { key = 0x12 })
-    menu.add_combo(T, G.MISC, "april_noclip_mode", "Noclip Mode", { "Toggle", "Hold" }, 1, { parent = P })
-    menu.add_slider_int(T, G.MISC, "april_noclip_speed", "Noclip Speed", 1, 50, 16, { parent = P })
+    menu.add_checkbox(T, G, "april_noclip_enabled", "Noclip", false, { key = 0x12 })
+    menu.add_combo(T, G, "april_noclip_mode", "Noclip Mode", { "Toggle", "Hold" }, 1, { parent = P })
+    menu.add_slider_int(T, G, "april_noclip_speed", "Noclip Speed", 1, 50, 16, { parent = P })
 
-    menu.add_checkbox(T, G.MISC, "april_omnisprint_enabled", "Omnisprint", false, { key = 0 })
-    menu.add_combo(T, G.MISC, "april_omnisprint_mode", "Sprint Mode", { "Toggle", "Hold" }, 0, { parent = "april_omnisprint_enabled" })
-    menu.add_slider_int(T, G.MISC, "april_omnisprint_speed", "Sprint Speed", 16, 80, 32, { parent = "april_omnisprint_enabled" })
+    menu.add_checkbox(T, G, "april_omnisprint_enabled", "Omnisprint", false, { key = 0 })
+    menu.add_combo(T, G, "april_omnisprint_mode", "Sprint Mode", { "Toggle", "Hold" }, 0, { parent = "april_omnisprint_enabled" })
+    menu.add_slider_int(T, G, "april_omnisprint_speed", "Sprint Speed", 16, 80, 32, { parent = "april_omnisprint_enabled" })
 
-    menu.add_checkbox(T, G.MISC, "april_spider_enabled", "Spider Climb", false, { key = 0 })
-    menu.add_slider_int(T, G.MISC, "april_spider_speed", "Wall Speed", 1, 50, 20, { parent = "april_spider_enabled" })
+    menu.add_checkbox(T, G, "april_spider_enabled", "Spider Climb", false, { key = 0 })
+    menu.add_slider_int(T, G, "april_spider_speed", "Wall Speed", 1, 50, 20, { parent = "april_spider_enabled" })
 end
 
 local function noclip_active()
@@ -1771,21 +1764,19 @@ local cache = April.require("core.cache")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_waypoints_enabled"
 
 function M.register_menu()
-    menu_util.ensure_group(G.WAYPOINTS)
-    menu.add_checkbox(T, G.WAYPOINTS, "april_waypoints_enabled", "Enable Waypoints", true, { key = 0 })
-    menu.add_checkbox(T, G.WAYPOINTS, "april_wp_dist", "Show Distance", true, { parent = P })
-    menu.add_checkbox(T, G.WAYPOINTS, "april_wp_line", "Draw Line", true, { parent = P })
-    menu.add_checkbox(T, G.WAYPOINTS, "april_wp_draw", "Draw Markers", true, { parent = P, colorpicker = { 0.2, 1, 0.8, 1 } })
+    local T, G = menu_util.bind("waypoints")
+    menu.add_checkbox(T, G, "april_waypoints_enabled", "Enable Waypoints", true, { key = 0 })
+    menu.add_checkbox(T, G, "april_wp_dist", "Show Distance", true, { parent = P })
+    menu.add_checkbox(T, G, "april_wp_line", "Draw Line", true, { parent = P })
+    menu.add_checkbox(T, G, "april_wp_draw", "Draw Markers", true, { parent = P, colorpicker = { 0.2, 1, 0.8, 1 } })
 
     for i = 1, 5 do
-        menu.add_button(T, G.WAYPOINTS, "april_wp_set_" .. i, "Set Waypoint " .. i, function()
+        menu.add_button(T, G, "april_wp_set_" .. i, "Set Waypoint " .. i, function()
             local lp = env.get_local_player()
             if lp and lp.position then
                 cache.waypoints[i] = {
@@ -1795,7 +1786,7 @@ function M.register_menu()
                 print("[April] Waypoint " .. i .. " set")
             end
         end)
-        menu.add_button(T, G.WAYPOINTS, "april_wp_clear_" .. i, "Clear Waypoint " .. i, function()
+        menu.add_button(T, G, "april_wp_clear_" .. i, "Clear Waypoint " .. i, function()
             cache.waypoints[i] = nil
             print("[April] Waypoint " .. i .. " cleared")
         end)
@@ -1846,23 +1837,21 @@ local draw_util = April.require("core.draw_util")
 local math_util = April.require("core.math_util")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_map_enabled"
 
 function M.register_menu()
-    menu_util.ensure_group(G.MAP)
-    menu.add_checkbox(T, G.MAP, "april_map_enabled", "Enable Tactical Map", false, { key = 0x28 })
-    menu.add_slider_float(T, G.MAP, "april_map_zoom", "Zoom Level", 0.05, 5.0, 1.0, "%.2f", { parent = P })
-    menu.add_colorpicker(T, G.MAP, "april_map_bg", "Background Color", { 0.05, 0.05, 0.08, 0.95 }, { parent = P })
-    menu.add_colorpicker(T, G.MAP, "april_map_grid", "Grid Color", { 1, 1, 1, 0.04 }, { parent = P })
-    menu.add_colorpicker(T, G.MAP, "april_map_local", "Local Player Color", { 0.2, 0.8, 1, 1 }, { parent = P })
-    menu.add_checkbox(T, G.MAP, "april_map_labels", "Show Labels", false, { parent = P })
-    menu.add_checkbox(T, G.MAP, "april_map_coords", "Show Coordinates", true, { parent = P })
-    menu.add_checkbox(T, G.MAP, "april_map_compass", "Compass Overlay", true, { parent = P, colorpicker = { 0.2, 0.8, 1, 0.8 } })
-    menu.add_slider_int(T, G.MAP, "april_map_size", "Map Size", 120, 500, 220, { parent = P })
+    local T, G = menu_util.bind("map")
+    menu.add_checkbox(T, G, "april_map_enabled", "Enable Tactical Map", false, { key = 0x28 })
+    menu.add_slider_float(T, G, "april_map_zoom", "Zoom Level", 0.05, 5.0, 1.0, "%.2f", { parent = P })
+    menu.add_colorpicker(T, G, "april_map_bg", "Background Color", { 0.05, 0.05, 0.08, 0.95 }, { parent = P })
+    menu.add_colorpicker(T, G, "april_map_grid", "Grid Color", { 1, 1, 1, 0.04 }, { parent = P })
+    menu.add_colorpicker(T, G, "april_map_local", "Local Player Color", { 0.2, 0.8, 1, 1 }, { parent = P })
+    menu.add_checkbox(T, G, "april_map_labels", "Show Labels", false, { parent = P })
+    menu.add_checkbox(T, G, "april_map_coords", "Show Coordinates", true, { parent = P })
+    menu.add_checkbox(T, G, "april_map_compass", "Compass Overlay", true, { parent = P, colorpicker = { 0.2, 0.8, 1, 0.8 } })
+    menu.add_slider_int(T, G, "april_map_size", "Map Size", 120, 500, 220, { parent = P })
 end
 
 local function key_active()
@@ -1921,8 +1910,6 @@ end)()
 April._mods["features.utility.config"] = (function()
 local settings = April.require("core.settings")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = April.require("core.menu_util").tab()
 
 local M = {}
 
@@ -1981,14 +1968,14 @@ function M.load_slot(slot)
 end
 
 function M.register_menu()
-    menu_util.ensure_group(G.CONFIG)
-    menu.add_label(T, G.CONFIG, "April v3 — Fallen Survival")
-    menu.add_button(T, G.CONFIG, "april_cfg_save_1", "Save Config Slot 1", function() M.save_slot(1) end)
-    menu.add_button(T, G.CONFIG, "april_cfg_load_1", "Load Config Slot 1", function() M.load_slot(1) end)
-    menu.add_button(T, G.CONFIG, "april_cfg_save_2", "Save Config Slot 2", function() M.save_slot(2) end)
-    menu.add_button(T, G.CONFIG, "april_cfg_load_2", "Load Config Slot 2", function() M.load_slot(2) end)
-    menu.add_separator(T, G.CONFIG)
-    menu.add_checkbox(T, G.CONFIG, "april_debug_overlay", "Debug Overlay", false)
+    local T, G = menu_util.bind("config")
+    menu.add_label(T, G, "April v3 — Fallen Survival")
+    menu.add_button(T, G, "april_cfg_save_1", "Save Config Slot 1", function() M.save_slot(1) end)
+    menu.add_button(T, G, "april_cfg_load_1", "Load Config Slot 1", function() M.load_slot(1) end)
+    menu.add_button(T, G, "april_cfg_save_2", "Save Config Slot 2", function() M.save_slot(2) end)
+    menu.add_button(T, G, "april_cfg_load_2", "Load Config Slot 2", function() M.load_slot(2) end)
+    menu.add_separator(T, G)
+    menu.add_checkbox(T, G, "april_debug_overlay", "Debug Overlay", false)
 end
 
 function M.update(dt) end
@@ -2039,8 +2026,6 @@ M.FEATURE_ORDER = {
 }
 
 function M.register_all()
-    April.TAB = menu_util.TAB
-
     M.features = {}
     local registered = 0
 
@@ -2058,7 +2043,7 @@ function M.register_all()
         end
     end
 
-    print("[April] Menu sections registered: " .. registered .. " / " .. #menu_util.GROUPS .. " groups")
+    print("[April] Menu sections registered: " .. registered)
 end
 
 function M.setup_scans()

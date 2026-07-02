@@ -3,23 +3,21 @@ local draw_util = April.require("core.draw_util")
 local math_util = April.require("core.math_util")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = April.require("core.menu_util").tab()
 
 local M = {}
 local P = "april_map_enabled"
 
 function M.register_menu()
-    menu_util.ensure_group(G.MAP)
-    menu.add_checkbox(T, G.MAP, "april_map_enabled", "Enable Tactical Map", false, { key = 0x28 })
-    menu.add_slider_float(T, G.MAP, "april_map_zoom", "Zoom Level", 0.05, 5.0, 1.0, "%.2f", { parent = P })
-    menu.add_colorpicker(T, G.MAP, "april_map_bg", "Background Color", { 0.05, 0.05, 0.08, 0.95 }, { parent = P })
-    menu.add_colorpicker(T, G.MAP, "april_map_grid", "Grid Color", { 1, 1, 1, 0.04 }, { parent = P })
-    menu.add_colorpicker(T, G.MAP, "april_map_local", "Local Player Color", { 0.2, 0.8, 1, 1 }, { parent = P })
-    menu.add_checkbox(T, G.MAP, "april_map_labels", "Show Labels", false, { parent = P })
-    menu.add_checkbox(T, G.MAP, "april_map_coords", "Show Coordinates", true, { parent = P })
-    menu.add_checkbox(T, G.MAP, "april_map_compass", "Compass Overlay", true, { parent = P, colorpicker = { 0.2, 0.8, 1, 0.8 } })
-    menu.add_slider_int(T, G.MAP, "april_map_size", "Map Size", 120, 500, 220, { parent = P })
+    local T, G = menu_util.bind("map")
+    menu.add_checkbox(T, G, "april_map_enabled", "Enable Tactical Map", false, { key = 0x28 })
+    menu.add_slider_float(T, G, "april_map_zoom", "Zoom Level", 0.05, 5.0, 1.0, "%.2f", { parent = P })
+    menu.add_colorpicker(T, G, "april_map_bg", "Background Color", { 0.05, 0.05, 0.08, 0.95 }, { parent = P })
+    menu.add_colorpicker(T, G, "april_map_grid", "Grid Color", { 1, 1, 1, 0.04 }, { parent = P })
+    menu.add_colorpicker(T, G, "april_map_local", "Local Player Color", { 0.2, 0.8, 1, 1 }, { parent = P })
+    menu.add_checkbox(T, G, "april_map_labels", "Show Labels", false, { parent = P })
+    menu.add_checkbox(T, G, "april_map_coords", "Show Coordinates", true, { parent = P })
+    menu.add_checkbox(T, G, "april_map_compass", "Compass Overlay", true, { parent = P, colorpicker = { 0.2, 0.8, 1, 0.8 } })
+    menu.add_slider_int(T, G, "april_map_size", "Map Size", 120, 500, 220, { parent = P })
 end
 
 local function key_active()

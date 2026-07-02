@@ -24,8 +24,6 @@ M.FEATURE_ORDER = {
 }
 
 function M.register_all()
-    April.TAB = menu_util.TAB
-
     M.features = {}
     local registered = 0
 
@@ -43,7 +41,7 @@ function M.register_all()
         end
     end
 
-    print("[April] Menu sections registered: " .. registered .. " / " .. #menu_util.GROUPS .. " groups")
+    print("[April] Menu sections registered: " .. registered)
 end
 
 function M.setup_scans()

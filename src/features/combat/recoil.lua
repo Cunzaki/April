@@ -1,28 +1,26 @@
 local settings = April.require("core.settings")
 local weapons = April.require("game.weapons")
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = menu_util.tab()
 
 local M = {}
 local P = "april_recoil_enabled"
 local last_apply = 0
 
 function M.register_menu()
+    local T, G = menu_util.bind("recoil")
     weapons.load()
-    menu_util.ensure_group(G.RECOIL)
 
-    menu.add_checkbox(T, G.RECOIL, P, "Enable Recoil Reduction", false, { key = 0 })
-    menu.add_label(T, G.RECOIL, "Scales ToolInfo recoil client-side (same table the game uses).")
-    menu.add_label(T, G.RECOIL, "0% = stock  |  100% = no kick. Server spread unchanged.")
-    menu.add_slider_int(T, G.RECOIL, "april_recoil_global", "Global Reduction %", 0, 100, 0, { parent = P })
-    menu.add_checkbox(T, G.RECOIL, "april_recoil_use_global", "Apply Global To All Guns", false, { parent = P })
-    menu.add_separator(T, G.RECOIL)
+    menu.add_checkbox(T, G, P, "Enable Recoil Reduction", false, { key = 0 })
+    menu.add_label(T, G, "Scales ToolInfo recoil client-side (same table the game uses).")
+    menu.add_label(T, G, "0% = stock  |  100% = no kick. Server spread unchanged.")
+    menu.add_slider_int(T, G, "april_recoil_global", "Global Reduction %", 0, 100, 0, { parent = P })
+    menu.add_checkbox(T, G, "april_recoil_use_global", "Apply Global To All Guns", false, { parent = P })
+    menu.add_separator(T, G)
 
     local names = weapons.recoil_weapon_names()
     for _, name in ipairs(names) do
         local id = weapons.slug(name)
-        menu.add_slider_int(T, G.RECOIL, id, name .. " %", 0, 100, 0, { parent = P })
+        menu.add_slider_int(T, G, id, name .. " %", 0, 100, 0, { parent = P })
         if menu.set_callback then
             menu.set_callback(id, function()
                 M.sync_patches()

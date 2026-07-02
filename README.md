@@ -12,21 +12,20 @@ Fallen Survival script for [Project Vector](https://project-vector-1.gitbook.io/
 2. In Vector's script editor, click **Open Folder** and copy `april.lua` into your Scripts folder (or load it from anywhere).
 3. **Load Script** → `april.lua` → **Execute Script**.
 
-All options appear under the **April** tab in the Scripts panel, organized in this sidebar order:
+All options live on **Vector's top menu bar** (horizontal tabs), not stacked in Scripts/April:
 
-1. **Aimbot** — targeting, FOV, smoothing, prediction, target line  
-2. **Visuals** — crosshair, player ESP, hitmarkers  
-3. **World** — resource nodes, plants, animals (per-type toggles + colors)  
-4. **Recoil Control** — global + per-weapon overrides  
-5. **Waypoints** — 5 waypoint slots  
-6. **Loot** — crates, sleepers, care packages (per-type toggles)  
-7. **NPCs** — soldiers, box modes, offscreen arrows  
-8. **Base** — cabinets, doors, turrets, sleeping bags  
-9. **Tactical Map** — minimap shell with zoom/colors  
-10. **Misc** — noclip, omnisprint, spider climb, ESP text size  
-11. **Config** — save/load slots, debug overlay  
+| Top tab | What's there |
+|---------|----------------|
+| **Aimbot** | Aimbot + Recoil Control groups |
+| **Player ESP** | Player ESP settings |
+| **Crosshair** | Crosshair settings |
+| **Visuals** | Hitmarkers |
+| **World** | Resources, Loot, NPCs, Base |
+| **Features** | Waypoints, Tactical Map, Movement |
+| **Settings** | Config save/load |
+| **Scripts → April** | Loader info only |
 
-Click a group name on the left to see its options on the right.
+Click **Player ESP** or **Crosshair** in the top bar for those settings.
 
 Config files save to `%LOCALAPPDATA%\Project Vector\Scripts\April_Slot_1.txt`.
 
