@@ -1,6 +1,4 @@
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = menu_util.tab()
 
 local M = {}
 

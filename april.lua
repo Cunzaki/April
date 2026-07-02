@@ -3,7 +3,7 @@
     https://github.com/Cunzaki/April
 
     Feature options register on Vector's top menu tabs (Aimbot, Player ESP, Crosshair, etc.)
-    Built: 2026-07-02T06:31:16.215Z
+    Built: 2026-07-02T06:32:11.065Z
 ]]
 
 April = {
@@ -2001,8 +2001,6 @@ end)()
 -- ── menu/tabs.lua ──
 April._mods["menu.tabs"] = (function()
 local menu_util = April.require("core.menu_util")
-local G = menu_util.G
-local T = menu_util.tab()
 
 local M = {}
 
