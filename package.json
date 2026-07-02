@@ -1,0 +1,8 @@
+{
+  "name": "april",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/bundle.mjs"
+  }
+}

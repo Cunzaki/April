@@ -1,14 +1,15 @@
 --[[
-    April bundle — auto-generated single file for Vector
-    Generated: 2026-07-02T04:36:21.874Z
-    Do not edit by hand; run: node tools/bundle_april.mjs
+    April — Fallen Survival for Project Vector
+    https://github.com/Cunzaki/April
+
+    This is the final bundled script. Load or execute this file in Vector.
+    Source modules live in src/ — rebuild with: node scripts/bundle.mjs
+    Built: 2026-07-02T06:13:17.026Z
 ]]
 
 if menu and menu.add_tab then
     menu.add_tab("April", "A", "full")
 end
-
-print("[April] bundle starting...")
 
 April = {
     version = "3.0.0",
@@ -1562,4 +1563,6 @@ end)
 
 if not ok then
     print("[April] Fatal: " .. tostring(err))
+else
+    print("[April v3] Ready — " .. April.version)
 end
