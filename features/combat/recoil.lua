@@ -3,9 +3,9 @@ local settings = April.require("core.settings")
 local M = {}
 
 function M.register_menu()
-    menu.add_group("Combat", "Recoil")
-    menu.add_checkbox("Combat", "Recoil", "april_recoil_enabled", "Enable Recoil Control", false)
-    menu.add_slider_float("Combat", "Recoil", "april_recoil_strength", "Strength", 0, 5, 1.0, "%.1f")
+    menu.add_group(April.TAB, "Recoil")
+    menu.add_checkbox(April.TAB, "Recoil", "april_recoil_enabled", "Enable Recoil Control", false)
+    menu.add_slider_float(April.TAB, "Recoil", "april_recoil_strength", "Strength", 0, 5, 1.0, "%.1f")
 end
 
 function M.update(dt)

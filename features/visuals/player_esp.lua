@@ -5,13 +5,13 @@ local draw_util = April.require("core.draw_util")
 local M = {}
 
 function M.register_menu()
-    menu.add_group("Visuals", "Players")
-    menu.add_checkbox("Visuals", "Players", "april_esp_enabled", "Player ESP", true)
-    menu.add_checkbox("Visuals", "Players", "april_esp_name", "Name", true)
-    menu.add_checkbox("Visuals", "Players", "april_esp_health", "Health Bar", true)
-    menu.add_checkbox("Visuals", "Players", "april_esp_distance", "Distance", true)
-    menu.add_slider_int("Visuals", "Players", "april_esp_max_dist", "Max Distance", 50, 2000, 800)
-    menu.add_colorpicker("Visuals", "Players", "april_esp_color", "ESP Color", { 0.3, 1, 0.5, 1 })
+    menu.add_group(April.TAB, "Players")
+    menu.add_checkbox(April.TAB, "Players", "april_esp_enabled", "Player ESP", true)
+    menu.add_checkbox(April.TAB, "Players", "april_esp_name", "Name", true)
+    menu.add_checkbox(April.TAB, "Players", "april_esp_health", "Health Bar", true)
+    menu.add_checkbox(April.TAB, "Players", "april_esp_distance", "Distance", true)
+    menu.add_slider_int(April.TAB, "Players", "april_esp_max_dist", "Max Distance", 50, 2000, 800)
+    menu.add_colorpicker(April.TAB, "Players", "april_esp_color", "ESP Color", { 0.3, 1, 0.5, 1 })
 end
 
 function M.scan()

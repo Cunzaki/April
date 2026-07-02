@@ -9,15 +9,15 @@ local locked_target = nil
 local BONES = { "Head", "UpperTorso", "LowerTorso", "HumanoidRootPart" }
 
 function M.register_menu()
-    menu.add_group("Combat", "Aimbot")
-    menu.add_checkbox("Combat", "Aimbot", "april_aimbot_enabled", "Enable Aimbot", false)
-    menu.add_hotkey("Combat", "Aimbot", "april_aimbot_key", "Aim Key", 0x02)
-    menu.add_slider_int("Combat", "Aimbot", "april_aimbot_fov", "FOV", 10, 600, 120)
-    menu.add_combo("Combat", "Aimbot", "april_aimbot_bone", "Bone", { "Head", "UpperTorso", "LowerTorso" }, 0)
-    menu.add_checkbox("Combat", "Aimbot", "april_aimbot_sticky", "Sticky Aim", true)
-    menu.add_checkbox("Combat", "Aimbot", "april_aimbot_visible", "Visibility Check", true)
-    menu.add_checkbox("Combat", "Aimbot", "april_aimbot_draw_fov", "Draw FOV", true)
-    menu.add_colorpicker("Combat", "Aimbot", "april_aimbot_fov_color", "FOV Color", { 1, 1, 1, 0.35 })
+    menu.add_group(April.TAB, "Aimbot")
+    menu.add_checkbox(April.TAB, "Aimbot", "april_aimbot_enabled", "Enable Aimbot", false)
+    menu.add_hotkey(April.TAB, "Aimbot", "april_aimbot_key", "Aim Key", 0x02)
+    menu.add_slider_int(April.TAB, "Aimbot", "april_aimbot_fov", "FOV", 10, 600, 120)
+    menu.add_combo(April.TAB, "Aimbot", "april_aimbot_bone", "Bone", { "Head", "UpperTorso", "LowerTorso" }, 0)
+    menu.add_checkbox(April.TAB, "Aimbot", "april_aimbot_sticky", "Sticky Aim", true)
+    menu.add_checkbox(April.TAB, "Aimbot", "april_aimbot_visible", "Visibility Check", true)
+    menu.add_checkbox(April.TAB, "Aimbot", "april_aimbot_draw_fov", "Draw FOV", true)
+    menu.add_colorpicker(April.TAB, "Aimbot", "april_aimbot_fov_color", "FOV Color", { 1, 1, 1, 0.35 })
 end
 
 local function get_bone_name()

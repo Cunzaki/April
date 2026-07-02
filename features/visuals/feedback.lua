@@ -5,9 +5,9 @@ local M = {}
 local last_hit_time = 0
 
 function M.register_menu()
-    menu.add_group("Visuals", "Feedback")
-    menu.add_checkbox("Visuals", "Feedback", "april_hitmarker_enabled", "Hitmarkers", true)
-    menu.add_colorpicker("Visuals", "Feedback", "april_hitmarker_color", "Hit Color", { 1, 0.3, 0.3, 1 })
+    menu.add_group(April.TAB, "Feedback")
+    menu.add_checkbox(April.TAB, "Feedback", "april_hitmarker_enabled", "Hitmarkers", true)
+    menu.add_colorpicker(April.TAB, "Feedback", "april_hitmarker_color", "Hit Color", { 1, 0.3, 0.3, 1 })
 end
 
 function M.notify_hit()

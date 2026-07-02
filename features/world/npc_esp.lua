@@ -11,10 +11,10 @@ local NPC_PATTERNS = {
 }
 
 function M.register_menu()
-    menu.add_group("World", "NPCs")
-    menu.add_checkbox("World", "NPCs", "april_npc_enabled", "NPC ESP", true)
-    menu.add_slider_int("World", "NPCs", "april_npc_range", "Range", 50, 2000, 1000)
-    menu.add_colorpicker("World", "NPCs", "april_npc_color", "Color", { 1, 0.2, 0.2, 1 })
+    menu.add_group(April.TAB, "NPCs")
+    menu.add_checkbox(April.TAB, "NPCs", "april_npc_enabled", "NPC ESP", true)
+    menu.add_slider_int(April.TAB, "NPCs", "april_npc_range", "Range", 50, 2000, 1000)
+    menu.add_colorpicker(April.TAB, "NPCs", "april_npc_color", "Color", { 1, 0.2, 0.2, 1 })
 end
 
 function M.scan()

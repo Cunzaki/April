@@ -4,11 +4,11 @@ local draw_util = April.require("core.draw_util")
 local M = {}
 
 function M.register_menu()
-    menu.add_group("Visuals", "Crosshair")
-    menu.add_checkbox("Visuals", "Crosshair", "april_crosshair_enabled", "Crosshair", true)
-    menu.add_slider_int("Visuals", "Crosshair", "april_crosshair_size", "Size", 2, 40, 8)
-    menu.add_slider_int("Visuals", "Crosshair", "april_crosshair_gap", "Gap", 0, 20, 4)
-    menu.add_colorpicker("Visuals", "Crosshair", "april_crosshair_color", "Color", { 1, 1, 1, 1 })
+    menu.add_group(April.TAB, "Crosshair")
+    menu.add_checkbox(April.TAB, "Crosshair", "april_crosshair_enabled", "Crosshair", true)
+    menu.add_slider_int(April.TAB, "Crosshair", "april_crosshair_size", "Size", 2, 40, 8)
+    menu.add_slider_int(April.TAB, "Crosshair", "april_crosshair_gap", "Gap", 0, 20, 4)
+    menu.add_colorpicker(April.TAB, "Crosshair", "april_crosshair_color", "Color", { 1, 1, 1, 1 })
 end
 
 function M.update(dt) end

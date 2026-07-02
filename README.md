@@ -11,13 +11,22 @@ Vector exposes `loadfile`, `loadstring`, `load`, and `utility.http_get` / `utili
 
 ## Quick load (remote — recommended)
 
-Create a new script in Vector and paste this **one line**, then **Execute Script**:
+**Important:** Vector only shows script menu options when `menu.add_tab(..., "full")` runs in **your executed script file**. A bare `load_url` one-liner will load features but hide all menu options.
+
+Copy the contents of `script_entry.lua` into your Vector script file, then **Execute Script**:
 
 ```lua
-utility.load_url("https://raw.githubusercontent.com/cunzaki/April/main/loader_remote.lua")
+if menu and menu.add_tab then
+    menu.add_tab("April", "A", "full")
+end
+
+local ok, err = utility.load_url("https://raw.githubusercontent.com/cunzaki/April/main/loader_remote.lua")
+if not ok then
+    print("[April] load_url failed: " .. tostring(err))
+end
 ```
 
-This downloads `loader_remote.lua` from GitHub, which then fetches each module over HTTP. You need internet access when loading and when modules are first required.
+Or open `script_entry.lua` from this repo and execute it directly.
 
 ## Local install (offline / faster reloads)
 

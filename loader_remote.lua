@@ -1,11 +1,15 @@
 --[[
     April — remote bootstrap (GitHub raw)
     Fetches each module over HTTP via utility.http_get + loadstring.
-    Paste the one-liner from README instead of loading this file directly.
 ]]
+
+if menu and menu.add_tab then
+    menu.add_tab("April", "A", "full")
+end
 
 April = April or {
     version = "3.0.0",
+    TAB = "April",
     repo = "https://raw.githubusercontent.com/cunzaki/April/main/",
     debug = false,
     _mods = {},

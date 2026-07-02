@@ -11,10 +11,10 @@ local LOOT_PATTERNS = {
 }
 
 function M.register_menu()
-    menu.add_group("World", "Loot")
-    menu.add_checkbox("World", "Loot", "april_loot_enabled", "Loot ESP", true)
-    menu.add_slider_int("World", "Loot", "april_loot_range", "Range", 50, 2000, 600)
-    menu.add_colorpicker("World", "Loot", "april_loot_color", "Color", { 1, 0.6, 0.2, 1 })
+    menu.add_group(April.TAB, "Loot")
+    menu.add_checkbox(April.TAB, "Loot", "april_loot_enabled", "Loot ESP", true)
+    menu.add_slider_int(April.TAB, "Loot", "april_loot_range", "Range", 50, 2000, 600)
+    menu.add_colorpicker(April.TAB, "Loot", "april_loot_color", "Color", { 1, 0.6, 0.2, 1 })
 end
 
 function M.scan()

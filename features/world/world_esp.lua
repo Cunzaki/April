@@ -12,10 +12,10 @@ local RESOURCE_NAMES = {
 }
 
 function M.register_menu()
-    menu.add_group("World", "Resources")
-    menu.add_checkbox("World", "Resources", "april_world_enabled", "Resource ESP", true)
-    menu.add_slider_int("World", "Resources", "april_world_range", "Range", 50, 1500, 400)
-    menu.add_colorpicker("World", "Resources", "april_world_color", "Color", { 0.8, 0.8, 0.2, 1 })
+    menu.add_group(April.TAB, "Resources")
+    menu.add_checkbox(April.TAB, "Resources", "april_world_enabled", "Resource ESP", true)
+    menu.add_slider_int(April.TAB, "Resources", "april_world_range", "Range", 50, 1500, 400)
+    menu.add_colorpicker(April.TAB, "Resources", "april_world_color", "Color", { 0.8, 0.8, 0.2, 1 })
 end
 
 function M.scan()

@@ -6,20 +6,20 @@ local env = April.require("core.env")
 local M = {}
 
 function M.register_menu()
-    menu.add_group("Radar", "Waypoints")
-    menu.add_button("Radar", "Waypoints", "april_wp_set", "Set Waypoint 1", function()
+    menu.add_group(April.TAB, "Waypoints")
+    menu.add_button(April.TAB, "Waypoints", "april_wp_set", "Set Waypoint 1", function()
         local lp = env.get_local_player()
         if lp and lp.position then
             cache.waypoints[1] = { name = "Waypoint 1", pos = { x = lp.position.x, y = lp.position.y, z = lp.position.z } }
             print("[April] Waypoint 1 set")
         end
     end)
-    menu.add_button("Radar", "Waypoints", "april_wp_clear", "Clear Waypoint 1", function()
+    menu.add_button(April.TAB, "Waypoints", "april_wp_clear", "Clear Waypoint 1", function()
         cache.waypoints[1] = nil
         print("[April] Waypoint 1 cleared")
     end)
-    menu.add_checkbox("Radar", "Waypoints", "april_wp_draw", "Draw Waypoints", true)
-    menu.add_colorpicker("Radar", "Waypoints", "april_wp_color", "Color", { 0.2, 1, 0.8, 1 })
+    menu.add_checkbox(April.TAB, "Waypoints", "april_wp_draw", "Draw Waypoints", true)
+    menu.add_colorpicker(April.TAB, "Waypoints", "april_wp_color", "Color", { 0.2, 1, 0.8, 1 })
 end
 
 function M.update(dt) end

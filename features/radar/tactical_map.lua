@@ -6,10 +6,10 @@ local env = April.require("core.env")
 local M = {}
 
 function M.register_menu()
-    menu.add_group("Radar", "Map")
-    menu.add_checkbox("Radar", "Map", "april_map_enabled", "Minimap Shell", false)
-    menu.add_slider_int("Radar", "Map", "april_map_size", "Size", 120, 500, 220)
-    menu.add_hotkey("Radar", "Map", "april_map_key", "Toggle Key", 0x28)
+    menu.add_group(April.TAB, "Map")
+    menu.add_checkbox(April.TAB, "Map", "april_map_enabled", "Minimap Shell", false)
+    menu.add_slider_int(April.TAB, "Map", "april_map_size", "Size", 120, 500, 220)
+    menu.add_hotkey(April.TAB, "Map", "april_map_key", "Toggle Key", 0x28)
 end
 
 local function map_open()

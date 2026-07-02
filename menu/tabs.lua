@@ -3,6 +3,10 @@ local M = {}
 M.features = {}
 
 function M.register_all()
+    local menu_util = April.require("core.menu_util")
+    April.TAB = menu_util.TAB
+    menu_util.ensure_tab()
+
     M.features = {
         April.require("features.combat.aimbot"),
         April.require("features.combat.recoil"),
@@ -19,16 +23,19 @@ function M.register_all()
         April.require("features.utility.config"),
     }
 
-    menu.add_tab("Combat", "C")
-    menu.add_tab("Visuals", "V")
-    menu.add_tab("World", "W")
-    menu.add_tab("Movement", "M")
-    menu.add_tab("Radar", "R")
-    menu.add_tab("Settings", "S")
-
-    for _, feat in ipairs(M.features) do
-        if feat.register_menu then feat.register_menu() end
+    local registered = 0
+    for i, feat in ipairs(M.features) do
+        local ok, err = pcall(function()
+            if feat.register_menu then
+                feat.register_menu()
+                registered = registered + 1
+            end
+        end)
+        if not ok then
+            print("[April] menu register failed (#" .. i .. "): " .. tostring(err))
+        end
     end
+    print("[April] Menu groups registered: " .. registered)
 end
 
 function M.setup_scans()

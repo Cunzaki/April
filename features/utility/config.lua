@@ -51,16 +51,16 @@ function M.load_slot(slot)
 end
 
 function M.register_menu()
-    menu.add_group("Settings", "Config")
-    menu.add_label("Settings", "Config", "April v3 — modular rewrite")
-    menu.add_button("Settings", "Config", "april_cfg_save", "Save Slot 1", function()
+    menu.add_group(April.TAB, "Config")
+    menu.add_label(April.TAB, "Config", "April v3 — modular rewrite")
+    menu.add_button(April.TAB, "Config", "april_cfg_save", "Save Slot 1", function()
         M.save_slot(1)
     end)
-    menu.add_button("Settings", "Config", "april_cfg_load", "Load Slot 1", function()
+    menu.add_button(April.TAB, "Config", "april_cfg_load", "Load Slot 1", function()
         M.load_slot(1)
     end)
-    menu.add_group("Settings", "Debug")
-    menu.add_checkbox("Settings", "Debug", "april_debug_overlay", "Debug Overlay", false)
+    menu.add_group(April.TAB, "Debug")
+    menu.add_checkbox(April.TAB, "Debug", "april_debug_overlay", "Debug Overlay", false)
 end
 
 function M.update(dt) end

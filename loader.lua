@@ -1,12 +1,16 @@
 --[[
     April — local bootstrap loader
-    Vector supports loadfile / loadstring / load for modular scripts.
-    Place this entire repo folder under your Vector Scripts directory, then
-    Load Script -> loader.lua (or Execute from the script editor).
+    Vector binds script menu UI to a tab registered with mode "full".
+    Place this repo under Vector Scripts/April/, then Load Script -> loader.lua
 ]]
+
+if menu and menu.add_tab then
+    menu.add_tab("April", "A", "full")
+end
 
 April = April or {
     version = "3.0.0",
+    TAB = "April",
     script_dir = "",
     debug = false,
     _mods = {},
@@ -19,6 +23,8 @@ local function resolve_path(rel)
         April.script_dir,
         "",
         "./",
+        "April/",
+        "./April/",
     }
     for _, dir in ipairs(dirs) do
         local path = dir .. file

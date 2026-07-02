@@ -11,10 +11,10 @@ local BASE_PATTERNS = {
 }
 
 function M.register_menu()
-    menu.add_group("World", "Base")
-    menu.add_checkbox("World", "Base", "april_base_enabled", "Base ESP", true)
-    menu.add_slider_int("World", "Base", "april_base_range", "Range", 50, 2000, 800)
-    menu.add_colorpicker("World", "Base", "april_base_color", "Color", { 0.4, 0.7, 1, 1 })
+    menu.add_group(April.TAB, "Base")
+    menu.add_checkbox(April.TAB, "Base", "april_base_enabled", "Base ESP", true)
+    menu.add_slider_int(April.TAB, "Base", "april_base_range", "Range", 50, 2000, 800)
+    menu.add_colorpicker(April.TAB, "Base", "april_base_color", "Color", { 0.4, 0.7, 1, 1 })
 end
 
 function M.scan()
