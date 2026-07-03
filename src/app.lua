@@ -1,8 +1,8 @@
 local tabs = April.require("menu.tabs")
+local debug = April.require("core.debug")
 
 local M = {}
 local initialized = false
-local last_frame = 0
 
 function M.init()
     if initialized then return true end
@@ -12,12 +12,15 @@ end
 
 function M.on_frame()
     if not initialized then return end
+    debug.tick_frame()
+
     local dt = 0.016
     if utility and utility.get_delta_time then
         dt = utility.get_delta_time()
     end
-    tabs.update(dt)
-    tabs.draw()
+
+    debug.guard("tabs.update", tabs.update, dt)
+    debug.guard("tabs.draw", tabs.draw)
 end
 
 return M

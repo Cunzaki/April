@@ -1,0 +1,2 @@
+{"referent":"26137","class":"BlurEffect","name":"BlurEffect","path":"Lighting.BlurEffect","parent_referent":"26134","properties":{"Size":"0","DefinesCapabilities":"false","Tags":""},"attributes":null}
+{"referent":"26141","class":"BlurEffect","name":"WaterBlur","path":"Lighting.WaterBlur","parent_referent":"26134","properties":{"Size":"30","Enabled":"false","DefinesCapabilities":"false","Name":"WaterBlur","Tags":""},"attributes":null}

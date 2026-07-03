@@ -8,7 +8,7 @@ local M = {}
 local P = "april_map_enabled"
 
 function M.register_menu()
-    local T, G = menu_util.bind("map")
+    local T, G = menu_util.group("Tactical Map")
     menu.add_checkbox(T, G, "april_map_enabled", "Enable Tactical Map", false, { key = 0x28 })
     menu.add_slider_float(T, G, "april_map_zoom", "Zoom Level", 0.05, 5.0, 1.0, "%.2f", { parent = P })
     menu.add_colorpicker(T, G, "april_map_bg", "Background Color", { 0.05, 0.05, 0.08, 0.95 }, { parent = P })

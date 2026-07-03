@@ -20,7 +20,7 @@ local TOGGLES = {
 }
 
 function M.register_menu()
-    local T, G = menu_util.bind("loot")
+    local T, G = menu_util.group("Loot")
     menu.add_checkbox(T, G, "april_loot_enabled", "Enable Loot ESP", true, { key = 0 })
     for _, t in ipairs(TOGGLES) do
         menu.add_checkbox(T, G, t.id, t.label, true, { parent = P, colorpicker = t.color })

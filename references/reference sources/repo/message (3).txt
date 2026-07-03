@@ -1,0 +1,173 @@
+--// Anticheat Bypass THANK YOU HAM uncomment on non obfuscated build
+if getgenv().fishy_loaded and LPH_OBFUSCATED then
+    return
+end
+
+if not (cloneref and type(cloneref) == "function") then
+    return
+end
+local players = game:GetService("Players")
+
+LPH_NO_VIRTUALIZE(function()
+    repeat
+        task.wait()
+    until players.LocalPlayer ~= nil and game:IsLoaded()
+end)()
+
+local local_player = players.LocalPlayer
+local character = local_player.Character or local_player.CharacterAdded:Wait()
+
+local root = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
+local head = character:WaitForChild("Head")
+
+do
+    local success, err = pcall(function()
+        if not LPH_OBFUSCATED then
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/Luraph/macrosdk/refs/heads/main/luraphsdk.lua"))()
+        end
+
+        local DEBUG_FILE = "fishy bypass.txt"
+
+        writefile(DEBUG_FILE, "")
+
+        local log = LPH_NO_VIRTUALIZE(function(...)
+            local output = ""
+
+            for _, v in { ... } do
+                local object_typeof = typeof(v)
+
+                local result
+
+                if object_typeof == "table" or object_typeof == "userdata" then
+                    local metatable = getrawmetatable(v)
+
+                    if metatable then
+                        result = "has meta" .. object_typeof
+                    end
+                end
+
+                if not result then
+                    result = `{tostring(v)} ({object_typeof})`
+                end
+
+                if object_typeof == "function" then
+                    local name = debug.getinfo(v).name
+
+                    if name and name ~= "" then
+                        result = string.format("%s | (name: %s)", result, name)
+                    end
+                end
+                output ..= result .. " "
+            end
+
+            appendfile(DEBUG_FILE, string.format("%s\n", output))
+        end)
+
+        local recursive_output
+        recursive_output = LPH_NO_VIRTUALIZE(function(i, v, indent)
+            log(string.rep("\t", indent), i, v)
+        end)
+
+        local log_tbl = LPH_NO_VIRTUALIZE(function(tbl, indent)
+            if not (tbl and type(tbl) == "table") then
+                return
+            end
+
+            indent = indent or 0
+
+            local tracked = { [tbl] = true }
+            for i, v in pairs(tbl) do
+                recursive_output(i, v, indent)
+
+                if type(v) == "table" and not tracked[v] then
+                    tracked[v] = true
+                    for i1, v1 in v do
+                        recursive_output(i1, v1, indent + 1)
+                    end
+                end
+            end
+        end)
+
+        local bypass = function(recursive_tbl, ban_index_value)
+            setrawmetatable(recursive_tbl, {
+                __newindex = function(self, index, value)
+                    if type(value) == "table" and index == ban_index_value then
+                        local whitelisted = false
+
+                        local id1 = rawget(value, 1)
+                        local id2 = rawget(value, 2)
+                        local id4 = rawget(value, 4)
+
+                        local len = rawlen(value)
+
+                        if id1 then
+                            if type(id1) == "table" and len == 2 and rawlen(id1) == 1 and (not rawget(id1, "n")) then
+                                local inside_val = rawget(id1, 1)
+                                local outside_val = rawget(value, 2)
+
+                                if inside_val and outside_val and tonumber(inside_val) and tonumber(outside_val) then
+                                    whitelisted = true
+                                end
+                            elseif type(id1) == "number" and rawequal(id1, 2) then
+                                if len == 1 then
+                                    whitelisted = true
+                                elseif len == 4 and rawequal(id4, false) then
+                                    whitelisted = true
+                                end
+                            elseif type(id1) == "string" and type(id2) == "number" and rawequal(id2, 7) then
+                                whitelisted = true
+                            end
+                        end
+
+                        if not whitelisted then
+                            return
+                        end
+                    end
+
+                    return rawset(self, index, value)
+                end,
+            })
+
+            return true
+        end
+
+        local bypassed = false
+
+        LPH_JIT_MAX(function()
+            for _, tbl in getgc(true) do
+                if type(tbl) ~= "table" then
+                    continue
+                end
+
+                if getrawmetatable(tbl) then
+                    continue
+                end
+
+                local found_index, found_recursive = false, false
+                for _, value in tbl do
+                    if type(value) == "number" and rawequal(value, 1) then
+                        found_index = value
+                    end
+                    if rawequal(value, tbl) then
+                        found_recursive = value
+                    end
+                end
+
+                if found_index and found_recursive and rawequal(rawget(tbl, found_index), nil) then
+                    if bypass(found_recursive, found_index) then
+                        bypassed = true
+                    end
+                end
+            end
+        end)()
+
+        if not bypassed and not getgenv().fishy_loaded then
+            return local_player:Kick("[fishy.solutions] run when fully loaded!")
+        end
+    end)
+
+    if not success then
+        local_player:Kick(err)
+    end
+end

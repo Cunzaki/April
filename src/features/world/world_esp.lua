@@ -20,7 +20,7 @@ local TOGGLES = {
 }
 
 function M.register_menu()
-    local T, G = menu_util.bind("world")
+    local T, G = menu_util.group("World")
     menu.add_checkbox(T, G, "april_world_enabled", "Enable World ESP", true, { key = 0 })
     for _, t in ipairs(TOGGLES) do
         menu.add_checkbox(T, G, t.id, t.label, true, { parent = P, colorpicker = t.color })

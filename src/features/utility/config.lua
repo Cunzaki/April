@@ -58,14 +58,18 @@ function M.load_slot(slot)
 end
 
 function M.register_menu()
-    local T, G = menu_util.bind("config")
+    local T, G = menu_util.group("Config")
     menu.add_label(T, G, "April v3 — Fallen Survival")
     menu.add_button(T, G, "april_cfg_save_1", "Save Config Slot 1", function() M.save_slot(1) end)
     menu.add_button(T, G, "april_cfg_load_1", "Load Config Slot 1", function() M.load_slot(1) end)
     menu.add_button(T, G, "april_cfg_save_2", "Save Config Slot 2", function() M.save_slot(2) end)
     menu.add_button(T, G, "april_cfg_load_2", "Load Config Slot 2", function() M.load_slot(2) end)
     menu.add_separator(T, G)
-    menu.add_checkbox(T, G, "april_debug_overlay", "Debug Overlay", false)
+    menu.add_checkbox(T, G, "april_debug_overlay", "Debug Overlay (on-screen stats)", false)
+    menu.add_button(T, G, "april_debug_clear", "Clear Error Log", function()
+        April.require("core.debug").reset_errors()
+        print("[April] Error log cleared")
+    end)
 end
 
 function M.update(dt) end
@@ -74,14 +78,22 @@ function M.draw()
     if not settings.bool("april_debug_overlay", false) then return end
     if not draw or not draw.text then return end
     local cache = April.require("core.cache")
+    local dbg = April.require("core.debug")
+    local stats = dbg.stats()
     local y = 40
     draw.text(10, y, "April v3 " .. (April.version or "?"), { 0.4, 1, 0.6, 1 }, 14)
     y = y + 16
+    draw.text(10, y, "Frames: " .. stats.frames, { 1, 1, 1, 0.9 }, 12)
+    y = y + 14
     draw.text(10, y, "Players: " .. #cache.players, { 1, 1, 1, 0.9 }, 12)
     y = y + 14
     draw.text(10, y, "World: " .. #cache.world .. "  Loot: " .. #cache.loot, { 1, 1, 1, 0.9 }, 12)
     y = y + 14
     draw.text(10, y, "NPCs: " .. #(cache.npcs or {}) .. "  Base: " .. #(cache.base or {}), { 1, 1, 1, 0.9 }, 12)
+    y = y + 14
+    local err_count = 0
+    for _ in pairs(stats.errors or {}) do err_count = err_count + 1 end
+    draw.text(10, y, "Errors logged: " .. err_count .. " (see console)", err_count > 0 and { 1, 0.4, 0.4, 1 } or { 0.7, 0.7, 0.7, 1 }, 12)
 end
 
 return M

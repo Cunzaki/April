@@ -1,14 +1,15 @@
 local menu_util = April.require("core.menu_util")
+local debug = April.require("core.debug")
+local scheduler = April.require("core.scheduler")
 
 local M = {}
 
 M.features = {}
 
--- Registration order = sidebar group order (groups pre-registered in menu_util)
 M.FEATURE_ORDER = {
     "features.combat.aimbot",
-    "features.visuals.crosshair",
     "features.visuals.player_esp",
+    "features.visuals.crosshair",
     "features.visuals.feedback",
     "features.world.world_esp",
     "features.combat.recoil",
@@ -22,6 +23,7 @@ M.FEATURE_ORDER = {
 }
 
 function M.register_all()
+    menu_util.ensure_tab()
     M.features = {}
     local registered = 0
 
@@ -35,15 +37,14 @@ function M.register_all()
             end
         end)
         if not ok then
-            print("[April] menu register failed (" .. path .. "): " .. tostring(err))
+            debug.error_once("menu:" .. path, err)
         end
     end
 
-    print("[April] Menu sections registered: " .. registered)
+    debug.log("Menu groups registered: " .. registered .. " (Scripts > April)")
 end
 
 function M.setup_scans()
-    local scheduler = April.require("core.scheduler")
     local player_esp = April.require("features.visuals.player_esp")
     local world_esp = April.require("features.world.world_esp")
     local loot_esp = April.require("features.world.loot_esp")
@@ -57,29 +58,41 @@ function M.setup_scans()
     scheduler.register("npcs", 750, function() npc_esp.scan() end)
     scheduler.start_all()
 
-    player_esp.scan()
-    world_esp.scan()
-    loot_esp.scan()
-    base_esp.scan()
-    npc_esp.scan()
+    debug.guard("scan:initial_players", player_esp.scan)
+    debug.guard("scan:initial_world", world_esp.scan)
+    debug.guard("scan:initial_loot", loot_esp.scan)
+    debug.guard("scan:initial_base", base_esp.scan)
+    debug.guard("scan:initial_npcs", npc_esp.scan)
 end
 
 function M.load_game_data()
-    April.require("game.items").load()
-    April.require("game.weapons").load()
+    local weapons = April.require("game.weapons")
+    local items = April.require("game.items")
+
+    debug.guard("items.load", items.load)
+    local weapons_ok = debug.guard_bool("weapons.load", weapons.load)
+    if weapons_ok and weapons.recoil_weapon_names then
+        local names = weapons.recoil_weapon_names()
+        debug.log("ToolInfo weapons: " .. #names)
+    else
+        debug.warn("ToolInfo not loaded — recoil/weapon stats use fallbacks until in-game")
+    end
 end
 
 function M.update(dt)
-    local scheduler = April.require("core.scheduler")
-    scheduler.tick_fallback()
-    for _, feat in ipairs(M.features) do
-        if feat.update then pcall(feat.update, dt) end
+    scheduler.tick()
+    for i, feat in ipairs(M.features) do
+        if feat.update then
+            debug.guard("update:" .. i, feat.update, dt)
+        end
     end
 end
 
 function M.draw()
-    for _, feat in ipairs(M.features) do
-        if feat.draw then pcall(feat.draw) end
+    for i, feat in ipairs(M.features) do
+        if feat.draw then
+            debug.guard("draw:" .. i, feat.draw)
+        end
     end
 end
 
@@ -87,14 +100,24 @@ function M.init()
     local env = April.require("core.env")
     local ok, missing = env.require_apis({ "menu", "draw", "utility", "entity", "game" })
     if not ok then
-        print("[April v3] Missing API: " .. tostring(missing))
+        debug.error_once("init:apis", "Missing required API: " .. tostring(missing))
         return false
     end
+
+    debug.audit_apis()
 
     M.register_all()
     M.load_game_data()
     M.setup_scans()
-    print("[April v3] Loaded — " .. April.version)
+
+    local me = entity.get_local_player and entity.get_local_player()
+    if me then
+        debug.log("Local player: " .. tostring(me.name))
+    else
+        debug.warn("Local player not ready yet (normal before spawn)")
+    end
+
+    debug.log("Init complete — v" .. April.version)
     return true
 end
 

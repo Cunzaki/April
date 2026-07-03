@@ -7,7 +7,7 @@ local hit_time = 0
 local P = "april_hitmarker_enabled"
 
 function M.register_menu()
-    local T, G = menu_util.bind("hitmarkers")
+    local T, G = menu_util.group("Hitmarkers")
     menu.add_checkbox(T, G, "april_hitmarker_enabled", "Hitmarker", true, { colorpicker = { 1, 1, 1, 1 } })
     menu.add_checkbox(T, G, "april_hitmarker_glow", "Hitmarker Glow", false, { parent = P })
     menu.add_slider_int(T, G, "april_hitmarker_size", "Hitmarker Size", 1, 20, 5, { parent = P })

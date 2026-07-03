@@ -9,7 +9,7 @@ local M = {}
 local P = "april_npc_enabled"
 
 function M.register_menu()
-    local T, G = menu_util.bind("npcs")
+    local T, G = menu_util.group("NPCs")
     menu.add_checkbox(T, G, "april_npc_enabled", "Enable NPC ESP", true, { key = 0, colorpicker = { 1, 0.3, 0.3, 1 } })
     menu.add_checkbox(T, G, "april_npc_soldiers", "Soldiers", true, { parent = P, colorpicker = { 1, 0.3, 0.3, 1 } })
     menu.add_combo(T, G, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 1, { parent = P })

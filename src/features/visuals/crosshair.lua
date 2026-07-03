@@ -6,7 +6,7 @@ local M = {}
 local P = "april_crosshair_enabled"
 
 function M.register_menu()
-    local T, G = menu_util.bind("crosshair")
+    local T, G = menu_util.group("Crosshair")
     menu.add_checkbox(T, G, "april_crosshair_enabled", "Enable Custom Crosshair", true, { key = 0 })
     menu.add_combo(T, G, "april_crosshair_type", "Crosshair Type", { "Cross", "Circle", "Dot", "T-Shape" }, 0, { parent = P })
     menu.add_slider_int(T, G, "april_crosshair_size", "Size", 1, 50, 10, { parent = P })

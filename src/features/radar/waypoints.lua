@@ -8,7 +8,7 @@ local M = {}
 local P = "april_waypoints_enabled"
 
 function M.register_menu()
-    local T, G = menu_util.bind("waypoints")
+    local T, G = menu_util.group("Waypoints")
     menu.add_checkbox(T, G, "april_waypoints_enabled", "Enable Waypoints", true, { key = 0 })
     menu.add_checkbox(T, G, "april_wp_dist", "Show Distance", true, { parent = P })
     menu.add_checkbox(T, G, "april_wp_line", "Draw Line", true, { parent = P })

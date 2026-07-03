@@ -7,7 +7,7 @@ local M = {}
 local P = "april_esp_enabled"
 
 function M.register_menu()
-    local T, G = menu_util.bind("player_esp")
+    local T, G = menu_util.group("Player ESP")
     menu.add_checkbox(T, G, "april_esp_enabled", "Player ESP", true, { key = 0 })
     menu.add_combo(T, G, "april_esp_box_mode", "Box Mode", { "None", "2D", "Corner" }, 1, { parent = P })
     menu.add_checkbox(T, G, "april_esp_name", "Name", true, { parent = P, colorpicker = { 1, 1, 1, 1 } })
@@ -22,9 +22,18 @@ function M.scan()
     cache.players = {}
     if not entity or not entity.get_players then return end
     for _, p in ipairs(entity.get_players()) do
-        if p.is_valid then table.insert(cache.players, p) end
+        if p.is_valid and not p.is_local then
+            table.insert(cache.players, p)
+        end
     end
     cache.stats.last_player_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+function M.get_players()
+    if entity and entity.get_players then
+        return entity.get_players()
+    end
+    return cache.players
 end
 
 function M.update(dt) end
@@ -37,7 +46,7 @@ function M.draw()
     local me = entity and entity.get_local_player and entity.get_local_player()
     local text_size = settings.num("april_esp_text_size", 13)
 
-    for _, p in ipairs(cache.players) do
+    for _, p in ipairs(M.get_players()) do
         if p.is_local or not p.is_alive then goto continue end
         if me and me.position and p.position then
             local dx = p.position.x - me.position.x

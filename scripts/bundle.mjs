@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 /**
  * Builds april.lua — the single Vector-executable script.
- * Edit modules under src/, then run: node scripts/bundle.mjs
  */
 
 import fs from "fs";
@@ -16,6 +15,7 @@ const ORDER = [
   "core/env.lua",
   "core/math_util.lua",
   "core/cache.lua",
+  "core/debug.lua",
   "core/settings.lua",
   "core/draw_util.lua",
   "core/scheduler.lua",
@@ -44,17 +44,21 @@ const ORDER = [
 const header = `--[[
     April — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-
-    Feature options register on Vector's top menu tabs (Aimbot, Player ESP, Crosshair, etc.)
     Built: ${new Date().toISOString()}
 ]]
 
 April = {
     version = "3.0.0",
-    debug = false,
+    debug = true,
     _mods = {},
     bundled = true,
 }
+
+-- Required first: Scripts > April uses "full" mode (2-column group grid)
+if menu and menu.add_tab then
+    menu.add_tab("April", "A", "full")
+end
+April._menu_tab_ready = true
 
 function April.require(path)
     local mod = April._mods[path]
@@ -67,25 +71,33 @@ end
 `;
 
 const footer = `
-local ok, err = pcall(function()
-    local app = April.require("app")
-    if not app.init() then return end
+April._init_ok = false
 
-    function on_frame()
-        app.on_frame()
+local ok, err = pcall(function()
+    local debug = April.require("core.debug")
+    local app = April.require("app")
+
+    if not app.init() then
+        debug.error_once("init", "app.init() returned false — features disabled")
+        return
     end
 
-    if callbacks and callbacks.add then
-        callbacks.add("on_frame", on_frame)
-    elseif draw and draw.callback then
-        draw.callback = on_frame
+    April._init_ok = true
+
+    if not debug.register_frame_hook(function()
+        app.on_frame()
+    end) then
+        debug.error_once("init", "Failed to register on_frame")
     end
 end)
 
 if not ok then
     print("[April] Fatal: " .. tostring(err))
+    if debug and debug.traceback then print(debug.traceback(err)) end
+elseif April._init_ok then
+    print("[April v3] Ready — " .. April.version .. " (debug on, watch console for errors)")
 else
-    print("[April v3] Ready — " .. April.version)
+    print("[April v3] Init failed — check console above")
 end
 `;
 

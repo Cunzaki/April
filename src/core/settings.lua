@@ -1,23 +1,18 @@
+--[[
+    Live menu reads — always fetch from menu.get (legacy cache_settings pattern).
+    Stale caching was breaking every feature after first read.
+]]
+
 local M = {}
 
-local values = {}
-local read_count = 0
-
-function M.invalidate()
-    values = {}
-end
+function M.invalidate() end
 
 function M.get(id, default)
-    if values[id] == nil then
-        if menu and menu.get then
-            local v = menu.get(id)
-            if v ~= nil then values[id] = v else values[id] = default end
-        else
-            values[id] = default
-        end
+    if menu and menu.get then
+        local v = menu.get(id)
+        if v ~= nil then return v end
     end
-    read_count = read_count + 1
-    return values[id]
+    return default
 end
 
 function M.bool(id, default)
@@ -38,10 +33,7 @@ end
 function M.color(id, default)
     if menu and menu.get_color then
         local c = menu.get_color(id)
-        if c then
-            values[id] = c
-            return c
-        end
+        if c then return c end
     end
     return default or { 1, 1, 1, 1 }
 end
@@ -49,22 +41,12 @@ end
 function M.on_change(id, fn)
     if menu and menu.set_callback then
         menu.set_callback(id, function(new_val)
-            values[id] = new_val
             if fn then fn(new_val) end
         end)
     end
 end
 
-function M.flush()
-    values = {}
-end
-
-function M.mark_dirty()
-    values = {}
-end
-
-function M.stats()
-    return { reads = read_count }
-end
+function M.flush() end
+function M.mark_dirty() end
 
 return M

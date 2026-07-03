@@ -131,7 +131,7 @@ local function find_target(cx, cy, fov_px)
 end
 
 function M.register_menu()
-    local T, G = menu_util.bind("aimbot")
+    local T, G = menu_util.group("Aimbot")
     menu.add_checkbox(T, G, P, "Enable Aimbot", false, { key = 0x02 })
     menu.add_checkbox(T, G, "april_aimbot_players", "Target Players", true, { parent = P })
     menu.add_slider_int(T, G, "april_aimbot_fov", "FOV Radius (px)", 50, 500, 150, { parent = P })
