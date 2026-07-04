@@ -82,6 +82,10 @@ function M.update(dt)
     end
 end
 
+function M.get_target()
+    return locked_target
+end
+
 function M.draw()
     if not settings.bool(P, false) then return end
 

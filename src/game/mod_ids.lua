@@ -1,0 +1,90 @@
+--[[ Fallen staff / mod user IDs — from matchascript + legacy fallen list. ]]
+
+local M = {}
+
+M.ROLES = {
+    [51281722] = "Game Moderator",
+    [7178750309] = "Game Moderator",
+    [113179883] = "Game Moderator",
+    [3122439095] = "Game Moderator",
+    [991290934] = "Game Moderator",
+    [3968854760] = "Game Moderator",
+    [81993536] = "Game Moderator",
+    [1004214871] = "Game Moderator",
+    [3034930770] = "Game Moderator",
+    [2364950171] = "Game Moderator",
+    [1528346843] = "Game Moderator",
+    [165053216] = "Game Moderator",
+    [1127954045] = "Game Moderator",
+    [3640120679] = "Game Moderator",
+    [602009251] = "Game Moderator",
+    [372791101] = "Game Moderator",
+    [1378169111] = "Game Moderator",
+    [3020799797] = "Game Moderator",
+    [2567998467] = "Game Moderator",
+    [4243907215] = "Game Moderator",
+    [353983652] = "Game Moderator",
+    [1406181681] = "Game Moderator",
+    [2229169589] = "Game Moderator",
+    [3004094651] = "Game Moderator",
+    [839333692] = "Game Moderator",
+    [979624578] = "Game Moderator",
+    [1478885961] = "Game Moderator",
+    [399754916] = "Game Moderator",
+    [1193091081] = "Game Moderator",
+    [4553863490] = "Game Moderator",
+    [4225513035] = "Game Moderator",
+    [41482597] = "Game Moderator",
+    [2924549627] = "Game Moderator",
+    [2732967856] = "Game Moderator",
+    [1937516999] = "Game Moderator",
+    [1374319325] = "Game Moderator",
+    [1058831985] = "Game Moderator",
+    [9621064456] = "Game Moderator",
+    [584370127] = "Game Moderator",
+    [813030262] = "Game Moderator",
+    [3470393585] = "Game Moderator",
+    [122915793] = "Game Moderator",
+    [1534692727] = "Game Moderator",
+    [7278178099] = "Game Moderator",
+    [8593140875] = "Game Moderator",
+    [2525997354] = "Game Moderator",
+    [3126891654] = "Game Moderator",
+    [1190967808] = "Game Moderator",
+    [833946684] = "Game Moderator",
+    [202751467] = "Game Moderator",
+    [510349404] = "Game Moderator",
+    [174212818] = "Contribution",
+    [25548179] = "Lead Developer",
+    [363101315] = "Lead Developer",
+    [47983795] = "Co-Founder",
+    [16681869] = "Founder",
+    -- legacy extras
+    [3544497889] = "Game Moderator",
+    [3739152618] = "Game Moderator",
+    [4252853044] = "Game Moderator",
+    [1500535353] = "Game Moderator",
+    [1116486172] = "Game Moderator",
+    [1304140224] = "Game Moderator",
+    [542183759] = "Game Moderator",
+    [2620215562] = "Game Moderator",
+    [1622256215] = "Game Moderator",
+    [2792072212] = "Game Moderator",
+    [3994092139] = "Game Moderator",
+    [914847610] = "Game Moderator",
+    [114812725] = "Game Moderator",
+    [1072151937] = "Game Moderator",
+    [1771300283] = "Game Moderator",
+    [1249478607] = "Game Moderator",
+}
+
+function M.role_for(user_id)
+    if not user_id then return nil end
+    return M.ROLES[user_id] or M.ROLES[tonumber(user_id)]
+end
+
+function M.is_mod(user_id)
+    return M.role_for(user_id) ~= nil
+end
+
+return M

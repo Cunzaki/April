@@ -1,11 +1,11 @@
 --[[
     April — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-04T03:41:05.545Z
+    Built: 2026-07-04T07:04:36.144Z
 ]]
 
 April = {
-    version = "3.6.0",
+    version = "3.9.0",
     debug = false,
     _mods = {},
     bundled = true,
@@ -313,11 +313,36 @@ end
 
 function M.bool(id, default)
     local v = M.get(id, default)
+    if v == false or v == 0 or v == "false" then return false end
+    return v == true or v == 1
+end
+
+--[[ Strict checkbox read — never treats missing menu value as enabled. ]]
+function M.enabled(id)
+    if not menu or not menu.get then return false end
+    local v = menu.get(id)
+    if v == nil or v == false or v == 0 or v == "false" then return false end
     return v == true or v == 1
 end
 
 function M.num(id, default)
     return tonumber(M.get(id, default)) or default or 0
+end
+
+--[[ Combo index — zero-based per API.md; also accepts label strings. ]]
+function M.combo_index(id, labels, default)
+    default = default or 0
+    local v = M.get(id, default)
+    if type(v) == "string" then
+        local lower = v:lower()
+        for i, label in ipairs(labels or {}) do
+            if label:lower() == lower then return i - 1 end
+        end
+        return default
+    end
+    local n = tonumber(v)
+    if n == nil then return default end
+    return n
 end
 
 function M.str(id, default)
@@ -375,8 +400,14 @@ function M.text(x, y, text, col, size)
 end
 
 function M.box_esp(x, y, w, h, col, style)
-    if not draw or not draw.box then return end
-    draw.box(x, y, w, h, col, 0, style or 0)
+    if not draw then return end
+    if style == 1 and draw.corner_box then
+        draw.corner_box(x, y, w, h, col)
+        return
+    end
+    if draw.box then
+        draw.box(x, y, w, h, col, 0, style or 0)
+    end
 end
 
 function M.health_bar(x, y, h, hp, max_hp)
@@ -429,6 +460,354 @@ function M.world_label(inst, text, col, max_dist)
     if vis then
         M.text_centered(sx, sy, text, col, 13)
     end
+end
+
+return M
+
+end)()
+
+-- ── core/notify.lua ──
+April._mods["core.notify"] = (function()
+--[[ Toast notifications — draws on-screen; also tries menu.notify if available. ]]
+
+local draw_util = April.require("core.draw_util")
+
+local M = {}
+local queue = {}
+
+local function tick()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function lerp(a, b, t)
+    return a + (b - a) * t
+end
+
+function M.show(msg, ntype, duration_ms)
+    if not msg or msg == "" then return end
+    msg = tostring(msg)
+    ntype = ntype or "warning"
+    duration_ms = duration_ms or 5000
+
+    for _, n in ipairs(queue) do
+        if n.msg == msg and (tick() - n.time) < 3000 then return end
+    end
+
+    if menu and menu.notify then
+        pcall(function() menu.notify(msg) end)
+    end
+
+    table.insert(queue, {
+        msg = msg,
+        type = ntype,
+        time = tick(),
+        duration = duration_ms,
+        alpha = 0,
+        x_off = 80,
+        y = 0,
+    })
+
+    while #queue > 6 do
+        table.remove(queue, 1)
+    end
+
+    print("[April] " .. msg)
+end
+
+function M.warning(msg, duration_ms)
+    M.show(msg, "warning", duration_ms)
+end
+
+function M.draw()
+    if #queue == 0 or not draw then return end
+
+    local now = tick()
+    local sw, sh = draw_util.screen_size()
+    local font = 14
+    local pad = 12
+    local gap = 8
+    local target_y = 18
+
+    for i = #queue, 1, -1 do
+        local n = queue[i]
+        local elapsed = now - n.time
+        if elapsed > n.duration then
+            table.remove(queue, i)
+        else
+            local fade = 350
+            local target_alpha = 1
+            if elapsed < fade then
+                target_alpha = elapsed / fade
+            elseif elapsed > n.duration - fade then
+                target_alpha = (n.duration - elapsed) / fade
+            end
+            n.alpha = lerp(n.alpha or 0, target_alpha, 0.18)
+
+            local slide = 0
+            if elapsed > n.duration - fade then slide = 60 end
+            n.x_off = lerp(n.x_off or 80, slide, 0.15)
+
+            if n.y == 0 then n.y = target_y end
+            n.y = lerp(n.y, target_y, 0.2)
+
+            local accent = { 1, 0.75, 0.2, 1 }
+            if n.type == "success" then accent = { 0.2, 0.85, 0.35, 1 }
+            elseif n.type == "danger" then accent = { 1, 0.25, 0.25, 1 }
+            elseif n.type == "info" then accent = { 0.25, 0.65, 1, 1 }
+            end
+
+            local tw = draw.get_text_size and draw.get_text_size(n.msg, font) or (#n.msg * 7)
+            local box_w = tw + pad * 2 + 6
+            local box_h = font + pad * 2
+            local x = sw - box_w - 16 + (n.x_off or 0)
+            local y = n.y
+            local a = n.alpha or 1
+
+            if draw.rect_filled then
+                draw.rect_filled(x, y, box_w, box_h, { 0.05, 0.05, 0.08, 0.82 * a })
+            end
+            if draw.rect then
+                draw.rect(x, y, box_w, box_h, { accent[1], accent[2], accent[3], 0.9 * a }, 0, 1)
+            end
+            if draw.line then
+                draw.line(x, y, x, y + box_h, { accent[1], accent[2], accent[3], a }, 3)
+            end
+            if draw.text then
+                draw.text(x + pad + 4, y + pad - 1, n.msg, { 1, 1, 1, a }, font)
+            end
+
+            target_y = target_y + box_h + gap
+        end
+    end
+end
+
+return M
+
+end)()
+
+-- ── game/asset_urls.lua ──
+April._mods["game.asset_urls"] = (function()
+--[[
+    GitHub CDN URLs for draw.load_image (April/docs/API.md — HTTPS required).
+    Assets live in repo assets/ — run: node scripts/download-assets.mjs
+]]
+
+local M = {}
+
+-- Bump branch/path if you fork; must match raw GitHub path after push.
+M.CDN_BASE = "https://raw.githubusercontent.com/cunzaki/April/main/assets"
+
+function M.item_png(asset_id)
+    asset_id = asset_id and tostring(asset_id):match("(%d+)")
+    if not asset_id then return nil end
+    return M.CDN_BASE .. "/items/" .. asset_id .. ".png"
+end
+
+function M.tung_png()
+    return M.CDN_BASE .. "/tung.png"
+end
+
+function M.urls_for_item(asset_id)
+    local png = M.item_png(asset_id)
+    if not png then return {} end
+    asset_id = tostring(asset_id):match("(%d+)")
+    return {
+        png,
+        "rbxassetid://" .. asset_id,
+        "https://www.roblox.com/asset/?id=" .. asset_id,
+    }
+end
+
+function M.urls_for_tung()
+    local id = "139818999438291"
+    return {
+        M.tung_png(),
+        "rbxassetid://" .. id,
+        "https://www.roblox.com/asset/?id=" .. id,
+    }
+end
+
+function M.urls_for_avatar(user_id)
+    user_id = tostring(user_id):match("(%d+)") or tostring(user_id)
+    return {
+        "https://www.roblox.com/headshot-thumbnail/image?userId=" .. user_id .. "&size=150x150&format=Png",
+        "https://www.roblox.com/headshot-thumbnail/image?userId=" .. user_id .. "&width=150&height=150&format=png",
+    }
+end
+
+return M
+
+end)()
+
+-- ── core/image_cache.lua ──
+April._mods["core.image_cache"] = (function()
+--[[ Async image loader — April/docs/API.md: HTTPS GitHub CDN first, lazy load in on_frame. ]]
+
+local asset_urls = April.require("game.asset_urls")
+
+local M = {}
+
+local entries = {}
+
+function M.urls_for_asset(id)
+    return asset_urls.urls_for_item(id)
+end
+
+function M.urls_for_tung()
+    return asset_urls.urls_for_tung()
+end
+
+function M.urls_for_avatar(user_id)
+    return asset_urls.urls_for_avatar(user_id)
+end
+
+local function normalize_urls(asset_id_or_urls)
+    if type(asset_id_or_urls) == "table" then
+        return asset_id_or_urls
+    end
+
+    if type(asset_id_or_urls) == "string" then
+        local id = asset_id_or_urls:match("(%d+)")
+        if asset_id_or_urls:find("http", 1, true) then
+            return { asset_id_or_urls }
+        end
+        if asset_id_or_urls:find("rbxassetid", 1, true) and id then
+            return asset_urls.urls_for_item(id)
+        end
+        if id then
+            return asset_urls.urls_for_item(id)
+        end
+    end
+
+    return asset_urls.urls_for_item(asset_id_or_urls)
+end
+
+function M.register(key, asset_id_or_urls)
+    if entries[key] then return entries[key] end
+
+    entries[key] = {
+        urls = normalize_urls(asset_id_or_urls),
+        url_index = 1,
+        handle = nil,
+        failed = false,
+    }
+    return entries[key]
+end
+
+function M.register_avatar(key, user_id)
+    return M.register(key, asset_urls.urls_for_avatar(user_id))
+end
+
+function M.ensure(key, asset_id_or_urls)
+    if not entries[key] then
+        M.register(key, asset_id_or_urls)
+    end
+    return entries[key]
+end
+
+function M.tick(key)
+    local entry = entries[key]
+    if not entry or entry.failed or not draw or not draw.load_image then return end
+
+    if not entry.handle then
+        local url = entry.urls[entry.url_index]
+        if not url then
+            entry.failed = true
+            return
+        end
+        entry.handle = draw.load_image(url)
+        if not entry.handle then
+            entry.url_index = entry.url_index + 1
+            if entry.url_index > #entry.urls then
+                entry.failed = true
+            end
+        end
+        return
+    end
+
+    if draw.image_loaded and draw.image_loaded(entry.handle) then
+        return
+    end
+
+    if draw.image_failed and draw.image_failed(entry.handle) then
+        if draw.free_image then
+            pcall(function() draw.free_image(entry.handle) end)
+        end
+        entry.handle = nil
+        entry.url_index = entry.url_index + 1
+        if entry.url_index > #entry.urls then
+            entry.failed = true
+        end
+    end
+end
+
+function M.tick_all()
+    for key, _ in pairs(entries) do
+        M.tick(key)
+    end
+end
+
+function M.ready(key)
+    local entry = entries[key]
+    if not entry or not entry.handle then return false end
+    return draw and draw.image_loaded and draw.image_loaded(entry.handle)
+end
+
+function M.handle(key)
+    local entry = entries[key]
+    return entry and entry.handle
+end
+
+function M.draw_fit(key, x, y, w, h, col)
+    M.tick(key)
+    if not M.ready(key) or not draw.image then return false end
+
+    local handle = M.handle(key)
+    local iw, ih = draw.image_size(handle)
+    if not iw or iw <= 0 or not ih or ih <= 0 then return false end
+
+    w = math.max(w or 0, 8)
+    h = math.max(h or 0, 8)
+
+    local dw = w
+    local dh = math.floor(w * ih / iw)
+    if dh < h then
+        dh = h
+        dw = math.floor(h * iw / ih)
+    end
+
+    local dx = x + (w - dw) * 0.5
+    local dy = y + (h - dh) * 0.5
+
+    if col then
+        draw.image(handle, dx, dy, dw, dh, col)
+    else
+        draw.image(handle, dx, dy, dw, dh)
+    end
+    return true
+end
+
+function M.draw_at_world(key, wx, wy, wz, display_w)
+    M.tick(key)
+    if not M.ready(key) then return false end
+
+    local sx, sy, vis
+    if draw and draw.world_to_screen then
+        sx, sy, vis = draw.world_to_screen(wx, wy, wz)
+    elseif utility and utility.world_to_screen then
+        sx, sy, vis = utility.world_to_screen(wx, wy, wz)
+    end
+    if not vis then return false end
+
+    local handle = M.handle(key)
+    local iw, ih = draw.image_size(handle)
+    if not iw or iw <= 0 or not ih or ih <= 0 then return false end
+
+    display_w = display_w or 64
+    local dh = math.floor(display_w * ih / iw)
+
+    draw.image(handle, sx - display_w * 0.5, sy - dh, display_w, dh)
+    return true
 end
 
 return M
@@ -585,6 +964,56 @@ function M.draw_offscreen_arrow(cx, cy, tx, ty, col, size)
     else
         draw_util.line(px, py, px - dx * 8 + lx * 6, py - dy * 8 + ly * 6, col, 2)
         draw_util.line(px, py, px - dx * 8 - lx * 6, py - dy * 8 - ly * 6, col, 2)
+    end
+end
+
+local BOX_EDGES = {
+    { 1, 2 }, { 1, 3 }, { 2, 4 }, { 3, 4 },
+    { 5, 6 }, { 5, 7 }, { 6, 8 }, { 7, 8 },
+    { 1, 5 }, { 2, 6 }, { 3, 7 }, { 4, 8 },
+}
+
+local BOX_SIGNS = {
+    { -1, -1, -1 }, { 1, -1, -1 }, { -1, 1, -1 }, { 1, 1, -1 },
+    { -1, -1, 1 }, { 1, -1, 1 }, { -1, 1, 1 }, { 1, 1, 1 },
+}
+
+function M.draw_oriented_box(box, col, thick)
+    if not box or not draw or not draw.line then return end
+    thick = thick or 1
+
+    local corners = {}
+    for i = 1, 8 do
+        local sx, sy, sz = BOX_SIGNS[i][1], BOX_SIGNS[i][2], BOX_SIGNS[i][3]
+        local lx, ly, lz = sx * box.hx, sy * box.hy, sz * box.hz
+        local wx = box.x + box.rx * lx + box.ux * ly - box.lx * lz
+        local wy = box.y + box.ry * lx + box.uy * ly - box.ly * lz
+        local wz = box.z + box.rz * lx + box.uz * ly - box.lz * lz
+        corners[i] = { wx, wy, wz }
+    end
+
+    local screen = {}
+    for i = 1, 8 do
+        local c = corners[i]
+        local sx, sy, vis = M.w2s(c[1], c[2], c[3])
+        if vis then screen[i] = { x = sx, y = sy } end
+    end
+
+    for _, edge in ipairs(BOX_EDGES) do
+        local a, b = screen[edge[1]], screen[edge[2]]
+        if a and b then
+            draw_util.line(a.x, a.y, b.x, b.y, col, thick)
+        end
+    end
+end
+
+function M.draw_entry_boxes(entry, col, thick)
+    if not entry or not entry.inst then return end
+    local scan = April.require("game.esp_scan")
+    local main = scan.find_main_part(entry.inst)
+    local box = scan.read_part_box(main)
+    if box then
+        M.draw_oriented_box(box, col, thick)
     end
 end
 
@@ -832,6 +1261,32 @@ function M.find_toolinfo()
     return best, best_n
 end
 
+function M.find_items()
+    local best, best_n = nil, 0
+    M.each_table(function(v)
+        local n = 0
+        if type(v[1]) == "table" and v[1].Name and v[1].Image then
+            for i = 1, #v do
+                local entry = v[i]
+                if type(entry) == "table" and entry.Name and entry.Image then
+                    n = n + 1
+                end
+            end
+        else
+            for _, entry in pairs(v) do
+                if type(entry) == "table" and entry.Name and entry.Image then
+                    n = n + 1
+                end
+            end
+        end
+        if n > best_n and n >= 100 then
+            best_n = n
+            best = v
+        end
+    end)
+    return best, best_n
+end
+
 return M
 
 end)()
@@ -898,6 +1353,9 @@ local function on_toolinfo_ready(count)
     else
         weapons.load()
     end
+
+    local items = April.require("game.items")
+    items.load()
 end
 
 function M.try_load_all()
@@ -947,12 +1405,15 @@ function M.force_reload()
     M._scan_after = 0
     module_scan.invalidate_cache()
     April.require("game.weapons").invalidate()
+    April.require("game.items").invalidate()
     return M.try_load_all()
 end
 
 function M.tick()
     if not M._ready then
         M.try_load_all()
+    else
+        April.require("game.items").load()
     end
 end
 
@@ -989,10 +1450,19 @@ function M.get_folder(...)
     local cur = ws
     for _, name in ipairs({ ... }) do
         if not cur then return nil end
-        cur = env.safe_call(function() return cur:find_first_child(name) end)
+        cur = env.safe_call(function()
+            return cur:find_first_child(name)
+                or cur:FindFirstChild(name)
+        end)
         if not env.is_valid(cur) then return nil end
     end
     return cur
+end
+
+function M.from_key(key)
+    local path = M.PATHS[key]
+    if not path then return nil end
+    return M.get_folder(unpack(path))
 end
 
 function M.scan_children(folder, class_filter, max_count)
@@ -1043,9 +1513,374 @@ return M
 
 end)()
 
+-- ── game/item_images.lua ──
+April._mods["game.item_images"] = (function()
+-- AUTO-GENERATED by scripts/extract-item-images.mjs — do not edit by hand
+-- Source: references/dump/scripts/ReplicatedStorage.Modules.Items.ModuleScript.lua
+
+local M = {}
+
+M.by_name = {
+    ["%s\\'s Trophy"] = { default = "15274399715" },
+    ["Admin Tool"] = { default = "16630443040" },
+    ["Ammo Press"] = { default = "15061609857" },
+    ["Animal Fat"] = { default = "15304534433" },
+    ["Anvil"] = { default = "15082009292" },
+    ["Armor Plate"] = { default = "126213314272257" },
+    ["Armor Polish"] = { default = "106804025023012" },
+    ["Armor Stand"] = { default = "80529735817758" },
+    ["Auto Turret"] = { default = "92892387954820" },
+    ["Balaclava"] = { default = "14654791788", variants = { ["Default"] = "14654791788", ["Jester"] = "15344534842", ["Frankenstein"] = "15883389666", ["Independence"] = "18341880885", ["Digital"] = "18965910197", ["Jolly"] = "129387971218495", ["Skull"] = "139941774966045", ["Monkey"] = "74568523494874", } },
+    ["Bandage"] = { default = "14134567329" },
+    ["Barrel Light"] = { default = "17508402018" },
+    ["Base Cabinet"] = { default = "14653876852", variants = { ["Default"] = "14653876852", ["Server"] = "109131187101243", } },
+    ["Baseball Cap"] = { default = "14654795325", variants = { ["Default"] = "14654795325", ["Quack"] = "16208669800", ["Independence"] = "18341880766", ["Propeller"] = "115535550124192", ["Pilgrim"] = "132977576727336", } },
+    ["Bean Can"] = { default = "14162885124" },
+    ["Bear Trap"] = { default = "16283811174" },
+    ["Bed"] = { default = "15368539842", variants = { ["Default"] = "15368539842", ["Pixel"] = "125567129432156", } },
+    ["Beef MRE"] = { default = "14162884919" },
+    ["Black Keycard"] = { default = "115892814344173" },
+    ["Blade"] = { default = "14651119220" },
+    ["Blast Furnace"] = { default = "15876671239", variants = { ["Default"] = "15876671239", ["Robot"] = "18149216269", ["Steampunk"] = "113856439034974", } },
+    ["Blueberries"] = { default = "17508520653" },
+    ["Blueberry Pie I"] = { default = "17513319274" },
+    ["Blueberry Pie II"] = { default = "17513319171" },
+    ["Blueberry Pie III"] = { default = "17513318992" },
+    ["Blueberry Pie IV"] = { default = "17513318548" },
+    ["Blueberry Plant Seed"] = { default = "17357236681" },
+    ["Blueprint"] = { default = "15132469785" },
+    ["Bone Armor"] = { default = "119847143620647", variants = { ["Default"] = "119847143620647", } },
+    ["Bone Arrow"] = { default = "13981013521" },
+    ["Bone Shards"] = { default = "13207713694" },
+    ["Bone Tool"] = { default = "15510368323", variants = { ["Default"] = "15510368323", } },
+    ["Boots"] = { default = "14654795457", variants = { ["Default"] = "14654795457", ["Black"] = "15283152697", ["Abibas"] = "15305690697", ["Valentine"] = "16293022275", ["Woodland"] = "16473066174", ["Correctional"] = "92577755087375", ["Nutcracker"] = "102533866187536", ["Brutus"] = "124559624944530", ["Tundra"] = "75185734630840", ["Pilot"] = "134265072222654", ["Medal"] = "107412050354842", } },
+    ["Boss Chestplate"] = { default = "16652581317", variants = { ["Default"] = "16652581317", ["Cryo"] = "106187507956822", ["Boris"] = "18354053691", ["Brutus"] = "120699966211693", } },
+    ["Boss Helmet"] = { default = "16652579167", variants = { ["Default"] = "16652579167", ["Cryo"] = "102872157681930", ["Boris"] = "18312187080", ["Brutus"] = "134265072222654", } },
+    ["Bottle Caps"] = { default = "14654996629" },
+    ["Boulder"] = { default = "15304806846", variants = { ["Default"] = "15304806846", ["Bubblegum"] = "15304805303", ["Frosty"] = "15304805239", ["Tester"] = "15304805180", ["Voxel"] = "15574223076", ["Wrapped"] = "15712360641", ["Pixskull"] = "17766619061", ["Stellark"] = "97313343547804", ["Cursed"] = "92913832321996", ["Sushi"] = "78426403974796", ["Chocolate"] = "139716602333201", ["Moai"] = "115978938918724", ["Ducky"] = "124674000707337", ["Pumpkin"] = "126349162347833", ["Mosaic"] = "74510585736689", } },
+    ["Bruno\\'s ACOG Sight"] = { default = "16671196298" },
+    ["Bruno\\'s M4A1"] = { default = "15574295393", variants = { ["Default"] = "15574295393", } },
+    ["Buckshot"] = { default = "13186566301" },
+    ["Bunny Ears"] = { default = "16916795577", variants = { ["Default"] = "16916795577", } },
+    ["Button"] = { default = "93858053715998" },
+    ["Cactus Flesh"] = { default = "13219980518" },
+    ["Campfire"] = { default = "15128008159", variants = { ["Default"] = "15128008159", ["Skulls"] = "133107732568884", } },
+    ["Candle"] = { default = "117249643725742", variants = { ["Default"] = "117249643725742", ["Medium"] = "108927440959870", ["Large"] = "84899373039469", } },
+    ["Candy Cane"] = { default = "15633196493", variants = { ["Default"] = "15633196493", } },
+    ["Candy Roll"] = { default = "138463136634140" },
+    ["Care Package Signal"] = { default = "15128007999" },
+    ["Carpentry Table"] = { default = "15082010398" },
+    ["Carrot Blade"] = { default = "16916703095", variants = { ["Default"] = "16916703095", } },
+    ["Chainsaw"] = { default = "17201657737", variants = { ["Default"] = "17201657737", ["Recycle"] = "17357130465", } },
+    ["Charcoal"] = { default = "13207713474" },
+    ["Chemistry Lab"] = { default = "15074207343" },
+    ["Chicken Egg"] = { default = "17497768025" },
+    ["Chicken House"] = { default = "17499918454" },
+    ["Chicken MRE"] = { default = "14162884663" },
+    ["Chocolate Bar"] = { default = "14162884792" },
+    ["Christmas Lights"] = { default = "134491722995587", variants = { ["Default"] = "134491722995587", } },
+    ["Christmas Tree"] = { default = "15634564093", variants = { ["Default"] = "15634564093", } },
+    ["Circuit Boards"] = { default = "14651118848" },
+    ["Clan Table"] = { default = "74442604226077" },
+    ["Cloth"] = { default = "13207713326" },
+    ["Cloth Footwraps"] = { default = "14654794730", variants = { ["Default"] = "14654794730", ["Ninja"] = "132892877448790", } },
+    ["Cloth Handwraps"] = { default = "14654831164", variants = { ["Default"] = "14654831164", ["Ninja"] = "114878511497747", } },
+    ["Cloth Headwrap"] = { default = "14654795058", variants = { ["Default"] = "14654795058", ["Ninja"] = "120080222783269", } },
+    ["Cloth Pants"] = { default = "14654794952", variants = { ["Default"] = "14654794952", ["Ninja"] = "88014133756226", } },
+    ["Cloth Shirt"] = { default = "14654794835", variants = { ["Default"] = "14654794835", ["Ninja"] = "107568365412229", } },
+    ["Collared Shirt"] = { default = "14654793432", variants = { ["Default"] = "14654793432", ["Business"] = "15444462393", ["Correctional"] = "140110401401547", ["Flannel"] = "97292443788852", } },
+    ["Combination Lock"] = { default = "15305165381" },
+    ["Combustive Arrow"] = { default = "13981013386" },
+    ["Combustive Buckshot"] = { default = "13186565241" },
+    ["Combustive Heavy Ammo"] = { default = "13186583441" },
+    ["Combustive Rocket"] = { default = "15637959127" },
+    ["Common Goodie Bag"] = { default = "118444522725158" },
+    ["Compensator"] = { default = "15347108187" },
+    ["Cooked Pork"] = { default = "15295773801" },
+    ["Cooked Venison"] = { default = "13220221662" },
+    ["Cooked Wolf"] = { default = "15295773801" },
+    ["Cooking Pot"] = { default = "15127562373", variants = { ["Default"] = "15127562373", } },
+    ["Copper Cogs"] = { default = "14651228837" },
+    ["Corn"] = { default = "17412555936" },
+    ["Corn Bread I"] = { default = "17513318249" },
+    ["Corn Bread II"] = { default = "17513318071" },
+    ["Corn Bread III"] = { default = "17513317915" },
+    ["Corn Bread IV"] = { default = "17513317765" },
+    ["Corn Plant Seed"] = { default = "17357236563" },
+    ["Cow Pasture"] = { default = "17499917838" },
+    ["Crossbow"] = { default = "15305596532", variants = { ["Default"] = "15305596532", ["Crossbones"] = "15305756728", ["HotDog"] = "15877969435", ["Emerald"] = "16751858634", ["Rose"] = "80803215254174", ["Toy"] = "102956782968040", ["Chief"] = "137062431435688", } },
+    ["Crude Fuel"] = { default = "14651282157" },
+    ["Crude Fuel Generator"] = { default = "117457710807147", variants = { ["Default"] = "117457710807147", } },
+    ["Culinary Table"] = { default = "15061609707" },
+    ["Cursed Pumpkin"] = { default = "74135087469069" },
+    ["Diving Goggles"] = { default = "13842989638" },
+    ["Diving Tank"] = { default = "13843003364" },
+    ["Duct Tape"] = { default = "14651118525" },
+    ["Dynamite Bundle"] = { default = "15127431071" },
+    ["Dynamite Stick"] = { default = "15127430886" },
+    ["Electric Furnace"] = { default = "71536889851799", variants = { ["Default"] = "71536889851799", ["ICBM"] = "115876027631434", } },
+    ["Electric Heater"] = { default = "117015755787407", variants = { ["Default"] = "117015755787407", } },
+    ["Empty Can"] = { default = "14594762895" },
+    ["Epic Goodie Bag"] = { default = "93565798791105" },
+    ["Explosive Shell"] = { default = "71411772918243" },
+    ["Extended Mag"] = { default = "17286302189" },
+    ["External Stone Gate"] = { default = "14134361372" },
+    ["External Stone Wall"] = { default = "15709318091" },
+    ["External Wooden Gate"] = { default = "15132487698" },
+    ["External Wooden Wall"] = { default = "15132487460" },
+    ["Fireplace"] = { default = "134438626724268", variants = { ["Default"] = "134438626724268", } },
+    ["Fish Can"] = { default = "14162884523" },
+    ["Flannel Jacket"] = { default = "14654794281", variants = { ["Default"] = "14654794281", ["Biker"] = "15877516070", ["Correctional"] = "100006176575349", ["Abibas"] = "138547747231782", } },
+    ["Flippers"] = { default = "13843003596" },
+    ["Floor Grill"] = { default = "15853202987" },
+    ["Furnace"] = { default = "15074084708", variants = { ["Default"] = "15074084708", ["Banana"] = "15344532656", ["Glyphs"] = "15630767150", ["Gorilla"] = "16484587298", ["Burger"] = "84948985557474", ["Penguin"] = "122396159441498", ["Pumpkin"] = "81542845446759", } },
+    ["Garage Door"] = { default = "16574547137", variants = { ["Default"] = "16574547137", ["Blob"] = "15509791543", ["Cryo"] = "113706556350765", ["Witch"] = "85491019952546", } },
+    ["Glass Window"] = { default = "15210914495" },
+    ["Glue"] = { default = "14651236358" },
+    ["Gunpowder"] = { default = "15074277771" },
+    ["Halloween Scythe"] = { default = "97593929634585" },
+    ["Hammer"] = { default = "15318044673", variants = { ["Default"] = "15318044673", ["Toy"] = "15509809013", } },
+    ["Hard Hat"] = { default = "14654794545", variants = { ["Default"] = "14654794545", ["Slurpee"] = "15950562586", } },
+    ["Hazmat Suit"] = { default = "15046441717", variants = { ["Default"] = "15046441717", ["Snowman"] = "15712521421", ["Spark"] = "18965466357", ["Stellark"] = "123693400858947", ["Classified"] = "78801273340050", ["Front"] = "109185322610878", ["Guard"] = "113617571174399", ["Ducky"] = "116234383398695", ["Ghoul"] = "102977931837887", ["Specialist"] = "99406105774604", } },
+    ["Heavy Ammo"] = { default = "13186564679" },
+    ["Heavy Padding"] = { default = "136131316663930" },
+    ["Holo Sight"] = { default = "14162721610" },
+    ["Hoodie"] = { default = "14654794392", variants = { ["Default"] = "14654794392", ["Boris"] = "18312277063", ["Red"] = "15283152304", ["Purple"] = "15283152380", ["Green"] = "15283152598", ["Abibas"] = "15305689057", ["Wool"] = "15877516276", ["Valentine"] = "16293021303", ["Woodland"] = "16448119412", ["Tyrant"] = "130901964742021", ["Nutcracker"] = "72418266986929", ["Puffer"] = "71855339887230", ["Brutus"] = "116605401922894", ["Tundra"] = "94852483691948", ["Pilot"] = "134265072222654", ["Player"] = "72323540553042", ["Bee"] = "106663686372311", ["Night"] = "104718096945503", } },
+    ["Horizontal Window Cover"] = { default = "15396925485" },
+    ["Iron Ore"] = { default = "14308849053" },
+    ["Iron Shard Hatchet"] = { default = "15073617640", variants = { ["Default"] = "15073617640", ["Fade"] = "16663953399", ["Sawblade"] = "18963884209", ["Leather"] = "82373698320243", } },
+    ["Iron Shard Pickaxe"] = { default = "15073617491", variants = { ["Default"] = "15073617491", ["Fade"] = "16663949312", ["Leather"] = "99659875069484", } },
+    ["Iron Shards"] = { default = "14184000696" },
+    ["Jack-O-Lantern"] = { default = "139460860545325", variants = { ["Default"] = "139460860545325", ["Sad"] = "101370696376275", ["Happy"] = "130966939339167", } },
+    ["Jail Door"] = { default = "13547704298" },
+    ["Jail Wall"] = { default = "13547704099" },
+    ["Jukebox"] = { default = "17343466496", variants = { ["Default"] = "17343466496", } },
+    ["Ladder"] = { default = "15127607098", variants = { ["Default"] = "15127607098", } },
+    ["Landmine Trap"] = { default = "16283811057" },
+    ["Large Battery"] = { default = "78253036378845", variants = { ["Default"] = "78253036378845", } },
+    ["Large Cobweb"] = { default = "104604287353224" },
+    ["Large Furnace"] = { default = "15133678858", variants = { ["Default"] = "15133678858", } },
+    ["Large Medkit"] = { default = "75730798424498" },
+    ["Large Planter Box"] = { default = "17506371558" },
+    ["Large Storage Box"] = { default = "15094083403", variants = { ["Default"] = "15094083403", ["Canvas"] = "15283200485", ["Festive"] = "15709683124", ["Forged"] = "17758887216", ["Coffin"] = "112688458744179", ["Ouja"] = "102172335761498", } },
+    ["Large Wooden Sign"] = { default = "15509119053" },
+    ["Leather"] = { default = "13207712789" },
+    ["Leather Boots"] = { default = "14654794176", variants = { ["Default"] = "14654794176", ["Correctional"] = "95515905374532", } },
+    ["Leather Gloves"] = { default = "14654794097", variants = { ["Default"] = "14654794097", ["Correctional"] = "92980178755471", ["Noir"] = "107804982630320", } },
+    ["Leather Pants"] = { default = "14654793993", variants = { ["Default"] = "14654793993", ["Correctional"] = "108412621160578", } },
+    ["Leather Poncho"] = { default = "14654793821", variants = { ["Default"] = "14654793821", ["Viva"] = "16208668209", ["Pilgrim"] = "98358561085174", } },
+    ["Leather Shirt"] = { default = "14654793568", variants = { ["Default"] = "14654793568", ["Correctional"] = "109168692318343", } },
+    ["Lemon"] = { default = "17508522472" },
+    ["Lemon Cake I"] = { default = "17513316973" },
+    ["Lemon Cake II"] = { default = "17513316847" },
+    ["Lemon Cake III"] = { default = "17513316683" },
+    ["Lemon Cake IV"] = { default = "17513316422" },
+    ["Lemon Plant Seed"] = { default = "17357236426" },
+    ["Light Ammo"] = { default = "13685818536" },
+    ["Lighter"] = { default = "15128007580", variants = { ["Default"] = "15128007580", ["Lantern"] = "123377357974589", } },
+    ["Lightweight Padding"] = { default = "96591489718879" },
+    ["Loom"] = { default = "17517380322" },
+    ["Machete"] = { default = "16249771824", variants = { ["Default"] = "16249771824", ["Rainbow"] = "16823202004", ["Crimson"] = "16912320468", ["Foam"] = "18761536955", ["Oni"] = "84793810931259", } },
+    ["Marsh Bar"] = { default = "113016339245665" },
+    ["Meatball Can"] = { default = "14162884362" },
+    ["Medium Battery"] = { default = "129552454538184", variants = { ["Default"] = "129552454538184", } },
+    ["Metal Barricade"] = { default = "15380991275" },
+    ["Metal Door"] = { default = "15132832907", variants = { ["Default"] = "15132832907", ["Pixel"] = "15310965325", ["Frosty"] = "15304875360", ["Independence"] = "18341881259", ["Comic"] = "18444379748", ["Industrial"] = "78073516430678", ["Demon"] = "137869636615146", ["Bayou"] = "88981731583061", } },
+    ["Metal Double Door"] = { default = "15132833297", variants = { ["Default"] = "15132833297", ["Pixel"] = "15310966370", ["Tropical"] = "16483738322", ["Nightwave"] = "119789304012674", } },
+    ["Metal Plating"] = { default = "14651164157" },
+    ["Metal Scraps"] = { default = "14651117901" },
+    ["Metal Spikes"] = { default = "16484592502" },
+    ["Metal Window Bars"] = { default = "15132553555" },
+    ["Military AA12"] = { default = "15068791139", variants = { ["Default"] = "15068791139", ["Zombie"] = "17199281354", ["Monster"] = "136853604493538", } },
+    ["Military ACOG Sight"] = { default = "15373701079" },
+    ["Military Backpack"] = { default = "117242081838466", variants = { ["Default"] = "117242081838466", ["Tundra"] = "98126095773472", ["Abibas"] = "82640089227507", } },
+    ["Military Barrett"] = { default = "15346280030", variants = { ["Default"] = "15346280030", ["Surge"] = "15876918136", ["Leprechaun"] = "16751857511", ["Mystra"] = "98792148092190", ["Fade"] = "73907766386158", ["Molten"] = "103075738835660", ["Cryo"] = "124741300378620", } },
+    ["Military Boat"] = { default = "14183996624" },
+    ["Military Chestplate"] = { default = "14654793303", variants = { ["Default"] = "14654793303", ["Nutcracker"] = "70853333750344", ["Pilot"] = "134265072222654", ["Medal"] = "81188910996008", } },
+    ["Military Gloves"] = { default = "14654794652", variants = { ["Default"] = "14654794652", ["Nutcracker"] = "118158228480821", ["Arctic"] = "76148467345468", ["Pilot"] = "134265072222654", ["Grim"] = "123472167772965", ["Medal"] = "137375914230135", } },
+    ["Military Grenade"] = { default = "15444535479" },
+    ["Military Grenade Launcher"] = { default = "136030704871223", variants = { ["Default"] = "136030704871223", } },
+    ["Military Helmet"] = { default = "14654793165", variants = { ["Default"] = "14654793165", ["Nutcracker"] = "80633563389909", ["Pilot"] = "134265072222654", ["Medal"] = "108938282129584", } },
+    ["Military Lasersight"] = { default = "15510372535" },
+    ["Military Leggings"] = { default = "14654792938", variants = { ["Default"] = "14654792938", ["Nutcracker"] = "84566720271674", ["Brutus"] = "75512320758936", ["Tundra"] = "86308809791688", ["Cryo"] = "88056077715569", ["Medal"] = "136956516639652", } },
+    ["Military M39"] = { default = "74435081612082", variants = { ["Default"] = "74435081612082", ["Medusa"] = "117342321001432", ["Turkey"] = "111197339750272", } },
+    ["Military M4A1"] = { default = "15346201415", variants = { ["Default"] = "15346201415", ["Syntax"] = "15951831122", ["Monster"] = "16663261126", ["Toy"] = "17521734560", ["Independence"] = "18341881006", ["Phantom"] = "139190777075295", ["Nutcracker"] = "136729540441664", ["Medusa"] = "101267874762837", ["Cryo"] = "94745687589547", ["CyberPop"] = "101893225757265", } },
+    ["Military MP7"] = { default = "17607841424", variants = { ["Default"] = "17607841424", ["Fade"] = "18764670728", ["Whiteout"] = "112724849582854", ["Tyrant"] = "88901653074832", ["Wave"] = "108003941053496", ["Animeaster"] = "137259300477168", ["Solitare"] = "128296099845816", ["Grunge"] = "96361565266502", ["Zap"] = "126949129741030", } },
+    ["Military PKM"] = { default = "16471125314", variants = { ["Default"] = "16471125314", ["Woodland"] = "16471122135", ["Resistance"] = "18149212335", ["Turbo"] = "18950918343", } },
+    ["Military Sniper Scope"] = { default = "15304097316" },
+    ["Military USP"] = { default = "85577075764668", variants = { ["Default"] = "85577075764668", ["Fade"] = "89094430760827", ["Azure"] = "74032961902891", } },
+    ["Milk"] = { default = "17497767948" },
+    ["Mining Drill"] = { default = "17287978593", variants = { ["Default"] = "17287978593", ["Recycle"] = "17357129069", ["Brick"] = "111424776562874", } },
+    ["Muzzle Boost"] = { default = "15347107233" },
+    ["Nail Gun"] = { default = "15305104734", variants = { ["Default"] = "15305104734", ["Striker"] = "15305729695", ["Magma"] = "15946260536", ["Wintrane"] = "114731373088561", } },
+    ["Nails"] = { default = "13186564996" },
+    ["Night Vision Goggles"] = { default = "97551543360376" },
+    ["Pants"] = { default = "14654792590", variants = { ["Default"] = "14654792590", ["Boris"] = "18312279038", ["Khaki"] = "15283151856", ["Abibas"] = "15305689962", ["Valentine"] = "16293019822", ["Woodland"] = "16448121262", ["Correctional"] = "135793344308303", ["Tyrant"] = "136885851029799", ["Nutcracker"] = "71901466636387", ["Brutus"] = "85540429494017", ["Tundra"] = "90847059484754", ["Pilot"] = "134265072222654", ["Player"] = "129572575838612", ["Bee"] = "136553486453775", } },
+    ["Peanut Butter Cup"] = { default = "77624523695187" },
+    ["Petroleum"] = { default = "14651118356" },
+    ["Petroleum Refinery"] = { default = "15304104065", variants = { ["Default"] = "15304104065", } },
+    ["Phosphate Dust"] = { default = "14183996960" },
+    ["Phosphate Ore"] = { default = "15132608151" },
+    ["Piercing Heavy Ammo"] = { default = "13186565419" },
+    ["Piercing Light Ammo"] = { default = "13186588755" },
+    ["Pink Keycard"] = { default = "15247381747" },
+    ["Pipe"] = { default = "14651117776" },
+    ["Pistol Receiver"] = { default = "14651117642" },
+    ["Power Cell"] = { default = "13187407477" },
+    ["Propane Tank"] = { default = "13187406443" },
+    ["Pumpkin"] = { default = "88626583598376" },
+    ["Pumpkin Launcher"] = { default = "119532925295032" },
+    ["Pumpkin Pie"] = { default = "84895386905458" },
+    ["Pumpkin Plant Seed"] = { default = "121878490679837" },
+    ["Purple Keycard"] = { default = "15247381544" },
+    ["Purple Ornament"] = { default = "131580423003709" },
+    ["Quality Iron Ore"] = { default = "14308848947" },
+    ["Radiation Vitamins"] = { default = "15304290390" },
+    ["Rare Goodie Bag"] = { default = "82913604650237" },
+    ["Raspberries"] = { default = "17508521640" },
+    ["Raspberry Pie I"] = { default = "17513317601" },
+    ["Raspberry Pie II"] = { default = "17513317487" },
+    ["Raspberry Pie III"] = { default = "17513317352" },
+    ["Raspberry Pie IV"] = { default = "17513317172" },
+    ["Raspberry Plant Seed"] = { default = "17357236197" },
+    ["Raw Pork"] = { default = "15295774046" },
+    ["Raw Venison"] = { default = "13220221327" },
+    ["Raw Wolf"] = { default = "15295774046" },
+    ["Red Keycard"] = { default = "18313788194" },
+    ["Red Ornament"] = { default = "100403008362378" },
+    ["Repair Table"] = { default = "15283452092", variants = { ["Default"] = "15283452092", } },
+    ["Resistant Rubber"] = { default = "114763366778253" },
+    ["Rifle Receiver"] = { default = "14651117496" },
+    ["Rocket"] = { default = "15132772763" },
+    ["Rope"] = { default = "14651117276" },
+    ["Rug"] = { default = "17205250687", variants = { ["Default"] = "17205250687", ["Kraken"] = "17518134457", ["Independence"] = "18341881393", } },
+    ["SMG Receiver"] = { default = "14651115848" },
+    ["Salvaged AK47"] = { default = "14882620172", variants = { ["Default"] = "14882620172", ["Frosty"] = "15304886302", ["Vaporwave"] = "15574230457", ["Diablo"] = "16021791118", ["Fade"] = "79444477121964", ["Tyrant"] = "124312637758997", ["Gingerbread"] = "85687142665622", ["Ghillie"] = "132083989873001", ["Anodized"] = "80710562596890", ["CyberPop"] = "128785004285267", ["Oni"] = "105854184847862", ["Medal"] = "102460072725837", ["Dune"] = "83484244695308", } },
+    ["Salvaged AK74u"] = { default = "15073408197", variants = { ["Default"] = "15073408197", ["Beast"] = "15305755800", ["Splash"] = "15509741616", ["VIP"] = "16014753591", ["Comic"] = "16114228051", ["Clover"] = "16748171046", ["Nebula"] = "17518135139", ["Tundra"] = "114982197234346", ["MP5"] = "78960618674854", ["Flarette"] = "125113179502352", ["Zombie"] = "101630769388124", } },
+    ["Salvaged Backpack"] = { default = "80978101846806", variants = { ["Default"] = "80978101846806", ["Ducky"] = "84777906931514", } },
+    ["Salvaged Break Action"] = { default = "15305085935", variants = { ["Default"] = "15305085935", ["Splat"] = "15305729191", ["HotDog"] = "15632163269", ["Boom"] = "16823202171", ["Carrot"] = "16917852163", ["Surf"] = "17766587211", } },
+    ["Salvaged Chestplate"] = { default = "14654792418", variants = { ["Default"] = "14654792418", ["Cupid"] = "16261611092", ["Burnout"] = "18557168052", ["Tempest"] = "18966646034", } },
+    ["Salvaged Double Barrel"] = { default = "132642766917853", variants = { ["Default"] = "132642766917853", ["Ducky"] = "140296796147704", ["HotDog"] = "86842880761011", } },
+    ["Salvaged Explosive Shell"] = { default = "100468627382165" },
+    ["Salvaged Flycopter"] = { default = "14183996624" },
+    ["Salvaged Gloves"] = { default = "14654792260", variants = { ["Default"] = "14654792260", ["Cupid"] = "16261613114", ["Tempest"] = "18971460487", } },
+    ["Salvaged Grenade Launcher"] = { default = "122319440938090", variants = { ["Default"] = "122319440938090", } },
+    ["Salvaged Helmet"] = { default = "14654792150", variants = { ["Default"] = "14654792150", ["Cupid"] = "16261611838", ["Tempest"] = "18966646232", ["Cardboard"] = "71323845635099", } },
+    ["Salvaged Lasersight"] = { default = "15347108897" },
+    ["Salvaged Leggings"] = { default = "14654792046", variants = { ["Default"] = "14654792046", ["Cupid"] = "16261614321", ["Tempest"] = "18966645952", } },
+    ["Salvaged M14"] = { default = "14882876522", variants = { ["Default"] = "14882876522", ["Paintball"] = "15305730875", ["Splat"] = "16031054728", ["Arcane"] = "17507702118", ["Stellark"] = "77123726699368", ["Huntsman"] = "121372881282577", ["Glitch"] = "82715807510122", ["Frog14"] = "133627766691157", } },
+    ["Salvaged Metal Door"] = { default = "15132658803", variants = { ["Default"] = "15132658803", ["Visions"] = "15444463543", ["Graffiti"] = "16664082484", } },
+    ["Salvaged P250"] = { default = "15305065991", variants = { ["Default"] = "15305065991", ["Splat"] = "15305728596", ["Fade"] = "15631601051", ["Peppermint"] = "15712513595", ["Sketch"] = "16208668754", ["Tempest"] = "18966645823", ["Festive"] = "101842524476750", ["Drift"] = "94234232543243", } },
+    ["Salvaged Pipe Rifle"] = { default = "15073408081", variants = { ["Default"] = "15073408081", ["Surge"] = "15509721163", ["Gingerbread"] = "15638252851", ["Frost"] = "16208668377", ["Skyline"] = "18557168359", } },
+    ["Salvaged Pump Action"] = { default = "15092313032", variants = { ["Default"] = "15092313032", ["Cyber"] = "91058444899439", ["Flurry"] = "138789905852084", } },
+    ["Salvaged Python"] = { default = "15188995729", variants = { ["Default"] = "15188995729", ["Canvas"] = "15283200809", ["Hazard"] = "15305731383", ["Saku"] = "16029067988", ["Inferno"] = "16283806768", ["Shockwave"] = "17366304773", ["Independence"] = "18341881121", ["Stellark"] = "124497972716738", ["Hyper"] = "85697748071844", ["Smudge"] = "76952866923184", ["Medal"] = "128419932789140", } },
+    ["Salvaged RPG"] = { default = "15132772506", variants = { ["Default"] = "15132772506", ["Blast"] = "15305772236", ["Boomstick"] = "18965877488", ["Festive"] = "81287503464820", } },
+    ["Salvaged SMG"] = { default = "15132874040", variants = { ["Default"] = "15132874040", ["Splat"] = "15313314715", ["Inferno"] = "15883391466", ["Checkmate"] = "16114277804", ["Valentine"] = "16281529715", ["Knight"] = "17366143384", ["Tempest"] = "18966646387", ["Joker"] = "104734469891887", ["Ducky"] = "119924390182546", } },
+    ["Salvaged Shell"] = { default = "127373719846093" },
+    ["Salvaged Shotgun"] = { default = "128621428767531", variants = { ["Default"] = "128621428767531", ["Banana"] = "90420924851404", ["HotDog"] = "94732589170018", ["Camo"] = "85391407055752", } },
+    ["Salvaged Shovel"] = { default = "15074352064" },
+    ["Salvaged Sight"] = { default = "15283494417" },
+    ["Salvaged Skorpion"] = { default = "15369212859", variants = { ["Default"] = "15369212859", ["Gingerbread"] = "15637191692", ["Superior"] = "15950161435", ["Pegasus"] = "16577230942", ["Surge"] = "18149214997", ["Rusty"] = "87710451691684", ["Comic"] = "103323135308928", ["Celestial"] = "102882157920367", } },
+    ["Salvaged Sniper"] = { default = "74470836610605", variants = { ["Default"] = "74470836610605", ["Valentine"] = "134067753909583", ["Radioactive"] = "128500957974672", } },
+    ["Salvaged Sniper Scope"] = { default = "15304097362" },
+    ["Santa Hat"] = { default = "15636087096", variants = { ["Default"] = "15636087096", } },
+    ["Saw Bat"] = { default = "16249771997" },
+    ["Scarecrow"] = { default = "99382957417299" },
+    ["Semi Receiver"] = { default = "14651116315" },
+    ["Sewing Table"] = { default = "15061609510" },
+    ["Shop Machine"] = { default = "16769451135", variants = { ["Default"] = "16769451135", } },
+    ["Shorts"] = { default = "14654791921", variants = { ["Default"] = "14654791921", } },
+    ["Shotgun Shell"] = { default = "90346230004065" },
+    ["Shotgun Turret"] = { default = "16009975774" },
+    ["Silencer"] = { default = "15347105863" },
+    ["Sleeping Bag"] = { default = "15313154200", variants = { ["Default"] = "15313154200", ["Prismatic"] = "15574227229", ["Santa"] = "15715978392", ["Shark"] = "16117442613", ["Voxel"] = "18147427074", ["Spooky"] = "85015559308510", ["Fruit"] = "81952434018281", ["UwU"] = "96904970768142", ["Chocolate"] = "108416357231982", } },
+    ["Slug"] = { default = "13186564525" },
+    ["Small Battery"] = { default = "88959343384498", variants = { ["Default"] = "88959343384498", } },
+    ["Small Cobweb"] = { default = "72444796789811" },
+    ["Small Medkit"] = { default = "15086741523" },
+    ["Small Planter Box"] = { default = "17506371372" },
+    ["Small Storage Box"] = { default = "15094083341", variants = { ["Default"] = "15094083341", ["Monster"] = "15883290696", ["Comic"] = "16577230729", ["Gremlin"] = "16748563435", ["Burger"] = "95806776502625", ["Medical"] = "97915388339168", } },
+    ["Small Wooden Sign"] = { default = "15509119765" },
+    ["Snorkle"] = { default = "136407336127139" },
+    ["Solar Panel"] = { default = "81539973869850", variants = { ["Default"] = "81539973869850", } },
+    ["Splitter"] = { default = "119105209870894" },
+    ["Spring"] = { default = "14651115579" },
+    ["Steel Axe"] = { default = "13206734202", variants = { ["Default"] = "13206734202", ["Ruby"] = "15444465626", ["Freeze"] = "15712516834", ["Lava"] = "81357829552245", } },
+    ["Steel Chestplate"] = { default = "14654791689", variants = { ["Default"] = "14654791689", ["Frosty"] = "15305683641", ["OBEY"] = "15305695517", ["Woodland"] = "16447572145", ["Tyrant"] = "140168023066476", ["Oni"] = "126974041982300", ["Dune"] = "105836010915280", } },
+    ["Steel Door"] = { default = "15132554218", variants = { ["Default"] = "15132554218", ["Galactic"] = "16483736587", ["Tyrant"] = "90255972475887", ["Duck"] = "132207599970757", } },
+    ["Steel Double Door"] = { default = "15132553963", variants = { ["Default"] = "15132553963", ["Vaporwave"] = "17199280862", } },
+    ["Steel Glass Window"] = { default = "15132487922" },
+    ["Steel Helmet"] = { default = "14654791532", variants = { ["Default"] = "14654791532", ["Golden"] = "15305714913", ["Frosty"] = "15305683226", ["OBEY"] = "15305695029", ["VIP"] = "16014684244", ["Cardboard"] = "15627624994", ["Woodland"] = "16447574211", ["Tyrant"] = "109539796004549", ["Bomo"] = "80249585885084", ["Hockey"] = "97015125505963", ["Fear"] = "81724456402833", ["Oni"] = "114978122703010", ["Dune"] = "72849082443137", } },
+    ["Steel Leggings"] = { default = "14654791387", variants = { ["Default"] = "14654791387", ["Frosty"] = "15305684250", ["OBEY"] = "15311675719", ["Woodland"] = "16447575529", ["Tyrant"] = "79519920346999", ["Oni"] = "98478307520733", ["Dune"] = "76898574981463", } },
+    ["Steel Metal"] = { default = "16252541108" },
+    ["Steel Pickaxe"] = { default = "13206733920", variants = { ["Default"] = "13206733920", ["Cross"] = "15444466662", ["Freeze"] = "15712518908", ["Molten"] = "18762535576", } },
+    ["Steel Shovel"] = { default = "15074351964", variants = { ["Default"] = "15074351964", } },
+    ["Steel Toes"] = { default = "117409121428636" },
+    ["Stone"] = { default = "14308848818" },
+    ["Stone Hatchet"] = { default = "15073617325", variants = { ["Default"] = "15073617325", ["Molten"] = "15305732445", ["Shark"] = "16208668072", ["VIP"] = "16014755281", ["Valentine"] = "16281532811", ["Slime"] = "80657230310751", } },
+    ["Stone Pickaxe"] = { default = "15073617163", variants = { ["Default"] = "15073617163", ["Molten"] = "15305731898", ["VIP"] = "16014754516", ["Valentine"] = "16281531919", } },
+    ["Stone Spear"] = { default = "15303292549" },
+    ["Storage Cabinet"] = { default = "15572100650", variants = { ["Default"] = "15572100650", ["Monster"] = "15631715604", ["Hades"] = "16293483340", ["Tyrant"] = "125396135034194", ["Server"] = "83936574533516", } },
+    ["Swift Arrow"] = { default = "13981013848" },
+    ["Swift Heavy Ammo"] = { default = "13186565740" },
+    ["Swift Light Ammo"] = { default = "13186591166" },
+    ["Swift Rocket"] = { default = "15637955888" },
+    ["Switch"] = { default = "99819564678318" },
+    ["Tank Top"] = { default = "14654791246", variants = { ["Default"] = "14654791246", } },
+    ["Tarp"] = { default = "14651115367" },
+    ["Thread"] = { default = "14651157447" },
+    ["Timed Charge"] = { default = "13169199238" },
+    ["Tomato"] = { default = "17412555272" },
+    ["Tomato Plant Seed"] = { default = "17357235843" },
+    ["Trap Door"] = { default = "13143032792", variants = { ["Default"] = "13143032792", } },
+    ["Triangle Trap Door"] = { default = "13724822281", variants = { ["Default"] = "13724822281", } },
+    ["Vertical Window Cover"] = { default = "15396925620" },
+    ["Water Bottle"] = { default = "14162884193" },
+    ["Water Filter"] = { default = "128444748129429" },
+    ["Water Turbine"] = { default = "118840048689367", variants = { ["Default"] = "118840048689367", } },
+    ["Weapon Flashlight"] = { default = "15373700419" },
+    ["Wetsuit"] = { default = "15304093679", variants = { ["Default"] = "15304093679", ["Pink"] = "17363544575", ["Frog"] = "80603678790020", } },
+    ["White Ornament"] = { default = "125029502429647" },
+    ["Windmill"] = { default = "84509705966195", variants = { ["Default"] = "84509705966195", } },
+    ["Wire Cutters"] = { default = "118552370695485" },
+    ["Wood Log"] = { default = "14183996624" },
+    ["Wooden Arrow"] = { default = "13981013657" },
+    ["Wooden Boat"] = { default = "14183996624" },
+    ["Wooden Bow"] = { default = "15313266356", variants = { ["Default"] = "15313266356", ["Cupid"] = "16260403928", ["Crimson"] = "16912320324", ["Dragon"] = "119198626388204", } },
+    ["Wooden Chestplate"] = { default = "14776135830", variants = { ["Default"] = "14776135830", } },
+    ["Wooden Door"] = { default = "15132568626", variants = { ["Default"] = "15132568626", ["Beware"] = "15305026376", ["Chocolate"] = "15712523927", ["Cardboard"] = "132805078818983", ["Pixel"] = "106378082611103", ["Wise"] = "101629446511815", } },
+    ["Wooden Double Door"] = { default = "15132568988", variants = { ["Default"] = "15132568988", ["Rainbow"] = "15344501592", } },
+    ["Wooden Helmet"] = { default = "14776135648", variants = { ["Default"] = "14776135648", } },
+    ["Wooden Leggings"] = { default = "14776135514", variants = { ["Default"] = "14776135514", } },
+    ["Wooden Lock"] = { default = "15305165322" },
+    ["Wooden Spear"] = { default = "15303292373" },
+    ["Wooden Spikes"] = { default = "15380989444" },
+    ["Wooden Window Bars"] = { default = "15128007380" },
+    ["Wool"] = { default = "17499807914" },
+    ["Wool Plant Seed"] = { default = "17357235671" },
+    ["Wreath"] = { default = "125156247966096", variants = { ["Default"] = "125156247966096", } },
+    ["Yellow Keycard"] = { default = "15247381343" },
+    ["ez shovel"] = { default = "13877485530" },
+}
+
+function M.get_asset_id(name, variant)
+    local row = name and M.by_name[name]
+    if not row then return nil end
+    if variant and row.variants and row.variants[variant] then
+        return row.variants[variant]
+    end
+    return row.default
+end
+
+return M
+
+end)()
+
 -- ── game/items.lua ──
 April._mods["game.items"] = (function()
 local env = April.require("core.env")
+local item_images = April.require("game.item_images")
+local asset_urls = April.require("game.asset_urls")
 
 local M = {}
 local loaded = false
@@ -1057,31 +1892,52 @@ local FALLBACK = {
     ["Salvaged M14"] = { Type = "Tool" },
 }
 
-function M.load()
-    if loaded then return true end
-    local rep = env.get_replicated_storage()
-    if not rep then return false end
-    local modules = env.safe_call(function() return rep:find_first_child("Modules") end)
-    local items_mod = modules and env.safe_call(function() return modules:find_first_child("Items") end)
-    if not items_mod then return false end
-    local ok, data = pcall(function() return require(items_mod) end)
-    if ok and type(data) == "table" then
-        if data[1] then
-            for _, entry in ipairs(data) do
-                if entry.Name then by_name[entry.Name] = entry end
-            end
-        else
-            for name, entry in pairs(data) do
-                if type(entry) == "table" then
-                    entry.Name = entry.Name or name
-                    by_name[entry.Name] = entry
-                end
+local function index_data(data)
+    if data[1] and type(data[1]) == "table" then
+        for _, entry in ipairs(data) do
+            if entry.Name then by_name[entry.Name] = entry end
+        end
+    else
+        for name, entry in pairs(data) do
+            if type(entry) == "table" then
+                entry.Name = entry.Name or name
+                by_name[entry.Name] = entry
             end
         end
+    end
+end
+
+function M.load()
+    if loaded then return true end
+
+    local rep = env.get_replicated_storage()
+    if rep then
+        local modules = env.safe_call(function() return rep:find_first_child("Modules") end)
+        local items_mod = modules and env.safe_call(function() return modules:find_first_child("Items") end)
+        if items_mod then
+            local ok, data = pcall(function() return require(items_mod) end)
+            if ok and type(data) == "table" then
+                index_data(data)
+                loaded = true
+                return true
+            end
+        end
+    end
+
+    local module_scan = April.require("game.module_scan")
+    local data = module_scan.find_items()
+    if data then
+        index_data(data)
         loaded = true
         return true
     end
+
     return false
+end
+
+function M.invalidate()
+    loaded = false
+    by_name = {}
 end
 
 function M.get(name)
@@ -1092,6 +1948,104 @@ end
 function M.get_type(name)
     local item = M.get(name)
     return item and item.Type or "Unknown"
+end
+
+local function rbx_id_from_image(img)
+    if type(img) == "string" then
+        return img:match("(%d+)")
+    end
+    if type(img) == "table" then
+        local pick = img.Default or img.default
+        if type(pick) == "string" then
+            return pick:match("(%d+)")
+        end
+    end
+    return nil
+end
+
+function M.get_image_asset_id(name, variant)
+    if not name then return nil end
+
+    local id = item_images.get_asset_id(name, variant)
+    if id then return id end
+
+    if not loaded then M.load() end
+    local item = by_name[name]
+    if not item or not item.Image then return nil end
+
+    local img = item.Image
+    if type(img) == "string" then
+        return img:match("(%d+)")
+    end
+    if type(img) == "table" then
+        if variant and img[variant] then
+            return tostring(img[variant]):match("(%d+)")
+        end
+        return rbx_id_from_image(img)
+    end
+    return nil
+end
+
+function M.get_image_url(name, variant)
+    local id = M.get_image_asset_id(name, variant)
+    if id then return asset_urls.item_png(id) end
+    return nil
+end
+
+return M
+
+end)()
+
+-- ── game/armor_map.lua ──
+April._mods["game.armor_map"] = (function()
+--[[ Armor model names on character -> Items module display names (legacy ARMOR_MAP). ]]
+
+local M = {}
+
+M.BY_MODEL = {
+    ["Armor_153"] = "Cloth Head Wrap",
+    ["Armor_115"] = "Cloth Shirt",
+    ["Armor_116"] = "Cloth Pants",
+    ["Armor_156"] = "Cloth Handwraps",
+    ["Armor_117"] = "Cloth Footwraps",
+    ["Armor_124"] = "Wooden Chestplate",
+    ["Armor_125"] = "Wooden Leggings",
+    ["Armor_123"] = "Wooden Helmet",
+    ["Armor_145"] = "Salvaged Helmet",
+    ["Armor_146"] = "Salvaged Chestplate",
+    ["Armor_147"] = "Salvaged Leggings",
+    ["Armor_155"] = "Salvaged Gloves",
+    ["Armor_148"] = "Military Helmet",
+    ["Armor_149"] = "Military Chestplate",
+    ["Armor_150"] = "Military Leggings",
+    ["Armor_157"] = "Military Gloves",
+    ["Armor_271"] = "Altyn Helmet",
+    ["Armor_272"] = "Boris Chestplate",
+    ["Armor_141"] = "Steel Helmet",
+    ["Armor_142"] = "Steel Chestplate",
+    ["Armor_143"] = "Steel Leggings",
+    ["Armor_158"] = "Leather Gloves",
+    ["Armor_113"] = "Shorts",
+    ["Armor_59"] = "Hoodie",
+    ["Armor_63"] = "Pants",
+    ["Armor_60"] = "Hazmat Suit",
+    ["Armor_111"] = "Boots",
+    ["Armor_121"] = "Boots",
+    ["Armor_112"] = "Collared Shirt",
+    ["Armor_122"] = "Flannel Jacket",
+    ["Armor_114"] = "Tank Top",
+    ["Armor_159"] = "Wetsuit",
+    ["Armor_154"] = "Baseball Cap",
+    ["Armor_152"] = "Balaclava",
+    ["Armor_223"] = "Bruno's Helmet",
+    ["Armor_222"] = "Bruno's Chestplate",
+    ["Armor_298"] = "Bone Armor",
+    ["Armor_308"] = "Military Backpack",
+    ["Armor_309"] = "Salvaged Backpack",
+}
+
+function M.item_name(model_key)
+    return model_key and M.BY_MODEL[model_key]
 end
 
 return M
@@ -1424,6 +2378,77 @@ return M
 
 end)()
 
+-- ── game/player_gear.lua ──
+April._mods["game.player_gear"] = (function()
+local env = April.require("core.env")
+local armor_map = April.require("game.armor_map")
+local items = April.require("game.items")
+local weapons = April.require("game.weapons")
+
+local M = {}
+
+local function parse_armor_child(name)
+    if not name or not name:find("Armor_", 1, true) then return nil end
+    local model_key, variant = name:match("^(Armor_%d+)[%/]?(%w*)")
+    if not model_key then
+        model_key = name:match("^(Armor_%d+)")
+    end
+    if variant == "" then variant = nil end
+    return model_key, variant
+end
+
+function M.scan_player(player)
+    local out = {
+        held = nil,
+        armor = {},
+    }
+
+    if not player then return out end
+
+    if player.tool_name and player.tool_name ~= "" then
+        out.held = player.tool_name
+    end
+
+    local char = player.character
+    if not char or not env.is_valid(char) then return out end
+
+    local children = env.safe_call(function() return char:get_children() end) or {}
+    local seen = {}
+
+    for _, child in ipairs(children) do
+        if not env.is_valid(child) then goto continue end
+        local name = child.Name or child.name
+        if not name then goto continue end
+
+        if not out.held and weapons.is_weapon_name(name) then
+            out.held = name
+        end
+
+        local model_key, variant = parse_armor_child(name)
+        if model_key then
+            local item_name = armor_map.item_name(model_key)
+            if item_name and not seen[item_name] then
+                seen[item_name] = true
+                local asset_id = items.get_image_asset_id(item_name, variant)
+                table.insert(out.armor, {
+                    name = item_name,
+                    variant = variant,
+                    asset_id = asset_id,
+                    model_key = model_key,
+                })
+            end
+        end
+
+        ::continue::
+    end
+
+    return out
+end
+
+return M
+
+end)()
+
 -- ── game/gc_weapon_mods.lua ──
 April._mods["game.gc_weapon_mods"] = (function()
 --[[
@@ -1450,6 +2475,12 @@ M.GC_KEYS = {
 
 M._last_node_count = 0
 M._probed = false
+M._last_refresh_at = 0
+M._refresh_cooldown_ms = 2500
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
 
 local function has_api()
     return type(refreshgc) == "function"
@@ -1465,6 +2496,28 @@ function M.last_node_count()
     return M._last_node_count
 end
 
+local function refresh_nodes(force)
+    if not has_api() then return 0 end
+
+    local now = tick_ms()
+    if not force and M._last_node_count > 0 and now - M._last_refresh_at < M._refresh_cooldown_ms then
+        return M._last_node_count
+    end
+
+    pcall(function()
+        refreshgc()
+    end)
+    pcall(function()
+        local n = getgc(M.GC_KEYS)
+        if type(n) == "number" then
+            M._last_node_count = n
+        end
+    end)
+
+    M._last_refresh_at = now
+    return M._last_node_count
+end
+
 --[[ One-time startup probe: refreshgc + getgc(keys) only — no applygc. ]]
 function M.probe_on_load()
     if M._probed then return M._last_node_count end
@@ -1474,19 +2527,31 @@ function M.probe_on_load()
         return 0
     end
 
-    local count = 0
-    pcall(function()
-        refreshgc()
-    end)
-    pcall(function()
-        local n = getgc(M.GC_KEYS)
-        if type(n) == "number" then
-            count = n
-        end
-    end)
+    return refresh_nodes(true)
+end
 
-    M._last_node_count = count
-    return count
+function M.refresh_cache(force)
+    return refresh_nodes(force)
+end
+
+function M.apply_cached(mods)
+    if not has_api() then
+        return false, 0, "GC API unavailable (refreshgc/getgc/applygc)"
+    end
+    if type(mods) ~= "table" or not next(mods) then
+        return false, 0, "No modifiers selected"
+    end
+    if M._last_node_count <= 0 then
+        return false, 0, "No GC nodes cached"
+    end
+
+    local ok, err = pcall(applygc, mods)
+    if not ok then
+        april_debug.error_once("gun_mods:applygc", err)
+        return false, M._last_node_count, "applygc failed: " .. tostring(err)
+    end
+
+    return true, M._last_node_count, string.format("%d node(s) — mods active", M._last_node_count)
 end
 
 function M.apply_once(mods)
@@ -1497,29 +2562,12 @@ function M.apply_once(mods)
         return false, 0, "No modifiers selected"
     end
 
-    local count = 0
-    pcall(function()
-        refreshgc()
-    end)
-    pcall(function()
-        local n = getgc(M.GC_KEYS)
-        if type(n) == "number" then
-            count = n
-        end
-    end)
-
-    M._last_node_count = count
+    local count = refresh_nodes(true)
     if count <= 0 then
         return false, 0, "No tables found — enter a match with a gun equipped"
     end
 
-    local ok, err = pcall(applygc, mods)
-    if not ok then
-        april_debug.error_once("gun_mods:applygc", err)
-        return false, count, "applygc failed: " .. tostring(err)
-    end
-
-    return true, count, string.format("%d node(s) cached — mods active", count)
+    return M.apply_cached(mods)
 end
 
 function M.status_text()
@@ -1820,6 +2868,403 @@ function M.export_config_values()
         end
     end
     return lines
+end
+
+return M
+
+end)()
+
+-- ── game/npcs.lua ──
+April._mods["game.npcs"] = (function()
+--[[
+    Fallen Survival hostile NPCs — from workspace.Military monument children.
+    Dump confirms: Soldier, Bruno, Boris, Brutus (no zombies; VM "Zombie" skins are viewmodels only).
+]]
+
+local env = April.require("core.env")
+local folders = April.require("game.folders")
+
+local M = {}
+
+M.HOSTILE_NAMES = {
+    Soldier = true,
+    Bruno = true,
+    Boris = true,
+    Brutus = true,
+}
+
+function M.is_hostile_name(name)
+    return name and M.HOSTILE_NAMES[name] == true
+end
+
+function M.kind(name)
+    if name == "Soldier" then return "soldier" end
+    if name == "Bruno" or name == "Boris" or name == "Brutus" then return "boss" end
+    return nil
+end
+
+local function read_health(model)
+    local hum = env.safe_call(function()
+        if model.find_first_child_of_class then
+            return model:find_first_child_of_class("Humanoid")
+        end
+        for _, child in ipairs(model:get_children()) do
+            if child.ClassName == "Humanoid" then return child end
+        end
+        return nil
+    end)
+    if not hum then return nil end
+    local hp = hum.Health or hum.health
+    if hp and hp <= 0 then return nil end
+    return hum
+end
+
+function M.scan()
+    local out = {}
+    local military = folders.from_key("military")
+    if not env.is_valid(military) then return out end
+
+    local monuments = env.safe_call(function() return military:get_children() end) or {}
+    for _, monument in ipairs(monuments) do
+        if not env.is_valid(monument) then goto next_monument end
+        local children = env.safe_call(function() return monument:get_children() end) or {}
+        for _, model in ipairs(children) do
+            if not env.is_valid(model) then goto next_npc end
+            local name = model.Name or model.name
+            if not M.is_hostile_name(name) then goto next_npc end
+            if not read_health(model) then goto next_npc end
+            local head = env.safe_call(function()
+                return model:find_first_child("Head") or model:FindFirstChild("Head")
+            end)
+            if not head or not env.is_valid(head) then goto next_npc end
+
+            table.insert(out, {
+                inst = model,
+                name = name,
+                kind = M.kind(name),
+                head = head,
+            })
+            ::next_npc::
+        end
+        ::next_monument::
+    end
+
+    return out
+end
+
+return M
+
+end)()
+
+-- ── game/mod_ids.lua ──
+April._mods["game.mod_ids"] = (function()
+--[[ Fallen staff / mod user IDs — from matchascript + legacy fallen list. ]]
+
+local M = {}
+
+M.ROLES = {
+    [51281722] = "Game Moderator",
+    [7178750309] = "Game Moderator",
+    [113179883] = "Game Moderator",
+    [3122439095] = "Game Moderator",
+    [991290934] = "Game Moderator",
+    [3968854760] = "Game Moderator",
+    [81993536] = "Game Moderator",
+    [1004214871] = "Game Moderator",
+    [3034930770] = "Game Moderator",
+    [2364950171] = "Game Moderator",
+    [1528346843] = "Game Moderator",
+    [165053216] = "Game Moderator",
+    [1127954045] = "Game Moderator",
+    [3640120679] = "Game Moderator",
+    [602009251] = "Game Moderator",
+    [372791101] = "Game Moderator",
+    [1378169111] = "Game Moderator",
+    [3020799797] = "Game Moderator",
+    [2567998467] = "Game Moderator",
+    [4243907215] = "Game Moderator",
+    [353983652] = "Game Moderator",
+    [1406181681] = "Game Moderator",
+    [2229169589] = "Game Moderator",
+    [3004094651] = "Game Moderator",
+    [839333692] = "Game Moderator",
+    [979624578] = "Game Moderator",
+    [1478885961] = "Game Moderator",
+    [399754916] = "Game Moderator",
+    [1193091081] = "Game Moderator",
+    [4553863490] = "Game Moderator",
+    [4225513035] = "Game Moderator",
+    [41482597] = "Game Moderator",
+    [2924549627] = "Game Moderator",
+    [2732967856] = "Game Moderator",
+    [1937516999] = "Game Moderator",
+    [1374319325] = "Game Moderator",
+    [1058831985] = "Game Moderator",
+    [9621064456] = "Game Moderator",
+    [584370127] = "Game Moderator",
+    [813030262] = "Game Moderator",
+    [3470393585] = "Game Moderator",
+    [122915793] = "Game Moderator",
+    [1534692727] = "Game Moderator",
+    [7278178099] = "Game Moderator",
+    [8593140875] = "Game Moderator",
+    [2525997354] = "Game Moderator",
+    [3126891654] = "Game Moderator",
+    [1190967808] = "Game Moderator",
+    [833946684] = "Game Moderator",
+    [202751467] = "Game Moderator",
+    [510349404] = "Game Moderator",
+    [174212818] = "Contribution",
+    [25548179] = "Lead Developer",
+    [363101315] = "Lead Developer",
+    [47983795] = "Co-Founder",
+    [16681869] = "Founder",
+    -- legacy extras
+    [3544497889] = "Game Moderator",
+    [3739152618] = "Game Moderator",
+    [4252853044] = "Game Moderator",
+    [1500535353] = "Game Moderator",
+    [1116486172] = "Game Moderator",
+    [1304140224] = "Game Moderator",
+    [542183759] = "Game Moderator",
+    [2620215562] = "Game Moderator",
+    [1622256215] = "Game Moderator",
+    [2792072212] = "Game Moderator",
+    [3994092139] = "Game Moderator",
+    [914847610] = "Game Moderator",
+    [114812725] = "Game Moderator",
+    [1072151937] = "Game Moderator",
+    [1771300283] = "Game Moderator",
+    [1249478607] = "Game Moderator",
+}
+
+function M.role_for(user_id)
+    if not user_id then return nil end
+    return M.ROLES[user_id] or M.ROLES[tonumber(user_id)]
+end
+
+function M.is_mod(user_id)
+    return M.role_for(user_id) ~= nil
+end
+
+return M
+
+end)()
+
+-- ── game/esp_maps.lua ──
+April._mods["game.esp_maps"] = (function()
+--[[ Fallen Survival ESP name maps — from dump + legacy scan_world / scan_loot. ]]
+
+local M = {}
+
+M.NODE_MAP = {
+    ["Stone_Node"] = "april_stone_node",
+    ["Metal_Node"] = "april_metal_node",
+    ["Phosphate_Node"] = "april_phosphate_node",
+}
+
+M.PLANT_MAP = {
+    ["Corn Plant"] = "april_corn_plant",
+    ["Tomato Plant"] = "april_tomato_plant",
+    ["Lemon Plant"] = "april_lemon_plant",
+    ["Raspberry Plant"] = "april_raspberry_plant",
+    ["Blueberry Plant"] = "april_blueberry_plant",
+    ["Wool Plant"] = "april_wool_plant",
+    ["Pumpkin Plant"] = "april_pumpkin_plant",
+}
+
+M.ANIMAL_MAP = {
+    ["PREFAB_ANIMAL_DEER"] = "april_deer",
+    ["PREFAB_ANIMAL_WILDBOAR"] = "april_boar",
+    ["PREFAB_ANIMAL_WOLF"] = "april_wolf",
+    ["Deer"] = "april_deer",
+    ["Wild Boar"] = "april_boar",
+    ["WildBoar"] = "april_boar",
+    ["Boar"] = "april_boar",
+    ["Wolf"] = "april_wolf",
+}
+
+M.LOOT_MAP = {
+    ["Wooden Crate"] = "april_wooden_crate",
+    ["Locked Wooden Crate"] = "april_wooden_crate",
+    ["Locked Metal Crate"] = "april_metal_crate",
+    ["Locked Steel Crate"] = "april_steel_crate",
+    ["Food Crate"] = "april_food_crate",
+    ["Timed Crate"] = "april_timed_crate",
+    ["Care Package"] = "april_care_package",
+    ["Body Bag"] = "april_body_bag",
+    ["Sleeper"] = "april_sleeper",
+    ["Trash Can"] = "april_trash_can",
+    ["Oil Barrel"] = "april_oil_barrel",
+}
+
+M.PLANT_LABELS = {
+    ["Corn Plant"] = "Corn Plant",
+    ["Tomato Plant"] = "Tomato Plant",
+    ["Lemon Plant"] = "Lemon Plant",
+    ["Raspberry Plant"] = "Raspberry Plant",
+    ["Blueberry Plant"] = "Blueberry Plant",
+    ["Wool Plant"] = "Wool Plant",
+    ["Pumpkin Plant"] = "Pumpkin Plant",
+}
+
+M.NODE_LABELS = {
+    ["Stone_Node"] = "Stone Node",
+    ["Metal_Node"] = "Metal Node",
+    ["Phosphate_Node"] = "Phosphate Node",
+}
+
+M.ANIMAL_LABELS = {
+    ["PREFAB_ANIMAL_DEER"] = "Deer",
+    ["PREFAB_ANIMAL_WILDBOAR"] = "Wild Boar",
+    ["PREFAB_ANIMAL_WOLF"] = "Wolf",
+    ["Deer"] = "Deer",
+    ["Wild Boar"] = "Wild Boar",
+    ["WildBoar"] = "Wild Boar",
+    ["Boar"] = "Boar",
+    ["Wolf"] = "Wolf",
+}
+
+return M
+
+end)()
+
+-- ── game/esp_scan.lua ──
+April._mods["game.esp_scan"] = (function()
+--[[ Shared ESP scan helpers — part lookup + oriented 3D box data. ]]
+
+local env = April.require("core.env")
+
+local M = {}
+
+local PART_CLASSES = {
+    Part = true,
+    MeshPart = true,
+    UnionOperation = true,
+}
+
+function M.is_part(inst)
+    if not inst then return false end
+    local cn = inst.ClassName or inst.class_name
+    return PART_CLASSES[cn] == true
+end
+
+function M.find_main_part(model)
+    if not env.is_valid(model) then return nil end
+
+    local main = env.safe_call(function()
+        if model.Main then return model.Main end
+        return model:find_first_child("Main") or model:FindFirstChild("Main")
+    end)
+    if main and M.is_part(main) then return main end
+
+    local hrp = env.safe_call(function()
+        if model.HumanoidRootPart then return model.HumanoidRootPart end
+        return model:find_first_child("HumanoidRootPart") or model:FindFirstChild("HumanoidRootPart")
+    end)
+    if hrp and M.is_part(hrp) then return hrp end
+
+    local children = env.safe_call(function() return model:get_children() end) or {}
+    for _, child in ipairs(children) do
+        if M.is_part(child) then return child end
+    end
+
+    if M.is_part(model) then return model end
+    return nil
+end
+
+local function vec3(v, axis)
+    if not v then return 0 end
+    if axis == "x" then return v.x or v.X or 0 end
+    if axis == "y" then return v.y or v.Y or 0 end
+    return v.z or v.Z or 0
+end
+
+function M.read_part_box(part)
+    if not env.is_valid(part) or not M.is_part(part) then return nil end
+
+    local pos, size, rv, uv, lv
+    pcall(function()
+        pos = part.Position or part.position
+        size = part.Size or part.size
+        rv = part.RightVector or part.right_vector
+        uv = part.UpVector or part.up_vector
+        lv = part.LookVector or part.look_vector
+    end)
+
+    if not pos or not size then return nil end
+
+    return {
+        x = vec3(pos, "x"),
+        y = vec3(pos, "y"),
+        z = vec3(pos, "z"),
+        hx = vec3(size, "x") * 0.5,
+        hy = vec3(size, "y") * 0.5,
+        hz = vec3(size, "z") * 0.5,
+        rx = rv and vec3(rv, "x") or 1,
+        ry = rv and vec3(rv, "y") or 0,
+        rz = rv and vec3(rv, "z") or 0,
+        ux = uv and vec3(uv, "x") or 0,
+        uy = uv and vec3(uv, "y") or 1,
+        uz = uv and vec3(uv, "z") or 0,
+        lx = lv and vec3(lv, "x") or 0,
+        ly = lv and vec3(lv, "y") or 0,
+        lz = lv and vec3(lv, "z") or 1,
+    }
+end
+
+function M.collect_boxes(model, max_parts)
+    max_parts = max_parts or 6
+    local boxes = {}
+    if not env.is_valid(model) then return boxes end
+
+    local main = M.find_main_part(model)
+    if main then
+        local box = M.read_part_box(main)
+        if box then table.insert(boxes, box) end
+    end
+
+    if #boxes >= max_parts then return boxes end
+
+    local desc = env.safe_call(function() return model:get_descendants() end) or {}
+    for _, inst in ipairs(desc) do
+        if #boxes >= max_parts then break end
+        if M.is_part(inst) and inst ~= main then
+            local cn = inst.ClassName or inst.class_name
+            if cn == "MeshPart" or cn == "Part" then
+                local box = M.read_part_box(inst)
+                if box then table.insert(boxes, box) end
+            end
+        end
+    end
+
+    return boxes
+end
+
+function M.label_position(entry)
+    if not entry or not env.is_valid(entry.inst) then return nil end
+    local main = M.find_main_part(entry.inst)
+    if main then
+        local box = M.read_part_box(main)
+        if box then
+            return box.x, box.y + box.hy + 0.25, box.z
+        end
+        local pos = main.Position or main.position
+        if pos then
+            return vec3(pos, "x"), vec3(pos, "y"), vec3(pos, "z")
+        end
+    end
+    return nil
+end
+
+function M.make_entry(model, name, toggle_id, opts)
+    opts = opts or {}
+    return {
+        inst = model,
+        name = name,
+        toggle_id = toggle_id,
+        dynamic = opts.dynamic == true,
+    }
 end
 
 return M
@@ -2243,6 +3688,10 @@ function M.update(dt)
     end
 end
 
+function M.get_target()
+    return locked_target
+end
+
 function M.draw()
     if not settings.bool(P, false) then return end
 
@@ -2297,15 +3746,19 @@ M._editing = profiles.GLOBAL
 M._last_applied_weapon = nil
 M._last_applied_profile = nil
 M._apply_dirty = false
+M._needs_refresh = false
 M._last_retry = 0
-M._retry_ms = 1000
+M._retry_ms = 2500
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
-local function request_apply()
+local function request_apply(refresh)
     M._apply_dirty = true
+    if refresh then
+        M._needs_refresh = true
+    end
 end
 
 local function switch_profile(idx)
@@ -2329,9 +3782,8 @@ function M.register_menu()
     menu.add_button(T, G.AIMBOT, "april_gm_save", "Save Profile", function()
         profiles.sync_editor_to_profile(M._editing)
         print("[April Gun Mods] Saved profile: " .. M._editing)
-        request_apply()
     end)
-    menu.add_label(T, G.AIMBOT, "Global = all weapons. Per-weapon uses saved profile on swap.", root)
+    menu.add_label(T, G.AIMBOT, "Save stores settings only. Auto-apply runs on weapon swap.", root)
 
     menu.add_checkbox(T, G.AIMBOT, "april_gm_recoil", "Recoil Modifier", false, root)
     menu.add_slider_int(T, G.AIMBOT, "april_gm_recoil_pct", "Recoil Reduction %", 0, 100, 100, root)
@@ -2351,9 +3803,9 @@ function M.register_menu()
     menu.add_slider_int(T, G.AIMBOT, "april_gm_range_mult", "RangeMult", 1, 20, 10, root)
 
     settings.on_change("april_gm_profile", switch_profile)
-    settings.on_change(P, request_apply)
-    settings.on_change("april_gm_auto_detect", request_apply)
-    settings.on_change("april_gm_per_weapon", request_apply)
+    settings.on_change(P, function() request_apply(true) end)
+    settings.on_change("april_gm_auto_detect", function() request_apply(false) end)
+    settings.on_change("april_gm_per_weapon", function() request_apply(false) end)
 
     profiles.sync_profile_to_editor(M._editing)
 end
@@ -2362,6 +3814,8 @@ function M.try_apply(held)
     if not settings.bool(P, false) then
         M._last_applied_weapon = nil
         M._last_applied_profile = nil
+        M._apply_dirty = false
+        M._needs_refresh = false
         return false
     end
 
@@ -2375,6 +3829,7 @@ function M.try_apply(held)
 
     local mods, profile_name = profiles.mods_for_weapon(apply_held, per_weapon)
     if not next(mods) then
+        M._apply_dirty = false
         return false
     end
 
@@ -2385,13 +3840,22 @@ function M.try_apply(held)
         return true
     end
 
-    local ok, n, msg = gc.apply_once(mods)
+    local ok
+    if M._needs_refresh or gc.last_node_count() <= 0 then
+        ok = gc.apply_once(mods)
+        M._needs_refresh = false
+    else
+        ok = gc.apply_cached(mods)
+        if not ok and gc.last_node_count() <= 0 then
+            ok = gc.apply_once(mods)
+            M._needs_refresh = false
+        end
+    end
+
     if ok then
         M._last_applied_weapon = weapon_key
         M._last_applied_profile = profile_name
         M._apply_dirty = false
-    else
-        M._apply_dirty = true
     end
 
     return ok
@@ -2405,16 +3869,15 @@ function M.update(dt)
 
     if M._apply_dirty or held ~= M._last_applied_weapon then
         M.try_apply(held)
-    elseif held and now - M._last_retry >= M._retry_ms then
-        if gc.last_node_count() <= 0 then
-            M._last_retry = now
-            M.try_apply(held)
-        end
+    elseif held and now - M._last_retry >= M._retry_ms and M._apply_dirty then
+        M._last_retry = now
+        M._needs_refresh = true
+        M.try_apply(held)
     end
 end
 
 function M.on_weapon_changed(name)
-    request_apply()
+    request_apply(true)
 end
 
 function M.on_modules_ready()
@@ -2434,9 +3897,21 @@ local cache = April.require("core.cache")
 local draw_util = April.require("core.draw_util")
 local esp_util = April.require("core.esp_util")
 local menu_util = April.require("core.menu_util")
+local image_cache = April.require("core.image_cache")
 
 local M = {}
 local P = "april_esp_enabled"
+local TUNG_KEY = "tung"
+
+local BOX_LABELS = { "None", "2D", "Corner", "Tung" }
+
+local function box_mode()
+    return settings.combo_index("april_esp_box_mode", BOX_LABELS, 0)
+end
+
+local function is_tung_mode()
+    return box_mode() == 3
+end
 
 function M.register_menu()
     local G = menu_util.G
@@ -2445,15 +3920,15 @@ function M.register_menu()
 
     menu.add_label(T, G.VISUALS, "Player ESP")
     menu.add_checkbox(T, G.VISUALS, P, "Player ESP", false, { key = 0 })
-    menu.add_combo(T, G.VISUALS, "april_esp_box_mode", "Box Mode", { "None", "2D", "Corner" }, 0, root)
+    menu.add_combo(T, G.VISUALS, "april_esp_box_mode", "Box Mode", { "None", "2D", "Corner", "Tung" }, 0, root)
     menu.add_checkbox(T, G.VISUALS, "april_esp_name", "Name", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 1 } }))
     menu.add_checkbox(T, G.VISUALS, "april_esp_health", "Health Bar", false, root)
     menu.add_checkbox(T, G.VISUALS, "april_esp_distance", "Distance", false, menu_util.parent(P, { colorpicker = { 0.7, 0.7, 0.7, 1 } }))
     menu.add_checkbox(T, G.VISUALS, "april_esp_held_item", "Held Item", false, menu_util.parent(P, { colorpicker = { 0.2, 0.8, 1, 1 } }))
     menu.add_checkbox(T, G.VISUALS, "april_esp_skeleton", "Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
     menu.add_checkbox(T, G.VISUALS, "april_esp_offscreen", "Offscreen Arrows", false, menu_util.parent(P, { colorpicker = { 0.3, 1, 0.5, 1 } }))
+    menu.add_colorpicker(T, G.VISUALS, "april_esp_box_color", "Box Color", { 0.3, 1, 0.5, 1 }, root)
     menu.add_slider_int(T, G.VISUALS, "april_esp_max_dist", "Max Distance", 50, 5000, 1000, root)
-    menu.add_checkbox(T, G.VISUALS, "april_esp_color", "Box Color", false, menu_util.parent(P, { colorpicker = { 0.3, 1, 0.5, 1 } }))
 end
 
 function M.scan()
@@ -2474,14 +3949,47 @@ function M.get_players()
     return cache.players
 end
 
-function M.update(dt) end
+function M.init()
+    image_cache.register(TUNG_KEY, image_cache.urls_for_tung())
+end
+
+function M.update(_dt)
+    -- tick_all runs from menu/tabs.update
+end
+
+local function draw_tung(p, b)
+    image_cache.tick(TUNG_KEY)
+
+    if b and b.valid and b.w > 0 and b.h > 0 then
+        if image_cache.draw_fit(TUNG_KEY, b.x, b.y, b.w, b.h) then
+            return
+        end
+    end
+
+    local pos = p.head_position or p.position
+    if not pos then return end
+
+    local display_w = 72
+    if b and b.valid and b.w > 0 then
+        display_w = math.max(48, math.floor(b.w))
+    end
+
+    image_cache.draw_at_world(
+        TUNG_KEY,
+        pos.x,
+        pos.y + 1,
+        pos.z,
+        display_w
+    )
+end
 
 function M.draw()
     if not settings.bool(P, false) then return end
 
     local max_dist = settings.num("april_esp_max_dist", 1000)
-    local col = settings.color("april_esp_color", { 0.3, 1, 0.5, 1 })
-    local box_mode = settings.num("april_esp_box_mode", 0)
+    local col = settings.color("april_esp_box_color", { 0.3, 1, 0.5, 1 })
+    local mode = box_mode()
+    local tung = mode == 3
     local me = entity and entity.get_local_player and entity.get_local_player()
     local text_size = esp_util.text_size()
     local sw, sh = draw_util.screen_size()
@@ -2499,7 +4007,9 @@ function M.draw()
 
         local b = p:get_bounds()
         if not b or not b.valid then
-            if settings.bool("april_esp_offscreen", false) and p.head_position then
+            if tung and p.head_position then
+                draw_tung(p, nil)
+            elseif settings.bool("april_esp_offscreen", false) and p.head_position then
                 local hx, hy, hvis = esp_util.w2s(p.head_position.x, p.head_position.y, p.head_position.z)
                 if not hvis then
                     local ac = settings.color("april_esp_offscreen", { 0.3, 1, 0.5, 1 })
@@ -2509,9 +4019,11 @@ function M.draw()
             goto continue
         end
 
-        if box_mode == 1 and settings.bool("april_esp_color", false) then
+        if tung then
+            draw_tung(p, b)
+        elseif mode == 1 then
             draw_util.box_esp(b.x, b.y, b.w, b.h, col, 0)
-        elseif box_mode == 2 and settings.bool("april_esp_color", false) then
+        elseif mode == 2 then
             draw_util.box_esp(b.x, b.y, b.w, b.h, col, 1)
         end
 
@@ -2539,6 +4051,366 @@ function M.draw()
         end
 
         ::continue::
+    end
+end
+
+return M
+
+end)()
+
+-- ── features/visuals/target_overlay.lua ──
+April._mods["features.visuals.target_overlay"] = (function()
+local settings = April.require("core.settings")
+local draw_util = April.require("core.draw_util")
+local esp_util = April.require("core.esp_util")
+local menu_util = April.require("core.menu_util")
+local image_cache = April.require("core.image_cache")
+local items = April.require("game.items")
+local player_gear = April.require("game.player_gear")
+local targeting = April.require("features.combat.targeting")
+
+local M = {}
+
+local P = "april_target_overlay"
+local AIM = "april_aimbot_enabled"
+local AIM_PREFIX = "april_aimbot_"
+
+local gear_cache = {}
+local GEAR_TTL = 400
+
+M._anchor_x = nil
+M._anchor_y = nil
+M._last_uid = nil
+
+local function scale()
+    return math.max(0.55, settings.num(P .. "_scale", 72) / 100)
+end
+
+local function lerp(a, b, t)
+    return a + (b - a) * t
+end
+
+local function img_key(prefix, id)
+    return prefix .. tostring(id)
+end
+
+local function ensure_item_image(name, variant)
+    if not name then return nil end
+    local url = items.get_image_url(name, variant)
+    if not url then return nil end
+    local asset_id = url:match("(%d+)")
+    local key = img_key("item_", asset_id or name)
+    image_cache.ensure(key, url)
+    return key
+end
+
+local function ensure_avatar(user_id)
+    if not user_id or user_id <= 0 then return nil end
+    local key = img_key("avatar_", user_id)
+    image_cache.ensure(key, image_cache.urls_for_avatar(user_id))
+    return key
+end
+
+local function get_gear(player)
+    if not player then return nil end
+    local uid = player.user_id or player.name or "?"
+    local now = utility and utility.get_tick_count and utility.get_tick_count() or 0
+    local cached = gear_cache[uid]
+    if cached and (now - cached.t) < GEAR_TTL then
+        return cached.data
+    end
+    local data = player_gear.scan_player(player)
+    gear_cache[uid] = { t = now, data = data }
+    return data
+end
+
+local function resolve_target()
+    if not settings.bool(AIM, false) then return nil end
+
+    local aimbot = April.require("features.combat.aimbot")
+    local locked = aimbot.get_target and aimbot.get_target()
+    if locked and locked.is_alive then return locked end
+
+    local sw, sh = targeting.screen_center()
+    local cx, cy = sw * 0.5, sh * 0.5
+    local fov = settings.num(AIM_PREFIX .. "fov", 150)
+    return targeting.find_target(cx, cy, fov, AIM_PREFIX)
+end
+
+local function hp_color(ratio)
+    if ratio > 0.6 then return { 0.35, 0.92, 0.45, 1 } end
+    if ratio > 0.3 then return { 0.95, 0.85, 0.25, 1 } end
+    return { 0.95, 0.3, 0.3, 1 }
+end
+
+local function draw_icon_slot(x, y, size, key, accent)
+    local pad = 2
+    draw.rect_filled(x, y, size, size, { 0.08, 0.08, 0.1, 0.9 })
+    draw.rect(x, y, size, size, accent or { 0.35, 0.55, 0.95, 0.45 }, 1)
+    if key then
+        image_cache.draw_fit(key, x + pad, y + pad, size - pad * 2, size - pad * 2)
+    end
+end
+
+local function measure_panel(target, s)
+    local gear = get_gear(target)
+    local armor_list = (gear and gear.armor) or {}
+    local held_name = gear and gear.held
+
+    local show_avatar = settings.bool(P .. "_avatar", true)
+    local show_held = settings.bool(P .. "_held", true) and held_name
+    local show_armor = settings.bool(P .. "_armor", true) and #armor_list > 0
+
+    local avatar_sz = math.floor(38 * s)
+    local slot_sz = math.floor(26 * s)
+    local pad = math.floor(6 * s)
+    local title_fs = math.max(11, math.floor(12 * s))
+    local body_fs = math.max(9, math.floor(10 * s))
+    local gap = math.floor(4 * s)
+
+    local cols = show_armor and math.min(4, math.max(1, #armor_list)) or 0
+    local armor_rows = show_armor and math.ceil(#armor_list / 4) or 0
+
+    local header_h = show_avatar and avatar_sz or math.floor(34 * s)
+    local info_w = math.floor(150 * s)
+    local content_w = (show_avatar and (avatar_sz + pad) or 0) + info_w
+
+    if show_armor then
+        content_w = math.max(content_w, cols * (slot_sz + gap) + pad)
+    end
+
+    local panel_w = content_w + pad * 2
+    local panel_h = header_h + pad * 2
+
+    if show_held then
+        panel_h = panel_h + slot_sz + gap + body_fs
+    end
+    if show_armor then
+        panel_h = panel_h + body_fs + gap + armor_rows * (slot_sz + gap)
+    end
+
+    return panel_w, panel_h, {
+        s = s,
+        pad = pad,
+        gap = gap,
+        avatar_sz = avatar_sz,
+        slot_sz = slot_sz,
+        title_fs = title_fs,
+        body_fs = body_fs,
+        show_avatar = show_avatar,
+        show_held = show_held,
+        show_armor = show_armor,
+        armor_list = armor_list,
+        held_name = held_name,
+        cols = cols,
+        armor_rows = armor_rows,
+    }
+end
+
+local function compute_anchor(target, panel_w, panel_h, sw, sh)
+    local gap = math.floor(14 + settings.num(P .. "_x_offset", 0))
+    local y_off = settings.num(P .. "_y_offset", 0)
+    local b = target.get_bounds and target:get_bounds()
+
+    local ax, ay, flip_left
+
+    if b and b.valid and b.w > 0 and b.h > 0 then
+        flip_left = (b.x + b.w + gap + panel_w) > (sw - 10)
+        if flip_left then
+            ax = b.x - gap - panel_w
+        else
+            ax = b.x + b.w + gap
+        end
+        ay = b.y + b.h * 0.5 - panel_h * 0.5 + y_off
+    else
+        local pos = target.head_position or target.position
+        if not pos then return nil, nil end
+        local sx, sy, vis = esp_util.w2s(pos.x, pos.y + 1.5, pos.z)
+        if not vis then return nil, nil end
+        flip_left = (sx + gap + panel_w) > (sw - 10)
+        if flip_left then
+            ax = sx - gap - panel_w
+        else
+            ax = sx + gap + 24
+        end
+        ay = sy - panel_h * 0.5 + y_off
+    end
+
+    ax = math.max(6, math.min(sw - panel_w - 6, ax))
+    ay = math.max(6, math.min(sh - panel_h - 6, ay))
+
+    return ax, ay
+end
+
+function M.register_menu()
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.VISUALS)
+    local root = menu_util.parent(AIM)
+
+    menu_util.section(T, G.VISUALS, "Target Overlay")
+    menu.add_checkbox(T, G.VISUALS, P, "Target Overlay", false, root)
+    menu.add_slider_int(T, G.VISUALS, P .. "_scale", "Scale %", 55, 120, 72, menu_util.parent(P))
+    menu.add_slider_int(T, G.VISUALS, P .. "_follow", "Follow Speed", 4, 24, 14, menu_util.parent(P))
+    menu.add_slider_int(T, G.VISUALS, P .. "_x_offset", "Side Offset", 0, 80, 14, menu_util.parent(P))
+    menu.add_slider_int(T, G.VISUALS, P .. "_y_offset", "Y Offset", -120, 120, 0, menu_util.parent(P))
+    menu.add_checkbox(T, G.VISUALS, P .. "_avatar", "Avatar", true, menu_util.parent(P))
+    menu.add_checkbox(T, G.VISUALS, P .. "_held", "Held Item", true, menu_util.parent(P))
+    menu.add_checkbox(T, G.VISUALS, P .. "_armor", "Armor Icons", true, menu_util.parent(P))
+    menu.add_checkbox(T, G.VISUALS, P .. "_distance", "Distance", true, menu_util.parent(P))
+    menu.add_colorpicker(T, G.VISUALS, P .. "_accent", "Accent", { 0.35, 0.72, 1, 1 }, menu_util.parent(P))
+    menu.add_colorpicker(T, G.VISUALS, P .. "_name", "Name Color", { 1, 1, 1, 1 }, menu_util.parent(P))
+    menu.add_colorpicker(T, G.VISUALS, P .. "_held_col", "Held Color", { 1, 0.45, 0.35, 1 }, menu_util.parent(P))
+end
+
+function M.update(dt)
+    if not settings.bool(AIM, false) or not settings.bool(P, false) then
+        M._anchor_x, M._anchor_y, M._last_uid = nil, nil, nil
+        return
+    end
+
+    image_cache.tick_all()
+
+    local target = resolve_target()
+    if not target then
+        M._anchor_x, M._anchor_y, M._last_uid = nil, nil, nil
+        return
+    end
+
+    local uid = target.user_id or target.name
+    if M._last_uid ~= uid then
+        M._anchor_x, M._anchor_y = nil, nil
+        M._last_uid = uid
+    end
+
+    if settings.bool(P .. "_avatar", true) and target.user_id then
+        ensure_avatar(target.user_id)
+    end
+
+    local gear = get_gear(target)
+    if gear then
+        if gear.held then ensure_item_image(gear.held) end
+        if settings.bool(P .. "_armor", true) then
+            for _, piece in ipairs(gear.armor) do
+                ensure_item_image(piece.name, piece.variant)
+            end
+        end
+    end
+
+    local sw, sh = draw_util.screen_size()
+    local panel_w, panel_h = measure_panel(target, scale())
+    local ax, ay = compute_anchor(target, panel_w, panel_h, sw, sh)
+    if not ax then return end
+
+    local speed = settings.num(P .. "_follow", 14)
+    local t = math.min(1, dt * speed)
+
+    if not M._anchor_x then
+        M._anchor_x, M._anchor_y = ax, ay
+    else
+        M._anchor_x = lerp(M._anchor_x, ax, t)
+        M._anchor_y = lerp(M._anchor_y, ay, t)
+    end
+end
+
+function M.draw()
+    if not settings.bool(AIM, false) or not settings.bool(P, false) then return end
+    if not draw or not M._anchor_x then return end
+
+    local target = resolve_target()
+    if not target or not target.is_alive then return end
+
+    local px, py = M._anchor_x, M._anchor_y
+    local s, layout = scale(), nil
+    local panel_w, panel_h
+    panel_w, panel_h, layout = measure_panel(target, s)
+
+    local accent = settings.color(P .. "_accent", { 0.35, 0.72, 1, 1 })
+    local name_col = settings.color(P .. "_name", { 1, 1, 1, 1 })
+    local held_col = settings.color(P .. "_held_col", { 1, 0.45, 0.35, 1 })
+    local sub_col = { 0.72, 0.76, 0.82, 1 }
+    local panel_bg = { 0.04, 0.05, 0.08, 0.9 }
+    local panel_edge = { accent[1], accent[2], accent[3], 0.4 }
+
+    local pad = layout.pad
+    local hp = target.health or 0
+    local max_hp = target.max_health or 100
+    if max_hp <= 0 then max_hp = 100 end
+    local hp_ratio = math.max(0, math.min(1, hp / max_hp))
+    local hp_col = hp_color(hp_ratio)
+
+    local name = target.name or "Unknown"
+    local dist_text = ""
+    if settings.bool(P .. "_distance", true) then
+        local me = entity and entity.get_local_player and entity.get_local_player()
+        if me and me.position and target.position then
+            local dx = target.position.x - me.position.x
+            local dy = target.position.y - me.position.y
+            local dz = target.position.z - me.position.z
+            dist_text = string.format("%dm", math.floor(math.sqrt(dx * dx + dy * dy + dz * dz)))
+        end
+    end
+
+    draw.rect_filled(px, py, panel_w, panel_h, panel_bg)
+    draw.rect(px, py, panel_w, panel_h, panel_edge, 1)
+    draw.rect_filled(px, py, panel_w, 2, accent)
+
+    local tx = px + pad
+    local ty = py + pad
+
+    if layout.show_avatar and target.user_id then
+        local av_key = ensure_avatar(target.user_id)
+        draw_icon_slot(tx, ty, layout.avatar_sz, av_key, accent)
+        tx = tx + layout.avatar_sz + pad
+    end
+
+    local info_x = tx
+    local info_w = px + panel_w - pad - info_x
+
+    draw.text(info_x, ty, name, name_col, layout.title_fs)
+
+    if dist_text ~= "" then
+        local dw = select(1, draw.get_text_size(dist_text, layout.body_fs))
+        draw.text(px + panel_w - pad - dw, ty + 1, dist_text, sub_col, layout.body_fs)
+    end
+
+    local hp_y = ty + layout.title_fs + 2
+    local hp_text = string.format("HP %d / %d", math.ceil(hp), math.ceil(max_hp))
+    draw.text(info_x, hp_y, hp_text, hp_col, layout.body_fs)
+
+    local bar_y = hp_y + layout.body_fs + 2
+    local bar_h = math.max(3, math.floor(4 * s))
+    draw.rect_filled(info_x, bar_y, info_w, bar_h, { 0.15, 0.16, 0.2, 0.9 })
+    if hp_ratio > 0 then
+        draw.rect_filled(info_x, bar_y, info_w * hp_ratio, bar_h, hp_col)
+    end
+
+    local row_y = py + pad + (layout.show_avatar and layout.avatar_sz or math.floor(34 * s)) + pad
+
+    if layout.show_held then
+        local held_key = ensure_item_image(layout.held_name)
+        draw.text(px + pad, row_y, "Held", sub_col, layout.body_fs)
+        draw_icon_slot(px + pad + math.floor(34 * s), row_y - 2, layout.slot_sz + 4, held_key, held_col)
+        if layout.held_name then
+            local label = layout.held_name
+            if #label > 18 then label = label:sub(1, 16) .. ".." end
+            draw.text(px + pad + math.floor(34 * s) + layout.slot_sz + 10, row_y + 4, label, held_col, layout.body_fs)
+        end
+        row_y = row_y + layout.slot_sz + layout.gap + layout.body_fs + 2
+    end
+
+    if layout.show_armor then
+        draw.text(px + pad, row_y, "Gear", sub_col, layout.body_fs)
+        row_y = row_y + layout.body_fs + layout.gap
+
+        local grid_x = px + pad
+        for i, piece in ipairs(layout.armor_list) do
+            local col_i = (i - 1) % 4
+            local row_i = math.floor((i - 1) / 4)
+            local sx = grid_x + col_i * (layout.slot_sz + layout.gap)
+            local sy = row_y + row_i * (layout.slot_sz + layout.gap)
+            local key = ensure_item_image(piece.name, piece.variant)
+            draw_icon_slot(sx, sy, layout.slot_sz, key, panel_edge)
+        end
     end
 end
 
@@ -2671,73 +4543,434 @@ return M
 
 end)()
 
+-- ── features/visuals/bullet_tracers.lua ──
+April._mods["features.visuals.bullet_tracers"] = (function()
+local settings = April.require("core.settings")
+local draw_util = April.require("core.draw_util")
+local esp_util = April.require("core.esp_util")
+local menu_util = April.require("core.menu_util")
+local weapons = April.require("game.weapons")
+local cache = April.require("core.cache")
+local env = April.require("core.env")
+
+local M = {}
+local P = "april_bullet_tracer_enabled"
+
+local tracers = {}
+local health_history = {}
+local last_shoot_tick = 0
+local last_hit_notify = {}
+
+local function tick()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function lerp(a, b, t)
+    return a + (b - a) * t
+end
+
+local function lerp_color(c1, c2, t)
+    return {
+        lerp(c1[1] or 1, c2[1] or 1, t),
+        lerp(c1[2] or 1, c2[2] or 1, t),
+        lerp(c1[3] or 1, c2[3] or 1, t),
+        lerp(c1[4] or 1, c2[4] or 1, t),
+    }
+end
+
+local function gradient_t(mode, speed, u)
+    mode = mode or 0
+    speed = speed or 1
+    if mode == 1 then
+        return 0.5 + 0.5 * math.sin(tick() * 0.001 * speed * 3)
+    elseif mode == 2 then
+        return (tick() * 0.001 * speed + u) % 1
+    elseif mode == 3 then
+        return math.abs(math.sin(tick() * 0.001 * speed * 2 + u * math.pi))
+    end
+    return u
+end
+
+local function shooting_recently(now)
+    if input and input.is_key_down and input.is_key_down(0x01) then return true end
+    return (now - last_shoot_tick) < 150
+end
+
+local function read_npc_health(npc)
+    if not npc or not env.is_valid(npc.inst) then return nil end
+    local hum = env.safe_call(function()
+        if npc.inst.find_first_child_of_class then
+            return npc.inst:find_first_child_of_class("Humanoid")
+        end
+        return nil
+    end)
+    if not hum then return nil end
+    return hum.Health or hum.health
+end
+
+local function npc_hit_pos(npc)
+    if npc.head and env.is_valid(npc.head) then
+        local pos = npc.head.Position or npc.head.position
+        if pos then
+            return pos.x or pos.X, pos.y or pos.Y, pos.z or pos.Z
+        end
+    end
+    local scan = April.require("game.esp_scan")
+    return scan.label_position({ inst = npc.inst })
+end
+
+local function add_tracer(hit_x, hit_y, hit_z)
+    if not camera or not camera.get_position then return end
+    local cam = camera.get_position()
+    if not cam then return end
+
+    local cx = cam.x or cam.X or 0
+    local cy = cam.y or cam.Y or 0
+    local cz = cam.z or cam.Z or 0
+
+    local stats = weapons.get_weapon_stats()
+    local grav = 20
+    local spd = 800
+    if stats then
+        spd = stats.speed or spd
+        grav = stats.gravity or grav
+        if grav < 5 then
+            grav = weapons.drop_gravity(grav)
+        end
+    end
+
+    local dx = hit_x - cx
+    local dy = hit_y - cy
+    local dz = hit_z - cz
+    local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+    local flight_time = dist / math.max(spd, 1)
+
+    table.insert(tracers, {
+        ox = cx, oy = cy, oz = cz,
+        tx = hit_x, ty = hit_y, tz = hit_z,
+        gravity = grav,
+        flight_time = flight_time,
+        created = tick(),
+    })
+
+    while #tracers > 30 do
+        table.remove(tracers, 1)
+    end
+end
+
+local function on_health_drop(target_id, hit_x, hit_y, hit_z, now)
+    local last = last_hit_notify[target_id] or 0
+    if now - last < 50 then return end
+    last_hit_notify[target_id] = now
+
+    if settings.enabled(P) then
+        add_tracer(hit_x, hit_y, hit_z)
+    end
+
+    pcall(function()
+        local feedback = April.require("features.visuals.feedback")
+        if feedback.trigger_hit then feedback.trigger_hit() end
+    end)
+end
+
+function M.track_hits()
+    if not settings.enabled(P)
+        and not settings.enabled("april_hitmarker_enabled")
+        and not settings.enabled("april_hit_notifier") then
+        return
+    end
+
+    local now = tick()
+    if input and input.is_key_down and input.is_key_down(0x01) then
+        last_shoot_tick = now
+    end
+
+    if not shooting_recently(now) then
+        if entity and entity.get_players then
+            for _, p in ipairs(entity.get_players()) do
+                if not p.is_local and p.is_alive then
+                    local id = p.user_id or p.name or tostring(p)
+                    health_history[id] = p.health
+                end
+            end
+        end
+        for _, npc in ipairs(cache.npcs or {}) do
+            local id = "npc:" .. (npc.name or "") .. ":" .. tostring(npc.inst)
+            health_history[id] = read_npc_health(npc)
+        end
+        return
+    end
+
+    if entity and entity.get_players then
+        for _, p in ipairs(entity.get_players()) do
+            if p.is_local or not p.is_alive then goto next_player end
+            local id = p.user_id or p.name or tostring(p)
+            local cur = p.health
+            local last = health_history[id]
+            if type(last) == "number" and type(cur) == "number" and cur < last and cur >= 0 then
+                local hx, hy, hz
+                if p.head_position then
+                    hx, hy, hz = p.head_position.x, p.head_position.y, p.head_position.z
+                elseif p.position then
+                    hx, hy, hz = p.position.x, p.position.y, p.position.z
+                end
+                if hx then
+                    on_health_drop(id, hx, hy, hz, now)
+                end
+            end
+            health_history[id] = cur
+            ::next_player::
+        end
+    end
+
+    for _, npc in ipairs(cache.npcs or {}) do
+        local id = "npc:" .. (npc.name or "") .. ":" .. tostring(npc.inst)
+        local cur = read_npc_health(npc)
+        local last = health_history[id]
+        if type(last) == "number" and type(cur) == "number" and cur < last and cur >= 0 then
+            local hx, hy, hz = npc_hit_pos(npc)
+            if hx then
+                on_health_drop(id, hx, hy, hz, now)
+            end
+        end
+        health_history[id] = cur
+    end
+end
+
+function M.register_menu()
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.VISUALS)
+    menu_util.section(T, G.VISUALS, "Bullet Tracers")
+    menu.add_checkbox(T, G.VISUALS, P, "Bullet Tracers", false, { colorpicker = { 1, 0.6, 0.2, 1 } })
+    menu.add_slider_float(T, G.VISUALS, "april_bullet_tracer_lifetime", "Tracer Fade Time", 0.1, 3.0, 0.5, "%.1fs", { parent = P })
+    menu.add_slider_int(T, G.VISUALS, "april_bullet_tracer_thickness", "Tracer Thickness", 1, 5, 2, { parent = P })
+    menu.add_slider_int(T, G.VISUALS, "april_bullet_tracer_segments", "Tracer Smoothness", 5, 30, 15, { parent = P })
+    menu.add_checkbox(T, G.VISUALS, "april_bullet_tracer_gradient", "Tracer Gradient", false, { parent = P, colorpicker = { 0, 0.8, 1, 1 } })
+    menu.add_combo(T, G.VISUALS, "april_bullet_tracer_grad_anim", "Gradient Animation", { "Static", "Pulse", "Cycle", "Bounce" }, 0, { parent = "april_bullet_tracer_gradient" })
+    menu.add_slider_float(T, G.VISUALS, "april_bullet_tracer_grad_speed", "Gradient Speed", 0.1, 10.0, 1.0, "%.1f", { parent = "april_bullet_tracer_gradient" })
+end
+
+function M.update(dt)
+    if settings.enabled(P)
+        or settings.enabled("april_hitmarker_enabled")
+        or settings.enabled("april_hit_notifier") then
+        M.track_hits()
+    end
+
+    if not settings.enabled(P) then
+        if #tracers > 0 then tracers = {} end
+        return
+    end
+
+    local now = tick()
+    local lifetime_ms = settings.num("april_bullet_tracer_lifetime", 0.5) * 1000
+    local i = 1
+    while i <= #tracers do
+        if now - tracers[i].created > lifetime_ms then
+            table.remove(tracers, i)
+        else
+            i = i + 1
+        end
+    end
+end
+
+function M.draw()
+    if not settings.enabled(P) or #tracers == 0 then return end
+
+    local now = tick()
+    local color = settings.color(P, { 1, 0.6, 0.2, 1 })
+    local thickness = settings.num("april_bullet_tracer_thickness", 2)
+    local num_segs = settings.num("april_bullet_tracer_segments", 15)
+    local lifetime_ms = settings.num("april_bullet_tracer_lifetime", 0.5) * 1000
+    local use_grad = settings.enabled("april_bullet_tracer_gradient")
+    local color2 = settings.color("april_bullet_tracer_gradient", { 0, 0.8, 1, 1 })
+    local grad_anim = settings.num("april_bullet_tracer_grad_anim", 0)
+    local grad_speed = settings.num("april_bullet_tracer_grad_speed", 1)
+
+    for _, tr in ipairs(tracers) do
+        local elapsed_ms = now - tr.created
+        local alpha = 1.0 - (elapsed_ms / lifetime_ms)
+        if alpha <= 0 then goto next_tracer end
+
+        local prev_sx, prev_sy, prev_vis = nil, nil, false
+        local cr, cg, cb, ca = color[1], color[2], color[3], color[4] or 1
+        local arc_peak = 0.5 * tr.gravity * tr.flight_time * tr.flight_time
+
+        for seg = 0, num_segs do
+            local u = seg / num_segs
+            local px = tr.ox + (tr.tx - tr.ox) * u
+            local py = tr.oy + (tr.ty - tr.oy) * u + arc_peak * u * (1 - u)
+            local pz = tr.oz + (tr.tz - tr.oz) * u
+
+            local sx, sy, vis = esp_util.w2s(px, py, pz)
+
+            if seg > 0 and vis and prev_vis then
+                local seg_alpha = (0.3 + 0.7 * u) * alpha * ca
+                if use_grad then
+                    local gt = gradient_t(grad_anim, grad_speed, u)
+                    local gc = lerp_color(color, color2, gt)
+                    draw_util.line(prev_sx, prev_sy, sx, sy, { gc[1], gc[2], gc[3], seg_alpha }, thickness)
+                else
+                    draw_util.line(prev_sx, prev_sy, sx, sy, { cr, cg, cb, seg_alpha }, thickness)
+                end
+            end
+
+            prev_sx, prev_sy, prev_vis = sx, sy, vis
+        end
+
+        ::next_tracer::
+    end
+end
+
+return M
+
+end)()
+
 -- ── features/world/world_esp.lua ──
 April._mods["features.world.world_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
 local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
+local esp_util = April.require("core.esp_util")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
+local maps = April.require("game.esp_maps")
+local esp_scan = April.require("game.esp_scan")
 
 local M = {}
 local P = "april_world_enabled"
 
+M._static = {}
+M._dynamic = {}
+
 local TOGGLES = {
-    { id = "april_stone_node", label = "Stone Node", match = "Stone", color = { 0.5, 0.5, 0.5, 1 } },
-    { id = "april_metal_node", label = "Metal Node", match = "Metal", color = { 0.7, 0.5, 0.3, 1 } },
-    { id = "april_phosphate_node", label = "Phosphate Node", match = "Phosphate", color = { 0.2, 0.8, 0.2, 1 } },
-    { id = "april_corn_plant", label = "Corn Plant", match = "Corn", color = { 1, 0.9, 0.3, 1 } },
-    { id = "april_deer", label = "Deer", match = "Deer", color = { 0.6, 0.4, 0.2, 1 } },
-    { id = "april_boar", label = "Wild Boar", match = "Boar", color = { 0.4, 0.3, 0.2, 1 } },
-    { id = "april_wolf", label = "Wolf", match = "Wolf", color = { 0.5, 0.5, 0.5, 1 } },
-    { id = "april_dropped_item", label = "Dropped Items", match = "Drop", color = { 1, 0.8, 0, 1 } },
+    { id = "april_stone_node", label = "Stone Node", color = { 0.5, 0.5, 0.5, 1 } },
+    { id = "april_metal_node", label = "Metal Node", color = { 0.7, 0.5, 0.3, 1 } },
+    { id = "april_phosphate_node", label = "Phosphate Node", color = { 0.2, 0.8, 0.2, 1 } },
+    { id = "april_corn_plant", label = "Corn Plant", color = { 1, 0.9, 0.3, 1 } },
+    { id = "april_tomato_plant", label = "Tomato Plant", color = { 1, 0.4, 0.3, 1 } },
+    { id = "april_pumpkin_plant", label = "Pumpkin Plant", color = { 1, 0.5, 0.1, 1 } },
+    { id = "april_deer", label = "Deer", color = { 0.6, 0.4, 0.2, 1 } },
+    { id = "april_boar", label = "Wild Boar", color = { 0.4, 0.3, 0.2, 1 } },
+    { id = "april_wolf", label = "Wolf", color = { 0.5, 0.5, 0.5, 1 } },
 }
+
+local function scan_folder(map, label_map, dynamic)
+    local out = {}
+    local key = map == maps.NODE_MAP and "nodes" or (map == maps.PLANT_MAP and "plants" or "animals")
+    local folder = folders.from_key(key)
+    if not env.is_valid(folder) then return out end
+
+    local children = env.safe_call(function() return folder:get_children() end) or {}
+    for _, model in ipairs(children) do
+        if not env.is_valid(model) then goto continue end
+        local name = model.Name or model.name
+        local toggle_id = name and map[name]
+        if toggle_id then
+            local label = (label_map and label_map[name]) or name
+            table.insert(out, esp_scan.make_entry(model, label, toggle_id, { dynamic = dynamic }))
+        end
+        ::continue::
+    end
+    return out
+end
+
+local function rebuild_cache()
+    cache.world = {}
+    for _, entry in ipairs(M._static) do
+        table.insert(cache.world, entry)
+    end
+    for _, entry in ipairs(M._dynamic) do
+        table.insert(cache.world, entry)
+    end
+end
 
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.WORLD)
     menu.add_label(T, G.WORLD, "Resources & Nodes")
-    menu.add_checkbox(T, G.WORLD, "april_world_enabled", "Enable World ESP", false, { key = 0 })
+    menu.add_checkbox(T, G.WORLD, P, "Enable World ESP", false, { key = 0 })
     for _, t in ipairs(TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
     end
+    menu.add_checkbox(T, G.WORLD, "april_world_boxes", "3D Boxes", false, { parent = P })
     menu.add_slider_int(T, G.WORLD, "april_world_range", "World Range", 50, 2000, 500, { parent = P })
 end
 
-local function matches_toggle(name)
-    name = name or ""
+local function toggle_color(toggle_id)
     for _, t in ipairs(TOGGLES) do
-        if settings.bool(t.id, false) and name:find(t.match) then
-            return settings.color(t.id, t.color)
+        if t.id == toggle_id then
+            return settings.color(toggle_id, t.color)
         end
     end
-    return nil
+    return settings.color(toggle_id, { 1, 1, 1, 1 })
+end
+
+function M.scan_static()
+    M._static = {}
+    for _, entry in ipairs(scan_folder(maps.NODE_MAP, maps.NODE_LABELS, false)) do
+        table.insert(M._static, entry)
+    end
+    for _, entry in ipairs(scan_folder(maps.PLANT_MAP, maps.PLANT_LABELS, false)) do
+        table.insert(M._static, entry)
+    end
+    rebuild_cache()
+    cache.stats.last_world_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+function M.scan_dynamic()
+    M._dynamic = scan_folder(maps.ANIMAL_MAP, maps.ANIMAL_LABELS, true)
+    rebuild_cache()
 end
 
 function M.scan()
-    cache.world = {}
-    folders.iter_workspace_folders({ "drops", "plants", "vegetation", "nodes", "animals" }, function(key, folder)
-        local found = folders.scan_descendants(folder, nil, 400)
-        for _, inst in ipairs(found) do
-            table.insert(cache.world, { inst = inst, name = inst.Name, category = key })
-        end
-    end)
-    cache.stats.last_world_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
+    M.scan_static()
+    M.scan_dynamic()
 end
 
 function M.update(dt) end
 
 function M.draw()
-    if not settings.bool("april_world_enabled", false) then return end
+    if not settings.enabled(P) then return end
+
     local range = settings.num("april_world_range", 500)
+    local draw_boxes = settings.enabled("april_world_boxes")
+    local me = env.get_local_player()
+    local text_size = esp_util.text_size()
+
     for _, entry in ipairs(cache.world) do
-        if env.is_valid(entry.inst) then
-            local col = matches_toggle(entry.name)
-            if col then
-                draw_util.world_label(entry.inst, entry.name or "?", col, range)
-            end
+        if not settings.enabled(entry.toggle_id) then goto continue end
+        if not env.is_valid(entry.inst) then goto continue end
+
+        local lx, ly, lz = esp_scan.label_position(entry)
+        if not lx then goto continue end
+
+        if me and me.position then
+            local dx = lx - me.position.x
+            local dy = ly - me.position.y
+            local dz = lz - me.position.z
+            if math.sqrt(dx * dx + dy * dy + dz * dz) > range then goto continue end
         end
+
+        local col = toggle_color(entry.toggle_id)
+        if draw_boxes then
+            esp_util.draw_entry_boxes(entry, col, 1)
+        end
+
+        local sx, sy, vis = esp_util.w2s(lx, ly, lz)
+        if vis then
+            local label = entry.name or "?"
+            if me and me.position then
+                local dx = lx - me.position.x
+                local dy = ly - me.position.y
+                local dz = lz - me.position.z
+                label = string.format("%s [%dm]", label, math.floor(math.sqrt(dx * dx + dy * dy + dz * dz)))
+            end
+            draw_util.text_centered(sx, sy, label, col, text_size)
+        end
+
+        ::continue::
     end
 end
 
@@ -2751,67 +4984,211 @@ local settings = April.require("core.settings")
 local cache = April.require("core.cache")
 local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
+local esp_util = April.require("core.esp_util")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
+local maps = April.require("game.esp_maps")
+local esp_scan = April.require("game.esp_scan")
 
 local M = {}
 local P = "april_loot_enabled"
 
+M._static = {}
+M._drops = {}
+
 local TOGGLES = {
-    { id = "april_wooden_crate", label = "Wooden Crate", match = "Wooden", color = { 0.6, 0.4, 0.2, 1 } },
-    { id = "april_metal_crate", label = "Metal Crate", match = "Metal", color = { 0.5, 0.5, 0.6, 1 } },
-    { id = "april_steel_crate", label = "Steel Crate", match = "Steel", color = { 0.7, 0.7, 0.8, 1 } },
-    { id = "april_food_crate", label = "Food Crate", match = "Food", color = { 0.2, 0.8, 0.2, 1 } },
-    { id = "april_timed_crate", label = "Timed Crate", match = "Timed", color = { 1, 0.5, 0, 1 } },
-    { id = "april_care_package", label = "Care Package", match = "Care", color = { 1, 0.2, 0.2, 1 } },
-    { id = "april_body_bag", label = "Body Bag", match = "Body", color = { 0.3, 0.3, 0.3, 1 } },
-    { id = "april_sleeper", label = "Sleepers", match = "Sleeper", color = { 0.8, 0.4, 0.8, 1 } },
+    { id = "april_dropped_item", label = "Dropped Items", color = { 1, 0.8, 0, 1 } },
+    { id = "april_wooden_crate", label = "Wooden Crate", color = { 0.6, 0.4, 0.2, 1 } },
+    { id = "april_metal_crate", label = "Metal Crate", color = { 0.5, 0.5, 0.6, 1 } },
+    { id = "april_steel_crate", label = "Steel Crate", color = { 0.7, 0.7, 0.8, 1 } },
+    { id = "april_food_crate", label = "Food Crate", color = { 0.2, 0.8, 0.2, 1 } },
+    { id = "april_timed_crate", label = "Timed Crate", color = { 1, 0.5, 0, 1 } },
+    { id = "april_care_package", label = "Care Package", color = { 1, 0.2, 0.2, 1 } },
+    { id = "april_body_bag", label = "Body Bag", color = { 0.3, 0.3, 0.3, 1 } },
+    { id = "april_sleeper", label = "Sleepers", color = { 0.8, 0.4, 0.8, 1 } },
+    { id = "april_trash_can", label = "Trash Can", color = { 0.45, 0.45, 0.45, 1 } },
+    { id = "april_oil_barrel", label = "Oil Barrel", color = { 0.2, 0.2, 0.2, 1 } },
 }
+
+local function toggle_color(toggle_id)
+    for _, t in ipairs(TOGGLES) do
+        if t.id == toggle_id then
+            return settings.color(toggle_id, t.color)
+        end
+    end
+    return settings.color(toggle_id, { 1, 1, 1, 1 })
+end
+
+local function append_loot_model(out, model, base_name, toggle_id, dynamic)
+    if not env.is_valid(model) then return end
+
+    local display = base_name
+    if base_name == "Sleeper" then
+        local label = env.safe_call(function()
+            local desc = model:get_descendants()
+            for _, d in ipairs(desc or {}) do
+                if (d.ClassName or d.class_name) == "TextLabel" then
+                    local text = d.Text or d.text
+                    if text and text ~= "" then return text .. " (Sleeper)" end
+                end
+            end
+            return nil
+        end)
+        if label then display = label end
+    elseif base_name == "Timed Crate" then
+        local extra = env.safe_call(function()
+            local desc = model:get_descendants()
+            for _, d in ipairs(desc or {}) do
+                if (d.ClassName or d.class_name) == "TextLabel" then
+                    local text = d.Text or d.text
+                    if text and text ~= "" then return text end
+                end
+            end
+            return nil
+        end)
+        if extra then display = base_name .. " (" .. extra .. ")" end
+    end
+
+    table.insert(out, esp_scan.make_entry(model, display, toggle_id, { dynamic = dynamic }))
+end
+
+local function scan_named_loot_folder(folder, out)
+    if not env.is_valid(folder) then return end
+    local children = env.safe_call(function() return folder:get_children() end) or {}
+    for _, model in ipairs(children) do
+        if not env.is_valid(model) then goto continue end
+        local name = model.Name or model.name
+        local toggle_id = name and maps.LOOT_MAP[name]
+        if toggle_id then
+            append_loot_model(out, model, name, toggle_id, false)
+        end
+        ::continue::
+    end
+end
+
+local function collect_drops(out)
+    local drops = folders.from_key("drops")
+    if not env.is_valid(drops) then return end
+    local children = env.safe_call(function() return drops:get_children() end) or {}
+    for _, model in ipairs(children) do
+        if not env.is_valid(model) then goto continue end
+        local name = model.Name or model.name
+        if name and name ~= "" then
+            append_loot_model(out, model, name, "april_dropped_item", true)
+        end
+        ::continue::
+    end
+end
+
+local function collect_loners(out)
+    local loners = folders.from_key("loners")
+    if not env.is_valid(loners) then return end
+    local children = env.safe_call(function() return loners:get_children() end) or {}
+    for _, child in ipairs(children) do
+        if not env.is_valid(child) then goto continue end
+        local name = child.Name or child.name
+        local toggle_id = name and maps.LOOT_MAP[name]
+        if not toggle_id then goto continue end
+
+        local cn = child.ClassName or child.class_name
+        if cn == "Model" then
+            append_loot_model(out, child, name, toggle_id, false)
+        else
+            local subs = env.safe_call(function() return child:get_children() end) or {}
+            for _, model in ipairs(subs) do
+                append_loot_model(out, model, name, toggle_id, false)
+            end
+        end
+        ::continue::
+    end
+end
+
+local function rebuild_cache()
+    cache.loot = {}
+    for _, entry in ipairs(M._static) do
+        table.insert(cache.loot, entry)
+    end
+    for _, entry in ipairs(M._drops) do
+        table.insert(cache.loot, entry)
+    end
+end
 
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.WORLD)
     menu_util.section(T, G.WORLD, "Loot ESP")
-    menu.add_checkbox(T, G.WORLD, "april_loot_enabled", "Enable Loot ESP", false, { key = 0 })
+    menu.add_checkbox(T, G.WORLD, P, "Enable Loot ESP", false, { key = 0 })
     for _, t in ipairs(TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
     end
+    menu.add_checkbox(T, G.WORLD, "april_loot_boxes", "3D Boxes", false, { parent = P })
     menu.add_slider_int(T, G.WORLD, "april_loot_range", "Loot Range", 50, 2000, 300, { parent = P })
 end
 
-local function matches_toggle(name)
-    name = name or ""
-    for _, t in ipairs(TOGGLES) do
-        if settings.bool(t.id, false) and name:find(t.match) then
-            return settings.color(t.id, t.color)
-        end
-    end
-    return nil
+function M.scan_drops()
+    M._drops = {}
+    collect_drops(M._drops)
+    rebuild_cache()
+end
+
+function M.scan_static()
+    M._static = {}
+    collect_loners(M._static)
+    scan_named_loot_folder(folders.from_key("vegetation"), M._static)
+    scan_named_loot_folder(folders.from_key("military"), M._static)
+    scan_named_loot_folder(folders.from_key("events"), M._static)
+    rebuild_cache()
+    cache.stats.last_loot_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
 function M.scan()
-    cache.loot = {}
-    folders.iter_workspace_folders({ "loners", "military", "events", "drops" }, function(key, folder)
-        local found = folders.scan_descendants(folder, nil, 400)
-        for _, inst in ipairs(found) do
-            table.insert(cache.loot, { inst = inst, name = inst.Name, category = key })
-        end
-    end)
-    cache.stats.last_loot_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
+    M.scan_static()
+    M.scan_drops()
 end
 
 function M.update(dt) end
 
 function M.draw()
-    if not settings.bool("april_loot_enabled", false) then return end
+    if not settings.enabled(P) then return end
+
     local range = settings.num("april_loot_range", 300)
+    local draw_boxes = settings.enabled("april_loot_boxes")
+    local me = env.get_local_player()
+    local text_size = esp_util.text_size()
+
     for _, entry in ipairs(cache.loot) do
-        if env.is_valid(entry.inst) then
-            local col = matches_toggle(entry.name)
-            if col then
-                draw_util.world_label(entry.inst, entry.name or "Loot", col, range)
-            end
+        if not settings.enabled(entry.toggle_id) then goto continue end
+        if not env.is_valid(entry.inst) then goto continue end
+
+        local lx, ly, lz = esp_scan.label_position(entry)
+        if not lx then goto continue end
+
+        local dist = 0
+        if me and me.position then
+            local dx = lx - me.position.x
+            local dy = ly - me.position.y
+            local dz = lz - me.position.z
+            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+            local unlimited = entry.toggle_id == "april_timed_crate"
+                or entry.toggle_id == "april_care_package"
+            if not unlimited and dist > range then goto continue end
         end
+
+        local col = toggle_color(entry.toggle_id)
+        if draw_boxes then
+            esp_util.draw_entry_boxes(entry, col, 1)
+        end
+
+        local sx, sy, vis = esp_util.w2s(lx, ly, lz)
+        if vis then
+            local label = entry.name or "Loot"
+            if me and me.position then
+                label = string.format("%s [%dm]", label, math.floor(dist))
+            end
+            draw_util.text_centered(sx, sy, label, col, text_size)
+        end
+
+        ::continue::
     end
 end
 
@@ -2825,8 +5202,10 @@ local settings = April.require("core.settings")
 local cache = April.require("core.cache")
 local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
+local esp_util = April.require("core.esp_util")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
+local esp_scan = April.require("game.esp_scan")
 
 local M = {}
 local P = "april_base_enabled"
@@ -2844,19 +5223,20 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.WORLD)
     menu_util.section(T, G.WORLD, "Base ESP")
-    menu.add_checkbox(T, G.WORLD, "april_base_enabled", "Enable Base ESP", false, { key = 0 })
+    menu.add_checkbox(T, G.WORLD, P, "Enable Base ESP", false, { key = 0 })
     for _, t in ipairs(TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
     end
+    menu.add_checkbox(T, G.WORLD, "april_base_boxes", "3D Boxes", false, { parent = P })
     menu.add_checkbox(T, G.WORLD, "april_base_distance", "Show Distance", false, { parent = P })
     menu.add_slider_int(T, G.WORLD, "april_base_range", "Base Range", 50, 500, 150, { parent = P })
 end
 
-local function matches_toggle(name)
+local function match_toggle_id(name)
     name = name or ""
     for _, t in ipairs(TOGGLES) do
-        if settings.bool(t.id, false) and name:find(t.match) then
-            return settings.color(t.id, t.color)
+        if name:find(t.match, 1, true) then
+            return t.id
         end
     end
     return nil
@@ -2867,7 +5247,10 @@ function M.scan()
     folders.iter_workspace_folders({ "bases", "deployables" }, function(key, folder)
         local found = folders.scan_descendants(folder, nil, 300)
         for _, inst in ipairs(found) do
-            table.insert(cache.base, { inst = inst, name = inst.Name, category = key })
+            local toggle_id = match_toggle_id(inst.Name)
+            if toggle_id then
+                table.insert(cache.base, esp_scan.make_entry(inst, inst.Name, toggle_id))
+            end
         end
     end)
     cache.stats.last_base_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -2876,16 +5259,43 @@ end
 function M.update(dt) end
 
 function M.draw()
-    if not settings.bool("april_base_enabled", false) then return end
+    if not settings.enabled(P) then return end
     local range = settings.num("april_base_range", 150)
+    local draw_boxes = settings.enabled("april_base_boxes")
+    local me = env.get_local_player()
+    local text_size = esp_util.text_size()
+
     for _, entry in ipairs(cache.base) do
-        if env.is_valid(entry.inst) then
-            local col = matches_toggle(entry.name)
-            if col then
-                local label = entry.name or "Base"
-                draw_util.world_label(entry.inst, label, col, range)
-            end
+        if not settings.enabled(entry.toggle_id) then goto continue end
+        if not env.is_valid(entry.inst) then goto continue end
+
+        local lx, ly, lz = esp_scan.label_position(entry)
+        if not lx then goto continue end
+
+        local dist = 0
+        if me and me.position then
+            local dx = lx - me.position.x
+            local dy = ly - me.position.y
+            local dz = lz - me.position.z
+            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+            if dist > range then goto continue end
         end
+
+        local col = settings.color(entry.toggle_id, { 1, 1, 1, 1 })
+        if draw_boxes then
+            esp_util.draw_entry_boxes(entry, col, 1)
+        end
+
+        local sx, sy, vis = esp_util.w2s(lx, ly, lz)
+        if vis then
+            local label = entry.name or "Base"
+            if settings.bool("april_base_distance", false) and me and me.position then
+                label = string.format("%s [%dm]", label, math.floor(dist))
+            end
+            draw_util.text_centered(sx, sy, label, col, text_size)
+        end
+
+        ::continue::
     end
 end
 
@@ -2897,11 +5307,11 @@ end)()
 April._mods["features.world.npc_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
-local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
 local esp_util = April.require("core.esp_util")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
+local npcs = April.require("game.npcs")
 
 local M = {}
 local P = "april_npc_enabled"
@@ -2914,8 +5324,7 @@ function M.register_menu()
     menu_util.section(T, G.WORLD, "NPC ESP")
     menu.add_checkbox(T, G.WORLD, P, "Enable NPC ESP", false, { key = 0, colorpicker = { 1, 0.3, 0.3, 1 } })
     menu.add_checkbox(T, G.WORLD, "april_npc_soldiers", "Soldiers", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_zombies", "Zombies", false, menu_util.parent(P, { colorpicker = { 0.4, 1, 0.3, 1 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_animals", "Animals", false, menu_util.parent(P, { colorpicker = { 0.8, 0.6, 0.2, 1 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, menu_util.parent(P, { colorpicker = { 1, 0.5, 0.1, 1 } }))
     menu.add_combo(T, G.WORLD, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 0, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_health", "Health Bar", false, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_name", "Name", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 1 } }))
@@ -2926,36 +5335,18 @@ function M.register_menu()
 end
 
 function M.scan()
-    cache.npcs = {}
-    folders.iter_workspace_folders({ "animals", "military", "npcs" }, function(key, folder)
-        local found = folders.scan_descendants(folder, { "Soldier", "NPC", "Zombie", "BTR", "Deer", "Boar", "Wolf" }, 200)
-        for _, inst in ipairs(found) do
-            table.insert(cache.npcs, { inst = inst, name = inst.Name or inst.name, category = key })
-        end
-    end)
+    cache.npcs = npcs.scan()
     cache.stats.last_npc_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
-local function category_enabled(entry)
-    local cat = entry.category or ""
-    local name = (entry.name or ""):lower()
-    if cat == "military" or name:find("soldier") or name:find("btr") then
-        return settings.bool("april_npc_soldiers", false)
-    end
-    if name:find("zombie") then return settings.bool("april_npc_zombies", false) end
-    if cat == "animals" or name:find("deer") or name:find("boar") or name:find("wolf") then
-        return settings.bool("april_npc_animals", false)
-    end
-    return settings.bool("april_npc_soldiers", false)
+local function kind_enabled(kind)
+    if kind == "soldier" then return settings.bool("april_npc_soldiers", false) end
+    if kind == "boss" then return settings.bool("april_npc_bosses", false) end
+    return false
 end
 
-local function category_color(entry)
-    local cat = entry.category or ""
-    local name = (entry.name or ""):lower()
-    if name:find("zombie") then return settings.color("april_npc_zombies", { 0.4, 1, 0.3, 1 }) end
-    if cat == "animals" or name:find("deer") or name:find("boar") or name:find("wolf") then
-        return settings.color("april_npc_animals", { 0.8, 0.6, 0.2, 1 })
-    end
+local function kind_color(kind)
+    if kind == "boss" then return settings.color("april_npc_bosses", { 1, 0.5, 0.1, 1 }) end
     return settings.color("april_npc_soldiers", { 1, 0.3, 0.3, 1 })
 end
 
@@ -2972,11 +5363,15 @@ function M.draw()
     local cx, cy = sw * 0.5, sh * 0.5
 
     for _, entry in ipairs(cache.npcs) do
-        if not category_enabled(entry) then goto continue end
+        if not kind_enabled(entry.kind) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
 
-        local col = category_color(entry)
-        local pos = entry.inst.Position or entry.inst.position
+        local col = kind_color(entry.kind)
+        local head = entry.head
+        local pos = head and (head.Position or head.position)
+        if not pos or pos.x == nil then
+            pos = entry.inst.Position or entry.inst.position
+        end
         if not pos or pos.x == nil then goto continue end
 
         if me and me.position then
@@ -3032,11 +5427,11 @@ end)()
 April._mods["features.movement.exploits"] = (function()
 local settings = April.require("core.settings")
 local env = April.require("core.env")
-local math_util = April.require("core.math_util")
 local menu_util = April.require("core.menu_util")
 
 local M = {}
 local P = "april_noclip_enabled"
+local OMNISPRINT_SPEED = 16
 
 function M.register_menu()
     local G = menu_util.G
@@ -3048,8 +5443,6 @@ function M.register_menu()
     menu.add_slider_int(T, G.MISC, "april_noclip_speed", "Noclip Speed", 1, 50, 16, root)
 
     menu.add_checkbox(T, G.MISC, "april_omnisprint_enabled", "Omnisprint", false, { key = 0 })
-    menu.add_combo(T, G.MISC, "april_omnisprint_mode", "Sprint Mode", { "Toggle", "Hold" }, 0, { parent = "april_omnisprint_enabled" })
-    menu.add_slider_int(T, G.MISC, "april_omnisprint_speed", "Sprint Speed", 16, 80, 32, { parent = "april_omnisprint_enabled" })
 
     menu.add_checkbox(T, G.MISC, "april_spider_enabled", "Spider Climb", false, { key = 0 })
     menu.add_slider_int(T, G.MISC, "april_spider_speed", "Wall Speed", 1, 50, 20, { parent = "april_spider_enabled" })
@@ -3068,8 +5461,105 @@ local function noclip_active()
     return false
 end
 
+local function key_down(code)
+    return input and input.is_key_down and input.is_key_down(code)
+end
+
+local function get_character(lp)
+    if lp and lp.character then return lp.character end
+    if game and game.local_player and game.local_player.character then
+        return game.local_player.character
+    end
+    return nil
+end
+
+local function get_root(lp)
+    local char = get_character(lp)
+    if not char then return nil end
+    return env.safe_call(function()
+        if char.find_first_child then
+            return char:find_first_child("HumanoidRootPart")
+        end
+        if char.FindFirstChild then
+            return char:FindFirstChild("HumanoidRootPart")
+        end
+    end)
+end
+
+local function movement_vector(lp)
+    local md = lp and lp.move_direction
+    if md then
+        local mx = md.x or md.X or 0
+        local mz = md.z or md.Z or 0
+        local mag = math.sqrt(mx * mx + mz * mz)
+        if mag > 0.05 then
+            return mx / mag, mz / mag
+        end
+    end
+
+    local look = camera and camera.get_look_vector and camera.get_look_vector()
+    if not look then return nil end
+
+    local fx, fz = look.x, look.z
+    local fmag = math.sqrt(fx * fx + fz * fz)
+    if fmag < 0.001 then return nil end
+    fx, fz = fx / fmag, fz / fmag
+    local rx, rz = -fz, fx
+
+    local mvx, mvz = 0, 0
+    if key_down(0x57) then mvx, mvz = mvx + fx, mvz + fz end
+    if key_down(0x53) then mvx, mvz = mvx - fx, mvz - fz end
+    if key_down(0x41) then mvx, mvz = mvx - rx, mvz - rz end
+    if key_down(0x44) then mvx, mvz = mvx + rx, mvz + rz end
+
+    local mmag = math.sqrt(mvx * mvx + mvz * mvz)
+    if mmag < 0.001 then return nil end
+    return mvx / mmag, mvz / mmag
+end
+
+local function apply_velocity(lp, vx, vy, vz)
+    pcall(function()
+        if lp then
+            if Vector3 then
+                lp.velocity = Vector3.new(vx, vy, vz)
+            else
+                lp.velocity = { x = vx, y = vy, z = vz }
+            end
+        end
+    end)
+
+    local root = lp and get_root(lp)
+    if root then
+        pcall(function()
+            if root.set_velocity then
+                root:set_velocity(vx, vy, vz)
+            elseif part and part.set_velocity then
+                part.set_velocity(root, vx, vy, vz)
+            end
+        end)
+    end
+end
+
+local function run_omnisprint()
+    if not settings.bool("april_omnisprint_enabled", false) then return end
+
+    local lp = entity and entity.get_local_player and entity.get_local_player()
+    if not lp then return end
+
+    local ux, uz = movement_vector(lp)
+    if not ux then return end
+
+    local vy = 0
+    if lp.velocity then
+        vy = lp.velocity.y or lp.velocity.Y or 0
+    end
+
+    local vx = ux * OMNISPRINT_SPEED
+    local vz = uz * OMNISPRINT_SPEED
+    apply_velocity(lp, vx, vy, vz)
+end
+
 function M.update(dt)
-    dt = dt or 0.016
     local lp = env.get_local_player()
     if not lp then return end
 
@@ -3080,19 +5570,7 @@ function M.update(dt)
         end
     end
 
-    if settings.bool("april_omnisprint_enabled", false) and camera and camera.get_look_vector then
-        local look = camera.get_look_vector()
-        local speed = settings.num("april_omnisprint_speed", 32) * dt
-        if input and input.is_key_down then
-            if input.is_key_down(0x57) then
-                pcall(function()
-                    if lp.set_velocity then
-                        lp:set_velocity(look.x * speed, look.y * speed, look.z * speed)
-                    end
-                end)
-            end
-        end
-    end
+    run_omnisprint()
 end
 
 function M.draw() end
@@ -3607,6 +6085,90 @@ return M
 
 end)()
 
+-- ── features/utility/mod_checker.lua ──
+April._mods["features.utility.mod_checker"] = (function()
+local settings = April.require("core.settings")
+local notify = April.require("core.notify")
+local mod_ids = April.require("game.mod_ids")
+local menu_util = April.require("core.menu_util")
+
+local M = {}
+local P = "april_mod_checker_enabled"
+local seen = {}
+local last_scan = 0
+local SCAN_MS = 2500
+
+function M.register_menu()
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.MISC)
+    menu_util.section(T, G.MISC, "Mod Checker")
+    menu.add_checkbox(T, G.MISC, P, "Mod Checker", false, { key = 0 })
+    menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Scan Interval (ms)", 1000, 10000, 2500, { parent = P })
+end
+
+local function player_label(p)
+    if not p then return "Unknown" end
+    if p.display_name and p.display_name ~= "" then return p.display_name end
+    return p.name or "Unknown"
+end
+
+function M.check_player(p)
+    if not settings.enabled(P) then return end
+    if not p or p.is_local then return end
+
+    local uid = p.user_id
+    if not uid or uid == 0 then return end
+
+    local role = mod_ids.role_for(uid)
+    if not role then return end
+    if seen[uid] then return end
+
+    seen[uid] = true
+    local label = player_label(p)
+    notify.warning(string.format("MOD: %s (%s) — %s", label, p.name or "?", role), 6000)
+end
+
+function M.scan_all()
+    if not settings.enabled(P) then return end
+    if not entity or not entity.get_players then return end
+
+    for _, p in ipairs(entity.get_players()) do
+        M.check_player(p)
+    end
+end
+
+function M.on_player_added(p)
+    M.check_player(p)
+end
+
+function M.on_player_removed(p)
+    if not p then return end
+    local uid = p.user_id
+    if uid and uid ~= 0 then
+        seen[uid] = nil
+    end
+end
+
+function M.update(dt)
+    if not settings.enabled(P) then
+        seen = {}
+        return
+    end
+
+    local now = utility and utility.get_tick_count and utility.get_tick_count() or 0
+    local interval = settings.num("april_mod_checker_interval", SCAN_MS)
+    if now - last_scan >= interval then
+        last_scan = now
+        M.scan_all()
+    end
+end
+
+function M.draw() end
+
+return M
+
+end)()
+
 -- ── features/utility/config.lua ──
 April._mods["features.utility.config"] = (function()
 local settings = April.require("core.settings")
@@ -3769,8 +6331,10 @@ M.FEATURE_ORDER = {
     "features.combat.aimbot",
     "features.combat.gun_mods",
     "features.visuals.player_esp",
+    "features.visuals.target_overlay",
     "features.visuals.crosshair",
     "features.visuals.feedback",
+    "features.visuals.bullet_tracers",
     "features.world.world_esp",
     "features.world.loot_esp",
     "features.world.npc_esp",
@@ -3778,6 +6342,7 @@ M.FEATURE_ORDER = {
     "features.radar.waypoints",
     "features.radar.tactical_map",
     "features.movement.exploits",
+    "features.utility.mod_checker",
     "features.utility.config",
 }
 
@@ -3815,15 +6380,20 @@ function M.setup_scans()
     local npc_esp = April.require("features.world.npc_esp")
 
     scheduler.register("players", 250, function() player_esp.scan() end)
-    scheduler.register("world", 1500, function() world_esp.scan() end)
-    scheduler.register("loot", 2000, function() loot_esp.scan() end)
+    scheduler.register("world", 1500, function() world_esp.scan_static() end)
+    scheduler.register("world_dynamic", 200, function() world_esp.scan_dynamic() end)
+    scheduler.register("loot", 1500, function() loot_esp.scan_static() end)
+    scheduler.register("loot_drops", 100, function() loot_esp.scan_drops() end)
     scheduler.register("base", 1000, function() base_esp.scan() end)
-    scheduler.register("npcs", 750, function() npc_esp.scan() end)
+    scheduler.register("npcs", 400, function() npc_esp.scan() end)
     scheduler.start_all()
 end
 
 function M.update(dt)
     bootstrap.tick()
+
+    local image_cache = April.require("core.image_cache")
+    image_cache.tick_all()
 
     local weapons = April.require("game.weapons")
     weapons.tick()
@@ -3854,7 +6424,25 @@ function M.init()
 
     M.register_all()
     M.setup_scans()
+
+    local player_esp = April.require("features.visuals.player_esp")
+    if player_esp.init then player_esp.init() end
+
+    M.setup_player_hooks()
+
     return true
+end
+
+function M.setup_player_hooks()
+    local mod = April.require("features.utility.mod_checker")
+
+    _G.on_player_added = function(p)
+        debug.guard("on_player_added", mod.on_player_added, p)
+    end
+
+    _G.on_player_removed = function(p)
+        debug.guard("on_player_removed", mod.on_player_removed, p)
+    end
 end
 
 return M
@@ -3865,6 +6453,7 @@ end)()
 April._mods["app"] = (function()
 local tabs = April.require("menu.tabs")
 local debug = April.require("core.debug")
+local notify = April.require("core.notify")
 
 local M = {}
 local initialized = false
@@ -3886,6 +6475,7 @@ function M.on_frame()
 
     debug.guard("tabs.update", tabs.update, dt)
     debug.guard("tabs.draw", tabs.draw)
+    debug.guard("notify.draw", notify.draw)
 end
 
 return M

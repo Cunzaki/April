@@ -22,8 +22,14 @@ function M.text(x, y, text, col, size)
 end
 
 function M.box_esp(x, y, w, h, col, style)
-    if not draw or not draw.box then return end
-    draw.box(x, y, w, h, col, 0, style or 0)
+    if not draw then return end
+    if style == 1 and draw.corner_box then
+        draw.corner_box(x, y, w, h, col)
+        return
+    end
+    if draw.box then
+        draw.box(x, y, w, h, col, 0, style or 0)
+    end
 end
 
 function M.health_bar(x, y, h, hp, max_hp)

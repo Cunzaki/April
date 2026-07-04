@@ -1,5 +1,6 @@
 local tabs = April.require("menu.tabs")
 local debug = April.require("core.debug")
+local notify = April.require("core.notify")
 
 local M = {}
 local initialized = false
@@ -21,6 +22,7 @@ function M.on_frame()
 
     debug.guard("tabs.update", tabs.update, dt)
     debug.guard("tabs.draw", tabs.draw)
+    debug.guard("notify.draw", notify.draw)
 end
 
 return M

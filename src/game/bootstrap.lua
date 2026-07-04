@@ -58,6 +58,9 @@ local function on_toolinfo_ready(count)
     else
         weapons.load()
     end
+
+    local items = April.require("game.items")
+    items.load()
 end
 
 function M.try_load_all()
@@ -107,12 +110,15 @@ function M.force_reload()
     M._scan_after = 0
     module_scan.invalidate_cache()
     April.require("game.weapons").invalidate()
+    April.require("game.items").invalidate()
     return M.try_load_all()
 end
 
 function M.tick()
     if not M._ready then
         M.try_load_all()
+    else
+        April.require("game.items").load()
     end
 end
 

@@ -21,10 +21,19 @@ function M.get_folder(...)
     local cur = ws
     for _, name in ipairs({ ... }) do
         if not cur then return nil end
-        cur = env.safe_call(function() return cur:find_first_child(name) end)
+        cur = env.safe_call(function()
+            return cur:find_first_child(name)
+                or cur:FindFirstChild(name)
+        end)
         if not env.is_valid(cur) then return nil end
     end
     return cur
+end
+
+function M.from_key(key)
+    local path = M.PATHS[key]
+    if not path then return nil end
+    return M.get_folder(unpack(path))
 end
 
 function M.scan_children(folder, class_filter, max_count)

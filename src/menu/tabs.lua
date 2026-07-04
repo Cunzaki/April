@@ -12,8 +12,10 @@ M.FEATURE_ORDER = {
     "features.combat.aimbot",
     "features.combat.gun_mods",
     "features.visuals.player_esp",
+    "features.visuals.target_overlay",
     "features.visuals.crosshair",
     "features.visuals.feedback",
+    "features.visuals.bullet_tracers",
     "features.world.world_esp",
     "features.world.loot_esp",
     "features.world.npc_esp",
@@ -21,6 +23,7 @@ M.FEATURE_ORDER = {
     "features.radar.waypoints",
     "features.radar.tactical_map",
     "features.movement.exploits",
+    "features.utility.mod_checker",
     "features.utility.config",
 }
 
@@ -58,15 +61,20 @@ function M.setup_scans()
     local npc_esp = April.require("features.world.npc_esp")
 
     scheduler.register("players", 250, function() player_esp.scan() end)
-    scheduler.register("world", 1500, function() world_esp.scan() end)
-    scheduler.register("loot", 2000, function() loot_esp.scan() end)
+    scheduler.register("world", 1500, function() world_esp.scan_static() end)
+    scheduler.register("world_dynamic", 200, function() world_esp.scan_dynamic() end)
+    scheduler.register("loot", 1500, function() loot_esp.scan_static() end)
+    scheduler.register("loot_drops", 100, function() loot_esp.scan_drops() end)
     scheduler.register("base", 1000, function() base_esp.scan() end)
-    scheduler.register("npcs", 750, function() npc_esp.scan() end)
+    scheduler.register("npcs", 400, function() npc_esp.scan() end)
     scheduler.start_all()
 end
 
 function M.update(dt)
     bootstrap.tick()
+
+    local image_cache = April.require("core.image_cache")
+    image_cache.tick_all()
 
     local weapons = April.require("game.weapons")
     weapons.tick()
@@ -97,7 +105,25 @@ function M.init()
 
     M.register_all()
     M.setup_scans()
+
+    local player_esp = April.require("features.visuals.player_esp")
+    if player_esp.init then player_esp.init() end
+
+    M.setup_player_hooks()
+
     return true
+end
+
+function M.setup_player_hooks()
+    local mod = April.require("features.utility.mod_checker")
+
+    _G.on_player_added = function(p)
+        debug.guard("on_player_added", mod.on_player_added, p)
+    end
+
+    _G.on_player_removed = function(p)
+        debug.guard("on_player_removed", mod.on_player_removed, p)
+    end
 end
 
 return M

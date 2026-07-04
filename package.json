@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/bundle.mjs"
+    "build": "node scripts/bundle.mjs",
+    "extract-images": "node scripts/extract-item-images.mjs",
+    "download-assets": "node scripts/download-assets.mjs",
+    "assets": "node scripts/extract-item-images.mjs && node scripts/download-assets.mjs"
   }
 }

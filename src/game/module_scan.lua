@@ -117,4 +117,30 @@ function M.find_toolinfo()
     return best, best_n
 end
 
+function M.find_items()
+    local best, best_n = nil, 0
+    M.each_table(function(v)
+        local n = 0
+        if type(v[1]) == "table" and v[1].Name and v[1].Image then
+            for i = 1, #v do
+                local entry = v[i]
+                if type(entry) == "table" and entry.Name and entry.Image then
+                    n = n + 1
+                end
+            end
+        else
+            for _, entry in pairs(v) do
+                if type(entry) == "table" and entry.Name and entry.Image then
+                    n = n + 1
+                end
+            end
+        end
+        if n > best_n and n >= 100 then
+            best_n = n
+            best = v
+        end
+    end)
+    return best, best_n
+end
+
 return M

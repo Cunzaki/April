@@ -149,4 +149,54 @@ function M.draw_offscreen_arrow(cx, cy, tx, ty, col, size)
     end
 end
 
+local BOX_EDGES = {
+    { 1, 2 }, { 1, 3 }, { 2, 4 }, { 3, 4 },
+    { 5, 6 }, { 5, 7 }, { 6, 8 }, { 7, 8 },
+    { 1, 5 }, { 2, 6 }, { 3, 7 }, { 4, 8 },
+}
+
+local BOX_SIGNS = {
+    { -1, -1, -1 }, { 1, -1, -1 }, { -1, 1, -1 }, { 1, 1, -1 },
+    { -1, -1, 1 }, { 1, -1, 1 }, { -1, 1, 1 }, { 1, 1, 1 },
+}
+
+function M.draw_oriented_box(box, col, thick)
+    if not box or not draw or not draw.line then return end
+    thick = thick or 1
+
+    local corners = {}
+    for i = 1, 8 do
+        local sx, sy, sz = BOX_SIGNS[i][1], BOX_SIGNS[i][2], BOX_SIGNS[i][3]
+        local lx, ly, lz = sx * box.hx, sy * box.hy, sz * box.hz
+        local wx = box.x + box.rx * lx + box.ux * ly - box.lx * lz
+        local wy = box.y + box.ry * lx + box.uy * ly - box.ly * lz
+        local wz = box.z + box.rz * lx + box.uz * ly - box.lz * lz
+        corners[i] = { wx, wy, wz }
+    end
+
+    local screen = {}
+    for i = 1, 8 do
+        local c = corners[i]
+        local sx, sy, vis = M.w2s(c[1], c[2], c[3])
+        if vis then screen[i] = { x = sx, y = sy } end
+    end
+
+    for _, edge in ipairs(BOX_EDGES) do
+        local a, b = screen[edge[1]], screen[edge[2]]
+        if a and b then
+            draw_util.line(a.x, a.y, b.x, b.y, col, thick)
+        end
+    end
+end
+
+function M.draw_entry_boxes(entry, col, thick)
+    if not entry or not entry.inst then return end
+    local scan = April.require("game.esp_scan")
+    local main = scan.find_main_part(entry.inst)
+    local box = scan.read_part_box(main)
+    if box then
+        M.draw_oriented_box(box, col, thick)
+    end
+end
+
 return M

@@ -17,11 +17,36 @@ end
 
 function M.bool(id, default)
     local v = M.get(id, default)
+    if v == false or v == 0 or v == "false" then return false end
+    return v == true or v == 1
+end
+
+--[[ Strict checkbox read — never treats missing menu value as enabled. ]]
+function M.enabled(id)
+    if not menu or not menu.get then return false end
+    local v = menu.get(id)
+    if v == nil or v == false or v == 0 or v == "false" then return false end
     return v == true or v == 1
 end
 
 function M.num(id, default)
     return tonumber(M.get(id, default)) or default or 0
+end
+
+--[[ Combo index — zero-based per API.md; also accepts label strings. ]]
+function M.combo_index(id, labels, default)
+    default = default or 0
+    local v = M.get(id, default)
+    if type(v) == "string" then
+        local lower = v:lower()
+        for i, label in ipairs(labels or {}) do
+            if label:lower() == lower then return i - 1 end
+        end
+        return default
+    end
+    local n = tonumber(v)
+    if n == nil then return default end
+    return n
 end
 
 function M.str(id, default)

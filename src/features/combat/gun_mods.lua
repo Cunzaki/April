@@ -11,15 +11,19 @@ M._editing = profiles.GLOBAL
 M._last_applied_weapon = nil
 M._last_applied_profile = nil
 M._apply_dirty = false
+M._needs_refresh = false
 M._last_retry = 0
-M._retry_ms = 1000
+M._retry_ms = 2500
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
-local function request_apply()
+local function request_apply(refresh)
     M._apply_dirty = true
+    if refresh then
+        M._needs_refresh = true
+    end
 end
 
 local function switch_profile(idx)
@@ -43,9 +47,8 @@ function M.register_menu()
     menu.add_button(T, G.AIMBOT, "april_gm_save", "Save Profile", function()
         profiles.sync_editor_to_profile(M._editing)
         print("[April Gun Mods] Saved profile: " .. M._editing)
-        request_apply()
     end)
-    menu.add_label(T, G.AIMBOT, "Global = all weapons. Per-weapon uses saved profile on swap.", root)
+    menu.add_label(T, G.AIMBOT, "Save stores settings only. Auto-apply runs on weapon swap.", root)
 
     menu.add_checkbox(T, G.AIMBOT, "april_gm_recoil", "Recoil Modifier", false, root)
     menu.add_slider_int(T, G.AIMBOT, "april_gm_recoil_pct", "Recoil Reduction %", 0, 100, 100, root)
@@ -65,9 +68,9 @@ function M.register_menu()
     menu.add_slider_int(T, G.AIMBOT, "april_gm_range_mult", "RangeMult", 1, 20, 10, root)
 
     settings.on_change("april_gm_profile", switch_profile)
-    settings.on_change(P, request_apply)
-    settings.on_change("april_gm_auto_detect", request_apply)
-    settings.on_change("april_gm_per_weapon", request_apply)
+    settings.on_change(P, function() request_apply(true) end)
+    settings.on_change("april_gm_auto_detect", function() request_apply(false) end)
+    settings.on_change("april_gm_per_weapon", function() request_apply(false) end)
 
     profiles.sync_profile_to_editor(M._editing)
 end
@@ -76,6 +79,8 @@ function M.try_apply(held)
     if not settings.bool(P, false) then
         M._last_applied_weapon = nil
         M._last_applied_profile = nil
+        M._apply_dirty = false
+        M._needs_refresh = false
         return false
     end
 
@@ -89,6 +94,7 @@ function M.try_apply(held)
 
     local mods, profile_name = profiles.mods_for_weapon(apply_held, per_weapon)
     if not next(mods) then
+        M._apply_dirty = false
         return false
     end
 
@@ -99,13 +105,22 @@ function M.try_apply(held)
         return true
     end
 
-    local ok, n, msg = gc.apply_once(mods)
+    local ok
+    if M._needs_refresh or gc.last_node_count() <= 0 then
+        ok = gc.apply_once(mods)
+        M._needs_refresh = false
+    else
+        ok = gc.apply_cached(mods)
+        if not ok and gc.last_node_count() <= 0 then
+            ok = gc.apply_once(mods)
+            M._needs_refresh = false
+        end
+    end
+
     if ok then
         M._last_applied_weapon = weapon_key
         M._last_applied_profile = profile_name
         M._apply_dirty = false
-    else
-        M._apply_dirty = true
     end
 
     return ok
@@ -119,16 +134,15 @@ function M.update(dt)
 
     if M._apply_dirty or held ~= M._last_applied_weapon then
         M.try_apply(held)
-    elseif held and now - M._last_retry >= M._retry_ms then
-        if gc.last_node_count() <= 0 then
-            M._last_retry = now
-            M.try_apply(held)
-        end
+    elseif held and now - M._last_retry >= M._retry_ms and M._apply_dirty then
+        M._last_retry = now
+        M._needs_refresh = true
+        M.try_apply(held)
     end
 end
 
 function M.on_weapon_changed(name)
-    request_apply()
+    request_apply(true)
 end
 
 function M.on_modules_ready()

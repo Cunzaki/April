@@ -1,10 +1,10 @@
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
-local folders = April.require("game.folders")
 local draw_util = April.require("core.draw_util")
 local esp_util = April.require("core.esp_util")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
+local npcs = April.require("game.npcs")
 
 local M = {}
 local P = "april_npc_enabled"
@@ -17,8 +17,7 @@ function M.register_menu()
     menu_util.section(T, G.WORLD, "NPC ESP")
     menu.add_checkbox(T, G.WORLD, P, "Enable NPC ESP", false, { key = 0, colorpicker = { 1, 0.3, 0.3, 1 } })
     menu.add_checkbox(T, G.WORLD, "april_npc_soldiers", "Soldiers", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_zombies", "Zombies", false, menu_util.parent(P, { colorpicker = { 0.4, 1, 0.3, 1 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_animals", "Animals", false, menu_util.parent(P, { colorpicker = { 0.8, 0.6, 0.2, 1 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, menu_util.parent(P, { colorpicker = { 1, 0.5, 0.1, 1 } }))
     menu.add_combo(T, G.WORLD, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 0, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_health", "Health Bar", false, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_name", "Name", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 1 } }))
@@ -29,36 +28,18 @@ function M.register_menu()
 end
 
 function M.scan()
-    cache.npcs = {}
-    folders.iter_workspace_folders({ "animals", "military", "npcs" }, function(key, folder)
-        local found = folders.scan_descendants(folder, { "Soldier", "NPC", "Zombie", "BTR", "Deer", "Boar", "Wolf" }, 200)
-        for _, inst in ipairs(found) do
-            table.insert(cache.npcs, { inst = inst, name = inst.Name or inst.name, category = key })
-        end
-    end)
+    cache.npcs = npcs.scan()
     cache.stats.last_npc_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
-local function category_enabled(entry)
-    local cat = entry.category or ""
-    local name = (entry.name or ""):lower()
-    if cat == "military" or name:find("soldier") or name:find("btr") then
-        return settings.bool("april_npc_soldiers", false)
-    end
-    if name:find("zombie") then return settings.bool("april_npc_zombies", false) end
-    if cat == "animals" or name:find("deer") or name:find("boar") or name:find("wolf") then
-        return settings.bool("april_npc_animals", false)
-    end
-    return settings.bool("april_npc_soldiers", false)
+local function kind_enabled(kind)
+    if kind == "soldier" then return settings.bool("april_npc_soldiers", false) end
+    if kind == "boss" then return settings.bool("april_npc_bosses", false) end
+    return false
 end
 
-local function category_color(entry)
-    local cat = entry.category or ""
-    local name = (entry.name or ""):lower()
-    if name:find("zombie") then return settings.color("april_npc_zombies", { 0.4, 1, 0.3, 1 }) end
-    if cat == "animals" or name:find("deer") or name:find("boar") or name:find("wolf") then
-        return settings.color("april_npc_animals", { 0.8, 0.6, 0.2, 1 })
-    end
+local function kind_color(kind)
+    if kind == "boss" then return settings.color("april_npc_bosses", { 1, 0.5, 0.1, 1 }) end
     return settings.color("april_npc_soldiers", { 1, 0.3, 0.3, 1 })
 end
 
@@ -75,11 +56,15 @@ function M.draw()
     local cx, cy = sw * 0.5, sh * 0.5
 
     for _, entry in ipairs(cache.npcs) do
-        if not category_enabled(entry) then goto continue end
+        if not kind_enabled(entry.kind) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
 
-        local col = category_color(entry)
-        local pos = entry.inst.Position or entry.inst.position
+        local col = kind_color(entry.kind)
+        local head = entry.head
+        local pos = head and (head.Position or head.position)
+        if not pos or pos.x == nil then
+            pos = entry.inst.Position or entry.inst.position
+        end
         if not pos or pos.x == nil then goto continue end
 
         if me and me.position then
