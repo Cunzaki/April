@@ -34,18 +34,10 @@ end
 
 local function ensure_item_image(name, variant)
     if not name then return nil end
-    local url = items.get_image_url(name, variant)
-    if not url then return nil end
-    local asset_id = url:match("(%d+)")
-    local key = img_key("item_", asset_id or name)
-    image_cache.ensure(key, url)
-    return key
-end
-
-local function ensure_avatar(user_id)
-    if not user_id or user_id <= 0 then return nil end
-    local key = img_key("avatar_", user_id)
-    image_cache.ensure(key, image_cache.urls_for_avatar(user_id))
+    local asset_id = items.get_image_asset_id(name, variant)
+    if not asset_id then return nil end
+    local key = img_key("item_", asset_id)
+    image_cache.ensure(key, asset_id)
     return key
 end
 
@@ -95,24 +87,20 @@ local function measure_panel(target, s)
     local armor_list = (gear and gear.armor) or {}
     local held_name = gear and gear.held
 
-    local show_avatar = settings.bool(P .. "_avatar", true)
     local show_held = settings.bool(P .. "_held", true) and held_name
     local show_armor = settings.bool(P .. "_armor", true) and #armor_list > 0
 
-    local avatar_sz = math.floor(38 * s)
     local slot_sz = math.floor(26 * s)
     local pad = math.floor(6 * s)
     local title_fs = math.max(11, math.floor(12 * s))
     local body_fs = math.max(9, math.floor(10 * s))
     local gap = math.floor(4 * s)
+    local header_h = math.floor(36 * s)
 
     local cols = show_armor and math.min(4, math.max(1, #armor_list)) or 0
     local armor_rows = show_armor and math.ceil(#armor_list / 4) or 0
 
-    local header_h = show_avatar and avatar_sz or math.floor(34 * s)
-    local info_w = math.floor(150 * s)
-    local content_w = (show_avatar and (avatar_sz + pad) or 0) + info_w
-
+    local content_w = math.floor(168 * s)
     if show_armor then
         content_w = math.max(content_w, cols * (slot_sz + gap) + pad)
     end
@@ -131,11 +119,9 @@ local function measure_panel(target, s)
         s = s,
         pad = pad,
         gap = gap,
-        avatar_sz = avatar_sz,
         slot_sz = slot_sz,
         title_fs = title_fs,
         body_fs = body_fs,
-        show_avatar = show_avatar,
         show_held = show_held,
         show_armor = show_armor,
         armor_list = armor_list,
@@ -150,11 +136,10 @@ local function compute_anchor(target, panel_w, panel_h, sw, sh)
     local y_off = settings.num(P .. "_y_offset", 0)
     local b = target.get_bounds and target:get_bounds()
 
-    local ax, ay, flip_left
+    local ax, ay
 
     if b and b.valid and b.w > 0 and b.h > 0 then
-        flip_left = (b.x + b.w + gap + panel_w) > (sw - 10)
-        if flip_left then
+        if (b.x + b.w + gap + panel_w) > (sw - 10) then
             ax = b.x - gap - panel_w
         else
             ax = b.x + b.w + gap
@@ -165,8 +150,7 @@ local function compute_anchor(target, panel_w, panel_h, sw, sh)
         if not pos then return nil, nil end
         local sx, sy, vis = esp_util.w2s(pos.x, pos.y + 1.5, pos.z)
         if not vis then return nil, nil end
-        flip_left = (sx + gap + panel_w) > (sw - 10)
-        if flip_left then
+        if (sx + gap + panel_w) > (sw - 10) then
             ax = sx - gap - panel_w
         else
             ax = sx + gap + 24
@@ -191,7 +175,6 @@ function M.register_menu()
     menu.add_slider_int(T, G.VISUALS, P .. "_follow", "Follow Speed", 4, 24, 14, menu_util.parent(P))
     menu.add_slider_int(T, G.VISUALS, P .. "_x_offset", "Side Offset", 0, 80, 14, menu_util.parent(P))
     menu.add_slider_int(T, G.VISUALS, P .. "_y_offset", "Y Offset", -120, 120, 0, menu_util.parent(P))
-    menu.add_checkbox(T, G.VISUALS, P .. "_avatar", "Avatar", true, menu_util.parent(P))
     menu.add_checkbox(T, G.VISUALS, P .. "_held", "Held Item", true, menu_util.parent(P))
     menu.add_checkbox(T, G.VISUALS, P .. "_armor", "Armor Icons", true, menu_util.parent(P))
     menu.add_checkbox(T, G.VISUALS, P .. "_distance", "Distance", true, menu_util.parent(P))
@@ -218,10 +201,6 @@ function M.update(dt)
     if M._last_uid ~= uid then
         M._anchor_x, M._anchor_y = nil, nil
         M._last_uid = uid
-    end
-
-    if settings.bool(P .. "_avatar", true) and target.user_id then
-        ensure_avatar(target.user_id)
     end
 
     local gear = get_gear(target)
@@ -258,9 +237,8 @@ function M.draw()
     if not target or not target.is_alive then return end
 
     local px, py = M._anchor_x, M._anchor_y
-    local s, layout = scale(), nil
-    local panel_w, panel_h
-    panel_w, panel_h, layout = measure_panel(target, s)
+    local s = scale()
+    local panel_w, panel_h, layout = measure_panel(target, s)
 
     local accent = settings.color(P .. "_accent", { 0.35, 0.72, 1, 1 })
     local name_col = settings.color(P .. "_name", { 1, 1, 1, 1 })
@@ -292,17 +270,9 @@ function M.draw()
     draw.rect(px, py, panel_w, panel_h, panel_edge, 1)
     draw.rect_filled(px, py, panel_w, 2, accent)
 
-    local tx = px + pad
+    local info_x = px + pad
     local ty = py + pad
-
-    if layout.show_avatar and target.user_id then
-        local av_key = ensure_avatar(target.user_id)
-        draw_icon_slot(tx, ty, layout.avatar_sz, av_key, accent)
-        tx = tx + layout.avatar_sz + pad
-    end
-
-    local info_x = tx
-    local info_w = px + panel_w - pad - info_x
+    local info_w = panel_w - pad * 2
 
     draw.text(info_x, ty, name, name_col, layout.title_fs)
 
@@ -322,7 +292,7 @@ function M.draw()
         draw.rect_filled(info_x, bar_y, info_w * hp_ratio, bar_h, hp_col)
     end
 
-    local row_y = py + pad + (layout.show_avatar and layout.avatar_sz or math.floor(34 * s)) + pad
+    local row_y = py + pad + math.floor(36 * s) + pad
 
     if layout.show_held then
         local held_key = ensure_item_image(layout.held_name)

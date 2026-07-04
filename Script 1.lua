@@ -1,11 +1,11 @@
 --[[
     April — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-04T07:04:36.144Z
+    Built: 2026-07-04T07:18:37.149Z
 ]]
 
 April = {
-    version = "3.9.0",
+    version = "3.9.1",
     debug = false,
     _mods = {},
     bundled = true,
@@ -588,50 +588,51 @@ end)()
 -- ── game/asset_urls.lua ──
 April._mods["game.asset_urls"] = (function()
 --[[
-    GitHub CDN URLs for draw.load_image (April/docs/API.md — HTTPS required).
-    Assets live in repo assets/ — run: node scripts/download-assets.mjs
+    GitHub CDN URLs for draw.load_image (April/docs/API.md — direct HTTPS).
+    Assets: https://github.com/Cunzaki/April/tree/main/assets
 ]]
 
 local M = {}
 
--- Bump branch/path if you fork; must match raw GitHub path after push.
-M.CDN_BASE = "https://raw.githubusercontent.com/cunzaki/April/main/assets"
+M.REPO = "Cunzaki/April"
+M.BRANCH = "main"
+
+M.CDN_RAW = "https://raw.githubusercontent.com/" .. M.REPO .. "/" .. M.BRANCH .. "/assets"
+M.CDN_JSdelivr = "https://cdn.jsdelivr.net/gh/" .. M.REPO .. "@" .. M.BRANCH .. "/assets"
+
+local function digits(id)
+    return id and tostring(id):match("(%d+)")
+end
 
 function M.item_png(asset_id)
-    asset_id = asset_id and tostring(asset_id):match("(%d+)")
+    asset_id = digits(asset_id)
     if not asset_id then return nil end
-    return M.CDN_BASE .. "/items/" .. asset_id .. ".png"
+    return M.CDN_JSdelivr .. "/items/" .. asset_id .. ".png"
 end
 
 function M.tung_png()
-    return M.CDN_BASE .. "/tung.png"
+    return M.CDN_JSdelivr .. "/tung.png"
 end
 
 function M.urls_for_item(asset_id)
-    local png = M.item_png(asset_id)
-    if not png then return {} end
-    asset_id = tostring(asset_id):match("(%d+)")
+    asset_id = digits(asset_id)
+    if not asset_id then return {} end
+    local rel = "/items/" .. asset_id .. ".png"
     return {
-        png,
+        M.CDN_JSdelivr .. rel,
+        M.CDN_RAW .. rel,
+        "https://github.com/" .. M.REPO .. "/raw/" .. M.BRANCH .. "/assets" .. rel,
         "rbxassetid://" .. asset_id,
-        "https://www.roblox.com/asset/?id=" .. asset_id,
     }
 end
 
 function M.urls_for_tung()
     local id = "139818999438291"
     return {
-        M.tung_png(),
+        M.CDN_JSdelivr .. "/tung.png",
+        M.CDN_RAW .. "/tung.png",
+        "https://github.com/" .. M.REPO .. "/raw/" .. M.BRANCH .. "/assets/tung.png",
         "rbxassetid://" .. id,
-        "https://www.roblox.com/asset/?id=" .. id,
-    }
-end
-
-function M.urls_for_avatar(user_id)
-    user_id = tostring(user_id):match("(%d+)") or tostring(user_id)
-    return {
-        "https://www.roblox.com/headshot-thumbnail/image?userId=" .. user_id .. "&size=150x150&format=Png",
-        "https://www.roblox.com/headshot-thumbnail/image?userId=" .. user_id .. "&width=150&height=150&format=png",
     }
 end
 
@@ -641,7 +642,7 @@ end)()
 
 -- ── core/image_cache.lua ──
 April._mods["core.image_cache"] = (function()
---[[ Async image loader — April/docs/API.md: HTTPS GitHub CDN first, lazy load in on_frame. ]]
+--[[ Async image loader — April/docs/API.md: load_image in on_frame, wait for image_loaded. ]]
 
 local asset_urls = April.require("game.asset_urls")
 
@@ -649,53 +650,35 @@ local M = {}
 
 local entries = {}
 
-function M.urls_for_asset(id)
-    return asset_urls.urls_for_item(id)
-end
-
 function M.urls_for_tung()
     return asset_urls.urls_for_tung()
 end
 
-function M.urls_for_avatar(user_id)
-    return asset_urls.urls_for_avatar(user_id)
-end
-
-local function normalize_urls(asset_id_or_urls)
+local function urls_for(asset_id_or_urls)
     if type(asset_id_or_urls) == "table" then
         return asset_id_or_urls
     end
-
     if type(asset_id_or_urls) == "string" then
         local id = asset_id_or_urls:match("(%d+)")
-        if asset_id_or_urls:find("http", 1, true) then
+        if asset_id_or_urls:find("http", 1, true) and not id then
             return { asset_id_or_urls }
-        end
-        if asset_id_or_urls:find("rbxassetid", 1, true) and id then
-            return asset_urls.urls_for_item(id)
         end
         if id then
             return asset_urls.urls_for_item(id)
         end
     end
-
     return asset_urls.urls_for_item(asset_id_or_urls)
 end
 
 function M.register(key, asset_id_or_urls)
     if entries[key] then return entries[key] end
-
     entries[key] = {
-        urls = normalize_urls(asset_id_or_urls),
+        urls = urls_for(asset_id_or_urls),
         url_index = 1,
         handle = nil,
         failed = false,
     }
     return entries[key]
-end
-
-function M.register_avatar(key, user_id)
-    return M.register(key, asset_urls.urls_for_avatar(user_id))
 end
 
 function M.ensure(key, asset_id_or_urls)
@@ -709,19 +692,14 @@ function M.tick(key)
     local entry = entries[key]
     if not entry or entry.failed or not draw or not draw.load_image then return end
 
+    local url = entry.urls[entry.url_index]
+    if not url then
+        entry.failed = true
+        return
+    end
+
     if not entry.handle then
-        local url = entry.urls[entry.url_index]
-        if not url then
-            entry.failed = true
-            return
-        end
         entry.handle = draw.load_image(url)
-        if not entry.handle then
-            entry.url_index = entry.url_index + 1
-            if entry.url_index > #entry.urls then
-                entry.failed = true
-            end
-        end
         return
     end
 
@@ -3950,7 +3928,7 @@ function M.get_players()
 end
 
 function M.init()
-    image_cache.register(TUNG_KEY, image_cache.urls_for_tung())
+    image_cache.ensure(TUNG_KEY, "139818999438291")
 end
 
 function M.update(_dt)
@@ -4096,18 +4074,10 @@ end
 
 local function ensure_item_image(name, variant)
     if not name then return nil end
-    local url = items.get_image_url(name, variant)
-    if not url then return nil end
-    local asset_id = url:match("(%d+)")
-    local key = img_key("item_", asset_id or name)
-    image_cache.ensure(key, url)
-    return key
-end
-
-local function ensure_avatar(user_id)
-    if not user_id or user_id <= 0 then return nil end
-    local key = img_key("avatar_", user_id)
-    image_cache.ensure(key, image_cache.urls_for_avatar(user_id))
+    local asset_id = items.get_image_asset_id(name, variant)
+    if not asset_id then return nil end
+    local key = img_key("item_", asset_id)
+    image_cache.ensure(key, asset_id)
     return key
 end
 
@@ -4157,24 +4127,20 @@ local function measure_panel(target, s)
     local armor_list = (gear and gear.armor) or {}
     local held_name = gear and gear.held
 
-    local show_avatar = settings.bool(P .. "_avatar", true)
     local show_held = settings.bool(P .. "_held", true) and held_name
     local show_armor = settings.bool(P .. "_armor", true) and #armor_list > 0
 
-    local avatar_sz = math.floor(38 * s)
     local slot_sz = math.floor(26 * s)
     local pad = math.floor(6 * s)
     local title_fs = math.max(11, math.floor(12 * s))
     local body_fs = math.max(9, math.floor(10 * s))
     local gap = math.floor(4 * s)
+    local header_h = math.floor(36 * s)
 
     local cols = show_armor and math.min(4, math.max(1, #armor_list)) or 0
     local armor_rows = show_armor and math.ceil(#armor_list / 4) or 0
 
-    local header_h = show_avatar and avatar_sz or math.floor(34 * s)
-    local info_w = math.floor(150 * s)
-    local content_w = (show_avatar and (avatar_sz + pad) or 0) + info_w
-
+    local content_w = math.floor(168 * s)
     if show_armor then
         content_w = math.max(content_w, cols * (slot_sz + gap) + pad)
     end
@@ -4193,11 +4159,9 @@ local function measure_panel(target, s)
         s = s,
         pad = pad,
         gap = gap,
-        avatar_sz = avatar_sz,
         slot_sz = slot_sz,
         title_fs = title_fs,
         body_fs = body_fs,
-        show_avatar = show_avatar,
         show_held = show_held,
         show_armor = show_armor,
         armor_list = armor_list,
@@ -4212,11 +4176,10 @@ local function compute_anchor(target, panel_w, panel_h, sw, sh)
     local y_off = settings.num(P .. "_y_offset", 0)
     local b = target.get_bounds and target:get_bounds()
 
-    local ax, ay, flip_left
+    local ax, ay
 
     if b and b.valid and b.w > 0 and b.h > 0 then
-        flip_left = (b.x + b.w + gap + panel_w) > (sw - 10)
-        if flip_left then
+        if (b.x + b.w + gap + panel_w) > (sw - 10) then
             ax = b.x - gap - panel_w
         else
             ax = b.x + b.w + gap
@@ -4227,8 +4190,7 @@ local function compute_anchor(target, panel_w, panel_h, sw, sh)
         if not pos then return nil, nil end
         local sx, sy, vis = esp_util.w2s(pos.x, pos.y + 1.5, pos.z)
         if not vis then return nil, nil end
-        flip_left = (sx + gap + panel_w) > (sw - 10)
-        if flip_left then
+        if (sx + gap + panel_w) > (sw - 10) then
             ax = sx - gap - panel_w
         else
             ax = sx + gap + 24
@@ -4253,7 +4215,6 @@ function M.register_menu()
     menu.add_slider_int(T, G.VISUALS, P .. "_follow", "Follow Speed", 4, 24, 14, menu_util.parent(P))
     menu.add_slider_int(T, G.VISUALS, P .. "_x_offset", "Side Offset", 0, 80, 14, menu_util.parent(P))
     menu.add_slider_int(T, G.VISUALS, P .. "_y_offset", "Y Offset", -120, 120, 0, menu_util.parent(P))
-    menu.add_checkbox(T, G.VISUALS, P .. "_avatar", "Avatar", true, menu_util.parent(P))
     menu.add_checkbox(T, G.VISUALS, P .. "_held", "Held Item", true, menu_util.parent(P))
     menu.add_checkbox(T, G.VISUALS, P .. "_armor", "Armor Icons", true, menu_util.parent(P))
     menu.add_checkbox(T, G.VISUALS, P .. "_distance", "Distance", true, menu_util.parent(P))
@@ -4280,10 +4241,6 @@ function M.update(dt)
     if M._last_uid ~= uid then
         M._anchor_x, M._anchor_y = nil, nil
         M._last_uid = uid
-    end
-
-    if settings.bool(P .. "_avatar", true) and target.user_id then
-        ensure_avatar(target.user_id)
     end
 
     local gear = get_gear(target)
@@ -4320,9 +4277,8 @@ function M.draw()
     if not target or not target.is_alive then return end
 
     local px, py = M._anchor_x, M._anchor_y
-    local s, layout = scale(), nil
-    local panel_w, panel_h
-    panel_w, panel_h, layout = measure_panel(target, s)
+    local s = scale()
+    local panel_w, panel_h, layout = measure_panel(target, s)
 
     local accent = settings.color(P .. "_accent", { 0.35, 0.72, 1, 1 })
     local name_col = settings.color(P .. "_name", { 1, 1, 1, 1 })
@@ -4354,17 +4310,9 @@ function M.draw()
     draw.rect(px, py, panel_w, panel_h, panel_edge, 1)
     draw.rect_filled(px, py, panel_w, 2, accent)
 
-    local tx = px + pad
+    local info_x = px + pad
     local ty = py + pad
-
-    if layout.show_avatar and target.user_id then
-        local av_key = ensure_avatar(target.user_id)
-        draw_icon_slot(tx, ty, layout.avatar_sz, av_key, accent)
-        tx = tx + layout.avatar_sz + pad
-    end
-
-    local info_x = tx
-    local info_w = px + panel_w - pad - info_x
+    local info_w = panel_w - pad * 2
 
     draw.text(info_x, ty, name, name_col, layout.title_fs)
 
@@ -4384,7 +4332,7 @@ function M.draw()
         draw.rect_filled(info_x, bar_y, info_w * hp_ratio, bar_h, hp_col)
     end
 
-    local row_y = py + pad + (layout.show_avatar and layout.avatar_sz or math.floor(34 * s)) + pad
+    local row_y = py + pad + math.floor(36 * s) + pad
 
     if layout.show_held then
         local held_key = ensure_item_image(layout.held_name)

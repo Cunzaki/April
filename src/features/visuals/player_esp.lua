@@ -56,7 +56,7 @@ function M.get_players()
 end
 
 function M.init()
-    image_cache.register(TUNG_KEY, image_cache.urls_for_tung())
+    image_cache.ensure(TUNG_KEY, "139818999438291")
 end
 
 function M.update(_dt)

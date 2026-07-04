@@ -1,48 +1,49 @@
 --[[
-    GitHub CDN URLs for draw.load_image (April/docs/API.md — HTTPS required).
-    Assets live in repo assets/ — run: node scripts/download-assets.mjs
+    GitHub CDN URLs for draw.load_image (April/docs/API.md — direct HTTPS).
+    Assets: https://github.com/Cunzaki/April/tree/main/assets
 ]]
 
 local M = {}
 
--- Bump branch/path if you fork; must match raw GitHub path after push.
-M.CDN_BASE = "https://raw.githubusercontent.com/cunzaki/April/main/assets"
+M.REPO = "Cunzaki/April"
+M.BRANCH = "main"
+
+M.CDN_RAW = "https://raw.githubusercontent.com/" .. M.REPO .. "/" .. M.BRANCH .. "/assets"
+M.CDN_JSdelivr = "https://cdn.jsdelivr.net/gh/" .. M.REPO .. "@" .. M.BRANCH .. "/assets"
+
+local function digits(id)
+    return id and tostring(id):match("(%d+)")
+end
 
 function M.item_png(asset_id)
-    asset_id = asset_id and tostring(asset_id):match("(%d+)")
+    asset_id = digits(asset_id)
     if not asset_id then return nil end
-    return M.CDN_BASE .. "/items/" .. asset_id .. ".png"
+    return M.CDN_JSdelivr .. "/items/" .. asset_id .. ".png"
 end
 
 function M.tung_png()
-    return M.CDN_BASE .. "/tung.png"
+    return M.CDN_JSdelivr .. "/tung.png"
 end
 
 function M.urls_for_item(asset_id)
-    local png = M.item_png(asset_id)
-    if not png then return {} end
-    asset_id = tostring(asset_id):match("(%d+)")
+    asset_id = digits(asset_id)
+    if not asset_id then return {} end
+    local rel = "/items/" .. asset_id .. ".png"
     return {
-        png,
+        M.CDN_JSdelivr .. rel,
+        M.CDN_RAW .. rel,
+        "https://github.com/" .. M.REPO .. "/raw/" .. M.BRANCH .. "/assets" .. rel,
         "rbxassetid://" .. asset_id,
-        "https://www.roblox.com/asset/?id=" .. asset_id,
     }
 end
 
 function M.urls_for_tung()
     local id = "139818999438291"
     return {
-        M.tung_png(),
+        M.CDN_JSdelivr .. "/tung.png",
+        M.CDN_RAW .. "/tung.png",
+        "https://github.com/" .. M.REPO .. "/raw/" .. M.BRANCH .. "/assets/tung.png",
         "rbxassetid://" .. id,
-        "https://www.roblox.com/asset/?id=" .. id,
-    }
-end
-
-function M.urls_for_avatar(user_id)
-    user_id = tostring(user_id):match("(%d+)") or tostring(user_id)
-    return {
-        "https://www.roblox.com/headshot-thumbnail/image?userId=" .. user_id .. "&size=150x150&format=Png",
-        "https://www.roblox.com/headshot-thumbnail/image?userId=" .. user_id .. "&width=150&height=150&format=png",
     }
 end
 

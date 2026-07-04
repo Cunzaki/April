@@ -1,4 +1,4 @@
---[[ Async image loader — April/docs/API.md: HTTPS GitHub CDN first, lazy load in on_frame. ]]
+--[[ Async image loader — April/docs/API.md: load_image in on_frame, wait for image_loaded. ]]
 
 local asset_urls = April.require("game.asset_urls")
 
@@ -6,53 +6,35 @@ local M = {}
 
 local entries = {}
 
-function M.urls_for_asset(id)
-    return asset_urls.urls_for_item(id)
-end
-
 function M.urls_for_tung()
     return asset_urls.urls_for_tung()
 end
 
-function M.urls_for_avatar(user_id)
-    return asset_urls.urls_for_avatar(user_id)
-end
-
-local function normalize_urls(asset_id_or_urls)
+local function urls_for(asset_id_or_urls)
     if type(asset_id_or_urls) == "table" then
         return asset_id_or_urls
     end
-
     if type(asset_id_or_urls) == "string" then
         local id = asset_id_or_urls:match("(%d+)")
-        if asset_id_or_urls:find("http", 1, true) then
+        if asset_id_or_urls:find("http", 1, true) and not id then
             return { asset_id_or_urls }
-        end
-        if asset_id_or_urls:find("rbxassetid", 1, true) and id then
-            return asset_urls.urls_for_item(id)
         end
         if id then
             return asset_urls.urls_for_item(id)
         end
     end
-
     return asset_urls.urls_for_item(asset_id_or_urls)
 end
 
 function M.register(key, asset_id_or_urls)
     if entries[key] then return entries[key] end
-
     entries[key] = {
-        urls = normalize_urls(asset_id_or_urls),
+        urls = urls_for(asset_id_or_urls),
         url_index = 1,
         handle = nil,
         failed = false,
     }
     return entries[key]
-end
-
-function M.register_avatar(key, user_id)
-    return M.register(key, asset_urls.urls_for_avatar(user_id))
 end
 
 function M.ensure(key, asset_id_or_urls)
@@ -66,19 +48,14 @@ function M.tick(key)
     local entry = entries[key]
     if not entry or entry.failed or not draw or not draw.load_image then return end
 
+    local url = entry.urls[entry.url_index]
+    if not url then
+        entry.failed = true
+        return
+    end
+
     if not entry.handle then
-        local url = entry.urls[entry.url_index]
-        if not url then
-            entry.failed = true
-            return
-        end
         entry.handle = draw.load_image(url)
-        if not entry.handle then
-            entry.url_index = entry.url_index + 1
-            if entry.url_index > #entry.urls then
-                entry.failed = true
-            end
-        end
         return
     end
 
