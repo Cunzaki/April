@@ -7,12 +7,14 @@ local hit_time = 0
 local P = "april_hitmarker_enabled"
 
 function M.register_menu()
-    local T, G = menu_util.group("Hitmarkers")
-    menu.add_checkbox(T, G, "april_hitmarker_enabled", "Hitmarker", true, { colorpicker = { 1, 1, 1, 1 } })
-    menu.add_checkbox(T, G, "april_hitmarker_glow", "Hitmarker Glow", false, { parent = P })
-    menu.add_slider_int(T, G, "april_hitmarker_size", "Hitmarker Size", 1, 20, 5, { parent = P })
-    menu.add_slider_int(T, G, "april_hitmarker_duration", "Duration (ms)", 100, 2000, 500, { parent = P })
-    menu.add_checkbox(T, G, "april_hit_notifier", "Hit Notifier", true)
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.VISUALS)
+    menu_util.section(T, G.VISUALS, "Hitmarkers")
+    menu.add_checkbox(T, G.VISUALS, "april_hitmarker_enabled", "Hitmarker", false, { colorpicker = { 1, 1, 1, 1 } })
+    menu.add_checkbox(T, G.VISUALS, "april_hitmarker_glow", "Hitmarker Glow", false, { parent = P })
+    menu.add_slider_int(T, G.VISUALS, "april_hitmarker_size", "Hitmarker Size", 1, 20, 5, { parent = P })
+    menu.add_slider_int(T, G.VISUALS, "april_hitmarker_duration", "Duration (ms)", 100, 2000, 500, { parent = P })
+    menu.add_checkbox(T, G.VISUALS, "april_hit_notifier", "Hit Notifier", false)
 end
 
 function M.trigger_hit()
@@ -22,7 +24,7 @@ end
 function M.update(dt) end
 
 function M.draw()
-    if not settings.bool("april_hitmarker_enabled", true) then return end
+    if not settings.bool("april_hitmarker_enabled", false) then return end
     if hit_time == 0 then return end
     local now = utility and utility.get_tick_count and utility.get_tick_count() or 0
     local dur = settings.num("april_hitmarker_duration", 500)

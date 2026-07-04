@@ -1,31 +1,30 @@
 --[[
-    Vector script menus (mode "full"):
-      - One script tab: April
-      - Each feature is a GROUP under that tab (Aimbot, Player ESP, Crosshair, ...)
-      - Vector lays groups out in a 2-column grid (left / right, then next row)
-
-    Do NOT register on Vector's built-in Aimbot/Visuals/World tabs — that breaks layout.
+    Vector "full" mode grid (Lone script pattern):
+      menu.add_group(tab, name)           → left column, new row
+      menu.add_group(tab, name, 0, true)  → right column, same row as previous left
 ]]
 
 local M = {}
 
 M.TAB = "April"
 
--- Group registration order = grid order (L, R, L, R, ...)
-M.GROUP_ORDER = {
-    "Aimbot",
-    "Player ESP",
-    "Crosshair",
-    "Hitmarkers",
-    "World",
-    "Recoil Control",
-    "Waypoints",
-    "Loot",
-    "NPCs",
-    "Base",
-    "Tactical Map",
-    "Movement",
-    "Config",
+M.G = {
+    AIMBOT = "Aimbot",
+    VISUALS = "Visuals",
+    WORLD = "World",
+    RADAR = "Radar",
+    MISC = "Misc",
+    CONFIG = "Config",
+}
+
+-- Which side each group renders on (must register left before its right pair).
+M.G_SIDE = {
+    [M.G.AIMBOT] = "left",
+    [M.G.VISUALS] = "right",
+    [M.G.WORLD] = "left",
+    [M.G.RADAR] = "right",
+    [M.G.MISC] = "left",
+    [M.G.CONFIG] = "right",
 }
 
 M._tab_ready = false
@@ -33,26 +32,45 @@ M._groups = {}
 
 function M.ensure_tab()
     if M._tab_ready then return end
-    -- Bundled april.lua registers the tab in its file header (legacy pattern).
     if not (April and April._menu_tab_ready) and menu and menu.add_tab then
         menu.add_tab(M.TAB, "A", "full")
     end
     M._tab_ready = true
 end
 
-function M.group(name)
+function M.group(name, side)
     M.ensure_tab()
-    if not M._groups[name] then
-        menu.add_group(M.TAB, name)
+    if M._groups[name] then
+        return M.TAB, name
+    end
+
+    side = side or M.G_SIDE[name] or "left"
+
+    if menu and menu.add_group then
+        if side == "right" then
+            menu.add_group(M.TAB, name, 0, true)
+        else
+            menu.add_group(M.TAB, name)
+        end
         M._groups[name] = true
     end
+
     return M.TAB, name
 end
 
-function M.group_count()
-    local n = 0
-    for _ in pairs(M._groups) do n = n + 1 end
-    return n
+function M.section(T, G, title)
+    menu.add_separator(T, G)
+    menu.add_label(T, G, title)
+end
+
+function M.parent(main_id, extra)
+    local opts = { parent = main_id }
+    if type(extra) == "table" then
+        for k, v in pairs(extra) do
+            opts[k] = v
+        end
+    end
+    return opts
 end
 
 return M

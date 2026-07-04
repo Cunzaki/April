@@ -1,70 +1,412 @@
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
-local math_util = April.require("core.math_util")
+local cache = April.require("core.cache")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
 
 local M = {}
 local P = "april_map_enabled"
 
+M._offset_x = 0
+M._offset_y = 0
+M._dragging = false
+M._drag_mx = 0
+M._drag_my = 0
+M._old_off_x = 0
+M._old_off_y = 0
+
 function M.register_menu()
-    local T, G = menu_util.group("Tactical Map")
-    menu.add_checkbox(T, G, "april_map_enabled", "Enable Tactical Map", false, { key = 0x28 })
-    menu.add_slider_float(T, G, "april_map_zoom", "Zoom Level", 0.05, 5.0, 1.0, "%.2f", { parent = P })
-    menu.add_colorpicker(T, G, "april_map_bg", "Background Color", { 0.05, 0.05, 0.08, 0.95 }, { parent = P })
-    menu.add_colorpicker(T, G, "april_map_grid", "Grid Color", { 1, 1, 1, 0.04 }, { parent = P })
-    menu.add_colorpicker(T, G, "april_map_local", "Local Player Color", { 0.2, 0.8, 1, 1 }, { parent = P })
-    menu.add_checkbox(T, G, "april_map_labels", "Show Labels", false, { parent = P })
-    menu.add_checkbox(T, G, "april_map_coords", "Show Coordinates", true, { parent = P })
-    menu.add_checkbox(T, G, "april_map_compass", "Compass Overlay", true, { parent = P, colorpicker = { 0.2, 0.8, 1, 0.8 } })
-    menu.add_slider_int(T, G, "april_map_size", "Map Size", 120, 500, 220, { parent = P })
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.RADAR)
+    local root = menu_util.parent(P)
+
+    menu_util.section(T, G.RADAR, "Tactical Map")
+    menu.add_checkbox(T, G.RADAR, P, "Enable Tactical Map", false, { key = 0x28 })
+    menu.add_combo(T, G.RADAR, "april_map_mode", "Display Mode", { "Corner Widget", "Fullscreen Overlay" }, 0, root)
+    menu.add_slider_float(T, G.RADAR, "april_map_zoom", "Zoom Level", 0.05, 5.0, 1.0, "%.2f", root)
+    menu.add_slider_int(T, G.RADAR, "april_map_size", "Corner Size", 120, 500, 220, root)
+    menu.add_slider_int(T, G.RADAR, "april_map_icon_scale", "Icon Scale", 1, 8, 3, root)
+
+    menu.add_separator(T, G.RADAR)
+    menu.add_label(T, G.RADAR, "Layers")
+    menu.add_checkbox(T, G.RADAR, "april_map_show_players", "Players", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_show_npcs", "NPCs", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_show_loot", "Loot", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_show_world", "World Resources", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_show_base", "Base Parts", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_show_waypoints", "Waypoints", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_show_local", "Local Player", true, root)
+
+    menu.add_separator(T, G.RADAR)
+    menu.add_colorpicker(T, G.RADAR, "april_map_bg", "Background Color", { 0.05, 0.05, 0.08, 0.95 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_grid", "Grid Color", { 1, 1, 1, 0.04 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_player_col", "Player Color", { 1, 0.35, 0.35, 1 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_npc_col", "NPC Color", { 1, 0.6, 0.2, 1 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_loot_col", "Loot Color", { 1, 0.85, 0.2, 1 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_world_col", "World Color", { 0.4, 0.9, 0.5, 1 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_base_col", "Base Color", { 0.5, 0.5, 1, 1 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_wp_col", "Waypoint Color", { 0.2, 1, 0.8, 1 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_local", "Local Player Color", { 0.2, 0.8, 1, 1 }, root)
+
+    menu.add_separator(T, G.RADAR)
+    menu.add_checkbox(T, G.RADAR, "april_map_labels", "Show Labels", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_coords", "Show Coordinates", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_compass", "Compass Overlay", false, menu_util.parent(P, { colorpicker = { 0.2, 0.8, 1, 0.8 } }))
+    menu.add_checkbox(T, G.RADAR, "april_map_tooltips", "Hover Tooltips", false, root)
+    menu.add_button(T, G.RADAR, "april_map_recenter", "Recenter Map", function()
+        M._offset_x = 0
+        M._offset_y = 0
+    end)
 end
 
 local function key_active()
-    local vk = settings.num("april_map_key", 0x28)
-    if input and input.is_key_down then return input.is_key_down(vk) end
-    return settings.bool("april_map_enabled", false)
+    if settings.bool(P, false) then return true end
+    if not menu or not menu.get_key then return false end
+    local vk = menu.get_key(P)
+    return vk and vk > 0 and input and input.is_key_down and input.is_key_down(vk)
+end
+
+local function get_mouse()
+    if not utility or not utility.get_mouse_pos then return 0, 0 end
+    local ok, a, b = pcall(utility.get_mouse_pos)
+    if not ok then return 0, 0 end
+    if type(a) == "table" then
+        return a.x or a.X or 0, a.y or a.Y or 0
+    end
+    if type(a) == "number" then
+        return a, b or 0
+    end
+    return 0, 0
+end
+
+local function vec_xz(v)
+    if not v then return 0, 0 end
+    return v.x or v.X or 0, v.z or v.Z or 0
+end
+
+local function get_look_vector()
+    if camera and camera.get_look_vector then
+        local ok, lv = pcall(camera.get_look_vector)
+        if ok and lv then return lv end
+    end
+    return nil
+end
+
+-- Horizontal camera yaw (radians). Forward on XZ = (sin(yaw), cos(yaw)).
+local function get_camera_yaw()
+    if camera and camera.get_angles then
+        local ok, a = pcall(camera.get_angles)
+        if ok and a then
+            local deg = a.Y or a.y
+            if deg then return math.rad(deg) end
+        end
+    end
+    if utility and utility.get_camera_angles then
+        local ok, pitch, yaw = pcall(utility.get_camera_angles)
+        if ok and yaw then return math.rad(yaw) end
+        if ok and pitch and not yaw then return math.rad(pitch) end
+    end
+    local lv = get_look_vector()
+    if lv then
+        local lx, lz = vec_xz(lv)
+        if math.abs(lx) > 0.001 or math.abs(lz) > 0.001 then
+            return math.atan2(lx, lz)
+        end
+    end
+    return 0
+end
+
+local function get_view_origin()
+    local cx, cy, cz = nil, nil, nil
+
+    if camera and camera.get_position then
+        local ok, pos = pcall(camera.get_position)
+        if ok and pos and (pos.x or pos.X) then
+            cx = pos.x or pos.X
+            cy = pos.y or pos.Y
+            cz = pos.z or pos.Z
+        end
+    end
+
+    local lp = env.get_local_player()
+    local px, py, pz = nil, nil, nil
+    if lp and lp.position then
+        px = lp.position.x
+        py = lp.position.y
+        pz = lp.position.z
+    end
+
+    if not cx then
+        cx, cy, cz = px, py, pz
+    end
+
+    return cx or 0, cy or 0, cz or 0, px, py, pz
+end
+
+local function map_layout(sw, sh, fullscreen)
+    if fullscreen then
+        return 0, 0, sw, sh, sw * 0.5, sh * 0.5
+    end
+    local size = settings.num("april_map_size", 220)
+    local x, y = sw - size - 20, 20
+    return x, y, size, size, x + size * 0.5, y + size * 0.5
+end
+
+-- Camera-relative: forward = up on screen, right = right on screen.
+local function world_to_map(wx, wz, view_x, view_z, map_cx, map_cy, zoom, yaw)
+    local wdx = wx - view_x
+    local wdz = wz - view_z
+    local fx, fz = math.sin(yaw), math.cos(yaw)
+    local rx, rz = math.cos(yaw), -math.sin(yaw)
+    local local_fwd = wdx * fx + wdz * fz
+    local local_right = wdx * rx + wdz * rz
+    return map_cx + local_right * zoom, map_cy - local_fwd * zoom
+end
+
+local function world_dir_to_screen(dx, dz, yaw, radius)
+    local fx, fz = math.sin(yaw), math.cos(yaw)
+    local rx, rz = math.cos(yaw), -math.sin(yaw)
+    local local_fwd = dx * fx + dz * fz
+    local local_right = dx * rx + dz * rz
+    return local_right * radius, -local_fwd * radius
+end
+
+local function draw_dot(mx, my, scale, col)
+    if draw and draw.circle_filled then
+        draw.circle_filled(mx, my, scale, col, 10)
+    else
+        draw_util.circle(mx, my, scale, col, true)
+    end
+end
+
+local function entry_world_xz(entry)
+    if entry.x and entry.z then return entry.x, entry.z end
+    local inst = entry.inst
+    if inst then
+        local pos = inst.Position or inst.position
+        if pos and pos.x then return pos.x, pos.z end
+    end
+    return nil, nil
+end
+
+local function draw_map_item(wx, wz, col, label, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h)
+    if not wx or not wz then return end
+    local mx, my = world_to_map(wx, wz, view_x, view_z, map_cx, map_cy, zoom, yaw)
+    if mx < x - 8 or mx > x + w + 8 or my < y - 8 or my > y + h + 8 then return end
+    draw_dot(mx, my, scale, col)
+    if settings.bool("april_map_labels", false) and label and label ~= "" then
+        draw_util.text(mx + scale + 2, my - 6, label, col, 10)
+    end
+end
+
+local function draw_grid(x, y, w, h, grid, map_cx, map_cy, zoom)
+    local step = math.max(12, (w / 8))
+    for i = -4, 4 do
+        if i ~= 0 then
+            draw_util.line(map_cx + i * step, y + 4, map_cx + i * step, y + h - 4, grid, 1)
+            draw_util.line(x + 4, map_cy + i * step, x + w - 4, map_cy + i * step, grid, 1)
+        end
+    end
+end
+
+local function draw_compass_rose(cx, cy, radius, yaw, cmp_col, inside_x, inside_y, inside_w, inside_h)
+    if draw and draw.circle_filled then
+        draw.circle_filled(cx, cy, radius, { 0.05, 0.05, 0.08, 0.75 }, 24)
+    end
+    if draw and draw.circle then
+        draw.circle(cx, cy, radius, cmp_col, 24, 1.5)
+    end
+
+    local function marker(lbl, wdx, wdz, col)
+        local sx, sy = world_dir_to_screen(wdx, wdz, yaw, radius - 10)
+        draw_util.text(cx + sx - 4, cy + sy - 6, lbl, col, 11)
+    end
+
+    marker("N", 0, -1, { 1, 0.2, 0.2, 1 })
+    marker("S", 0, 1, cmp_col)
+    marker("E", 1, 0, cmp_col)
+    marker("W", -1, 0, cmp_col)
+
+    if draw and draw.line then
+        local nx, ny = world_dir_to_screen(0, -1, yaw, radius - 4)
+        draw.line(cx, cy, cx + nx, cy + ny, { 1, 0.2, 0.2, 0.9 }, 2)
+    end
+end
+
+local function handle_fullscreen_pan(zoom, mx, my, yaw)
+    if not input or not input.is_key_down then return end
+
+    if input.is_key_down(0x04) then
+        M._offset_x = 0
+        M._offset_y = 0
+        return
+    end
+
+    if input.is_key_down(0x01) then
+        if not M._dragging then
+            M._dragging = true
+            M._drag_mx = mx
+            M._drag_my = my
+            M._old_off_x = M._offset_x
+            M._old_off_y = M._offset_y
+        elseif zoom > 0 then
+            local dx = (mx - M._drag_mx) / zoom
+            local dy = (my - M._drag_my) / zoom
+            local fx, fz = math.sin(yaw), math.cos(yaw)
+            local rx, rz = math.cos(yaw), -math.sin(yaw)
+            M._offset_x = M._old_off_x - (dx * rx + dy * rz)
+            M._offset_y = M._old_off_y - (-dx * fx + dy * fz)
+        end
+    else
+        M._dragging = false
+    end
 end
 
 function M.update(dt) end
 
 function M.draw()
-    if not settings.bool("april_map_enabled", false) and not key_active() then return end
+    if not key_active() then return end
+    if not draw then return end
 
-    local size = settings.num("april_map_size", 220)
     local sw, sh = draw_util.screen_size()
-    local x, y = sw - size - 20, 20
+    local fullscreen = settings.num("april_map_mode", 0) == 1
+    local x, y, w, h, map_cx, map_cy = map_layout(sw, sh, fullscreen)
+    local zoom = settings.num("april_map_zoom", 1.0)
+    local scale = settings.num("april_map_icon_scale", 3)
     local bg = settings.color("april_map_bg", { 0.05, 0.05, 0.08, 0.95 })
     local grid = settings.color("april_map_grid", { 1, 1, 1, 0.04 })
-    local local_col = settings.color("april_map_local", { 0.2, 0.8, 1, 1 })
 
-    if draw and draw.rect_filled then
-        draw.rect_filled(x, y, size, size, bg)
-        draw.rect(x, y, size, size, { 1, 1, 1, 0.15 }, 1)
+    local cam_x, cam_y, cam_z, body_x, body_y, body_z = get_view_origin()
+    local yaw = get_camera_yaw()
+
+    local mx, my = get_mouse()
+
+    if fullscreen then
+        handle_fullscreen_pan(zoom, mx, my, yaw)
+    else
+        M._offset_x = 0
+        M._offset_y = 0
+        M._dragging = false
     end
 
-    local step = size / 8
-    for i = 1, 7 do
-        draw_util.line(x + step * i, y, x + step * i, y + size, grid, 1)
-        draw_util.line(x, y + step * i, x + size, y + step * i, grid, 1)
-    end
+    local view_x = cam_x + M._offset_x
+    local view_z = cam_z + M._offset_y
 
-    local lp = env.get_local_player()
-    if lp and lp.position then
-        local cx, cy = x + size * 0.5, y + size * 0.5
-        draw_util.circle(cx, cy, 4, local_col, true)
-        if settings.bool("april_map_coords", true) then
-            local px, py, pz = lp.position.x, lp.position.y, lp.position.z
-            draw_util.text(x + 6, y + size + 4, string.format("%.0f, %.0f, %.0f", px, py, pz), { 1, 1, 1, 0.8 }, 11)
-        end
-        if settings.bool("april_map_labels", false) then
-            draw_util.text(x + 6, y + 4, "Tactical Map", { 1, 1, 1, 0.9 }, 12)
+    if draw.rect_filled then
+        draw.rect_filled(x, y, w, h, bg, fullscreen and 0 or 1)
+        if draw.rect then
+            draw.rect(x, y, w, h, { 1, 1, 1, 0.15 }, fullscreen and 0 or 1, 1)
         end
     end
 
-    if settings.bool("april_map_compass", true) then
-        local cc = settings.color("april_map_compass", { 0.2, 0.8, 1, 0.8 })
-        draw_util.text_centered(x + size * 0.5, y - 14, "N", cc, 12)
+    draw_grid(x, y, w, h, grid, map_cx, map_cy, zoom)
+
+    if settings.bool("april_map_show_players", false) and entity and entity.get_players then
+        local col = settings.color("april_map_player_col", { 1, 0.35, 0.35, 1 })
+        for _, p in ipairs(entity.get_players()) do
+            if not p.is_local and p.is_alive and p.position then
+                draw_map_item(p.position.x, p.position.z, col, p.name, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h)
+            end
+        end
+    end
+
+    if settings.bool("april_map_show_npcs", false) then
+        local col = settings.color("april_map_npc_col", { 1, 0.6, 0.2, 1 })
+        for _, entry in ipairs(cache.npcs) do
+            local inst = entry.inst
+            if inst and env.is_valid(inst) then
+                local pos = inst.Position or inst.position
+                if pos then
+                    draw_map_item(pos.x, pos.z, col, entry.name, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h)
+                end
+            end
+        end
+    end
+
+    if settings.bool("april_map_show_loot", false) then
+        local col = settings.color("april_map_loot_col", { 1, 0.85, 0.2, 1 })
+        for _, item in ipairs(cache.loot) do
+            local wx, wz = entry_world_xz(item)
+            if wx then
+                draw_map_item(wx, wz, col, item.name, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h)
+            end
+        end
+    end
+
+    if settings.bool("april_map_show_world", false) then
+        local col = settings.color("april_map_world_col", { 0.4, 0.9, 0.5, 1 })
+        for _, item in ipairs(cache.world) do
+            local wx, wz = entry_world_xz(item)
+            if wx then
+                draw_map_item(wx, wz, col, item.name, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h)
+            end
+        end
+    end
+
+    if settings.bool("april_map_show_base", false) then
+        local col = settings.color("april_map_base_col", { 0.5, 0.5, 1, 1 })
+        for _, item in ipairs(cache.base) do
+            local wx, wz = entry_world_xz(item)
+            if wx then
+                draw_map_item(wx, wz, col, item.label or item.name, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h)
+            end
+        end
+    end
+
+    if settings.bool("april_map_show_waypoints", false) then
+        local col = settings.color("april_map_wp_col", { 0.2, 1, 0.8, 1 })
+        for i, wp in pairs(cache.waypoints) do
+            if wp and wp.pos then
+                draw_map_item(wp.pos.x, wp.pos.z, col, wp.name or ("WP" .. i), view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h)
+            end
+        end
+    end
+
+    local show_local = settings.bool("april_map_show_local", true)
+    if not fullscreen then
+        show_local = true
+    end
+
+    if show_local then
+        local col = settings.color("april_map_local", { 0.2, 0.8, 1, 1 })
+        local dot_x, dot_y = map_cx, map_cy
+
+        if body_x and body_z then
+            dot_x, dot_y = world_to_map(body_x, body_z, view_x, view_z, map_cx, map_cy, zoom, yaw)
+        end
+
+        draw_dot(dot_x, dot_y, scale + 1, col)
+        if draw and draw.circle then
+            draw.circle(dot_x, dot_y, scale + 4, { col[1], col[2], col[3], (col[4] or 1) * 0.35 }, 16, 1)
+        end
+
+        if draw and draw.line then
+            local tip_x, tip_y = map_cx, map_cy - (scale + 10)
+            draw.line(map_cx, map_cy, tip_x, tip_y, { col[1], col[2], col[3], 0.85 }, 2)
+            draw.line(tip_x, tip_y - 5, tip_x - 4, tip_y + 2, { col[1], col[2], col[3], 0.85 }, 2)
+            draw.line(tip_x, tip_y - 5, tip_x + 4, tip_y + 2, { col[1], col[2], col[3], 0.85 }, 2)
+        end
+    end
+
+    if settings.bool("april_map_compass", false) then
+        local cmp_col = settings.color("april_map_compass", { 0.2, 0.8, 1, 0.8 })
+        if fullscreen then
+            draw_compass_rose(sw - 60, sh - 60, 42, yaw, cmp_col)
+        else
+            draw_compass_rose(map_cx, map_cy, math.min(w, h) * 0.42, yaw, cmp_col, x, y, w, h)
+        end
+    end
+
+    if settings.bool("april_map_coords", false) then
+        local coord_y = fullscreen and (sh - 22) or (y + h + 4)
+        draw_util.text(x + 6, coord_y, string.format("Cam: %.0f, %.0f, %.0f", cam_x, cam_y, cam_z), { 1, 1, 1, 0.8 }, 11)
+        if body_x then
+            draw_util.text(x + 6, coord_y + 13, string.format("Body: %.0f, %.0f, %.0f", body_x, body_y or 0, body_z or 0), { 0.7, 0.7, 0.7, 0.75 }, 10)
+        end
+    end
+
+    if fullscreen then
+        draw_util.text(10, sh - 18, "Drag: LMB pan  |  Recenter: MMB  |  Forward = up", { 1, 1, 1, 0.35 }, 10)
     end
 end
 

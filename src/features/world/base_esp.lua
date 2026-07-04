@@ -18,23 +18,21 @@ local TOGGLES = {
 }
 
 function M.register_menu()
-    local T, G = menu_util.group("Base")
-    menu.add_checkbox(T, G, "april_base_enabled", "Enable Base ESP", true, { key = 0 })
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.WORLD)
+    menu_util.section(T, G.WORLD, "Base ESP")
+    menu.add_checkbox(T, G.WORLD, "april_base_enabled", "Enable Base ESP", false, { key = 0 })
     for _, t in ipairs(TOGGLES) do
-        menu.add_checkbox(T, G, t.id, t.label, true, { parent = P, colorpicker = t.color })
+        menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
     end
-    menu.add_checkbox(T, G, "april_base_distance", "Show Distance", true, { parent = P })
-    menu.add_button(T, G, "april_base_rescan", "Force Base Scan", function()
-        M.scan()
-        print("[April] Base scan forced")
-    end)
-    menu.add_slider_int(T, G, "april_base_range", "Base Range", 50, 500, 150, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_base_distance", "Show Distance", false, { parent = P })
+    menu.add_slider_int(T, G.WORLD, "april_base_range", "Base Range", 50, 500, 150, { parent = P })
 end
 
 local function matches_toggle(name)
     name = name or ""
     for _, t in ipairs(TOGGLES) do
-        if settings.bool(t.id, true) and name:find(t.match) then
+        if settings.bool(t.id, false) and name:find(t.match) then
             return settings.color(t.id, t.color)
         end
     end
@@ -55,7 +53,7 @@ end
 function M.update(dt) end
 
 function M.draw()
-    if not settings.bool("april_base_enabled", true) then return end
+    if not settings.bool("april_base_enabled", false) then return end
     local range = settings.num("april_base_range", 150)
     for _, entry in ipairs(cache.base) do
         if env.is_valid(entry.inst) then

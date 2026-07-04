@@ -20,18 +20,20 @@ local TOGGLES = {
 }
 
 function M.register_menu()
-    local T, G = menu_util.group("World")
-    menu.add_checkbox(T, G, "april_world_enabled", "Enable World ESP", true, { key = 0 })
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.WORLD)
+    menu.add_label(T, G.WORLD, "Resources & Nodes")
+    menu.add_checkbox(T, G.WORLD, "april_world_enabled", "Enable World ESP", false, { key = 0 })
     for _, t in ipairs(TOGGLES) do
-        menu.add_checkbox(T, G, t.id, t.label, true, { parent = P, colorpicker = t.color })
+        menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
     end
-    menu.add_slider_int(T, G, "april_world_range", "World Range", 50, 2000, 500, { parent = P })
+    menu.add_slider_int(T, G.WORLD, "april_world_range", "World Range", 50, 2000, 500, { parent = P })
 end
 
 local function matches_toggle(name)
     name = name or ""
     for _, t in ipairs(TOGGLES) do
-        if settings.bool(t.id, true) and name:find(t.match) then
+        if settings.bool(t.id, false) and name:find(t.match) then
             return settings.color(t.id, t.color)
         end
     end
@@ -52,7 +54,7 @@ end
 function M.update(dt) end
 
 function M.draw()
-    if not settings.bool("april_world_enabled", true) then return end
+    if not settings.bool("april_world_enabled", false) then return end
     local range = settings.num("april_world_range", 500)
     for _, entry in ipairs(cache.world) do
         if env.is_valid(entry.inst) then

@@ -1,47 +1,53 @@
 local menu_util = April.require("core.menu_util")
 local debug = April.require("core.debug")
 local scheduler = April.require("core.scheduler")
+local bootstrap = April.require("game.bootstrap")
 
 local M = {}
 
 M.features = {}
+M._menu_registered = false
 
 M.FEATURE_ORDER = {
     "features.combat.aimbot",
+    "features.combat.gun_mods",
     "features.visuals.player_esp",
     "features.visuals.crosshair",
     "features.visuals.feedback",
     "features.world.world_esp",
-    "features.combat.recoil",
-    "features.radar.waypoints",
     "features.world.loot_esp",
     "features.world.npc_esp",
     "features.world.base_esp",
+    "features.radar.waypoints",
     "features.radar.tactical_map",
     "features.movement.exploits",
     "features.utility.config",
 }
 
 function M.register_all()
-    menu_util.ensure_tab()
+    if M._menu_registered then return end
+
     M.features = {}
     local registered = 0
 
     for _, path in ipairs(M.FEATURE_ORDER) do
         local feat = April.require(path)
         table.insert(M.features, feat)
-        local ok, err = pcall(function()
-            if feat.register_menu then
-                feat.register_menu()
+        if feat.register_menu then
+            local ok, err = pcall(feat.register_menu)
+            if ok then
                 registered = registered + 1
+            else
+                print("[April] Menu registration failed: " .. path .. " — " .. tostring(err))
+                debug.error_once("menu:" .. path, err)
             end
-        end)
-        if not ok then
-            debug.error_once("menu:" .. path, err)
         end
     end
 
-    debug.log("Menu groups registered: " .. registered .. " (Scripts > April)")
+    M._menu_registered = true
+    if April and April.debug then
+        debug.log("Menu: " .. registered .. " sections")
+    end
 end
 
 function M.setup_scans()
@@ -57,29 +63,14 @@ function M.setup_scans()
     scheduler.register("base", 1000, function() base_esp.scan() end)
     scheduler.register("npcs", 750, function() npc_esp.scan() end)
     scheduler.start_all()
-
-    debug.guard("scan:initial_players", player_esp.scan)
-    debug.guard("scan:initial_world", world_esp.scan)
-    debug.guard("scan:initial_loot", loot_esp.scan)
-    debug.guard("scan:initial_base", base_esp.scan)
-    debug.guard("scan:initial_npcs", npc_esp.scan)
-end
-
-function M.load_game_data()
-    local weapons = April.require("game.weapons")
-    local items = April.require("game.items")
-
-    debug.guard("items.load", items.load)
-    local weapons_ok = debug.guard_bool("weapons.load", weapons.load)
-    if weapons_ok and weapons.recoil_weapon_names then
-        local names = weapons.recoil_weapon_names()
-        debug.log("ToolInfo weapons: " .. #names)
-    else
-        debug.warn("ToolInfo not loaded — recoil/weapon stats use fallbacks until in-game")
-    end
 end
 
 function M.update(dt)
+    bootstrap.tick()
+
+    local weapons = April.require("game.weapons")
+    weapons.tick()
+
     scheduler.tick()
     for i, feat in ipairs(M.features) do
         if feat.update then
@@ -104,20 +95,8 @@ function M.init()
         return false
     end
 
-    debug.audit_apis()
-
     M.register_all()
-    M.load_game_data()
     M.setup_scans()
-
-    local me = entity.get_local_player and entity.get_local_player()
-    if me then
-        debug.log("Local player: " .. tostring(me.name))
-    else
-        debug.warn("Local player not ready yet (normal before spawn)")
-    end
-
-    debug.log("Init complete — v" .. April.version)
     return true
 end
 

@@ -17,6 +17,10 @@ function M.text_outlined(x, y, text, col, size)
     draw.text(x, y, text, col, size or 14)
 end
 
+function M.text(x, y, text, col, size)
+    M.text_outlined(x, y, text, col, size)
+end
+
 function M.box_esp(x, y, w, h, col, style)
     if not draw or not draw.box then return end
     draw.box(x, y, w, h, col, 0, style or 0)

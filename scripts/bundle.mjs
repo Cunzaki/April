@@ -15,17 +15,25 @@ const ORDER = [
   "core/env.lua",
   "core/math_util.lua",
   "core/cache.lua",
+  "core/capabilities.lua",
   "core/debug.lua",
   "core/settings.lua",
   "core/draw_util.lua",
+  "core/esp_util.lua",
   "core/scheduler.lua",
   "core/menu_util.lua",
+  "game/module_scan.lua",
+  "game/bootstrap.lua",
   "game/folders.lua",
   "game/items.lua",
   "game/weapons.lua",
+  "game/gc_weapon_mods.lua",
+  "game/gun_mod_profiles.lua",
   "game/inventory.lua",
+  "features/combat/targeting.lua",
+  "features/combat/combat_menu.lua",
   "features/combat/aimbot.lua",
-  "features/combat/recoil.lua",
+  "features/combat/gun_mods.lua",
   "features/visuals/player_esp.lua",
   "features/visuals/crosshair.lua",
   "features/visuals/feedback.lua",
@@ -48,8 +56,8 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.0.0",
-    debug = true,
+    version = "3.6.0",
+    debug = false,
     _mods = {},
     bundled = true,
 }
@@ -71,10 +79,16 @@ end
 `;
 
 const footer = `
+-- Vector requires menu registration from the script main chunk (not nested init).
+do
+    April.require("menu.tabs").register_all()
+end
+
 April._init_ok = false
 
 local ok, err = pcall(function()
     local debug = April.require("core.debug")
+    local caps = April.require("core.capabilities")
     local app = April.require("app")
 
     if not app.init() then
@@ -83,6 +97,13 @@ local ok, err = pcall(function()
     end
 
     April._init_ok = true
+
+    local c = caps.probe()
+    if c.fallen_gc then
+        local gc = April.require("game.gc_weapon_mods")
+        local n = gc.probe_on_load()
+        print(string.format("[April] Fallen GC API: getgc(keys) OK — %d node(s) (enter match if 0)", n))
+    end
 
     if not debug.register_frame_hook(function()
         app.on_frame()
@@ -95,7 +116,7 @@ if not ok then
     print("[April] Fatal: " .. tostring(err))
     if debug and debug.traceback then print(debug.traceback(err)) end
 elseif April._init_ok then
-    print("[April v3] Ready — " .. April.version .. " (debug on, watch console for errors)")
+    print("[April v3] Ready — " .. April.version)
 else
     print("[April v3] Init failed — check console above")
 end

@@ -20,18 +20,20 @@ local TOGGLES = {
 }
 
 function M.register_menu()
-    local T, G = menu_util.group("Loot")
-    menu.add_checkbox(T, G, "april_loot_enabled", "Enable Loot ESP", true, { key = 0 })
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.WORLD)
+    menu_util.section(T, G.WORLD, "Loot ESP")
+    menu.add_checkbox(T, G.WORLD, "april_loot_enabled", "Enable Loot ESP", false, { key = 0 })
     for _, t in ipairs(TOGGLES) do
-        menu.add_checkbox(T, G, t.id, t.label, true, { parent = P, colorpicker = t.color })
+        menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
     end
-    menu.add_slider_int(T, G, "april_loot_range", "Loot Range", 50, 2000, 300, { parent = P })
+    menu.add_slider_int(T, G.WORLD, "april_loot_range", "Loot Range", 50, 2000, 300, { parent = P })
 end
 
 local function matches_toggle(name)
     name = name or ""
     for _, t in ipairs(TOGGLES) do
-        if settings.bool(t.id, true) and name:find(t.match) then
+        if settings.bool(t.id, false) and name:find(t.match) then
             return settings.color(t.id, t.color)
         end
     end
@@ -52,7 +54,7 @@ end
 function M.update(dt) end
 
 function M.draw()
-    if not settings.bool("april_loot_enabled", true) then return end
+    if not settings.bool("april_loot_enabled", false) then return end
     local range = settings.num("april_loot_range", 300)
     for _, entry in ipairs(cache.loot) do
         if env.is_valid(entry.inst) then
