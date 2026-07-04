@@ -1,2 +1,0 @@
-{"referent":"54936","class":"AngularVelocity","name":"AngularVelocity","path":"ReplicatedStorage.Benches.Wooden Boat.Default.Main.AngularVelocity","parent_referent":"54902","properties":{"MaxTorque":"4000","Attachment0":"54937","DefinesCapabilities":"false","Tags":""},"attributes":null}
-{"referent":"57814","class":"AngularVelocity","name":"AngularVelocity","path":"ReplicatedStorage.Benches.Military Boat.Default.Main.AngularVelocity","parent_referent":"57810","properties":{"MaxTorque":"4000","Attachment0":"57806","DefinesCapabilities":"false","Tags":""},"attributes":null}

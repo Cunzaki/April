@@ -295,12 +295,6 @@ function M.tick()
     if held and held ~= M._last_held then
         M._last_held = held
         M._weapon_changed_at = utility and utility.get_tick_count and utility.get_tick_count() or 0
-        pcall(function()
-            local gun_mods = April.require("features.combat.gun_mods")
-            if gun_mods.on_weapon_changed then
-                gun_mods.on_weapon_changed(held)
-            end
-        end)
     elseif not held then
         M._last_held = nil
     end

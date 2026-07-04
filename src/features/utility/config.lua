@@ -1,6 +1,5 @@
 local settings = April.require("core.settings")
 local menu_util = April.require("core.menu_util")
-local profiles = April.require("game.gun_mod_profiles")
 
 local M = {}
 
@@ -12,14 +11,19 @@ end
 
 local function base_config_keys()
     return {
-        "april_aimbot_enabled", "april_aimbot_fov", "april_aimbot_smooth",
-        "april_esp_enabled", "april_world_enabled", "april_loot_enabled",
+        "april_target_overlay", "april_target_overlay_fov", "april_target_overlay_gear_size", "april_target_overlay_bottom",
+        "april_world_enabled", "april_loot_enabled",
         "april_npc_enabled", "april_base_enabled", "april_noclip_enabled",
         "april_crosshair_enabled", "april_map_enabled", "april_gunmods_enabled",
-        "april_gm_auto_detect", "april_gm_per_weapon", "april_gm_profile",
+        "april_hitmarker_enabled", "april_hitmarker_at_impact", "april_hitmarker_glow",
+        "april_hitmarker_size", "april_hitmarker_duration",
+        "april_hit_notify_enabled", "april_hit_notify_duration",
+        "april_bullet_tracer_enabled", "april_bullet_tracer_lifetime", "april_bullet_tracer_thickness",
+        "april_hit_aim_fov", "april_hit_max_distance",
         "april_gm_recoil", "april_gm_recoil_pct", "april_gm_spread", "april_gm_spread_pct",
         "april_gm_sway", "april_gm_fire_rate", "april_gm_fire_rate_mult",
         "april_gm_speed", "april_gm_speed_mult", "april_gm_range", "april_gm_range_mult",
+        "april_farm_helper", "april_farm_radius", "april_farm_smooth",
     }
 end
 
@@ -32,10 +36,6 @@ function M.save_slot(slot)
             local v = menu.get(id)
             if v ~= nil then table.insert(lines, id .. "=" .. tostring(v)) end
         end
-    end
-
-    for _, pair in ipairs(profiles.export_config_values()) do
-        table.insert(lines, pair[1] .. "=" .. pair[2])
     end
 
     local path = M.get_config_path("April_Slot_" .. slot .. ".txt")
@@ -55,18 +55,14 @@ function M.load_slot(slot)
 
     for line in f:lines() do
         local id, val = line:match("^([^=]+)=(.+)$")
-        if id and val then
-            if profiles.import_config_value(id, val) then
-                -- stored in profile table
-            elseif menu and menu.set then
-                if val == "true" then menu.set(id, true)
-                elseif val == "false" then menu.set(id, false)
-                else
-                    local n = tonumber(val)
-                    menu.set(id, n or val)
-                end
-                April.require("core.settings").invalidate()
+        if id and val and menu and menu.set then
+            if val == "true" then menu.set(id, true)
+            elseif val == "false" then menu.set(id, false)
+            else
+                local n = tonumber(val)
+                menu.set(id, n or val)
             end
+            April.require("core.settings").invalidate()
         end
     end
 
@@ -74,14 +70,7 @@ function M.load_slot(slot)
 
     pcall(function()
         local gun_mods = April.require("features.combat.gun_mods")
-        local weapons = April.require("game.weapons")
-        local idx = settings.num("april_gm_profile", 0)
-        gun_mods._editing = profiles.name_at_index(idx)
-        profiles.sync_profile_to_editor(gun_mods._editing)
         gun_mods._apply_dirty = true
-        if gun_mods.on_weapon_changed then
-            gun_mods.on_weapon_changed(weapons._last_held)
-        end
     end)
 
     print("[April] Config loaded slot " .. slot)
@@ -129,8 +118,6 @@ function M.draw()
         y = y + 14
     end
     draw.text(10, y, "Frames: " .. stats.frames, { 1, 1, 1, 0.9 }, 12)
-    y = y + 14
-    draw.text(10, y, "Players: " .. #cache.players, { 1, 1, 1, 0.9 }, 12)
     y = y + 14
     draw.text(10, y, "World: " .. #cache.world .. "  Loot: " .. #cache.loot, { 1, 1, 1, 0.9 }, 12)
     y = y + 14

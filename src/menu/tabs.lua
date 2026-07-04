@@ -9,9 +9,8 @@ M.features = {}
 M._menu_registered = false
 
 M.FEATURE_ORDER = {
-    "features.combat.aimbot",
+    "features.combat.perfect_farm",
     "features.combat.gun_mods",
-    "features.visuals.player_esp",
     "features.visuals.target_overlay",
     "features.visuals.crosshair",
     "features.visuals.feedback",
@@ -54,27 +53,61 @@ function M.register_all()
 end
 
 function M.setup_scans()
-    local player_esp = April.require("features.visuals.player_esp")
+    local settings = April.require("core.settings")
     local world_esp = April.require("features.world.world_esp")
     local loot_esp = April.require("features.world.loot_esp")
     local base_esp = April.require("features.world.base_esp")
     local npc_esp = April.require("features.world.npc_esp")
 
-    scheduler.register("players", 250, function() player_esp.scan() end)
-    scheduler.register("world", 1500, function() world_esp.scan_static() end)
-    scheduler.register("world_dynamic", 200, function() world_esp.scan_dynamic() end)
-    scheduler.register("loot", 1500, function() loot_esp.scan_static() end)
-    scheduler.register("loot_drops", 100, function() loot_esp.scan_drops() end)
-    scheduler.register("base", 1000, function() base_esp.scan() end)
-    scheduler.register("npcs", 400, function() npc_esp.scan() end)
+    local function map_on(layer)
+        return function()
+            if not settings.enabled("april_map_enabled") then return false end
+            return settings.enabled("april_map_show_" .. layer)
+        end
+    end
+
+    local function need_npcs()
+        if settings.enabled("april_npc_enabled") then return true end
+        if map_on("npcs")() then return true end
+    if settings.enabled("april_bullet_tracer_enabled")
+        or settings.enabled("april_hitmarker_enabled")
+        or settings.enabled("april_hit_notify_enabled") then
+            return true
+        end
+        return false
+    end
+
+    scheduler.register("world", 2000, function() world_esp.scan_static() end, function()
+        return settings.enabled("april_world_enabled") or map_on("world")()
+    end)
+
+    scheduler.register("world_dynamic", 500, function() world_esp.scan_dynamic() end, function()
+        if not settings.enabled("april_world_enabled") then return false end
+        return settings.enabled("april_deer")
+            or settings.enabled("april_boar")
+            or settings.enabled("april_wolf")
+    end)
+
+    scheduler.register("loot", 2000, function() loot_esp.scan_static() end, function()
+        return settings.enabled("april_loot_enabled") or map_on("loot")()
+    end)
+
+    scheduler.register("loot_drops", 450, function() loot_esp.scan_drops() end, function()
+        if not settings.enabled("april_loot_enabled") then return false end
+        return settings.enabled("april_dropped_item")
+    end)
+
+    scheduler.register("base", 1500, function() base_esp.scan() end, function()
+        return settings.enabled("april_base_enabled") or map_on("base")()
+    end)
+
+    scheduler.register("npcs", 600, function() npc_esp.scan() end, need_npcs)
+
     scheduler.start_all()
 end
 
 function M.update(dt)
     bootstrap.tick()
-
-    local image_cache = April.require("core.image_cache")
-    image_cache.tick_all()
 
     local weapons = April.require("game.weapons")
     weapons.tick()
@@ -105,10 +138,6 @@ function M.init()
 
     M.register_all()
     M.setup_scans()
-
-    local player_esp = April.require("features.visuals.player_esp")
-    if player_esp.init then player_esp.init() end
-
     M.setup_player_hooks()
 
     return true

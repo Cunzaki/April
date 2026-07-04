@@ -9,7 +9,7 @@ local M = {}
 M.TAB = "April"
 
 M.G = {
-    AIMBOT = "Aimbot",
+    COMBAT = "Combat",
     VISUALS = "Visuals",
     WORLD = "World",
     RADAR = "Radar",
@@ -19,7 +19,7 @@ M.G = {
 
 -- Which side each group renders on (must register left before its right pair).
 M.G_SIDE = {
-    [M.G.AIMBOT] = "left",
+    [M.G.COMBAT] = "left",
     [M.G.VISUALS] = "right",
     [M.G.WORLD] = "left",
     [M.G.RADAR] = "right",

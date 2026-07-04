@@ -1,3 +1,0 @@
-{"referent":"30540","class":"UnreliableRemoteEvent","name":"VFX","path":"ReplicatedStorage.ClientSignals.VFX","parent_referent":"30538","properties":{"DefinesCapabilities":"false","Name":"VFX","Tags":""},"attributes":null}
-{"referent":"30542","class":"UnreliableRemoteEvent","name":"Build","path":"ReplicatedStorage.ClientSignals.Build","parent_referent":"30538","properties":{"DefinesCapabilities":"false","Name":"Build","Tags":""},"attributes":null}
-{"referent":"30548","class":"UnreliableRemoteEvent","name":"SystemMessage","path":"ReplicatedStorage.ClientSignals.SystemMessage","parent_referent":"30538","properties":{"DefinesCapabilities":"false","Name":"SystemMessage","Tags":""},"attributes":null}

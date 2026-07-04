@@ -10,7 +10,7 @@ local M = {}
 
 M._table_cache = nil
 M._cache_at = 0
-M._cache_ttl = 8000
+M._cache_ttl = 30000
 
 function M.has_gc()
     return type(getgc) == "function"

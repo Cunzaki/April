@@ -1,2 +1,0 @@
-{"referent":"59142","class":"Team","name":"Attackers","path":"Teams.Attackers","parent_referent":"59141","properties":{"AutoAssignable":"false","DefinesCapabilities":"false","Name":"Attackers","Tags":""},"attributes":null}
-{"referent":"59143","class":"Team","name":"Defenders","path":"Teams.Defenders","parent_referent":"59141","properties":{"AutoAssignable":"false","DefinesCapabilities":"false","Name":"Defenders","Tags":""},"attributes":null}

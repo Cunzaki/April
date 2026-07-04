@@ -28,29 +28,24 @@ This file is the **source of truth for AI agents** working on April v3. Read it 
 |-------|---------------------|
 | Drawing | All `draw.*` calls only inside `on_frame` |
 | Menu | `menu.get(id)` every frame — never cache toggle state |
-| Images | `draw.load_image(url)` is async; only `draw.image` after `draw.image_loaded` |
-| Image URLs | **Prefer direct HTTPS** (`raw.githubusercontent.com/...`). `rbxassetid://` is fallback only |
-| Image init | Call `draw.load_image` from `on_frame` (via `image_cache.tick`), not at script load |
+| Images | `handle = draw.load_image(url)` once; call `draw.image(handle, x,y,w,h, 255,255,255,255)` **every frame** (no-ops until uploaded) |
+| Image URLs | **One direct HTTPS URL** per image (API example: `raw.githubusercontent.com/.../icon.png`) |
+| No fallbacks | **Do not add fallback URLs, APIs, or code paths unless API.md documents them** |
 | Player ESP | `p:get_bounds()` for boxes; `p.head_position` for world labels |
 | Fallen AC | **Do not write `WalkSpeed`** — use velocity/root movement |
-| Gun mods | `refreshgc` / `getgc` / `applygc` only |
+| Menu | Unique `id` per control **and** unique `label` text within the same tab+group (Vector ties visibility to labels) |
 
-When adding or fixing visuals, **re-read the Images section** in API.md (`draw.load_image`, `draw.image_loaded`, `draw.image_failed`).
+When adding or fixing visuals, **re-read the Images section** in API.md and use the on_frame pattern: load once, skip the load frame, then call `draw.image` every frame (no `image_loaded` gate).
 
 ---
 
 ## Image assets (GitHub CDN)
 
-Roblox `rbxassetid://` and thumbnail URLs often **fail inside Vector**. April hosts item/decal PNGs on GitHub and loads them via HTTPS.
+Item icons are hosted on GitHub and loaded with **one** HTTPS URL per API.md:
 
-| Path | Purpose |
-|------|---------|
-| `assets/manifest.json` | All asset IDs from dump (+ tung) |
-| `assets/items/{id}.png` | Item icons (420×420) |
-| `assets/tung.png` | Tung ESP decal [139818999438291](https://create.roblox.com/store/asset/139818999438291/tung-tung-tung-sahur) |
-| `src/game/item_images.lua` | Generated `Name → assetId` map from dump |
-| `src/game/asset_urls.lua` | CDN base URL + URL builders |
-| `src/core/image_cache.lua` | Lazy load in `on_frame`, GitHub URL first |
+`https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/assets/items/{assetId}.png`
+
+No alternate CDNs or `rbxassetid://` fallbacks in runtime code.
 
 **Regenerate after dump updates:**
 ```bash
@@ -86,9 +81,9 @@ src/game/        → asset_urls, item_images, items, weapons, armor_map
 src/features/    → combat, visuals, world, movement, radar, utility
 ```
 
-**Images:** `image_cache.ensure(key, url)` → `tick_all()` each frame → `draw_fit` only when `ready`.
+**Images:** `asset_urls.item_png(id)` → `image_cache.ensure(key, url)` → load on first draw, `draw.image` every frame after.
 
-**Bundle order:** `game/asset_urls.lua` and `game/item_images.lua` must load before `core/image_cache.lua` and `game/items.lua`.
+**No fallbacks:** Only use APIs and patterns documented in `April/docs/API.md`. Do not invent alternate URLs, hooks, or fallbacks.
 
 ---
 
@@ -99,6 +94,7 @@ src/features/    → combat, visuals, world, movement, radar, utility
 3. New item icons: extract from dump → download PNG → push to GitHub → rebuild.
 4. Minimize scope; match existing module style.
 5. Avoid WalkSpeed writes on Fallen.
+6. **Menu labels:** never reuse the same display label in one tab+group (e.g. don't have two "Distance" checkboxes in Visuals — use "ESP Distance" vs "Overlay Distance").
 
 ---
 

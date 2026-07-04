@@ -117,8 +117,6 @@ end
 function M.tick()
     if not M._ready then
         M.try_load_all()
-    else
-        April.require("game.items").load()
     end
 end
 

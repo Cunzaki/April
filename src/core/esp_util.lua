@@ -105,6 +105,27 @@ function M.draw_model_skeleton(model, col, thick)
     M.draw_skeleton_bones(screen, col, thick)
 end
 
+function M.draw_vertical_beacon(wx, wy, wz, col, opts)
+    opts = opts or {}
+    local height = opts.height or 90
+    local steps = opts.steps or 10
+    local prev_sx, prev_sy, prev_vis
+
+    for i = 0, steps do
+        local py = wy + (height * i / steps)
+        local sx, sy, vis = M.w2s(wx, py, wz)
+        if i > 0 and vis and prev_vis and draw and draw.line then
+            local alpha = (col[4] or 1) * (0.35 + 0.65 * (i / steps))
+            draw.line(prev_sx, prev_sy, sx, sy, { col[1], col[2], col[3], alpha }, opts.thickness or 2)
+        end
+        prev_sx, prev_sy, prev_vis = sx, sy, vis
+    end
+
+    if prev_vis and draw and draw.circle_filled then
+        draw.circle_filled(prev_sx, prev_sy, opts.marker_r or 4, col, 12)
+    end
+end
+
 function M.draw_beacon(sx, sy, col, opts)
     opts = opts or {}
     local sw, sh = draw_util.screen_size()
@@ -159,6 +180,68 @@ local BOX_SIGNS = {
     { -1, -1, -1 }, { 1, -1, -1 }, { -1, 1, -1 }, { 1, 1, -1 },
     { -1, -1, 1 }, { 1, -1, 1 }, { -1, 1, 1 }, { 1, 1, 1 },
 }
+
+function M.draw_world_line(x1, y1, z1, x2, y2, z2, col, thick)
+    if not draw then return false end
+    local sx1, sy1, v1 = M.w2s(x1, y1, z1)
+    local sx2, sy2, v2 = M.w2s(x2, y2, z2)
+    if v1 and v2 then
+        draw_util.line(sx1, sy1, sx2, sy2, col, thick or 2)
+        return true
+    end
+    return false
+end
+
+function M.draw_world_cross(wx, wy, wz, size, col, thick)
+    if not camera or not camera.get_look_vector then return end
+
+    local look = camera.get_look_vector()
+    if not look then return end
+
+    local lx = look.x or look.X or 0
+    local ly = look.y or look.Y or 0
+    local lz = look.z or look.Z or 0
+    local mag = math.sqrt(lx * lx + ly * ly + lz * lz)
+    if mag < 0.001 then return end
+    lx, ly, lz = lx / mag, ly / mag, lz / mag
+
+    local ux, uy, uz = 0, 1, 0
+    local rx = uy * lz - uz * ly
+    local ry = uz * lx - ux * lz
+    local rz = ux * ly - uy * lx
+    local rm = math.sqrt(rx * rx + ry * ry + rz * rz)
+    if rm < 0.001 then
+        ux, uy, uz = 0, 0, 1
+        rx = uy * lz - uz * ly
+        ry = uz * lx - ux * lz
+        rz = ux * ly - uy * lx
+        rm = math.sqrt(rx * rx + ry * ry + rz * rz)
+    end
+    if rm < 0.001 then return end
+    rx, ry, rz = rx / rm, ry / rm, rz / rm
+
+    ux = ly * rz - lz * ry
+    uy = lz * rx - lx * rz
+    uz = lx * ry - ly * rx
+    local um = math.sqrt(ux * ux + uy * uy + uz * uz)
+    if um < 0.001 then return end
+    ux, uy, uz = ux / um, uy / um, uz / um
+
+    size = size or 0.35
+    thick = thick or 2
+    local s = size * 0.5
+
+    M.draw_world_line(
+        wx - rx * s - ux * s, wy - ry * s - uy * s, wz - rz * s - uz * s,
+        wx + rx * s + ux * s, wy + ry * s + uy * s, wz + rz * s + uz * s,
+        col, thick
+    )
+    M.draw_world_line(
+        wx - rx * s + ux * s, wy - ry * s + uy * s, wz - rz * s + uz * s,
+        wx + rx * s - ux * s, wy + ry * s - uy * s, wz + rz * s - uz * s,
+        col, thick
+    )
+end
 
 function M.draw_oriented_box(box, col, thick)
     if not box or not draw or not draw.line then return end

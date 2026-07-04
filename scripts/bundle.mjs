@@ -39,12 +39,10 @@ const ORDER = [
   "game/mod_ids.lua",
   "game/esp_maps.lua",
   "game/esp_scan.lua",
+  "game/hit_tracker.lua",
   "game/inventory.lua",
-  "features/combat/targeting.lua",
-  "features/combat/combat_menu.lua",
-  "features/combat/aimbot.lua",
+  "features/combat/perfect_farm.lua",
   "features/combat/gun_mods.lua",
-  "features/visuals/player_esp.lua",
   "features/visuals/target_overlay.lua",
   "features/visuals/crosshair.lua",
   "features/visuals/feedback.lua",
@@ -69,7 +67,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.9.1",
+    version = "3.13.3",
     debug = false,
     _mods = {},
     bundled = true,

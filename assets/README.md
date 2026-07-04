@@ -23,7 +23,9 @@ PNG files hosted on GitHub for `draw.load_image` (Vector requires **HTTPS** URLs
    npm run build
    ```
 
-Runtime URLs: `https://raw.githubusercontent.com/cunzaki/April/main/assets/items/{id}.png`
+Runtime URLs: `https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/assets/items/{id}.png`
+
+Do **not** use `github.com/.../blob/main/...` — that is the web viewer, not a direct image URL.
 
 ## Tung ESP
 

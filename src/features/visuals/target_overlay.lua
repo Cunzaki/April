@@ -5,27 +5,30 @@ local menu_util = April.require("core.menu_util")
 local image_cache = April.require("core.image_cache")
 local items = April.require("game.items")
 local player_gear = April.require("game.player_gear")
-local targeting = April.require("features.combat.targeting")
+local math_util = April.require("core.math_util")
 
 local M = {}
 
 local P = "april_target_overlay"
-local AIM = "april_aimbot_enabled"
-local AIM_PREFIX = "april_aimbot_"
+local GEAR_SLOTS = 7
 
 local gear_cache = {}
-local GEAR_TTL = 400
+local GEAR_TTL = 1000
+local TARGET_TTL = 150
 
-M._anchor_x = nil
-M._anchor_y = nil
-M._last_uid = nil
+M._target = nil
+M._target_at = 0
+M._layout = nil
 
-local function scale()
-    return math.max(0.55, settings.num(P .. "_scale", 72) / 100)
-end
+local SLOT_BG = { 0.14, 0.14, 0.16, 0.72 }
+local HELD_BG = { 0.2, 0.2, 0.22, 0.85 }
+local EMPTY_BG = { 0.1, 0.1, 0.12, 0.65 }
+local EMPTY_EDGE = { 1, 1, 1, 0.28 }
+local EMPTY_INNER = { 1, 1, 1, 0.06 }
+local ROUND = 5
 
-local function lerp(a, b, t)
-    return a + (b - a) * t
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
 local function img_key(prefix, id)
@@ -44,7 +47,7 @@ end
 local function get_gear(player)
     if not player then return nil end
     local uid = player.user_id or player.name or "?"
-    local now = utility and utility.get_tick_count and utility.get_tick_count() or 0
+    local now = tick_ms()
     local cached = gear_cache[uid]
     if cached and (now - cached.t) < GEAR_TTL then
         return cached.data
@@ -54,271 +57,193 @@ local function get_gear(player)
     return data
 end
 
-local function resolve_target()
-    if not settings.bool(AIM, false) then return nil end
-
-    local aimbot = April.require("features.combat.aimbot")
-    local locked = aimbot.get_target and aimbot.get_target()
-    if locked and locked.is_alive then return locked end
-
-    local sw, sh = targeting.screen_center()
-    local cx, cy = sw * 0.5, sh * 0.5
-    local fov = settings.num(AIM_PREFIX .. "fov", 150)
-    return targeting.find_target(cx, cy, fov, AIM_PREFIX)
+local function get_mouse()
+    if not utility or not utility.get_mouse_pos then return nil, nil end
+    local ok, a, b = pcall(utility.get_mouse_pos)
+    if not ok then return nil, nil end
+    if type(a) == "table" then
+        return a.x or a.X, a.y or a.Y
+    end
+    if type(a) == "number" then
+        return a, b
+    end
+    return nil, nil
 end
 
-local function hp_color(ratio)
-    if ratio > 0.6 then return { 0.35, 0.92, 0.45, 1 } end
-    if ratio > 0.3 then return { 0.95, 0.85, 0.25, 1 } end
-    return { 0.95, 0.3, 0.3, 1 }
+local function find_mouse_target(fov_px)
+    if not entity or not entity.get_players then return nil end
+
+    local mx, my = get_mouse()
+    if not mx then
+        local sw, sh = draw_util.screen_size()
+        mx, my = sw * 0.5, sh * 0.5
+    end
+
+    local best, best_dist = nil, fov_px
+
+    for _, p in ipairs(entity.get_players()) do
+        if p.is_local or not p.is_alive then goto continue end
+
+        local pos = p.head_position or p.position
+        if not pos then goto continue end
+
+        local sx, sy, vis = esp_util.w2s(pos.x, pos.y, pos.z)
+        if not vis then goto continue end
+
+        local dist = math_util.screen_fov_dist(sx, sy, mx, my)
+        if dist <= fov_px and dist < best_dist then
+            best_dist = dist
+            best = p
+        end
+
+        ::continue::
+    end
+
+    return best
 end
 
-local function draw_icon_slot(x, y, size, key, accent)
-    local pad = 2
-    draw.rect_filled(x, y, size, size, { 0.08, 0.08, 0.1, 0.9 })
-    draw.rect(x, y, size, size, accent or { 0.35, 0.55, 0.95, 0.45 }, 1)
-    if key then
-        image_cache.draw_fit(key, x + pad, y + pad, size - pad * 2, size - pad * 2)
-    end
+local function bottom_offset()
+    local bottom = settings.num(P .. "_bottom", -1)
+    if bottom >= 0 then return bottom end
+    return settings.num(P .. "_top", 140)
 end
 
-local function measure_panel(target, s)
-    local gear = get_gear(target)
-    local armor_list = (gear and gear.armor) or {}
-    local held_name = gear and gear.held
+local function build_layout(gear, gear_sz)
+    local held = gear and gear.held
+    local packed = gear and gear.slots or {}
+    local filled = #packed
 
-    local show_held = settings.bool(P .. "_held", true) and held_name
-    local show_armor = settings.bool(P .. "_armor", true) and #armor_list > 0
+    local held_sz = math.floor(gear_sz * 1.28)
+    local gap = 5
+    local row_w = GEAR_SLOTS * gear_sz + (GEAR_SLOTS - 1) * gap
+    local block_h = held_sz + 8 + gear_sz
 
-    local slot_sz = math.floor(26 * s)
-    local pad = math.floor(6 * s)
-    local title_fs = math.max(11, math.floor(12 * s))
-    local body_fs = math.max(9, math.floor(10 * s))
-    local gap = math.floor(4 * s)
-    local header_h = math.floor(36 * s)
-
-    local cols = show_armor and math.min(4, math.max(1, #armor_list)) or 0
-    local armor_rows = show_armor and math.ceil(#armor_list / 4) or 0
-
-    local content_w = math.floor(168 * s)
-    if show_armor then
-        content_w = math.max(content_w, cols * (slot_sz + gap) + pad)
-    end
-
-    local panel_w = content_w + pad * 2
-    local panel_h = header_h + pad * 2
-
-    if show_held then
-        panel_h = panel_h + slot_sz + gap + body_fs
-    end
-    if show_armor then
-        panel_h = panel_h + body_fs + gap + armor_rows * (slot_sz + gap)
-    end
-
-    return panel_w, panel_h, {
-        s = s,
-        pad = pad,
+    return {
+        held = held,
+        packed = packed,
+        filled = filled,
+        gear_sz = gear_sz,
+        held_sz = held_sz,
         gap = gap,
-        slot_sz = slot_sz,
-        title_fs = title_fs,
-        body_fs = body_fs,
-        show_held = show_held,
-        show_armor = show_armor,
-        armor_list = armor_list,
-        held_name = held_name,
-        cols = cols,
-        armor_rows = armor_rows,
+        row_w = row_w,
+        row_gap = 8,
+        name_fs = 11,
+        block_h = block_h,
     }
 end
 
-local function compute_anchor(target, panel_w, panel_h, sw, sh)
-    local gap = math.floor(14 + settings.num(P .. "_x_offset", 0))
-    local y_off = settings.num(P .. "_y_offset", 0)
-    local b = target.get_bounds and target:get_bounds()
-
-    local ax, ay
-
-    if b and b.valid and b.w > 0 and b.h > 0 then
-        if (b.x + b.w + gap + panel_w) > (sw - 10) then
-            ax = b.x - gap - panel_w
-        else
-            ax = b.x + b.w + gap
-        end
-        ay = b.y + b.h * 0.5 - panel_h * 0.5 + y_off
-    else
-        local pos = target.head_position or target.position
-        if not pos then return nil, nil end
-        local sx, sy, vis = esp_util.w2s(pos.x, pos.y + 1.5, pos.z)
-        if not vis then return nil, nil end
-        if (sx + gap + panel_w) > (sw - 10) then
-            ax = sx - gap - panel_w
-        else
-            ax = sx + gap + 24
-        end
-        ay = sy - panel_h * 0.5 + y_off
+local function draw_slot(x, y, size, key, piece, style)
+    local pad = 3
+    local bg = SLOT_BG
+    if style == "held" then
+        bg = HELD_BG
+    elseif style == "empty" then
+        bg = EMPTY_BG
     end
 
-    ax = math.max(6, math.min(sw - panel_w - 6, ax))
-    ay = math.max(6, math.min(sh - panel_h - 6, ay))
+    draw.rect_filled(x, y, size, size, bg, ROUND)
+    if style == "empty" then
+        if draw.rect then
+            draw.rect(x, y, size, size, EMPTY_EDGE, ROUND, 1)
+        end
+        local inset = math.max(4, math.floor(size * 0.22))
+        draw.rect_filled(
+            x + inset, y + inset,
+            size - inset * 2, size - inset * 2,
+            EMPTY_INNER, ROUND - 2
+        )
+    end
 
-    return ax, ay
+    if not piece then return end
+
+    if key then
+        image_cache.begin_load(key)
+        if image_cache.draw_fit(key, x + pad, y + pad, size - pad * 2, size - pad * 2) then
+            return
+        end
+    end
+
+    local fs = math.max(10, math.floor(size * 0.34))
+    local tw = select(1, draw.get_text_size("?", fs))
+    draw.text(
+        x + size * 0.5 - tw * 0.5,
+        y + size * 0.5 - fs * 0.45,
+        "?",
+        { 0.55, 0.55, 0.58, 0.85 },
+        fs
+    )
 end
 
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.VISUALS)
-    local root = menu_util.parent(AIM)
 
-    menu_util.section(T, G.VISUALS, "Target Overlay")
-    menu.add_checkbox(T, G.VISUALS, P, "Target Overlay", false, root)
-    menu.add_slider_int(T, G.VISUALS, P .. "_scale", "Scale %", 55, 120, 72, menu_util.parent(P))
-    menu.add_slider_int(T, G.VISUALS, P .. "_follow", "Follow Speed", 4, 24, 14, menu_util.parent(P))
-    menu.add_slider_int(T, G.VISUALS, P .. "_x_offset", "Side Offset", 0, 80, 14, menu_util.parent(P))
-    menu.add_slider_int(T, G.VISUALS, P .. "_y_offset", "Y Offset", -120, 120, 0, menu_util.parent(P))
-    menu.add_checkbox(T, G.VISUALS, P .. "_held", "Held Item", true, menu_util.parent(P))
-    menu.add_checkbox(T, G.VISUALS, P .. "_armor", "Armor Icons", true, menu_util.parent(P))
-    menu.add_checkbox(T, G.VISUALS, P .. "_distance", "Distance", true, menu_util.parent(P))
-    menu.add_colorpicker(T, G.VISUALS, P .. "_accent", "Accent", { 0.35, 0.72, 1, 1 }, menu_util.parent(P))
-    menu.add_colorpicker(T, G.VISUALS, P .. "_name", "Name Color", { 1, 1, 1, 1 }, menu_util.parent(P))
-    menu.add_colorpicker(T, G.VISUALS, P .. "_held_col", "Held Color", { 1, 0.45, 0.35, 1 }, menu_util.parent(P))
+    menu_util.section(T, G.VISUALS, "Target Gear")
+    menu.add_checkbox(T, G.VISUALS, P, "Target Gear", false)
+    menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Target FOV", 40, 400, 150, menu_util.parent(P))
+    menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, menu_util.parent(P))
+    menu.add_slider_int(T, G.VISUALS, P .. "_bottom", "Bottom Offset", 80, 320, 140, menu_util.parent(P))
 end
 
-function M.update(dt)
-    if not settings.bool(AIM, false) or not settings.bool(P, false) then
-        M._anchor_x, M._anchor_y, M._last_uid = nil, nil, nil
+function M.update(_dt)
+    if not settings.bool(P, false) then
+        M._target = nil
+        M._layout = nil
         return
     end
 
-    image_cache.tick_all()
+    local now = tick_ms()
+    if now - M._target_at < TARGET_TTL then return end
+    M._target_at = now
 
-    local target = resolve_target()
-    if not target then
-        M._anchor_x, M._anchor_y, M._last_uid = nil, nil, nil
-        return
-    end
-
-    local uid = target.user_id or target.name
-    if M._last_uid ~= uid then
-        M._anchor_x, M._anchor_y = nil, nil
-        M._last_uid = uid
-    end
-
-    local gear = get_gear(target)
-    if gear then
-        if gear.held then ensure_item_image(gear.held) end
-        if settings.bool(P .. "_armor", true) then
-            for _, piece in ipairs(gear.armor) do
-                ensure_item_image(piece.name, piece.variant)
-            end
-        end
-    end
-
-    local sw, sh = draw_util.screen_size()
-    local panel_w, panel_h = measure_panel(target, scale())
-    local ax, ay = compute_anchor(target, panel_w, panel_h, sw, sh)
-    if not ax then return end
-
-    local speed = settings.num(P .. "_follow", 14)
-    local t = math.min(1, dt * speed)
-
-    if not M._anchor_x then
-        M._anchor_x, M._anchor_y = ax, ay
+    local fov = settings.num(P .. "_fov", 150)
+    local target = find_mouse_target(fov)
+    if target and target.is_alive then
+        M._target = target
+        M._layout = build_layout(get_gear(target), settings.num(P .. "_gear_size", 48))
     else
-        M._anchor_x = lerp(M._anchor_x, ax, t)
-        M._anchor_y = lerp(M._anchor_y, ay, t)
+        M._target = nil
+        M._layout = nil
     end
 end
 
 function M.draw()
-    if not settings.bool(AIM, false) or not settings.bool(P, false) then return end
-    if not draw or not M._anchor_x then return end
+    if not settings.bool(P, false) then return end
+    if not draw or not draw.text or not draw.rect_filled then return end
 
-    local target = resolve_target()
-    if not target or not target.is_alive then return end
+    local target = M._target
+    local layout = M._layout
+    if not target or not layout then return end
 
-    local px, py = M._anchor_x, M._anchor_y
-    local s = scale()
-    local panel_w, panel_h, layout = measure_panel(target, s)
+    if layout.held then ensure_item_image(layout.held) end
+    for i = 1, layout.filled do
+        local piece = layout.packed[i]
+        if piece then
+            ensure_item_image(piece.name, piece.variant)
+        end
+    end
 
-    local accent = settings.color(P .. "_accent", { 0.35, 0.72, 1, 1 })
-    local name_col = settings.color(P .. "_name", { 1, 1, 1, 1 })
-    local held_col = settings.color(P .. "_held_col", { 1, 0.45, 0.35, 1 })
-    local sub_col = { 0.72, 0.76, 0.82, 1 }
-    local panel_bg = { 0.04, 0.05, 0.08, 0.9 }
-    local panel_edge = { accent[1], accent[2], accent[3], 0.4 }
+    local sw, sh = draw_util.screen_size()
+    local cx = sw * 0.5
+    local bottom = bottom_offset()
 
-    local pad = layout.pad
-    local hp = target.health or 0
-    local max_hp = target.max_health or 100
-    if max_hp <= 0 then max_hp = 100 end
-    local hp_ratio = math.max(0, math.min(1, hp / max_hp))
-    local hp_col = hp_color(hp_ratio)
+    local gear_y = sh - bottom - layout.gear_sz
+    local held_y = gear_y - layout.row_gap - layout.held_sz
+    local name_y = held_y - 6 - layout.name_fs
 
     local name = target.name or "Unknown"
-    local dist_text = ""
-    if settings.bool(P .. "_distance", true) then
-        local me = entity and entity.get_local_player and entity.get_local_player()
-        if me and me.position and target.position then
-            local dx = target.position.x - me.position.x
-            local dy = target.position.y - me.position.y
-            local dz = target.position.z - me.position.z
-            dist_text = string.format("%dm", math.floor(math.sqrt(dx * dx + dy * dy + dz * dz)))
-        end
-    end
+    local nw = select(1, draw.get_text_size(name, layout.name_fs))
+    draw.text(cx - nw * 0.5, name_y, name, { 1, 1, 1, 1 }, layout.name_fs)
 
-    draw.rect_filled(px, py, panel_w, panel_h, panel_bg)
-    draw.rect(px, py, panel_w, panel_h, panel_edge, 1)
-    draw.rect_filled(px, py, panel_w, 2, accent)
+    local held_key = layout.held and ensure_item_image(layout.held) or nil
+    draw_slot(cx - layout.held_sz * 0.5, held_y, layout.held_sz, held_key, layout.held, layout.held and "held" or "empty")
 
-    local info_x = px + pad
-    local ty = py + pad
-    local info_w = panel_w - pad * 2
-
-    draw.text(info_x, ty, name, name_col, layout.title_fs)
-
-    if dist_text ~= "" then
-        local dw = select(1, draw.get_text_size(dist_text, layout.body_fs))
-        draw.text(px + panel_w - pad - dw, ty + 1, dist_text, sub_col, layout.body_fs)
-    end
-
-    local hp_y = ty + layout.title_fs + 2
-    local hp_text = string.format("HP %d / %d", math.ceil(hp), math.ceil(max_hp))
-    draw.text(info_x, hp_y, hp_text, hp_col, layout.body_fs)
-
-    local bar_y = hp_y + layout.body_fs + 2
-    local bar_h = math.max(3, math.floor(4 * s))
-    draw.rect_filled(info_x, bar_y, info_w, bar_h, { 0.15, 0.16, 0.2, 0.9 })
-    if hp_ratio > 0 then
-        draw.rect_filled(info_x, bar_y, info_w * hp_ratio, bar_h, hp_col)
-    end
-
-    local row_y = py + pad + math.floor(36 * s) + pad
-
-    if layout.show_held then
-        local held_key = ensure_item_image(layout.held_name)
-        draw.text(px + pad, row_y, "Held", sub_col, layout.body_fs)
-        draw_icon_slot(px + pad + math.floor(34 * s), row_y - 2, layout.slot_sz + 4, held_key, held_col)
-        if layout.held_name then
-            local label = layout.held_name
-            if #label > 18 then label = label:sub(1, 16) .. ".." end
-            draw.text(px + pad + math.floor(34 * s) + layout.slot_sz + 10, row_y + 4, label, held_col, layout.body_fs)
-        end
-        row_y = row_y + layout.slot_sz + layout.gap + layout.body_fs + 2
-    end
-
-    if layout.show_armor then
-        draw.text(px + pad, row_y, "Gear", sub_col, layout.body_fs)
-        row_y = row_y + layout.body_fs + layout.gap
-
-        local grid_x = px + pad
-        for i, piece in ipairs(layout.armor_list) do
-            local col_i = (i - 1) % 4
-            local row_i = math.floor((i - 1) / 4)
-            local sx = grid_x + col_i * (layout.slot_sz + layout.gap)
-            local sy = row_y + row_i * (layout.slot_sz + layout.gap)
-            local key = ensure_item_image(piece.name, piece.variant)
-            draw_icon_slot(sx, sy, layout.slot_sz, key, panel_edge)
-        end
+    local start_x = cx - layout.row_w * 0.5
+    for i = 1, GEAR_SLOTS do
+        local piece = i <= filled and packed[i] or nil
+        local key = piece and ensure_item_image(piece.name, piece.variant) or nil
+        local sx = start_x + (i - 1) * (layout.gear_sz + layout.gap)
+        draw_slot(sx, gear_y, layout.gear_sz, key, piece, piece and "gear" or "empty")
     end
 end
 

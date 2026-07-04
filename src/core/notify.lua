@@ -14,13 +14,19 @@ local function lerp(a, b, t)
 end
 
 function M.show(msg, ntype, duration_ms)
+    M.toast(msg, ntype, duration_ms, false)
+end
+
+function M.toast(msg, ntype, duration_ms, skip_dedupe)
     if not msg or msg == "" then return end
     msg = tostring(msg)
     ntype = ntype or "warning"
     duration_ms = duration_ms or 5000
 
-    for _, n in ipairs(queue) do
-        if n.msg == msg and (tick() - n.time) < 3000 then return end
+    if not skip_dedupe then
+        for _, n in ipairs(queue) do
+            if n.msg == msg and (tick() - n.time) < 3000 then return end
+        end
     end
 
     if menu and menu.notify then
@@ -40,8 +46,6 @@ function M.show(msg, ntype, duration_ms)
     while #queue > 6 do
         table.remove(queue, 1)
     end
-
-    print("[April] " .. msg)
 end
 
 function M.warning(msg, duration_ms)

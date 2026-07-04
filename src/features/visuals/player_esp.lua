@@ -4,6 +4,7 @@ local draw_util = April.require("core.draw_util")
 local esp_util = April.require("core.esp_util")
 local menu_util = April.require("core.menu_util")
 local image_cache = April.require("core.image_cache")
+local asset_urls = April.require("game.asset_urls")
 
 local M = {}
 local P = "april_esp_enabled"
@@ -30,7 +31,6 @@ function M.register_menu()
     menu.add_checkbox(T, G.VISUALS, "april_esp_name", "Name", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 1 } }))
     menu.add_checkbox(T, G.VISUALS, "april_esp_health", "Health Bar", false, root)
     menu.add_checkbox(T, G.VISUALS, "april_esp_distance", "Distance", false, menu_util.parent(P, { colorpicker = { 0.7, 0.7, 0.7, 1 } }))
-    menu.add_checkbox(T, G.VISUALS, "april_esp_held_item", "Held Item", false, menu_util.parent(P, { colorpicker = { 0.2, 0.8, 1, 1 } }))
     menu.add_checkbox(T, G.VISUALS, "april_esp_skeleton", "Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
     menu.add_checkbox(T, G.VISUALS, "april_esp_offscreen", "Offscreen Arrows", false, menu_util.parent(P, { colorpicker = { 0.3, 1, 0.5, 1 } }))
     menu.add_colorpicker(T, G.VISUALS, "april_esp_box_color", "Box Color", { 0.3, 1, 0.5, 1 }, root)
@@ -56,16 +56,14 @@ function M.get_players()
 end
 
 function M.init()
-    image_cache.ensure(TUNG_KEY, "139818999438291")
+    image_cache.ensure(TUNG_KEY, asset_urls.tung_png())
 end
 
 function M.update(_dt)
-    -- tick_all runs from menu/tabs.update
+    -- images load lazily on first draw call (Vector upload pattern)
 end
 
 local function draw_tung(p, b)
-    image_cache.tick(TUNG_KEY)
-
     if b and b.valid and b.w > 0 and b.h > 0 then
         if image_cache.draw_fit(TUNG_KEY, b.x, b.y, b.w, b.h) then
             return
@@ -147,9 +145,6 @@ function M.draw()
         if settings.bool("april_esp_distance", false) and me and p.distance_to then
             local d = math.floor(p:distance_to(me.position))
             label = label .. (label ~= "" and " " or "") .. "[" .. d .. "m]"
-        end
-        if settings.bool("april_esp_held_item", false) and p.tool_name and p.tool_name ~= "" then
-            label = label .. (label ~= "" and " " or "") .. "(" .. p.tool_name .. ")"
         end
         if label ~= "" then
             local nc = settings.color("april_esp_name", { 1, 1, 1, 1 })
