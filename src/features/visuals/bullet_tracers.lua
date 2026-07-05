@@ -40,7 +40,6 @@ function M.register_menu()
     menu_util.section(T, G.VISUALS, "Bullet Tracers")
     menu.add_checkbox(T, G.VISUALS, P, "Bullet Tracers", false, { colorpicker = { 1, 0.6, 0.2, 1 } })
     menu.add_slider_int(T, G.VISUALS, "april_hit_aim_fov", "Aim FOV (px)", 40, 600, 250, { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_hit_max_distance", "Max Hit Distance", 50, 1000, 450, { parent = P })
     menu.add_slider_float(T, G.VISUALS, "april_bullet_tracer_lifetime", "Tracer Fade Time", 0.1, 2.0, 0.35, "%.1fs", { parent = P })
     menu.add_slider_int(T, G.VISUALS, "april_bullet_tracer_thickness", "Tracer Thickness", 1, 4, 2, { parent = P })
 end

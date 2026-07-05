@@ -25,6 +25,8 @@ const ORDER = [
   "core/esp_util.lua",
   "core/scheduler.lua",
   "core/menu_util.lua",
+  "core/config_store.lua",
+  "core/memory_string.lua",
   "game/module_scan.lua",
   "game/bootstrap.lua",
   "game/folders.lua",
@@ -32,7 +34,9 @@ const ORDER = [
   "game/items.lua",
   "game/armor_map.lua",
   "game/weapons.lua",
+  "game/inventory.lua",
   "game/player_gear.lua",
+  "game/player_state.lua",
   "game/gc_weapon_mods.lua",
   "game/gun_mod_profiles.lua",
   "game/npcs.lua",
@@ -40,9 +44,10 @@ const ORDER = [
   "game/esp_maps.lua",
   "game/esp_scan.lua",
   "game/hit_tracker.lua",
-  "game/inventory.lua",
+  "features/combat/combat_menu.lua",
   "features/combat/perfect_farm.lua",
   "features/combat/gun_mods.lua",
+  "features/visuals/player_esp.lua",
   "features/visuals/target_overlay.lua",
   "features/visuals/crosshair.lua",
   "features/visuals/feedback.lua",
@@ -55,6 +60,7 @@ const ORDER = [
   "features/radar/waypoints.lua",
   "features/radar/tactical_map.lua",
   "features/utility/mod_checker.lua",
+  "features/utility/name_hider.lua",
   "features/utility/config.lua",
   "menu/tabs.lua",
   "app.lua",
@@ -67,7 +73,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.13.3",
+    version = "3.16.1",
     debug = false,
     _mods = {},
     bundled = true,
@@ -112,8 +118,7 @@ local ok, err = pcall(function()
     local c = caps.probe()
     if c.fallen_gc then
         local gc = April.require("game.gc_weapon_mods")
-        local n = gc.probe_on_load()
-        print(string.format("[April] Fallen GC API: getgc(keys) OK — %d node(s) (enter match if 0)", n))
+        gc.probe_on_load()
     end
 
     if not debug.register_frame_hook(function()
@@ -126,10 +131,6 @@ end)
 if not ok then
     print("[April] Fatal: " .. tostring(err))
     if debug and debug.traceback then print(debug.traceback(err)) end
-elseif April._init_ok then
-    print("[April v3] Ready — " .. April.version)
-else
-    print("[April v3] Init failed — check console above")
 end
 `;
 

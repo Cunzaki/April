@@ -1,10 +1,4 @@
---[[
-    Fallen weapon mods — Vector globals:
-
-        refreshgc()
-        local n = getgc({ "RecoilMult", "RangeMult", ... })
-        applygc({ ... })
-]]
+--[[ Fallen weapon mods — Vector globals: refreshgc → getgc(keys) → applygc(keys, values) ]]
 
 local debug = April.require("core.debug")
 local env = April.require("core.env")
@@ -61,6 +55,42 @@ local function sanitize_payload(mods)
     return out
 end
 
+local function keys_for_payload(payload)
+    local keys = {}
+    for k in pairs(payload) do
+        keys[#keys + 1] = k
+    end
+    table.sort(keys)
+    return keys
+end
+
+local function warm_nodes(keys)
+    local count = 0
+    local ok, result = pcall(getgc, keys)
+    if ok and type(result) == "number" then
+        count = result
+    end
+    if count <= 0 then
+        ok, result = pcall(getgc, M.WEAPON_FIND_KEYS)
+        if ok and type(result) == "number" then
+            count = result
+        end
+    end
+    return count
+end
+
+local function write_payload(keys, payload)
+    -- API.md: applygc(keys, values) — two-arg form (required on current Vector)
+    local ok, err = pcall(applygc, keys, payload)
+    if ok then return true end
+
+    ok, err = pcall(applygc, M.WEAPON_FIND_KEYS, payload)
+    if ok then return true end
+
+    debug.error_once("gun_mods:applygc", err)
+    return false
+end
+
 function M.apply_weapon(mods)
     if not has_api() then
         return false, 0, "GC API unavailable"
@@ -81,27 +111,16 @@ function M.apply_weapon(mods)
         return false, 0, "refreshgc failed"
     end
 
-    local count = 0
-    local ok_gc, gc_result = pcall(function()
-        return getgc(M.WEAPON_FIND_KEYS)
-    end)
-    if not ok_gc then
-        debug.error_once("gun_mods:getgc", gc_result)
-        return false, 0, "getgc failed"
-    end
-    if type(gc_result) == "number" then
-        count = gc_result
-    end
-
+    local patch_keys = keys_for_payload(payload)
+    local count = warm_nodes(patch_keys)
     M._last_node_count = count
+
     if count <= 0 then
-        debug.warn_once("gun_mods:nodes", "No tables found — enter a match with a gun equipped")
-        return false, 0, "No tables found — enter a match first"
+        debug.warn_once("gun_mods:nodes", "No GC nodes — equip a gun in-game, then toggle Gun Mods")
+        return false, 0, "No nodes — equip a gun first"
     end
 
-    local ok_apply, err_apply = pcall(applygc, payload)
-    if not ok_apply then
-        debug.error_once("gun_mods:applygc", err_apply)
+    if not write_payload(patch_keys, payload) then
         return false, count, "applygc failed"
     end
 
@@ -127,17 +146,15 @@ function M.refresh_cache()
     end
 
     pcall(refreshgc)
-    local count = 0
-    pcall(function()
-        local n = getgc(M.WEAPON_FIND_KEYS)
-        if type(n) == "number" then count = n end
-    end)
+    local count = warm_nodes(M.WEAPON_FIND_KEYS)
     M._last_node_count = count
     return count
 end
 
 function M.probe_on_load()
-    return 0
+    if not has_api() then return 0 end
+    if not M.in_game() then return 0 end
+    return M.refresh_cache()
 end
 
 function M.status_text()

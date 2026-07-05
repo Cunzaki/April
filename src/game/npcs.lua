@@ -1,6 +1,6 @@
 --[[
-    Fallen Survival hostile NPCs — from workspace.Military monument children.
-    Dump confirms: Soldier, Bruno, Boris, Brutus (no zombies; VM "Zombie" skins are viewmodels only).
+    Fallen hostile NPCs — Soldiers + bosses under Workspace.Military monuments.
+    Soldiers spawn at runtime (not in static dump); scan runs periodically.
 ]]
 
 local env = April.require("core.env")
@@ -41,34 +41,55 @@ local function read_health(model)
     return hum
 end
 
+local function try_add_npc(out, model, seen)
+    if not env.is_valid(model) then return end
+    local cn = model.ClassName or model.class_name
+    if cn ~= "Model" then return end
+
+    local name = model.Name or model.name
+    if not M.is_hostile_name(name) then return end
+
+    local addr = model.Address or model.address or tostring(model)
+    if seen[addr] then return end
+
+    if not read_health(model) then return end
+
+    local head = env.safe_call(function()
+        return model:find_first_child("Head") or model:FindFirstChild("Head")
+    end)
+    if not head or not env.is_valid(head) then return end
+
+    seen[addr] = true
+    table.insert(out, {
+        inst = model,
+        name = name,
+        kind = M.kind(name),
+        head = head,
+    })
+end
+
+local function scan_container(out, container, seen, depth)
+    if not env.is_valid(container) or depth > 2 then return end
+    try_add_npc(out, container, seen)
+
+    local children = env.safe_call(function() return container:get_children() end) or {}
+    for _, child in ipairs(children) do
+        try_add_npc(out, child, seen)
+        if depth < 2 then
+            scan_container(out, child, seen, depth + 1)
+        end
+    end
+end
+
 function M.scan()
     local out = {}
+    local seen = {}
     local military = folders.from_key("military")
     if not env.is_valid(military) then return out end
 
     local monuments = env.safe_call(function() return military:get_children() end) or {}
     for _, monument in ipairs(monuments) do
-        if not env.is_valid(monument) then goto next_monument end
-        local children = env.safe_call(function() return monument:get_children() end) or {}
-        for _, model in ipairs(children) do
-            if not env.is_valid(model) then goto next_npc end
-            local name = model.Name or model.name
-            if not M.is_hostile_name(name) then goto next_npc end
-            if not read_health(model) then goto next_npc end
-            local head = env.safe_call(function()
-                return model:find_first_child("Head") or model:FindFirstChild("Head")
-            end)
-            if not head or not env.is_valid(head) then goto next_npc end
-
-            table.insert(out, {
-                inst = model,
-                name = name,
-                kind = M.kind(name),
-                head = head,
-            })
-            ::next_npc::
-        end
-        ::next_monument::
+        scan_container(out, monument, seen, 0)
     end
 
     return out

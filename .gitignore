@@ -21,6 +21,10 @@ references/
 # Generated asset reports
 assets/missing.json
 
+# Local Vector config files
+April_Slot_*.txt
+April_meta.txt
+
 # Editor / local env
 *.local
 .env

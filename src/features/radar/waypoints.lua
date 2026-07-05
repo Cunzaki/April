@@ -13,13 +13,12 @@ function M.register_menu()
     local T, _ = menu_util.group(G.RADAR)
     local root = menu_util.parent(P)
 
-    menu.add_label(T, G.RADAR, "Waypoints")
     menu.add_checkbox(T, G.RADAR, P, "Enable Waypoints", false, { key = 0 })
-    menu.add_checkbox(T, G.RADAR, "april_wp_dist", "Show Distance", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_wp_dist", "Waypoint Show Distance", false, root)
     menu.add_checkbox(T, G.RADAR, "april_wp_beacon", "Beacon Pillar", false, root)
     menu.add_slider_int(T, G.RADAR, "april_wp_beacon_h", "Beacon Height", 20, 200, 90, menu_util.parent("april_wp_beacon"))
     menu.add_checkbox(T, G.RADAR, "april_wp_draw", "Draw Markers", false, menu_util.parent(P, { colorpicker = { 0.2, 1, 0.8, 1 } }))
-    menu.add_slider_int(T, G.RADAR, "april_wp_slot", "Active Slot", 1, 5, 1, root)
+    menu.add_slider_int(T, G.RADAR, "april_wp_slot", "Waypoint Active Slot", 1, 5, 1, root)
 
     menu.add_button(T, G.RADAR, "april_wp_set", "Set Active Waypoint", function()
         local slot = settings.num("april_wp_slot", 1)
@@ -29,19 +28,16 @@ function M.register_menu()
                 name = "Waypoint " .. slot,
                 pos = { x = lp.position.x, y = lp.position.y, z = lp.position.z },
             }
-            print("[April] Waypoint " .. slot .. " set")
         end
     end)
 
     menu.add_button(T, G.RADAR, "april_wp_clear", "Clear Active Waypoint", function()
         local slot = settings.num("april_wp_slot", 1)
         cache.waypoints[slot] = nil
-        print("[April] Waypoint " .. slot .. " cleared")
     end)
 
     menu.add_button(T, G.RADAR, "april_wp_clear_all", "Clear All Waypoints", function()
         cache.waypoints = {}
-        print("[April] All waypoints cleared")
     end)
 end
 

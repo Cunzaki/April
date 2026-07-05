@@ -10,6 +10,9 @@ local math_util = April.require("core.math_util")
 local esp_util = April.require("core.esp_util")
 local draw_util = April.require("core.draw_util")
 
+local weapons = April.require("game.weapons")
+local player_state = April.require("game.player_state")
+
 local M = {}
 
 local health_history = {}
@@ -19,12 +22,13 @@ local last_idle_sync = 0
 local was_shooting = false
 local fire_origin = { x = 0, y = 0, z = 0 }
 local fire_origin_tick = 0
+local MAX_HIT_DIST = 1000
 local IDLE_SYNC_MS = 800
-local SHOOT_WINDOW_MS = 250
-local FIRE_ORIGIN_MS = 350
+local SHOOT_WINDOW_MS = 400
+local FIRE_ORIGIN_MS = 600
 local HIT_DEBOUNCE_MS = 40
 local DEFAULT_AIM_FOV = 250
-local DEFAULT_MAX_HIT_DIST = 450
+local MUZZLE_OFFSET = 1.25
 
 local AIM_BONES = {
     "Head", "UpperTorso", "LowerTorso", "HumanoidRootPart",
@@ -152,10 +156,14 @@ function M.resolve_impact_point(player)
         end
     end
 
-    if best_dist > 4 then
+    if best_dist > 16 then
         if player.head_position then
             local x, y, z = vec3(player.head_position)
             if x then return x, y, z, "Head" end
+        end
+        if player.position then
+            local x, y, z = vec3(player.position)
+            if x then return x, y, z, "Body" end
         end
         return nil
     end
@@ -191,13 +199,6 @@ local function shooting_recently(now)
     return (now - last_shoot_tick) < SHOOT_WINDOW_MS
 end
 
-local function shot_origin(now)
-    if (now - fire_origin_tick) <= FIRE_ORIGIN_MS then
-        return fire_origin.x, fire_origin.y, fire_origin.z
-    end
-    return tracer_origin()
-end
-
 local function tracer_origin()
     if camera and camera.get_position then
         local cam = camera.get_position()
@@ -209,6 +210,18 @@ local function tracer_origin()
         return vec3(me.head_position)
     end
     return 0, 0, 0
+end
+
+local function muzzle_origin()
+    local x, y, z = tracer_origin()
+    if camera and camera.get_look_vector then
+        local look = camera.get_look_vector()
+        local lx, ly, lz = vec3(look)
+        if lx then
+            return x + lx * MUZZLE_OFFSET, y + ly * MUZZLE_OFFSET, z + lz * MUZZLE_OFFSET
+        end
+    end
+    return x, y, z
 end
 
 local function player_id(p)
@@ -232,10 +245,6 @@ local function aim_fov_px()
     return settings.num("april_hit_aim_fov", settings.num("april_target_overlay_fov", DEFAULT_AIM_FOV))
 end
 
-local function max_hit_distance()
-    return settings.num("april_hit_max_distance", DEFAULT_MAX_HIT_DIST)
-end
-
 function M.find_closest_player_to_mouse(fov_px)
     if not entity or not entity.get_players then return nil end
 
@@ -249,7 +258,7 @@ function M.find_closest_player_to_mouse(fov_px)
     local best, best_screen = nil, fov_px
 
     for _, p in ipairs(entity.get_players()) do
-        if p.is_local or not p.is_alive then goto continue end
+        if not player_state.is_combat_target(p) then goto continue end
 
         local pos = p.head_position or p.position
         if not pos then goto continue end
@@ -278,13 +287,28 @@ local function player_distance(p)
     return math_util.distance3(bx - ax, by - ay, bz - az)
 end
 
-local function is_plausible_player_hit(p, aim_player)
-    if not p or not aim_player or p ~= aim_player then return false end
+local function impact_point_for(p)
+    local hx, hy, hz, part = M.resolve_impact_point(p)
+    if hx then return hx, hy, hz, part end
+    if p.head_position then
+        local x, y, z = vec3(p.head_position)
+        if x then return x, y, z, "Head" end
+    end
+    if p.position then
+        local x, y, z = vec3(p.position)
+        if x then return x, y, z, "Body" end
+    end
+    return nil
+end
+
+local function is_plausible_player_hit(p, aim_id)
+    if not p or not aim_id then return false end
+    if player_id(p) ~= aim_id then return false end
 
     local dist = player_distance(p)
-    if dist <= 0 or dist > max_hit_distance() then return false end
+    if dist <= 0 or dist > MAX_HIT_DIST then return false end
 
-    local hx, hy, hz, part = M.resolve_impact_point(p)
+    local hx, hy, hz, part = impact_point_for(p)
     if not hx then return false end
 
     return true, dist, hx, hy, hz, part
@@ -293,7 +317,7 @@ end
 function M.sync_baselines()
     if entity and entity.get_players then
         for _, p in ipairs(entity.get_players()) do
-            if not p.is_local and p.is_alive then
+            if player_state.is_combat_target(p) then
                 local id = p.user_id or p.name or tostring(p)
                 health_history[id] = p.health
             end
@@ -307,13 +331,22 @@ end
 
 function M.track(callback)
     local now = tick()
+
+    if not weapons.holding_ranged_weapon() then
+        if now - last_idle_sync >= IDLE_SYNC_MS then
+            last_idle_sync = now
+            M.sync_baselines()
+        end
+        return
+    end
+
     local shooting = input and input.is_key_down and input.is_key_down(0x01)
 
     if shooting then
         last_shoot_tick = now
         if not was_shooting then
             M.sync_baselines()
-            fire_origin.x, fire_origin.y, fire_origin.z = tracer_origin()
+            fire_origin.x, fire_origin.y, fire_origin.z = muzzle_origin()
             fire_origin_tick = now
         end
     end
@@ -327,13 +360,18 @@ function M.track(callback)
         return
     end
 
-    local ox, oy, oz = shot_origin(now)
+    local ox, oy, oz
+    if (now - fire_origin_tick) <= FIRE_ORIGIN_MS then
+        ox, oy, oz = fire_origin.x, fire_origin.y, fire_origin.z
+    else
+        ox, oy, oz = muzzle_origin()
+    end
     local aim_player = M.find_closest_player_to_mouse()
     local aim_id = aim_player and player_id(aim_player)
 
     if entity and entity.get_players then
         for _, p in ipairs(entity.get_players()) do
-            if p.is_local or not p.is_alive then goto next_player end
+            if not player_state.is_combat_target(p) then goto next_player end
             local id = player_id(p)
             local cur = p.health
             local last = health_history[id]
@@ -343,7 +381,7 @@ function M.track(callback)
                 and cur < last
                 and cur >= 0
             then
-                local ok, dist, hx, hy, hz, part = is_plausible_player_hit(p, aim_player)
+                local ok, dist, hx, hy, hz, part = is_plausible_player_hit(p, aim_id)
                 if ok and (now - (last_hit_at[id] or 0)) >= HIT_DEBOUNCE_MS then
                     last_hit_at[id] = now
                     callback({

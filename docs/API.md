@@ -79,7 +79,7 @@ There is **no `task` global**. Use `thread.create(fn, interval_ms)` for delayed/
 ```
 Script loaded
   └─ Top-level code runs once (menu registration, thread setup)
-  └─ Callbacks defined
+        └─ Callbacks defined
 
 Every frame
   └─ on_frame() — all drawing happens here
@@ -693,7 +693,7 @@ Background visibility cache — cheap reads from Lua.
 | `raycast.is_visible(vec3_from, vec3_to)` | bool | Vector3 form |
 
 ```lua
-local char = p.character
+        local char = p.character
 if utility.is_valid(char) then
     local vis = raycast.is_player_visible(char.address)
     local col = vis and {0,1,0.4,1} or {0.5,0.5,0.5,0.6}
@@ -752,7 +752,7 @@ Roblox Fast Flags — background scan, ~6000–7000 flags cached.
 
 ```lua
 if fflag.is_scanned() then
-    fflag.set_value("TaskSchedulerTargetFps", 9999)
+fflag.set_value("TaskSchedulerTargetFps", 9999)
 end
 ```
 

@@ -5,6 +5,7 @@ local menu_util = April.require("core.menu_util")
 local image_cache = April.require("core.image_cache")
 local items = April.require("game.items")
 local player_gear = April.require("game.player_gear")
+local player_state = April.require("game.player_state")
 local math_util = April.require("core.math_util")
 
 local M = {}
@@ -22,9 +23,8 @@ M._layout = nil
 
 local SLOT_BG = { 0.14, 0.14, 0.16, 0.72 }
 local HELD_BG = { 0.2, 0.2, 0.22, 0.85 }
-local EMPTY_BG = { 0.1, 0.1, 0.12, 0.65 }
-local EMPTY_EDGE = { 1, 1, 1, 0.28 }
-local EMPTY_INNER = { 1, 1, 1, 0.06 }
+local EMPTY_BG = { 0.08, 0.08, 0.1, 0.55 }
+local EMPTY_EDGE = { 1, 1, 1, 0.12 }
 local ROUND = 5
 
 local function tick_ms()
@@ -82,7 +82,7 @@ local function find_mouse_target(fov_px)
     local best, best_dist = nil, fov_px
 
     for _, p in ipairs(entity.get_players()) do
-        if p.is_local or not p.is_alive then goto continue end
+        if not player_state.is_combat_target(p) then goto continue end
 
         local pos = p.head_position or p.position
         if not pos then goto continue end
@@ -102,34 +102,73 @@ local function find_mouse_target(fov_px)
     return best
 end
 
-local function bottom_offset()
-    local bottom = settings.num(P .. "_bottom", -1)
-    if bottom >= 0 then return bottom end
-    return settings.num(P .. "_top", 140)
+local function armor_sort_key(piece)
+    local n = (piece.name or ""):lower()
+    if n:find("helmet", 1, true) or n:find("head", 1, true) or n:find("cap", 1, true)
+        or n:find("wrap", 1, true) or n:find("balaclava", 1, true) or n:find("hood", 1, true) then
+        return 1
+    end
+    if n:find("chest", 1, true) or n:find("plate", 1, true) or n:find("shirt", 1, true)
+        or n:find("jacket", 1, true) or n:find("hoodie", 1, true) or n:find("vest", 1, true)
+        or n:find("suit", 1, true) or n:find("torso", 1, true) then
+        return 2
+    end
+    if n:find("legging", 1, true) or n:find("pants", 1, true) or n:find("shorts", 1, true) then
+        return 3
+    end
+    if n:find("glove", 1, true) or n:find("handwrap", 1, true) then
+        return 4
+    end
+    if n:find("boot", 1, true) or n:find("footwrap", 1, true) or n:find("shoe", 1, true) then
+        return 5
+    end
+    if n:find("backpack", 1, true) or n:find("bag", 1, true) then
+        return 6
+    end
+    return 7
+end
+
+local function pack_gear(armor_list)
+    local sorted = {}
+    for _, piece in ipairs(armor_list or {}) do
+        table.insert(sorted, piece)
+    end
+    table.sort(sorted, function(a, b)
+        return armor_sort_key(a) < armor_sort_key(b)
+    end)
+
+    local packed = {}
+    for _, piece in ipairs(sorted) do
+        table.insert(packed, piece)
+        if #packed >= GEAR_SLOTS then break end
+    end
+    return packed
 end
 
 local function build_layout(gear, gear_sz)
     local held = gear and gear.held
-    local packed = gear and gear.slots or {}
-    local filled = #packed
-
+    local packed = pack_gear(gear and gear.armor)
     local held_sz = math.floor(gear_sz * 1.28)
     local gap = 5
     local row_w = GEAR_SLOTS * gear_sz + (GEAR_SLOTS - 1) * gap
-    local block_h = held_sz + 8 + gear_sz
 
     return {
         held = held,
         packed = packed,
-        filled = filled,
+        filled = #packed,
         gear_sz = gear_sz,
         held_sz = held_sz,
         gap = gap,
         row_w = row_w,
         row_gap = 8,
         name_fs = 11,
-        block_h = block_h,
     }
+end
+
+local function held_piece(held)
+    if not held then return nil end
+    if type(held) == "table" then return held end
+    return { name = held }
 end
 
 local function draw_slot(x, y, size, key, piece, style)
@@ -142,16 +181,8 @@ local function draw_slot(x, y, size, key, piece, style)
     end
 
     draw.rect_filled(x, y, size, size, bg, ROUND)
-    if style == "empty" then
-        if draw.rect then
-            draw.rect(x, y, size, size, EMPTY_EDGE, ROUND, 1)
-        end
-        local inset = math.max(4, math.floor(size * 0.22))
-        draw.rect_filled(
-            x + inset, y + inset,
-            size - inset * 2, size - inset * 2,
-            EMPTY_INNER, ROUND - 2
-        )
+    if style == "empty" and draw.rect then
+        draw.rect(x, y, size, size, EMPTY_EDGE, ROUND, 1)
     end
 
     if not piece then return end
@@ -182,7 +213,7 @@ function M.register_menu()
     menu.add_checkbox(T, G.VISUALS, P, "Target Gear", false)
     menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Target FOV", 40, 400, 150, menu_util.parent(P))
     menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, menu_util.parent(P))
-    menu.add_slider_int(T, G.VISUALS, P .. "_bottom", "Bottom Offset", 80, 320, 140, menu_util.parent(P))
+    menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, menu_util.parent(P))
 end
 
 function M.update(_dt)
@@ -198,7 +229,7 @@ function M.update(_dt)
 
     local fov = settings.num(P .. "_fov", 150)
     local target = find_mouse_target(fov)
-    if target and target.is_alive then
+    if target and player_state.is_combat_target(target) then
         M._target = target
         M._layout = build_layout(get_gear(target), settings.num(P .. "_gear_size", 48))
     else
@@ -223,27 +254,27 @@ function M.draw()
         end
     end
 
-    local sw, sh = draw_util.screen_size()
+    local sw, _ = draw_util.screen_size()
+    local top = settings.num(P .. "_top", 88)
     local cx = sw * 0.5
-    local bottom = bottom_offset()
-
-    local gear_y = sh - bottom - layout.gear_sz
-    local held_y = gear_y - layout.row_gap - layout.held_sz
-    local name_y = held_y - 6 - layout.name_fs
 
     local name = target.name or "Unknown"
     local nw = select(1, draw.get_text_size(name, layout.name_fs))
-    draw.text(cx - nw * 0.5, name_y, name, { 1, 1, 1, 1 }, layout.name_fs)
+    draw.text(cx - nw * 0.5, top, name, { 1, 1, 1, 1 }, layout.name_fs)
 
-    local held_key = layout.held and ensure_item_image(layout.held) or nil
-    draw_slot(cx - layout.held_sz * 0.5, held_y, layout.held_sz, held_key, layout.held, layout.held and "held" or "empty")
+    local y = top + layout.name_fs + 6
+
+    local held = held_piece(layout.held)
+    local held_key = held and ensure_item_image(held.name, held.variant) or nil
+    draw_slot(cx - layout.held_sz * 0.5, y, layout.held_sz, held_key, held, held and "held" or "empty")
+    y = y + layout.held_sz + layout.row_gap
 
     local start_x = cx - layout.row_w * 0.5
     for i = 1, GEAR_SLOTS do
-        local piece = i <= filled and packed[i] or nil
+        local piece = i <= layout.filled and layout.packed[i] or nil
         local key = piece and ensure_item_image(piece.name, piece.variant) or nil
         local sx = start_x + (i - 1) * (layout.gear_sz + layout.gap)
-        draw_slot(sx, gear_y, layout.gear_sz, key, piece, piece and "gear" or "empty")
+        draw_slot(sx, y, layout.gear_sz, key, piece, piece and "gear" or "empty")
     end
 end
 

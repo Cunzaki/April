@@ -185,7 +185,7 @@ function M.draw_world_line(x1, y1, z1, x2, y2, z2, col, thick)
     if not draw then return false end
     local sx1, sy1, v1 = M.w2s(x1, y1, z1)
     local sx2, sy2, v2 = M.w2s(x2, y2, z2)
-    if v1 and v2 then
+    if v1 or v2 then
         draw_util.line(sx1, sy1, sx2, sy2, col, thick or 2)
         return true
     end

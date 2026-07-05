@@ -22,4 +22,8 @@ function M.tung_png()
     return M.CDN_BASE .. "/tung.png"
 end
 
+function M.mod_warning_png()
+    return M.CDN_BASE .. "/mod_warning.png"
+end
+
 return M

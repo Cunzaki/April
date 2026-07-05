@@ -19,11 +19,11 @@ function M.register_menu()
     menu.add_checkbox(T, G.WORLD, "april_npc_soldiers", "Soldiers", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, menu_util.parent(P, { colorpicker = { 1, 0.5, 0.1, 1 } }))
     menu.add_combo(T, G.WORLD, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 0, root)
-    menu.add_checkbox(T, G.WORLD, "april_npc_health", "Health Bar", false, root)
-    menu.add_checkbox(T, G.WORLD, "april_npc_name", "Name", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 1 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_distance", "Distance", false, menu_util.parent(P, { colorpicker = { 0.7, 0.7, 0.7, 1 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_offscreen", "Offscreen Arrows", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_health", "NPC Health Bar", false, root)
+    menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "NPC Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_offscreen", "NPC Offscreen Arrows", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "NPC Show Name", true, root)
+    menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "NPC Show Distance", true, root)
     menu.add_slider_int(T, G.WORLD, "april_npc_range", "NPC Range", 50, 2000, 500, root)
 end
 
@@ -83,15 +83,27 @@ function M.draw()
         end
 
         local label = entry.name or "NPC"
-        if settings.bool("april_npc_name", false) then
-            if settings.bool("april_npc_distance", false) and me and me.position then
+        local show_name = settings.bool("april_npc_show_name", true)
+        local show_dist = settings.bool("april_npc_show_distance", true)
+
+        if show_name or show_dist then
+            if show_dist and me and me.position then
                 local dx = pos.x - me.position.x
                 local dy = pos.y - me.position.y
                 local dz = pos.z - me.position.z
-                label = label .. string.format(" [%dm]", math.floor(math.sqrt(dx * dx + dy * dy + dz * dz)))
+                local dist_text = string.format("%dm", math.floor(math.sqrt(dx * dx + dy * dy + dz * dz)))
+                if show_name then
+                    label = label .. " [" .. dist_text .. "]"
+                else
+                    label = dist_text
+                end
+            elseif not show_name then
+                label = nil
             end
-            local nc = settings.color("april_npc_name", { 1, 1, 1, 1 })
-            draw_util.text_centered(sx, sy - 14, label, nc, text_size)
+
+            if label then
+                draw_util.text_centered(sx, sy - 14, label, col, text_size)
+            end
         end
 
         if settings.bool("april_npc_skeleton", false) then

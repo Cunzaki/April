@@ -72,7 +72,6 @@ function M.register_menu()
 
     menu_util.section(T, G.VISUALS, "Hit Notifications")
     menu.add_checkbox(T, G.VISUALS, P_NOTIFY, "Hit Toasts", false)
-    menu.add_label(T, G.VISUALS, "Shows damage, distance, and body part.", notify_root)
     menu.add_slider_int(T, G.VISUALS, "april_hit_notify_duration", "Toast Duration (ms)", 500, 3000, 1000, notify_root)
 end
 

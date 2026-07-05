@@ -1,16 +1,14 @@
 --[[
-    April debug — always on by default.
-    Errors are deduplicated so the console is readable; re-enable spam with April.debug_verbose = true.
+    April debug — off by default. Set April.debug = true for console logs.
 ]]
 
 local M = {}
 
 local seen_errors = {}
 local frame_count = 0
-local last_heartbeat = nil
 
 function M.enabled()
-    return not (April and April.debug == false)
+    return April and April.debug == true
 end
 
 function M.verbose()
@@ -84,21 +82,6 @@ end
 
 function M.tick_frame()
     frame_count = frame_count + 1
-    if not M.enabled() then return end
-
-    local now = utility and utility.get_tick_count and utility.get_tick_count() or 0
-    if last_heartbeat == nil then
-        last_heartbeat = now
-    end
-    if now - last_heartbeat > 30000 then
-        last_heartbeat = now
-        local players = entity and entity.get_players and #entity.get_players() or 0
-        local bootstrap = April.require("game.bootstrap")
-        M.log(string.format("Heartbeat — frames=%d players=%d modules=%s %s",
-            frame_count, players,
-            bootstrap.is_ready() and "OK" or "wait",
-            bootstrap.get_status and bootstrap.get_status() or ""))
-    end
 end
 
 function M.reset_errors()

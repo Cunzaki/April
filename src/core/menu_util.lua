@@ -58,9 +58,8 @@ function M.group(name, side)
     return M.TAB, name
 end
 
-function M.section(T, G, title)
+function M.section(T, G, _title)
     menu.add_separator(T, G)
-    menu.add_label(T, G, title)
 end
 
 function M.parent(main_id, extra)

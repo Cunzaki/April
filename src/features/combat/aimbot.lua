@@ -1,5 +1,6 @@
 local settings = April.require("core.settings")
 local targeting = April.require("features.combat.targeting")
+local player_state = April.require("game.player_state")
 local draw_util = April.require("core.draw_util")
 local menu_util = April.require("core.menu_util")
 local combat_menu = April.require("features.combat.combat_menu")
@@ -35,7 +36,6 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.AIMBOT)
     menu.add_checkbox(T, G.AIMBOT, P, "Enable Aimbot", false, { key = 0x02 })
-    menu.add_label(T, G.AIMBOT, "Auto weapon drop + velocity prediction (always on).")
     combat_menu.register_targeting(T, G.AIMBOT, PREFIX, P, {
         fov_default = 150,
         smooth = true,
@@ -106,7 +106,7 @@ function M.draw()
         end
     end
 
-    if not locked_target or not locked_target.is_alive then return end
+    if not locked_target or not player_state.is_combat_target(locked_target) then return end
 
     if settings.bool(PREFIX .. "target_line", false) then
         local cam = camera and camera.get_position and camera.get_position()

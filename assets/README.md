@@ -31,6 +31,12 @@ Do **not** use `github.com/.../blob/main/...` — that is the web viewer, not a 
 
 Decal asset [139818999438291](https://create.roblox.com/store/asset/139818999438291/tung-tung-tung-sahur) → `assets/tung.png`
 
+## Mod Checker
+
+Shield warning icon for in-world mod markers → `assets/mod_warning.png`
+
+Runtime URL: `https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/assets/mod_warning.png`
+
 ## After game updates
 
 Re-dump Items module → re-run `npm run assets` → commit new/changed PNGs.

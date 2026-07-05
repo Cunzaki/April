@@ -126,7 +126,6 @@ function M.register_menu()
 
     menu_util.section(T, G.COMBAT, "Farming")
     menu.add_checkbox(T, G.COMBAT, P, "Farm Helper", false)
-    menu.add_label(T, G.COMBAT, "Aims camera at NodeSpark / TreeX when nearby.", root)
     menu.add_slider_int(T, G.COMBAT, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
     menu.add_slider_int(T, G.COMBAT, P_SMOOTH, "Aim Smoothness", 1, 30, 8, root)
 end

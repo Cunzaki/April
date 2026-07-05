@@ -2,6 +2,7 @@ local settings = April.require("core.settings")
 local weapons = April.require("game.weapons")
 local math_util = April.require("core.math_util")
 local esp_util = April.require("core.esp_util")
+local player_state = April.require("game.player_state")
 
 local M = {}
 
@@ -168,7 +169,7 @@ function M.get_aim_point(target, prefix, bone, origin, cx, cy)
 end
 
 function M.is_target_valid(target, prefix, cx, cy, fov_px)
-    if not target or not target.is_alive then return false, nil end
+    if not player_state.is_combat_target(target) then return false, nil end
 
     local cam = camera and camera.get_position and camera.get_position()
     local aim = M.get_aim_point(target, prefix, nil, cam, cx, cy)
@@ -198,7 +199,7 @@ function M.find_target(cx, cy, fov_px, prefix)
     local cam = camera and camera.get_position and camera.get_position()
 
     for _, p in ipairs(entity.get_players()) do
-        if p.is_local or not p.is_alive then goto continue end
+        if not player_state.is_combat_target(p) then goto continue end
 
         local aim
         if bone == "Closest" then

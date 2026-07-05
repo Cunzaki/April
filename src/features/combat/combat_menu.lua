@@ -5,6 +5,12 @@ local esp_util = April.require("core.esp_util")
 
 local M = {}
 
+function M.register_filters(T, G, parent_id)
+    local root = menu_util.parent(parent_id)
+    menu_util.section(T, G, "Target Filters")
+    menu.add_checkbox(T, G, "april_combat_skip_downed", "Ignore Downed Players", true, root)
+end
+
 function M.register_targeting(T, G, prefix, parent_id, opts)
     opts = opts or {}
     local p = prefix

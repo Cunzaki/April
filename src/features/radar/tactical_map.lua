@@ -2,6 +2,7 @@ local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
 local cache = April.require("core.cache")
 local env = April.require("core.env")
+local player_state = April.require("game.player_state")
 local menu_util = April.require("core.menu_util")
 
 local M = {}
@@ -28,7 +29,6 @@ function M.register_menu()
     menu.add_slider_int(T, G.RADAR, "april_map_icon_scale", "Icon Scale", 1, 8, 3, root)
 
     menu.add_separator(T, G.RADAR)
-    menu.add_label(T, G.RADAR, "Layers")
     menu.add_checkbox(T, G.RADAR, "april_map_show_players", "Players", false, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_npcs", "NPCs", false, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_loot", "Loot", false, root)
@@ -304,7 +304,7 @@ function M.draw()
     if settings.bool("april_map_show_players", false) and entity and entity.get_players then
         local col = settings.color("april_map_player_col", { 1, 0.35, 0.35, 1 })
         for _, p in ipairs(entity.get_players()) do
-            if not p.is_local and p.is_alive and p.position then
+            if player_state.is_combat_target(p) and p.position then
                 draw_map_item(p.position.x, p.position.z, col, p.name, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h)
             end
         end

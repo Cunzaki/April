@@ -134,4 +134,37 @@ function M.make_entry(model, name, toggle_id, opts)
     }
 end
 
+--[[ Scan direct children of folder keys against a name→toggle map. ]]
+function M.scan_folders(folder_keys, name_map, label_map, dynamic)
+    local folders_mod = April.require("game.folders")
+    local out = {}
+    local seen = {}
+
+    local function add_entry(model, inst_name)
+        local toggle_id = name_map[inst_name]
+        if not toggle_id then return end
+        local key = tostring(model.Address or model) .. ":" .. toggle_id
+        if seen[key] then return end
+        seen[key] = true
+        local label = (label_map and label_map[inst_name]) or inst_name
+        table.insert(out, M.make_entry(model, label, toggle_id, { dynamic = dynamic }))
+    end
+
+    for _, folder_key in ipairs(folder_keys or {}) do
+        local folder = folders_mod.from_key(folder_key)
+        if not env.is_valid(folder) then goto next_folder end
+
+        local children = env.safe_call(function() return folder:get_children() end) or {}
+        for _, model in ipairs(children) do
+            if not env.is_valid(model) then goto continue end
+            local inst_name = model.Name or model.name
+            if inst_name then add_entry(model, inst_name) end
+            ::continue::
+        end
+        ::next_folder::
+    end
+
+    return out
+end
+
 return M

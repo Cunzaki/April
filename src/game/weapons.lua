@@ -80,6 +80,83 @@ function M.is_weapon_name(name)
     return name and weapon_names[name] == true
 end
 
+local MELEE_NAME_HINTS = {
+    "hatchet", "pickaxe", "spear", "machete", "knife", "sword",
+    "bone tool", "hammer", "crowbar",
+}
+
+local function name_looks_melee(name)
+    local n = (name or ""):lower()
+    for _, hint in ipairs(MELEE_NAME_HINTS) do
+        if n:find(hint, 1, true) then return true end
+    end
+    return false
+end
+
+function M.is_ranged_weapon_name(name)
+    if not name or name == "" then return false end
+    if name_looks_melee(name) then return false end
+
+    if not loaded then M.load() end
+
+    local entry = toolinfo[name]
+    if entry then
+        if entry.Bullet then return true end
+        if entry.Melee and not entry.Bullet then return false end
+        if entry.Weapon and (entry.Weapon.RPM or entry.Weapon.ActualRPM) then
+            return true
+        end
+        if entry.Melee then return false end
+    end
+
+    if FALLBACK_STATS[name] then
+        return true
+    end
+
+    return false
+end
+
+function M.get_held_ranged_weapon_name()
+    if not loaded then M.load() end
+
+    local lp = env.get_local_player()
+    if not lp then return nil end
+
+    local function pick(name)
+        if name and M.is_ranged_weapon_name(name) then return name end
+    end
+
+    local char = lp.character
+    if char and env.is_valid(char) then
+        for _, child in ipairs(env.safe_call(function() return char:get_children() end) or {}) do
+            local hit = pick(inst_name(child))
+            if hit then return hit end
+        end
+    end
+
+    local ws = env.get_workspace()
+    if ws then
+        local vms = env.safe_call(function() return ws:find_first_child("Viewmodels") end)
+            or env.safe_call(function() return ws:FindFirstChild("Viewmodels") end)
+        if vms then
+            for _, vm in ipairs(env.safe_call(function() return vms:get_children() end) or {}) do
+                if inst_name(vm) == "Viewmodel" then
+                    for _, item in ipairs(env.safe_call(function() return vm:get_children() end) or {}) do
+                        local hit = pick(inst_name(item))
+                        if hit then return hit end
+                    end
+                end
+            end
+        end
+    end
+
+    return pick(lp.tool_name)
+end
+
+function M.holding_ranged_weapon()
+    return M.get_held_ranged_weapon_name() ~= nil
+end
+
 function M.invalidate()
     loaded = false
     toolinfo = {}

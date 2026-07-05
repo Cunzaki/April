@@ -11,6 +11,7 @@ M._menu_registered = false
 M.FEATURE_ORDER = {
     "features.combat.perfect_farm",
     "features.combat.gun_mods",
+    "features.visuals.player_esp",
     "features.visuals.target_overlay",
     "features.visuals.crosshair",
     "features.visuals.feedback",
@@ -23,6 +24,7 @@ M.FEATURE_ORDER = {
     "features.radar.tactical_map",
     "features.movement.exploits",
     "features.utility.mod_checker",
+    "features.utility.name_hider",
     "features.utility.config",
 }
 
@@ -40,7 +42,6 @@ function M.register_all()
             if ok then
                 registered = registered + 1
             else
-                print("[April] Menu registration failed: " .. path .. " — " .. tostring(err))
                 debug.error_once("menu:" .. path, err)
             end
         end
@@ -50,6 +51,13 @@ function M.register_all()
     if April and April.debug then
         debug.log("Menu: " .. registered .. " sections")
     end
+
+    pcall(function()
+        local esp = April.require("features.visuals.player_esp")
+        if esp.init then esp.init() end
+        local mod = April.require("features.utility.mod_checker")
+        if mod.init then mod.init() end
+    end)
 end
 
 function M.setup_scans()
@@ -139,6 +147,10 @@ function M.init()
     M.register_all()
     M.setup_scans()
     M.setup_player_hooks()
+
+    pcall(function()
+        April.require("features.utility.config").try_autoload()
+    end)
 
     return true
 end
