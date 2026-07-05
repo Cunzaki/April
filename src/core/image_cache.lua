@@ -23,12 +23,32 @@ function M.ensure(key, asset_id_or_url)
     if keys[key] then return keys[key] end
     local url = url_for(asset_id_or_url)
     if not url then return nil end
-    keys[key] = { url = url, handle = nil, failed = false }
+    local asset_id = type(asset_id_or_url) == "number" and asset_id_or_url
+        or (type(asset_id_or_url) == "string" and asset_id_or_url:match("^(%d+)$"))
+    keys[key] = {
+        url = url,
+        asset_id = asset_id and tostring(asset_id) or nil,
+        handle = nil,
+        failed = false,
+        fallback = false,
+    }
     return keys[key]
 end
 
 function M.register(key, asset_id_or_url)
     return M.ensure(key, asset_id_or_url)
+end
+
+local function try_fallback(entry)
+    if entry.fallback or not entry.asset_id then return false end
+    local fb = asset_urls.roblox_thumb(entry.asset_id)
+    if not fb or fb == entry.url then return false end
+    entry.fallback = true
+    entry.url = fb
+    entry.handle = nil
+    entry.failed = false
+    entry.just_loaded = nil
+    return true
 end
 
 local function get_handle(key)
@@ -39,18 +59,16 @@ local function get_handle(key)
 
     if not entry.handle then
         entry.handle = draw.load_image(entry.url)
-        entry.just_loaded = true
-        return nil
-    end
-
-    if entry.just_loaded then
-        entry.just_loaded = false
         return nil
     end
 
     if draw.image_failed and draw.image_failed(entry.handle) then
+        if try_fallback(entry) then
+            return nil
+        end
         debug.warn_once("img:" .. key, "load failed — " .. entry.url)
         entry.failed = true
+        entry.handle = nil
         return nil
     end
 
@@ -87,10 +105,23 @@ function M.state(key)
     if entry.failed then return "failed" end
     if not entry.handle then return "loading" end
     if draw and draw.image_failed and draw.image_failed(entry.handle) then
+        if try_fallback(entry) then
+            return "loading"
+        end
         entry.failed = true
+        entry.handle = nil
         return "failed"
     end
     return "ready"
+end
+
+function M.is_ready(key)
+    return M.state(key) == "ready"
+end
+
+function M.preload(key, asset_id_or_url)
+    M.ensure(key, asset_id_or_url)
+    get_handle(key)
 end
 
 function M.begin_load(key)

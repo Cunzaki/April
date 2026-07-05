@@ -1,6 +1,7 @@
---[[ Toast notifications — draws on-screen; also tries menu.notify if available. ]]
+--[[ Toast notifications — Project Vector themed HUD toasts. ]]
 
 local draw_util = April.require("core.draw_util")
+local theme = April.require("core.ui_theme")
 
 local M = {}
 local queue = {}
@@ -52,12 +53,23 @@ function M.warning(msg, duration_ms)
     M.show(msg, "warning", duration_ms)
 end
 
+function M.success(msg, duration_ms)
+    M.show(msg, "success", duration_ms)
+end
+
+function M.error(msg, duration_ms)
+    M.show(msg, "danger", duration_ms)
+end
+
+function M.info(msg, duration_ms)
+    M.show(msg, "info", duration_ms)
+end
+
 function M.draw()
     if #queue == 0 or not draw then return end
 
     local now = tick()
-    local sw, sh = draw_util.screen_size()
-    local font = 14
+    local font = 13
     local pad = 12
     local gap = 8
     local target_y = 18
@@ -84,30 +96,25 @@ function M.draw()
             if n.y == 0 then n.y = target_y end
             n.y = lerp(n.y, target_y, 0.2)
 
-            local accent = { 1, 0.75, 0.2, 1 }
-            if n.type == "success" then accent = { 0.2, 0.85, 0.35, 1 }
-            elseif n.type == "danger" then accent = { 1, 0.25, 0.25, 1 }
-            elseif n.type == "info" then accent = { 0.25, 0.65, 1, 1 }
-            end
-
-            local tw = draw.get_text_size and draw.get_text_size(n.msg, font) or (#n.msg * 7)
-            local box_w = tw + pad * 2 + 6
+            local accent = theme.toast_accent(n.type)
+            local tw = select(1, theme.text_w(n.msg, font))
+            local box_w = tw + pad * 2 + 4
             local box_h = font + pad * 2
+            local sw = select(1, draw_util.screen_size())
             local x = sw - box_w - 16 + (n.x_off or 0)
             local y = n.y
             local a = n.alpha or 1
 
-            if draw.rect_filled then
-                draw.rect_filled(x, y, box_w, box_h, { 0.05, 0.05, 0.08, 0.82 * a })
-            end
-            if draw.rect then
-                draw.rect(x, y, box_w, box_h, { accent[1], accent[2], accent[3], 0.9 * a }, 0, 1)
-            end
-            if draw.line then
-                draw.line(x, y, x, y + box_h, { accent[1], accent[2], accent[3], a }, 3)
-            end
+            theme.draw_panel(x, y, box_w, box_h, {
+                bg = theme.alpha(theme.PANEL, 0.94 * a),
+                border = theme.alpha(theme.BORDER_CYAN, 0.55 * a),
+                accent = theme.alpha(accent, a),
+                accent_w = 2,
+                rounding = theme.ROUND,
+            })
+
             if draw.text then
-                draw.text(x + pad + 4, y + pad - 1, n.msg, { 1, 1, 1, a }, font)
+                draw.text(x + pad, y + pad - 1, n.msg, theme.alpha(theme.TEXT, a), font)
             end
 
             target_y = target_y + box_h + gap

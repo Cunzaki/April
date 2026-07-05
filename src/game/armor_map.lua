@@ -3,7 +3,7 @@
 local M = {}
 
 M.BY_MODEL = {
-    ["Armor_153"] = "Cloth Head Wrap",
+    ["Armor_153"] = "Cloth Headwrap",
     ["Armor_115"] = "Cloth Shirt",
     ["Armor_116"] = "Cloth Pants",
     ["Armor_156"] = "Cloth Handwraps",

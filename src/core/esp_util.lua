@@ -81,6 +81,46 @@ function M.draw_player_skeleton(player, col, thick)
     M.draw_skeleton_bones(bones, col, thick)
 end
 
+function M.model_screen_bounds(model)
+    if not model then return nil end
+    local env = April.require("core.env")
+    if not env.is_valid(model) then return nil end
+
+    local part_names = {
+        "Head", "HumanoidRootPart", "UpperTorso", "LowerTorso",
+        "LeftFoot", "RightFoot", "Left Leg", "Right Leg",
+    }
+
+    local min_x, min_y, max_x, max_y
+    local any = false
+
+    for i = 1, #part_names do
+        local name = part_names[i]
+        local part = env.safe_call(function()
+            return model:find_first_child(name) or model:FindFirstChild(name)
+        end)
+        if part and env.is_valid(part) then
+            local pos = part.Position or part.position
+            if pos and pos.x then
+                local sx, sy, vis = M.w2s(pos.x, pos.y, pos.z)
+                if vis then
+                    any = true
+                    min_x = min_x and math.min(min_x, sx) or sx
+                    min_y = min_y and math.min(min_y, sy) or sy
+                    max_x = max_x and math.max(max_x, sx) or sx
+                    max_y = max_y and math.max(max_y, sy) or sy
+                end
+            end
+        end
+    end
+
+    if not any then return nil end
+
+    local w = math.max(8, max_x - min_x)
+    local h = math.max(12, max_y - min_y)
+    return { x = min_x, y = min_y, w = w, h = h, valid = true }
+end
+
 function M.draw_model_skeleton(model, col, thick)
     if not model then return end
     local env = April.require("core.env")
@@ -274,10 +314,15 @@ end
 
 function M.draw_entry_boxes(entry, col, thick)
     if not entry or not entry.inst then return end
+    if entry.box then
+        M.draw_oriented_box(entry.box, col, thick)
+        return
+    end
     local scan = April.require("game.esp_scan")
-    local main = scan.find_main_part(entry.inst)
+    local main = entry.main_part or scan.find_main_part(entry.inst)
     local box = scan.read_part_box(main)
     if box then
+        entry.box = box
         M.draw_oriented_box(box, col, thick)
     end
 end

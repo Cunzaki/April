@@ -1,8 +1,9 @@
 {
-  "generated": "2026-07-04T07:03:55.525Z",
-  "source": "references/dump/scripts/ReplicatedStorage.Modules.Items.ModuleScript.lua",
+  "generated": "2026-07-05T22:59:22.576Z",
+  "source": "dump/scripts/ReplicatedStorage.Modules.Items.ModuleScript.lua",
   "tung": "139818999438291",
-  "itemCount": 340,
+  "itemCount": 341,
+  "imageCount": 340,
   "assetCount": 703,
   "assets": [
     "13143032792",

@@ -14,8 +14,6 @@ M.FEATURE_ORDER = {
     "features.visuals.player_esp",
     "features.visuals.target_overlay",
     "features.visuals.crosshair",
-    "features.visuals.feedback",
-    "features.visuals.bullet_tracers",
     "features.world.world_esp",
     "features.world.loot_esp",
     "features.world.npc_esp",
@@ -62,10 +60,13 @@ end
 
 function M.setup_scans()
     local settings = April.require("core.settings")
+    local iscan = April.require("core.incremental_scan")
     local world_esp = April.require("features.world.world_esp")
     local loot_esp = April.require("features.world.loot_esp")
     local base_esp = April.require("features.world.base_esp")
     local npc_esp = April.require("features.world.npc_esp")
+
+    iscan.configure({ budget_ms = 5, items_per_step = 14 })
 
     local function map_on(layer)
         return function()
@@ -76,42 +77,34 @@ function M.setup_scans()
 
     local function need_npcs()
         if settings.enabled("april_npc_enabled") then return true end
-        if map_on("npcs")() then return true end
-    if settings.enabled("april_bullet_tracer_enabled")
-        or settings.enabled("april_hitmarker_enabled")
-        or settings.enabled("april_hit_notify_enabled") then
-            return true
-        end
-        return false
+        return map_on("npcs")()
     end
 
-    scheduler.register("world", 2000, function() world_esp.scan_static() end, function()
+    iscan.register("world", 3500, function()
         return settings.enabled("april_world_enabled") or map_on("world")()
-    end)
+    end, world_esp.begin_static_scan, world_esp.step_static_scan, world_esp.complete_static_scan, 0)
 
-    scheduler.register("world_dynamic", 500, function() world_esp.scan_dynamic() end, function()
+    iscan.register("world_dynamic", 900, function()
         if not settings.enabled("april_world_enabled") then return false end
         return settings.enabled("april_deer")
             or settings.enabled("april_boar")
             or settings.enabled("april_wolf")
-    end)
+    end, world_esp.begin_dynamic_scan, world_esp.step_dynamic_scan, world_esp.complete_dynamic_scan, 450)
 
-    scheduler.register("loot", 2000, function() loot_esp.scan_static() end, function()
+    iscan.register("loot", 4000, function()
         return settings.enabled("april_loot_enabled") or map_on("loot")()
-    end)
+    end, loot_esp.begin_static_scan, loot_esp.step_static_scan, loot_esp.complete_static_scan, 900)
 
-    scheduler.register("loot_drops", 450, function() loot_esp.scan_drops() end, function()
+    iscan.register("loot_drops", 700, function()
         if not settings.enabled("april_loot_enabled") then return false end
         return settings.enabled("april_dropped_item")
-    end)
+    end, loot_esp.begin_drops_scan, loot_esp.step_drops_scan, loot_esp.complete_drops_scan, 1350)
 
-    scheduler.register("base", 1500, function() base_esp.scan() end, function()
+    iscan.register("base", 4500, function()
         return settings.enabled("april_base_enabled") or map_on("base")()
-    end)
+    end, base_esp.begin_scan, base_esp.step_scan, base_esp.complete_scan, 1800)
 
-    scheduler.register("npcs", 600, function() npc_esp.scan() end, need_npcs)
-
-    scheduler.start_all()
+    iscan.register("npcs", 1400, need_npcs, npc_esp.begin_scan, npc_esp.step_scan, npc_esp.complete_scan, 2250)
 end
 
 function M.update(dt)
@@ -121,6 +114,7 @@ function M.update(dt)
     weapons.tick()
 
     scheduler.tick()
+    April.require("core.incremental_scan").tick()
     for i, feat in ipairs(M.features) do
         if feat.update then
             debug.guard("update:" .. i, feat.update, dt)

@@ -19,6 +19,12 @@ function M.register_menu()
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_outline", "Outline", true, { parent = P, colorpicker = { 0, 0, 0, 1 } })
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_rainbow", "Rainbow Crosshair", false, { parent = P })
     menu.add_slider_int(T, G.VISUALS, "april_crosshair_rainbow_speed", "Rainbow Speed", 1, 100, 10, { parent = P })
+
+    menu_util.bind_master(P, {
+        "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap", "april_crosshair_thickness",
+        "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
+        "april_crosshair_rainbow", "april_crosshair_rainbow_speed",
+    })
 end
 
 local function crosshair_color()

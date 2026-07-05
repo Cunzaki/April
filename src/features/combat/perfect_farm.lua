@@ -128,6 +128,7 @@ function M.register_menu()
     menu.add_checkbox(T, G.COMBAT, P, "Farm Helper", false)
     menu.add_slider_int(T, G.COMBAT, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
     menu.add_slider_int(T, G.COMBAT, P_SMOOTH, "Aim Smoothness", 1, 30, 8, root)
+    menu_util.bind_master(P, { P_RADIUS, P_SMOOTH })
 end
 
 function M.update(_dt)

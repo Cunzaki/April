@@ -60,39 +60,94 @@ local function try_add_npc(out, model, seen)
     if not head or not env.is_valid(head) then return end
 
     seen[addr] = true
-    table.insert(out, {
+
+    local pos = head.Position or head.position
+    local entry = {
         inst = model,
         name = name,
         kind = M.kind(name),
         head = head,
-    })
+    }
+    if pos and pos.x then
+        entry.lx = pos.x
+        entry.ly = pos.y
+        entry.lz = pos.z
+    end
+    table.insert(out, entry)
 end
 
-local function scan_container(out, container, seen, depth)
-    if not env.is_valid(container) or depth > 2 then return end
-    try_add_npc(out, container, seen)
+function M.begin_scan()
+    return {
+        monuments = nil,
+        mi = 1,
+        queue = {},
+        qi = 1,
+        out = {},
+        seen = {},
+    }
+end
 
-    local children = env.safe_call(function() return container:get_children() end) or {}
-    for _, child in ipairs(children) do
-        try_add_npc(out, child, seen)
-        if depth < 2 then
-            scan_container(out, child, seen, depth + 1)
-        end
+function M.step_scan(state, batch)
+    if not state.monuments then
+        state.monuments = env.safe_call(function()
+            local military = folders.from_key("military")
+            if not env.is_valid(military) then return {} end
+            return military:get_children()
+        end) or {}
+        state.mi = 1
+        state.queue = {}
+        state.qi = 1
     end
+
+    local processed = 0
+
+    while processed < batch do
+        if state.qi > #state.queue then
+            if state.mi > #state.monuments then
+                return true
+            end
+
+            local monument = state.monuments[state.mi]
+            state.mi = state.mi + 1
+            processed = processed + 1
+
+            if env.is_valid(monument) then
+                table.insert(state.queue, { inst = monument, depth = 0 })
+            end
+            goto continue
+        end
+
+        local item = state.queue[state.qi]
+        state.qi = state.qi + 1
+        processed = processed + 1
+
+        local container = item.inst
+        if not env.is_valid(container) or item.depth > 4 then goto continue end
+
+        try_add_npc(state.out, container, state.seen)
+
+        local children = env.safe_call(function() return container:get_children() end) or {}
+        for _, child in ipairs(children) do
+            try_add_npc(state.out, child, state.seen)
+            if item.depth < 4 and env.is_valid(child) then
+                table.insert(state.queue, { inst = child, depth = item.depth + 1 })
+            end
+        end
+
+        ::continue::
+    end
+
+    return false
+end
+
+function M.complete_scan(state)
+    return state.out or {}
 end
 
 function M.scan()
-    local out = {}
-    local seen = {}
-    local military = folders.from_key("military")
-    if not env.is_valid(military) then return out end
-
-    local monuments = env.safe_call(function() return military:get_children() end) or {}
-    for _, monument in ipairs(monuments) do
-        scan_container(out, monument, seen, 0)
-    end
-
-    return out
+    local state = M.begin_scan()
+    while not M.step_scan(state, 9999) do end
+    return M.complete_scan(state)
 end
 
 return M

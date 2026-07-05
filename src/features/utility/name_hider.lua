@@ -129,6 +129,8 @@ function M.register_menu()
             M.schedule_apply()
         end
     end)
+
+    menu_util.bind_master("april_mod_checker_enabled", { P })
 end
 
 function M.schedule_apply()

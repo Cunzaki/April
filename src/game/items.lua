@@ -1,5 +1,6 @@
 local env = April.require("core.env")
 local item_images = April.require("game.item_images")
+local item_catalog = April.require("game.item_catalog")
 local asset_urls = April.require("game.asset_urls")
 
 local M = {}
@@ -11,6 +12,26 @@ local FALLBACK = {
     ["Bandage"] = { Type = "Tool" },
     ["Salvaged M14"] = { Type = "Tool" },
 }
+
+local NAME_ALIASES = {
+    ["Cloth Head Wrap"] = "Cloth Headwrap",
+}
+
+local HELD_TYPES = {
+    Gun = true,
+    Tool = true,
+    Bench = true,
+    Attachment = true,
+}
+
+local function parse_variant_name(name)
+    if not name then return nil, nil end
+    local base, variant = name:match("^([^/]+)/(.+)$")
+    if base and variant then
+        return base, variant
+    end
+    return name, nil
+end
 
 local function index_data(data)
     if data[1] and type(data[1]) == "table" then
@@ -25,6 +46,11 @@ local function index_data(data)
             end
         end
     end
+end
+
+function M.normalize_name(name)
+    if not name then return nil end
+    return NAME_ALIASES[name] or name
 end
 
 function M.load()
@@ -65,9 +91,31 @@ function M.get(name)
     return by_name[name] or FALLBACK[name]
 end
 
+function M.get_catalog(name)
+    return item_catalog.get_by_name(M.normalize_name(name))
+end
+
+function M.get_by_id(id)
+    return item_catalog.get(id)
+end
+
 function M.get_type(name)
+    local row = M.get_catalog(name)
+    if row then return row.type end
+
     local item = M.get(name)
     return item and item.Type or "Unknown"
+end
+
+function M.is_held_display(name)
+    if not name or name == "" then return false end
+
+    local base = select(1, parse_variant_name(name))
+    local row = M.get_catalog(base)
+    if row and HELD_TYPES[row.type] then return true end
+
+    local t = M.get_type(base)
+    return HELD_TYPES[t] == true
 end
 
 local function rbx_id_from_image(img)
@@ -86,8 +134,15 @@ end
 function M.get_image_asset_id(name, variant)
     if not name then return nil end
 
+    name = M.normalize_name(name)
+
     local id = item_images.get_asset_id(name, variant)
     if id then return id end
+
+    if variant and variant ~= "" and variant ~= "Default" then
+        id = item_images.get_asset_id(name, "Default")
+        if id then return id end
+    end
 
     if not loaded then M.load() end
     local item = by_name[name]
@@ -103,6 +158,49 @@ function M.get_image_asset_id(name, variant)
         end
         return rbx_id_from_image(img)
     end
+    return nil
+end
+
+function M.make_piece(name, variant)
+    name = M.normalize_name(name)
+    if not name or name == "" then return nil end
+    return {
+        name = name,
+        variant = variant,
+        asset_id = M.get_image_asset_id(name, variant),
+    }
+end
+
+function M.resolve_armor_model(model_name)
+    if not model_name then return nil end
+    local item_name, variant = item_catalog.name_for_armor_model(model_name)
+    if not item_name then return nil end
+    return M.make_piece(item_name, variant)
+end
+
+function M.resolve_item_label(label)
+    if not label or label == "" then return nil end
+
+    local base, variant = parse_variant_name(label)
+    base = M.normalize_name(base)
+
+    local numeric = tonumber(base)
+    if numeric then
+        local row = item_catalog.get(numeric)
+        if row then
+            return M.make_piece(row.name, variant)
+        end
+    end
+
+    if item_catalog.get_by_name(base) or item_images.get_asset_id(base, variant) then
+        return M.make_piece(base, variant)
+    end
+
+    if not loaded then M.load() end
+    if by_name[base] then
+        return M.make_piece(base, variant)
+    end
+
     return nil
 end
 

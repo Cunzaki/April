@@ -17,7 +17,6 @@ M.G = {
     CONFIG = "Config",
 }
 
--- Which side each group renders on (must register left before its right pair).
 M.G_SIDE = {
     [M.G.COMBAT] = "left",
     [M.G.VISUALS] = "right",
@@ -29,6 +28,13 @@ M.G_SIDE = {
 
 M._tab_ready = false
 M._groups = {}
+M._master_children = {}
+M._master_hooked = {}
+M._when_rules = {}
+
+local function settings_mod()
+    return April.require("core.settings")
+end
 
 function M.ensure_tab()
     if M._tab_ready then return end
@@ -58,8 +64,23 @@ function M.group(name, side)
     return M.TAB, name
 end
 
-function M.section(T, G, _title)
+function M.section(T, G, title)
     menu.add_separator(T, G)
+    if title and title ~= "" and menu.add_label then
+        menu.add_label(T, G, title)
+    end
+end
+
+function M.label(T, G, text)
+    if menu and menu.add_label then
+        menu.add_label(T, G, text)
+    end
+end
+
+function M.input(T, G, id, label, default)
+    if menu and menu.add_input then
+        menu.add_input(T, G, id, label, default or "")
+    end
 end
 
 function M.parent(main_id, extra)
@@ -70,6 +91,99 @@ function M.parent(main_id, extra)
         end
     end
     return opts
+end
+
+local function add_child_ids(bucket, ids)
+    bucket = bucket or {}
+    local seen = {}
+    for _, id in ipairs(bucket) do
+        seen[id] = true
+    end
+    for _, id in ipairs(ids or {}) do
+        if id and not seen[id] then
+            seen[id] = true
+            bucket[#bucket + 1] = id
+        end
+    end
+    return bucket
+end
+
+local function set_visible(id, show)
+    if menu and menu.set_visible and id then
+        pcall(menu.set_visible, id, show)
+    end
+end
+
+function M.sync_masters()
+    for master_id in pairs(M._master_hooked) do
+        local show = settings_mod().enabled(master_id)
+        for _, id in ipairs(M._master_children[master_id] or {}) do
+            set_visible(id, show)
+        end
+    end
+    for i = 1, #M._when_rules do
+        local rule = M._when_rules[i]
+        if rule.sync then rule.sync() end
+    end
+end
+
+function M.bind_master(master_id, child_ids)
+    if not master_id or not child_ids then return end
+    M._master_children[master_id] = add_child_ids(M._master_children[master_id], child_ids)
+
+    if M._master_hooked[master_id] then return end
+    M._master_hooked[master_id] = true
+
+    local function sync()
+        local show = settings_mod().enabled(master_id)
+        for _, id in ipairs(M._master_children[master_id] or {}) do
+            set_visible(id, show)
+        end
+    end
+
+    settings_mod().on_change(master_id, sync)
+    sync()
+end
+
+function M.bind_when(when_fn, child_ids, watch_ids)
+    if not when_fn or not child_ids then return end
+
+    local rule = {
+        fn = when_fn,
+        ids = {},
+    }
+    rule.ids = add_child_ids(rule.ids, child_ids)
+
+    local watch = {}
+    for _, id in ipairs(watch_ids or {}) do
+        watch[id] = true
+    end
+    rule.watch = watch
+
+    M._when_rules[#M._when_rules + 1] = rule
+
+    local function sync()
+        local show = when_fn()
+        for _, id in ipairs(rule.ids) do
+            set_visible(id, show)
+        end
+    end
+
+    rule.sync = sync
+    sync()
+
+    for id in pairs(watch) do
+        settings_mod().on_change(id, sync)
+    end
+end
+
+function M.button(T, G, id, label, callback, master_id)
+    if menu and menu.add_button then
+        menu.add_button(T, G, id, label, callback)
+    end
+    if master_id then
+        M.bind_master(master_id, { id })
+    end
 end
 
 return M

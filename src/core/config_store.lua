@@ -14,8 +14,10 @@ local META_FILE = "April_meta.txt"
 
 local EXCLUDE = {
     april_cfg_slot = true,
+    april_cfg_profile_name = true,
     april_cfg_autoload = true,
     april_cfg_autoload_slot = true,
+    april_cfg_autoload_profile = true,
     april_debug_overlay = true,
 }
 
@@ -26,11 +28,6 @@ local MENU_KEYS = {
     "april_crosshair_enabled", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
     "april_crosshair_thickness", "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
     "april_crosshair_rainbow", "april_crosshair_rainbow_speed",
-    "april_hitmarker_enabled", "april_hitmarker_at_impact", "april_hitmarker_glow",
-    "april_hitmarker_size", "april_hitmarker_duration",
-    "april_hit_notify_enabled", "april_hit_notify_duration",
-    "april_bullet_tracer_enabled", "april_bullet_tracer_lifetime", "april_bullet_tracer_thickness",
-        "april_hit_aim_fov",
     "april_aimbot_enabled", "april_aimbot_fov", "april_aimbot_bone", "april_aimbot_priority",
     "april_aimbot_sticky", "april_aimbot_visible", "april_aimbot_smooth",
     "april_aimbot_draw_fov", "april_aimbot_fov_fill", "april_aimbot_target_line",
@@ -75,7 +72,6 @@ local MENU_KEYS = {
 
 local COLOR_KEYS = {
     "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
-    "april_hitmarker_enabled", "april_bullet_tracer_enabled",
     "april_aimbot_enabled", "april_aimbot_draw_fov", "april_aimbot_target_line",
     "april_stone_node", "april_metal_node", "april_phosphate_node", "april_corn_plant", "april_tomato_plant",
     "april_pumpkin_plant", "april_lemon_plant", "april_raspberry_plant", "april_blueberry_plant",
@@ -193,6 +189,50 @@ local function read_waypoints(id, field, val)
     end
 end
 
+local function profile_name_from_menu()
+    if not menu or not menu.get then return "Default" end
+    local name = menu.get("april_cfg_profile_name")
+    if type(name) ~= "string" or name:gsub("%s", "") == "" then
+        return "Default"
+    end
+    return name:gsub("[\r\n=]", " "):sub(1, 48)
+end
+
+local function read_slot_meta(slot)
+    local path = slot_path(slot)
+    local f = io.open(path, "r")
+    if not f then return nil end
+
+    local meta = {}
+    for line in f:lines() do
+        if line:sub(1, 1) == "#" then goto continue end
+        local key, val = line:match("^([^=]+)=(.+)$")
+        if key == "profile_name" then
+            meta.profile_name = val
+        end
+        ::continue::
+    end
+    f:close()
+    return meta
+end
+
+function M.find_slot_by_profile_name(name)
+    if not name or name == "" then return nil end
+    local target = name:lower()
+    for slot = M.SLOT_MIN, M.SLOT_MAX do
+        local meta = read_slot_meta(slot)
+        if meta and meta.profile_name and meta.profile_name:lower() == target then
+            return slot
+        end
+    end
+    return nil
+end
+
+function M.get_slot_profile_name(slot)
+    local meta = read_slot_meta(slot)
+    return meta and meta.profile_name or nil
+end
+
 function M.slot_exists(slot)
     local f = io.open(slot_path(slot), "r")
     if not f then return false end
@@ -208,6 +248,7 @@ function M.save_slot(slot)
     local lines = {
         "# April config v" .. M.FILE_VERSION,
         "version=" .. M.FILE_VERSION,
+        "profile_name=" .. profile_name_from_menu(),
     }
 
     for _, id in ipairs(collect_menu_keys()) do
@@ -261,7 +302,9 @@ function M.load_slot(slot, opts)
         if line:sub(1, 1) ~= "#" and line:find("=") then
             local key, val = line:match("^([^=]+)=(.+)$")
             if key and val then
-                if key:sub(1, 7) == "@color:" then
+                if key == "profile_name" then
+                    if menu.set then menu.set("april_cfg_profile_name", val) end
+                elseif key:sub(1, 7) == "@color:" then
                     local id = key:sub(8)
                     local r, g, b, a = val:match("([^,]+),([^,]+),([^,]+),([^,]+)")
                     if id and menu.set_color then
@@ -290,6 +333,7 @@ function M.load_slot(slot, opts)
 
     f:close()
     April.require("core.settings").invalidate()
+    April.require("core.menu_util").sync_masters()
 
     pcall(function()
         local gun_mods = April.require("features.combat.gun_mods")
@@ -314,6 +358,7 @@ function M.save_meta()
         "version=" .. M.FILE_VERSION,
         "autoload=" .. (menu.get("april_cfg_autoload") and "true" or "false"),
         "autoload_slot=" .. tostring(menu.get("april_cfg_autoload_slot") or 1),
+        "autoload_profile=" .. tostring(menu.get("april_cfg_autoload_profile") or ""),
         "active_slot=" .. tostring(menu.get("april_cfg_slot") or 1),
     }
     local f = io.open(M.get_config_path(META_FILE), "w")
@@ -333,6 +378,8 @@ function M.load_meta()
             menu.set("april_cfg_autoload", val == "true")
         elseif key == "autoload_slot" then
             menu.set("april_cfg_autoload_slot", tonumber(val) or 1)
+        elseif key == "autoload_profile" then
+            menu.set("april_cfg_autoload_profile", val or "")
         elseif key == "active_slot" then
             menu.set("april_cfg_slot", tonumber(val) or 1)
         end
@@ -350,7 +397,17 @@ function M.try_autoload()
     local autoload = menu.get("april_cfg_autoload")
     if autoload ~= true and autoload ~= 1 then return false end
 
-    local slot = math.floor(tonumber(menu.get("april_cfg_autoload_slot")) or 1)
+    local profile = menu.get("april_cfg_autoload_profile")
+    local slot
+
+    if type(profile) == "string" and profile:gsub("%s", "") ~= "" then
+        slot = M.find_slot_by_profile_name(profile)
+    end
+
+    if not slot then
+        slot = math.floor(tonumber(menu.get("april_cfg_autoload_slot")) or 1)
+    end
+
     if slot < M.SLOT_MIN then slot = M.SLOT_MIN end
     if slot > M.SLOT_MAX then slot = M.SLOT_MAX end
 

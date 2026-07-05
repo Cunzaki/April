@@ -1,11 +1,11 @@
 --[[
     April — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-05T03:24:21.015Z
+    Built: 2026-07-05T23:00:02.274Z
 ]]
 
 April = {
-    version = "3.16.1",
+    version = "3.23.0",
     debug = false,
     _mods = {},
     bundled = true,
@@ -449,11 +449,229 @@ return M
 
 end)()
 
--- ── core/notify.lua ──
-April._mods["core.notify"] = (function()
---[[ Toast notifications — draws on-screen; also tries menu.notify if available. ]]
+-- ── core/ui_theme.lua ──
+April._mods["core.ui_theme"] = (function()
+--[[ Project Vector — shared overlay / HUD theme (matches main cheat menu). ]]
 
 local draw_util = April.require("core.draw_util")
+
+local M = {}
+
+-- #0D0D0D base, #00C3E3 cyan accent
+M.BG          = { 13 / 255, 13 / 255, 13 / 255, 0.94 }
+M.PANEL       = { 18 / 255, 18 / 255, 20 / 255, 0.92 }
+M.PANEL_DEEP  = { 10 / 255, 10 / 255, 12 / 255, 0.90 }
+M.SLOT        = { 22 / 255, 22 / 255, 24 / 255, 0.82 }
+M.SLOT_HELD   = { 28 / 255, 28 / 255, 30 / 255, 0.90 }
+M.SLOT_EMPTY  = { 14 / 255, 14 / 255, 16 / 255, 0.55 }
+
+M.CYAN        = { 0, 195 / 255, 227 / 255, 1 }
+M.CYAN_SOFT   = { 0, 195 / 255, 227 / 255, 0.35 }
+M.CYAN_GLOW   = { 0, 195 / 255, 227 / 255, 0.18 }
+
+M.TEXT        = { 1, 1, 1, 0.96 }
+M.TEXT_DIM    = { 128 / 255, 128 / 255, 128 / 255, 0.95 }
+M.TEXT_MUTED  = { 0.62, 0.64, 0.68, 0.88 }
+
+M.BORDER      = { 1, 1, 1, 0.08 }
+M.BORDER_CYAN = { 0, 195 / 255, 227 / 255, 0.45 }
+
+M.RED         = { 1, 0.35, 0.35, 1 }
+M.ORANGE      = { 1, 0.55, 0.22, 1 }
+M.PURPLE      = { 0.92, 0.45, 1, 1 }
+M.GREEN       = { 0.35, 0.85, 0.55, 1 }
+
+M.ROUND       = 4
+M.MAP_BG      = { 13 / 255, 13 / 255, 13 / 255, 0.95 }
+M.MAP_GRID    = { 0, 195 / 255, 227 / 255, 0.06 }
+
+function M.alpha(col, a)
+    return { col[1], col[2], col[3], a }
+end
+
+function M.text_w(text, size)
+    if draw and draw.get_text_size then
+        return draw.get_text_size(text, size or 13)
+    end
+    return (#text * (size or 13) * 0.55), size or 13
+end
+
+function M.draw_panel(x, y, w, h, opts)
+    if not draw then return end
+    opts = opts or {}
+
+    local bg = opts.bg or M.PANEL
+    local border = opts.border or M.BORDER
+    local rounding = opts.rounding ~= nil and opts.rounding or M.ROUND
+
+    if draw.rect_filled then
+        draw.rect_filled(x, y, w, h, bg, rounding)
+    end
+    if draw.rect then
+        draw.rect(x, y, w, h, border, rounding, opts.border_w or 1)
+    end
+
+    if opts.accent and draw.line then
+        local ax = x + (rounding > 0 and 1 or 0)
+        local aw = w - (rounding > 0 and 2 or 0)
+        draw.line(ax, y, ax + aw, y, opts.accent, opts.accent_w or 2)
+    end
+
+    if opts.accent_left and draw.line then
+        draw.line(x, y + 1, x, y + h - 1, opts.accent_left, opts.accent_w or 2)
+    end
+end
+
+function M.draw_section_title(x, y, title, col)
+    col = col or M.CYAN
+    draw_util.text(x, y, title, col, 13)
+end
+
+function M.draw_tooltip_box(x, y, lines)
+    if not draw or not lines or #lines == 0 then return end
+    lines = type(lines) == "table" and lines or { tostring(lines) }
+
+    local fs = 12
+    local pad = 8
+    local tw = 0
+    for i = 1, #lines do
+        local w = select(1, M.text_w(lines[i], fs))
+        if w > tw then tw = w end
+    end
+
+    local box_w = tw + pad * 2
+    local box_h = #lines * 14 + pad * 2
+    local sw = select(1, draw_util.screen_size())
+    x = math.min(x, sw - box_w - 12)
+    y = math.max(y, 8)
+
+    M.draw_panel(x, y, box_w, box_h, {
+        bg = M.alpha(M.PANEL, 0.96),
+        accent = M.CYAN,
+        rounding = M.ROUND,
+    })
+
+    for i = 1, #lines do
+        local col = (i == 1) and M.TEXT or M.TEXT_MUTED
+        draw_util.text(x + pad, y + pad + (i - 1) * 14, lines[i], col, fs)
+    end
+end
+
+function M.toast_accent(ntype)
+    if ntype == "danger" then return M.RED end
+    if ntype == "warning" then return M.ORANGE end
+    if ntype == "success" then return M.CYAN end
+    return M.CYAN
+end
+
+function M.role_accent(role)
+    if not role then return M.CYAN end
+    local r = role:lower()
+    if r:find("founder") or r:find("developer") then return M.PURPLE end
+    if r:find("moderator") then return M.RED end
+    return M.CYAN
+end
+
+function M.draw_mod_marker(sx, sy, image_cache, icon_key)
+    if not draw or not draw.text then return end
+
+    local label = "MOD"
+    local fs = 11
+    local icon_size = 14
+    local gap = 4
+    local pad_x, pad_y = 6, 4
+    local tw = select(1, M.text_w(label, fs))
+    local w = pad_x * 2 + icon_size + gap + tw
+    local h = pad_y * 2 + math.max(icon_size, fs + 2)
+    local x = math.floor(sx - w * 0.5)
+    local y = math.floor(sy - h - 8)
+
+    M.draw_panel(x, y, w, h, {
+        bg = M.alpha(M.BG, 0.86),
+        border = M.alpha(M.BORDER, 0.35),
+        accent = M.RED,
+        accent_w = 2,
+        rounding = 3,
+    })
+
+    if image_cache and icon_key then
+        image_cache.begin_load(icon_key)
+        image_cache.draw_fit(icon_key, x + pad_x, y + pad_y, icon_size, icon_size)
+    end
+
+    draw.text(
+        x + pad_x + icon_size + gap,
+        y + pad_y + 1,
+        label,
+        M.RED,
+        fs
+    )
+end
+
+function M.draw_staff_list(x, y, width, rows, max_rows)
+    if not draw or not draw.text or not rows or #rows == 0 then return end
+
+    max_rows = max_rows or 4
+    local pad = 10
+    local title_h = 24
+    local row_h = 44
+    local count = math.min(#rows, max_rows)
+    local height = title_h + count * row_h + 6
+
+    M.draw_panel(x, y, width, height, {
+        bg = M.alpha(M.BG, 0.90),
+        border = M.alpha(M.BORDER, 0.45),
+        accent = M.RED,
+        accent_w = 2,
+        rounding = M.ROUND,
+    })
+
+    draw_util.text(x + pad, y + 6, "Staff In Lobby", M.TEXT, 12)
+
+    local div_y = y + title_h
+    if draw.line then
+        draw.line(x + pad, div_y, x + width - pad, div_y, M.alpha(M.BORDER, 0.55), 1)
+    end
+
+    local ry = div_y + 6
+    for i = 1, count do
+        local row = rows[i]
+        local accent = row.accent or M.role_accent(row.role)
+
+        if i > 1 and draw.line then
+            draw.line(x + pad, ry - 4, x + width - pad, ry - 4, M.alpha(M.BORDER, 0.22), 1)
+        end
+
+        if draw.circle_filled then
+            draw.circle_filled(x + pad + 3, ry + 7, 3, accent, 8)
+        end
+
+        local name = row.name or "?"
+        if #name > 20 then name = name:sub(1, 18) .. ".." end
+        draw.text(x + pad + 12, ry, name, M.TEXT, 13)
+
+        local role = row.role or "Staff"
+        if #role > 24 then role = role:sub(1, 22) .. ".." end
+        draw.text(x + pad + 12, ry + 15, role, accent, 11)
+
+        if row.meta and row.meta ~= "" then
+            draw.text(x + pad + 12, ry + 28, row.meta, M.TEXT_MUTED, 10)
+        end
+
+        ry = ry + row_h
+    end
+end
+
+return M
+
+end)()
+
+-- ── core/notify.lua ──
+April._mods["core.notify"] = (function()
+--[[ Toast notifications — Project Vector themed HUD toasts. ]]
+
+local draw_util = April.require("core.draw_util")
+local theme = April.require("core.ui_theme")
 
 local M = {}
 local queue = {}
@@ -505,12 +723,23 @@ function M.warning(msg, duration_ms)
     M.show(msg, "warning", duration_ms)
 end
 
+function M.success(msg, duration_ms)
+    M.show(msg, "success", duration_ms)
+end
+
+function M.error(msg, duration_ms)
+    M.show(msg, "danger", duration_ms)
+end
+
+function M.info(msg, duration_ms)
+    M.show(msg, "info", duration_ms)
+end
+
 function M.draw()
     if #queue == 0 or not draw then return end
 
     local now = tick()
-    local sw, sh = draw_util.screen_size()
-    local font = 14
+    local font = 13
     local pad = 12
     local gap = 8
     local target_y = 18
@@ -537,30 +766,25 @@ function M.draw()
             if n.y == 0 then n.y = target_y end
             n.y = lerp(n.y, target_y, 0.2)
 
-            local accent = { 1, 0.75, 0.2, 1 }
-            if n.type == "success" then accent = { 0.2, 0.85, 0.35, 1 }
-            elseif n.type == "danger" then accent = { 1, 0.25, 0.25, 1 }
-            elseif n.type == "info" then accent = { 0.25, 0.65, 1, 1 }
-            end
-
-            local tw = draw.get_text_size and draw.get_text_size(n.msg, font) or (#n.msg * 7)
-            local box_w = tw + pad * 2 + 6
+            local accent = theme.toast_accent(n.type)
+            local tw = select(1, theme.text_w(n.msg, font))
+            local box_w = tw + pad * 2 + 4
             local box_h = font + pad * 2
+            local sw = select(1, draw_util.screen_size())
             local x = sw - box_w - 16 + (n.x_off or 0)
             local y = n.y
             local a = n.alpha or 1
 
-            if draw.rect_filled then
-                draw.rect_filled(x, y, box_w, box_h, { 0.05, 0.05, 0.08, 0.82 * a })
-            end
-            if draw.rect then
-                draw.rect(x, y, box_w, box_h, { accent[1], accent[2], accent[3], 0.9 * a }, 0, 1)
-            end
-            if draw.line then
-                draw.line(x, y, x, y + box_h, { accent[1], accent[2], accent[3], a }, 3)
-            end
+            theme.draw_panel(x, y, box_w, box_h, {
+                bg = theme.alpha(theme.PANEL, 0.94 * a),
+                border = theme.alpha(theme.BORDER_CYAN, 0.55 * a),
+                accent = theme.alpha(accent, a),
+                accent_w = 2,
+                rounding = theme.ROUND,
+            })
+
             if draw.text then
-                draw.text(x + pad + 4, y + pad - 1, n.msg, { 1, 1, 1, a }, font)
+                draw.text(x + pad, y + pad - 1, n.msg, theme.alpha(theme.TEXT, a), font)
             end
 
             target_y = target_y + box_h + gap
@@ -586,6 +810,15 @@ M.CDN_BASE = "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/as
 
 local function digits(id)
     return id and tostring(id):match("(%d+)")
+end
+
+function M.roblox_thumb(asset_id)
+    asset_id = digits(asset_id)
+    if not asset_id then return nil end
+    return string.format(
+        "https://www.roblox.com/Thumbs/Asset.ashx?width=420&height=420&assetId=%s",
+        asset_id
+    )
 end
 
 function M.item_png(asset_id)
@@ -633,12 +866,32 @@ function M.ensure(key, asset_id_or_url)
     if keys[key] then return keys[key] end
     local url = url_for(asset_id_or_url)
     if not url then return nil end
-    keys[key] = { url = url, handle = nil, failed = false }
+    local asset_id = type(asset_id_or_url) == "number" and asset_id_or_url
+        or (type(asset_id_or_url) == "string" and asset_id_or_url:match("^(%d+)$"))
+    keys[key] = {
+        url = url,
+        asset_id = asset_id and tostring(asset_id) or nil,
+        handle = nil,
+        failed = false,
+        fallback = false,
+    }
     return keys[key]
 end
 
 function M.register(key, asset_id_or_url)
     return M.ensure(key, asset_id_or_url)
+end
+
+local function try_fallback(entry)
+    if entry.fallback or not entry.asset_id then return false end
+    local fb = asset_urls.roblox_thumb(entry.asset_id)
+    if not fb or fb == entry.url then return false end
+    entry.fallback = true
+    entry.url = fb
+    entry.handle = nil
+    entry.failed = false
+    entry.just_loaded = nil
+    return true
 end
 
 local function get_handle(key)
@@ -649,18 +902,16 @@ local function get_handle(key)
 
     if not entry.handle then
         entry.handle = draw.load_image(entry.url)
-        entry.just_loaded = true
-        return nil
-    end
-
-    if entry.just_loaded then
-        entry.just_loaded = false
         return nil
     end
 
     if draw.image_failed and draw.image_failed(entry.handle) then
+        if try_fallback(entry) then
+            return nil
+        end
         debug.warn_once("img:" .. key, "load failed — " .. entry.url)
         entry.failed = true
+        entry.handle = nil
         return nil
     end
 
@@ -697,10 +948,23 @@ function M.state(key)
     if entry.failed then return "failed" end
     if not entry.handle then return "loading" end
     if draw and draw.image_failed and draw.image_failed(entry.handle) then
+        if try_fallback(entry) then
+            return "loading"
+        end
         entry.failed = true
+        entry.handle = nil
         return "failed"
     end
     return "ready"
+end
+
+function M.is_ready(key)
+    return M.state(key) == "ready"
+end
+
+function M.preload(key, asset_id_or_url)
+    M.ensure(key, asset_id_or_url)
+    get_handle(key)
 end
 
 function M.begin_load(key)
@@ -812,6 +1076,46 @@ function M.draw_player_skeleton(player, col, thick)
     local bones = player:get_bones_screen()
     if not bones then return end
     M.draw_skeleton_bones(bones, col, thick)
+end
+
+function M.model_screen_bounds(model)
+    if not model then return nil end
+    local env = April.require("core.env")
+    if not env.is_valid(model) then return nil end
+
+    local part_names = {
+        "Head", "HumanoidRootPart", "UpperTorso", "LowerTorso",
+        "LeftFoot", "RightFoot", "Left Leg", "Right Leg",
+    }
+
+    local min_x, min_y, max_x, max_y
+    local any = false
+
+    for i = 1, #part_names do
+        local name = part_names[i]
+        local part = env.safe_call(function()
+            return model:find_first_child(name) or model:FindFirstChild(name)
+        end)
+        if part and env.is_valid(part) then
+            local pos = part.Position or part.position
+            if pos and pos.x then
+                local sx, sy, vis = M.w2s(pos.x, pos.y, pos.z)
+                if vis then
+                    any = true
+                    min_x = min_x and math.min(min_x, sx) or sx
+                    min_y = min_y and math.min(min_y, sy) or sy
+                    max_x = max_x and math.max(max_x, sx) or sx
+                    max_y = max_y and math.max(max_y, sy) or sy
+                end
+            end
+        end
+    end
+
+    if not any then return nil end
+
+    local w = math.max(8, max_x - min_x)
+    local h = math.max(12, max_y - min_y)
+    return { x = min_x, y = min_y, w = w, h = h, valid = true }
 end
 
 function M.draw_model_skeleton(model, col, thick)
@@ -1007,10 +1311,15 @@ end
 
 function M.draw_entry_boxes(entry, col, thick)
     if not entry or not entry.inst then return end
+    if entry.box then
+        M.draw_oriented_box(entry.box, col, thick)
+        return
+    end
     local scan = April.require("game.esp_scan")
-    local main = scan.find_main_part(entry.inst)
+    local main = entry.main_part or scan.find_main_part(entry.inst)
     local box = scan.read_part_box(main)
     if box then
+        entry.box = box
         M.draw_oriented_box(box, col, thick)
     end
 end
@@ -1065,6 +1374,112 @@ return M
 
 end)()
 
+-- ── core/incremental_scan.lua ──
+April._mods["core.incremental_scan"] = (function()
+--[[ Time-budgeted ESP scans — spread work across frames to avoid stutter spikes. ]]
+
+local debug = April.require("core.debug")
+
+local M = {}
+
+local jobs = {}
+local BUDGET_MS = 5
+local ITEMS_PER_STEP = 16
+local MAX_STARTS_PER_TICK = 1
+local starts_this_tick = 0
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+function M.configure(opts)
+    if not opts then return end
+    if opts.budget_ms then BUDGET_MS = opts.budget_ms end
+    if opts.items_per_step then ITEMS_PER_STEP = opts.items_per_step end
+end
+
+function M.register(id, interval_ms, when_fn, create_state_fn, step_fn, complete_fn, phase_ms)
+    jobs[id] = {
+        id = id,
+        interval = interval_ms,
+        last_done = tick_ms() - (interval_ms - (phase_ms or 0)),
+        when = when_fn,
+        create_state = create_state_fn,
+        step = step_fn,
+        complete = complete_fn,
+        active = false,
+        state = nil,
+    }
+end
+
+function M.is_active(id)
+    local job = jobs[id]
+    return job and job.active == true
+end
+
+function M.force(id)
+    local job = jobs[id]
+    if not job then return end
+    job.last_done = 0
+    job.active = false
+    job.state = nil
+end
+
+function M.tick()
+    starts_this_tick = 0
+    local budget_left = BUDGET_MS
+    local now = tick_ms()
+
+    for id, job in pairs(jobs) do
+        if budget_left <= 0 then break end
+
+        if job.when then
+            local ok, pass = pcall(job.when)
+            if not ok or not pass then
+                job.active = false
+                job.state = nil
+                goto continue
+            end
+        end
+
+        if job.active and job.state then
+            while budget_left > 0 do
+                local t0 = tick_ms()
+                local ok, done = pcall(job.step, job.state, ITEMS_PER_STEP)
+                if not ok then
+                    debug.error_once("iscan:" .. id, done)
+                    job.active = false
+                    job.state = nil
+                    job.last_done = now
+                    break
+                end
+
+                budget_left = budget_left - (tick_ms() - t0)
+
+                if done then
+                    pcall(job.complete, job.state)
+                    job.active = false
+                    job.state = nil
+                    job.last_done = now
+                    break
+                end
+
+                if budget_left <= 0 then break end
+            end
+        elseif now - job.last_done >= job.interval and starts_this_tick < MAX_STARTS_PER_TICK then
+            job.state = job.create_state and job.create_state() or {}
+            job.active = true
+            starts_this_tick = starts_this_tick + 1
+        end
+
+        ::continue::
+    end
+end
+
+return M
+
+end)()
+
 -- ── core/menu_util.lua ──
 April._mods["core.menu_util"] = (function()
 --[[
@@ -1086,7 +1501,6 @@ M.G = {
     CONFIG = "Config",
 }
 
--- Which side each group renders on (must register left before its right pair).
 M.G_SIDE = {
     [M.G.COMBAT] = "left",
     [M.G.VISUALS] = "right",
@@ -1098,6 +1512,13 @@ M.G_SIDE = {
 
 M._tab_ready = false
 M._groups = {}
+M._master_children = {}
+M._master_hooked = {}
+M._when_rules = {}
+
+local function settings_mod()
+    return April.require("core.settings")
+end
 
 function M.ensure_tab()
     if M._tab_ready then return end
@@ -1127,8 +1548,23 @@ function M.group(name, side)
     return M.TAB, name
 end
 
-function M.section(T, G, _title)
+function M.section(T, G, title)
     menu.add_separator(T, G)
+    if title and title ~= "" and menu.add_label then
+        menu.add_label(T, G, title)
+    end
+end
+
+function M.label(T, G, text)
+    if menu and menu.add_label then
+        menu.add_label(T, G, text)
+    end
+end
+
+function M.input(T, G, id, label, default)
+    if menu and menu.add_input then
+        menu.add_input(T, G, id, label, default or "")
+    end
 end
 
 function M.parent(main_id, extra)
@@ -1139,6 +1575,99 @@ function M.parent(main_id, extra)
         end
     end
     return opts
+end
+
+local function add_child_ids(bucket, ids)
+    bucket = bucket or {}
+    local seen = {}
+    for _, id in ipairs(bucket) do
+        seen[id] = true
+    end
+    for _, id in ipairs(ids or {}) do
+        if id and not seen[id] then
+            seen[id] = true
+            bucket[#bucket + 1] = id
+        end
+    end
+    return bucket
+end
+
+local function set_visible(id, show)
+    if menu and menu.set_visible and id then
+        pcall(menu.set_visible, id, show)
+    end
+end
+
+function M.sync_masters()
+    for master_id in pairs(M._master_hooked) do
+        local show = settings_mod().enabled(master_id)
+        for _, id in ipairs(M._master_children[master_id] or {}) do
+            set_visible(id, show)
+        end
+    end
+    for i = 1, #M._when_rules do
+        local rule = M._when_rules[i]
+        if rule.sync then rule.sync() end
+    end
+end
+
+function M.bind_master(master_id, child_ids)
+    if not master_id or not child_ids then return end
+    M._master_children[master_id] = add_child_ids(M._master_children[master_id], child_ids)
+
+    if M._master_hooked[master_id] then return end
+    M._master_hooked[master_id] = true
+
+    local function sync()
+        local show = settings_mod().enabled(master_id)
+        for _, id in ipairs(M._master_children[master_id] or {}) do
+            set_visible(id, show)
+        end
+    end
+
+    settings_mod().on_change(master_id, sync)
+    sync()
+end
+
+function M.bind_when(when_fn, child_ids, watch_ids)
+    if not when_fn or not child_ids then return end
+
+    local rule = {
+        fn = when_fn,
+        ids = {},
+    }
+    rule.ids = add_child_ids(rule.ids, child_ids)
+
+    local watch = {}
+    for _, id in ipairs(watch_ids or {}) do
+        watch[id] = true
+    end
+    rule.watch = watch
+
+    M._when_rules[#M._when_rules + 1] = rule
+
+    local function sync()
+        local show = when_fn()
+        for _, id in ipairs(rule.ids) do
+            set_visible(id, show)
+        end
+    end
+
+    rule.sync = sync
+    sync()
+
+    for id in pairs(watch) do
+        settings_mod().on_change(id, sync)
+    end
+end
+
+function M.button(T, G, id, label, callback, master_id)
+    if menu and menu.add_button then
+        menu.add_button(T, G, id, label, callback)
+    end
+    if master_id then
+        M.bind_master(master_id, { id })
+    end
 end
 
 return M
@@ -1163,8 +1692,10 @@ local META_FILE = "April_meta.txt"
 
 local EXCLUDE = {
     april_cfg_slot = true,
+    april_cfg_profile_name = true,
     april_cfg_autoload = true,
     april_cfg_autoload_slot = true,
+    april_cfg_autoload_profile = true,
     april_debug_overlay = true,
 }
 
@@ -1175,11 +1706,6 @@ local MENU_KEYS = {
     "april_crosshair_enabled", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
     "april_crosshair_thickness", "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
     "april_crosshair_rainbow", "april_crosshair_rainbow_speed",
-    "april_hitmarker_enabled", "april_hitmarker_at_impact", "april_hitmarker_glow",
-    "april_hitmarker_size", "april_hitmarker_duration",
-    "april_hit_notify_enabled", "april_hit_notify_duration",
-    "april_bullet_tracer_enabled", "april_bullet_tracer_lifetime", "april_bullet_tracer_thickness",
-        "april_hit_aim_fov",
     "april_aimbot_enabled", "april_aimbot_fov", "april_aimbot_bone", "april_aimbot_priority",
     "april_aimbot_sticky", "april_aimbot_visible", "april_aimbot_smooth",
     "april_aimbot_draw_fov", "april_aimbot_fov_fill", "april_aimbot_target_line",
@@ -1224,7 +1750,6 @@ local MENU_KEYS = {
 
 local COLOR_KEYS = {
     "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
-    "april_hitmarker_enabled", "april_bullet_tracer_enabled",
     "april_aimbot_enabled", "april_aimbot_draw_fov", "april_aimbot_target_line",
     "april_stone_node", "april_metal_node", "april_phosphate_node", "april_corn_plant", "april_tomato_plant",
     "april_pumpkin_plant", "april_lemon_plant", "april_raspberry_plant", "april_blueberry_plant",
@@ -1342,6 +1867,50 @@ local function read_waypoints(id, field, val)
     end
 end
 
+local function profile_name_from_menu()
+    if not menu or not menu.get then return "Default" end
+    local name = menu.get("april_cfg_profile_name")
+    if type(name) ~= "string" or name:gsub("%s", "") == "" then
+        return "Default"
+    end
+    return name:gsub("[\r\n=]", " "):sub(1, 48)
+end
+
+local function read_slot_meta(slot)
+    local path = slot_path(slot)
+    local f = io.open(path, "r")
+    if not f then return nil end
+
+    local meta = {}
+    for line in f:lines() do
+        if line:sub(1, 1) == "#" then goto continue end
+        local key, val = line:match("^([^=]+)=(.+)$")
+        if key == "profile_name" then
+            meta.profile_name = val
+        end
+        ::continue::
+    end
+    f:close()
+    return meta
+end
+
+function M.find_slot_by_profile_name(name)
+    if not name or name == "" then return nil end
+    local target = name:lower()
+    for slot = M.SLOT_MIN, M.SLOT_MAX do
+        local meta = read_slot_meta(slot)
+        if meta and meta.profile_name and meta.profile_name:lower() == target then
+            return slot
+        end
+    end
+    return nil
+end
+
+function M.get_slot_profile_name(slot)
+    local meta = read_slot_meta(slot)
+    return meta and meta.profile_name or nil
+end
+
 function M.slot_exists(slot)
     local f = io.open(slot_path(slot), "r")
     if not f then return false end
@@ -1357,6 +1926,7 @@ function M.save_slot(slot)
     local lines = {
         "# April config v" .. M.FILE_VERSION,
         "version=" .. M.FILE_VERSION,
+        "profile_name=" .. profile_name_from_menu(),
     }
 
     for _, id in ipairs(collect_menu_keys()) do
@@ -1410,7 +1980,9 @@ function M.load_slot(slot, opts)
         if line:sub(1, 1) ~= "#" and line:find("=") then
             local key, val = line:match("^([^=]+)=(.+)$")
             if key and val then
-                if key:sub(1, 7) == "@color:" then
+                if key == "profile_name" then
+                    if menu.set then menu.set("april_cfg_profile_name", val) end
+                elseif key:sub(1, 7) == "@color:" then
                     local id = key:sub(8)
                     local r, g, b, a = val:match("([^,]+),([^,]+),([^,]+),([^,]+)")
                     if id and menu.set_color then
@@ -1439,6 +2011,7 @@ function M.load_slot(slot, opts)
 
     f:close()
     April.require("core.settings").invalidate()
+    April.require("core.menu_util").sync_masters()
 
     pcall(function()
         local gun_mods = April.require("features.combat.gun_mods")
@@ -1463,6 +2036,7 @@ function M.save_meta()
         "version=" .. M.FILE_VERSION,
         "autoload=" .. (menu.get("april_cfg_autoload") and "true" or "false"),
         "autoload_slot=" .. tostring(menu.get("april_cfg_autoload_slot") or 1),
+        "autoload_profile=" .. tostring(menu.get("april_cfg_autoload_profile") or ""),
         "active_slot=" .. tostring(menu.get("april_cfg_slot") or 1),
     }
     local f = io.open(M.get_config_path(META_FILE), "w")
@@ -1482,6 +2056,8 @@ function M.load_meta()
             menu.set("april_cfg_autoload", val == "true")
         elseif key == "autoload_slot" then
             menu.set("april_cfg_autoload_slot", tonumber(val) or 1)
+        elseif key == "autoload_profile" then
+            menu.set("april_cfg_autoload_profile", val or "")
         elseif key == "active_slot" then
             menu.set("april_cfg_slot", tonumber(val) or 1)
         end
@@ -1499,7 +2075,17 @@ function M.try_autoload()
     local autoload = menu.get("april_cfg_autoload")
     if autoload ~= true and autoload ~= 1 then return false end
 
-    local slot = math.floor(tonumber(menu.get("april_cfg_autoload_slot")) or 1)
+    local profile = menu.get("april_cfg_autoload_profile")
+    local slot
+
+    if type(profile) == "string" and profile:gsub("%s", "") ~= "" then
+        slot = M.find_slot_by_profile_name(profile)
+    end
+
+    if not slot then
+        slot = math.floor(tonumber(menu.get("april_cfg_autoload_slot")) or 1)
+    end
+
     if slot < M.SLOT_MIN then slot = M.SLOT_MIN end
     if slot > M.SLOT_MAX then slot = M.SLOT_MAX end
 
@@ -2207,8 +2793,8 @@ end)()
 
 -- ── game/item_images.lua ──
 April._mods["game.item_images"] = (function()
--- AUTO-GENERATED by scripts/extract-item-images.mjs — do not edit by hand
--- Source: references/dump/scripts/ReplicatedStorage.Modules.Items.ModuleScript.lua
+-- AUTO-GENERATED by scripts/extract-item-catalog.mjs — do not edit by hand
+-- Source: dump/scripts/ReplicatedStorage.Modules.Items.ModuleScript.lua
 
 local M = {}
 
@@ -2568,10 +3154,762 @@ return M
 
 end)()
 
+-- ── game/item_catalog.lua ──
+April._mods["game.item_catalog"] = (function()
+-- AUTO-GENERATED by scripts/extract-item-catalog.mjs — do not edit by hand
+-- Items: 341 entries from dump
+
+local M = {}
+
+M.by_id = {
+    [1] = { name = "Wood Log", type = "Resource" },
+    [2] = { name = "Bandage", type = "Tool" },
+    [3] = { name = "Stone Hatchet", type = "Tool" },
+    [4] = { name = "Heavy Ammo", type = "Ammo" },
+    [5] = { name = "Salvaged AK47", type = "Gun" },
+    [6] = { name = "Bottle Caps", type = "Resource" },
+    [7] = { name = "Holo Sight", type = "Attachment" },
+    [8] = { name = "Silencer", type = "Attachment" },
+    [9] = { name = "Salvaged M14", type = "Gun" },
+    [10] = { name = "Lighter", type = "Tool" },
+    [11] = { name = "Swift Heavy Ammo", type = "Ammo" },
+    [12] = { name = "Salvaged Sight", type = "Attachment" },
+    [13] = { name = "Muzzle Boost", type = "Attachment" },
+    [14] = { name = "Compensator", type = "Attachment" },
+    [15] = { name = "Salvaged Lasersight", type = "Attachment" },
+    [16] = { name = "Weapon Flashlight", type = "Attachment" },
+    [17] = { name = "Salvaged Sniper Scope", type = "Attachment" },
+    [18] = { name = "Military Sniper Scope", type = "Attachment" },
+    [19] = { name = "Wooden Spear", type = "Tool" },
+    [20] = { name = "Stone Spear", type = "Tool" },
+    [21] = { name = "Stone Pickaxe", type = "Tool" },
+    [22] = { name = "Crossbow", type = "Gun" },
+    [23] = { name = "Wooden Bow", type = "Gun" },
+    [24] = { name = "Cloth", type = "Resource" },
+    [25] = { name = "Cactus Flesh", type = "Consumable" },
+    [26] = { name = "Stone", type = "Resource" },
+    [27] = { name = "Iron Ore", type = "Resource" },
+    [28] = { name = "Quality Iron Ore", type = "Resource" },
+    [29] = { name = "Campfire", type = "Bench" },
+    [30] = { name = "Blueprint", type = "Tool" },
+    [31] = { name = "Hammer", type = "Tool" },
+    [32] = { name = "Raw Pork", type = "Consumable" },
+    [33] = { name = "Cooked Pork", type = "Consumable" },
+    [34] = { name = "Charcoal", type = "Resource" },
+    [35] = { name = "Salvaged P250", type = "Gun" },
+    [36] = { name = "Light Ammo", type = "Ammo" },
+    [37] = { name = "Boulder", type = "Tool" },
+    [38] = { name = "Salvaged SMG", type = "Gun" },
+    [39] = { name = "Salvaged Python", type = "Gun" },
+    [40] = { name = "Combustive Heavy Ammo", type = "Ammo" },
+    [41] = { name = "Animal Fat", type = "Resource" },
+    [42] = { name = "Small Storage Box", type = "Bench" },
+    [43] = { name = "Raw Venison", type = "Consumable" },
+    [44] = { name = "Cooked Venison", type = "Consumable" },
+    [45] = { name = "Iron Shards", type = "Resource" },
+    [46] = { name = "Steel Metal", type = "Resource" },
+    [47] = { name = "Wooden Door", type = "Bench" },
+    [48] = { name = "Wooden Lock", type = "Lock" },
+    [49] = { name = "Combination Lock", type = "Lock" },
+    [50] = { name = "Salvaged Metal Door", type = "Bench" },
+    [51] = { name = "Base Cabinet", type = "Bench" },
+    [52] = { name = "Wooden Double Door", type = "Bench" },
+    [53] = { name = "Wooden Window Bars", type = "Bench" },
+    [54] = { name = "Metal Window Bars", type = "Bench" },
+    [55] = { name = "Glass Window", type = "Bench" },
+    [56] = { name = "Steel Glass Window", type = "Bench" },
+    [57] = { name = "Trap Door", type = "Bench" },
+    [58] = { name = "Radiation Vitamins", type = "Consumable" },
+    [59] = { name = "Hoodie", type = "Armor", armor_type = "Shirt" },
+    [60] = { name = "Hazmat Suit", type = "Armor", armor_type = "All", attribute = "ResistWet" },
+    [61] = { name = "Chicken MRE", type = "Consumable" },
+    [62] = { name = "Beef MRE", type = "Consumable" },
+    [63] = { name = "Pants", type = "Armor", armor_type = "Pants" },
+    [64] = { name = "Phosphate Ore", type = "Resource" },
+    [65] = { name = "Phosphate Dust", type = "Resource" },
+    [66] = { name = "Leather", type = "Resource" },
+    [67] = { name = "Furnace", type = "Bench" },
+    [68] = { name = "Crude Fuel", type = "Resource" },
+    [69] = { name = "Gunpowder", type = "Resource" },
+    [70] = { name = "Bone Shards", type = "Resource" },
+    [71] = { name = "Metal Door", type = "Bench" },
+    [72] = { name = "Metal Double Door", type = "Bench" },
+    [73] = { name = "Steel Door", type = "Bench" },
+    [74] = { name = "Steel Double Door", type = "Bench" },
+    [75] = { name = "Nail Gun", type = "Gun" },
+    [76] = { name = "Steel Axe", type = "Tool" },
+    [77] = { name = "Steel Pickaxe", type = "Tool" },
+    [78] = { name = "Power Cell", type = "Misc" },
+    [79] = { name = "Copper Cogs", type = "Misc" },
+    [80] = { name = "Pipe", type = "Misc" },
+    [81] = { name = "Propane Tank", type = "Misc" },
+    [82] = { name = "Rope", type = "Misc" },
+    [83] = { name = "Blade", type = "Misc" },
+    [84] = { name = "Thread", type = "Misc" },
+    [85] = { name = "Metal Plating", type = "Misc" },
+    [86] = { name = "Spring", type = "Misc" },
+    [87] = { name = "Tarp", type = "Misc" },
+    [88] = { name = "Circuit Boards", type = "Misc" },
+    [89] = { name = "Metal Scraps", type = "Misc" },
+    [90] = { name = "Swift Light Ammo", type = "Ammo" },
+    [91] = { name = "Sleeping Bag", type = "Bench" },
+    [92] = { name = "Timed Charge", type = "Tool" },
+    [93] = { name = "Nails", type = "Ammo" },
+    [94] = { name = "Garage Door", type = "Bench" },
+    [95] = { name = "Dynamite Bundle", type = "Tool" },
+    [96] = { name = "Dynamite Stick", type = "Tool" },
+    [97] = { name = "Salvaged RPG", type = "Gun" },
+    [98] = { name = "Rocket", type = "Ammo" },
+    [99] = { name = "Swift Rocket", type = "Ammo" },
+    [100] = { name = "Combustive Rocket", type = "Ammo" },
+    [101] = { name = "External Wooden Wall", type = "Bench" },
+    [102] = { name = "External Wooden Gate", type = "Bench" },
+    [103] = { name = "Vertical Window Cover", type = "Bench" },
+    [104] = { name = "Horizontal Window Cover", type = "Bench" },
+    [105] = { name = "Jail Wall", type = "Bench" },
+    [106] = { name = "Jail Door", type = "Bench" },
+    [107] = { name = "%s\\'s Trophy", type = "Bench" },
+    [108] = { name = "Salvaged AK74u", type = "Gun" },
+    [109] = { name = "Salvaged Pipe Rifle", type = "Gun" },
+    [110] = { name = "Petroleum", type = "Resource" },
+    [111] = { name = "Boots", type = "Armor", armor_type = "Boots" },
+    [112] = { name = "Collared Shirt", type = "Armor", armor_type = "Shirt" },
+    [113] = { name = "Shorts", type = "Armor", armor_type = "Pants" },
+    [114] = { name = "Tank Top", type = "Armor", armor_type = "Shirt" },
+    [115] = { name = "Cloth Shirt", type = "Armor", armor_type = "Shirt" },
+    [116] = { name = "Cloth Pants", type = "Armor", armor_type = "Pants" },
+    [117] = { name = "Cloth Footwraps", type = "Armor", armor_type = "Boots" },
+    [118] = { name = "Leather Poncho", type = "Armor", armor_type = "Chestplate" },
+    [119] = { name = "Leather Pants", type = "Armor", armor_type = "Pants" },
+    [120] = { name = "Leather Shirt", type = "Armor", armor_type = "Shirt" },
+    [121] = { name = "Leather Boots", type = "Armor", armor_type = "Boots" },
+    [122] = { name = "Flannel Jacket", type = "Armor", armor_type = "Chestplate" },
+    [123] = { name = "Wooden Helmet", type = "Armor", armor_type = "Hat" },
+    [124] = { name = "Wooden Chestplate", type = "Armor", armor_type = "Chestplate" },
+    [125] = { name = "Wooden Leggings", type = "Armor", armor_type = "Kilt" },
+    [126] = { name = "Wooden Arrow", type = "Ammo" },
+    [127] = { name = "Swift Arrow", type = "Ammo" },
+    [128] = { name = "Bone Arrow", type = "Ammo" },
+    [129] = { name = "Combustive Arrow", type = "Ammo" },
+    [130] = { name = "Iron Shard Hatchet", type = "Tool" },
+    [131] = { name = "Iron Shard Pickaxe", type = "Tool" },
+    [132] = { name = "Large Furnace", type = "Bench" },
+    [133] = { name = "Yellow Keycard", type = "Tool" },
+    [134] = { name = "Purple Keycard", type = "Tool" },
+    [135] = { name = "Pink Keycard", type = "Tool" },
+    [136] = { name = "Small Medkit", type = "Tool" },
+    [137] = { name = "Salvaged Break Action", type = "Gun" },
+    [138] = { name = "Buckshot", type = "Ammo" },
+    [139] = { name = "Slug", type = "Ammo" },
+    [140] = { name = "Combustive Buckshot", type = "Ammo" },
+    [141] = { name = "Steel Helmet", type = "Armor", armor_type = "Helmet" },
+    [142] = { name = "Steel Chestplate", type = "Armor", armor_type = "Chestplate" },
+    [143] = { name = "Steel Leggings", type = "Armor", armor_type = "Kilt" },
+    [144] = { name = "Large Storage Box", type = "Bench" },
+    [145] = { name = "Salvaged Helmet", type = "Armor", armor_type = "Helmet" },
+    [146] = { name = "Salvaged Chestplate", type = "Armor", armor_type = "Chestplate" },
+    [147] = { name = "Salvaged Leggings", type = "Armor", armor_type = "Kilt" },
+    [148] = { name = "Military Helmet", type = "Armor", armor_type = "Helmet" },
+    [149] = { name = "Military Chestplate", type = "Armor", armor_type = "Chestplate" },
+    [150] = { name = "Military Leggings", type = "Armor", armor_type = "Kilt" },
+    [151] = { name = "Hard Hat", type = "Armor", armor_type = "Hat" },
+    [152] = { name = "Balaclava", type = "Armor", armor_type = "Face" },
+    [153] = { name = "Cloth Headwrap", type = "Armor", armor_type = "Helmet" },
+    [154] = { name = "Baseball Cap", type = "Armor", armor_type = "Hat" },
+    [155] = { name = "Salvaged Gloves", type = "Armor", armor_type = "Gloves" },
+    [156] = { name = "Cloth Handwraps", type = "Armor", armor_type = "Gloves" },
+    [157] = { name = "Military Gloves", type = "Armor", armor_type = "Gloves" },
+    [158] = { name = "Leather Gloves", type = "Armor", armor_type = "Gloves" },
+    [159] = { name = "Wetsuit", type = "Armor", armor_type = "Wetsuit", attribute = "ResistWet" },
+    [160] = { name = "Flippers", type = "Armor", armor_type = "Boots", attribute = "HasFlippers" },
+    [161] = { name = "Diving Tank", type = "Armor", armor_type = "Chestplate", attribute = "HasTank" },
+    [162] = { name = "Diving Goggles", type = "Armor", armor_type = "Helmet", attribute = "HasGoggles" },
+    [163] = { name = "Cooking Pot", type = "Bench" },
+    [164] = { name = "Ladder", type = "Bench" },
+    [165] = { name = "Chocolate Bar", type = "Consumable" },
+    [166] = { name = "Bean Can", type = "Consumable" },
+    [167] = { name = "Meatball Can", type = "Consumable" },
+    [168] = { name = "Fish Can", type = "Consumable" },
+    [169] = { name = "Water Bottle", type = "Consumable" },
+    [170] = { name = "Piercing Heavy Ammo", type = "Ammo" },
+    [171] = { name = "Piercing Light Ammo", type = "Ammo" },
+    [172] = { name = "Semi Receiver", type = "Misc" },
+    [173] = { name = "SMG Receiver", type = "Misc" },
+    [174] = { name = "Rifle Receiver", type = "Misc" },
+    [175] = { name = "Steel Shovel", type = "Tool" },
+    [176] = { name = "Empty Can", type = "Misc" },
+    [177] = { name = "Care Package Signal", type = "Tool" },
+    [178] = { name = "Duct Tape", type = "Misc" },
+    [179] = { name = "Glue", type = "Misc" },
+    [180] = { name = "Pistol Receiver", type = "Misc" },
+    [181] = { name = "Salvaged Shovel", type = "Tool" },
+    [182] = { name = "ez shovel", type = "Tool" },
+    [183] = { name = "Anvil", type = "Bench" },
+    [184] = { name = "Chemistry Lab", type = "Bench" },
+    [185] = { name = "Carpentry Table", type = "Bench" },
+    [186] = { name = "Sewing Table", type = "Bench" },
+    [187] = { name = "Ammo Press", type = "Bench" },
+    [188] = { name = "Culinary Table", type = "Bench" },
+    [189] = { name = "Petroleum Refinery", type = "Bench" },
+    [190] = { name = "Triangle Trap Door", type = "Bench" },
+    [191] = { name = "Military AA12", type = "Gun" },
+    [192] = { name = "Repair Table", type = "Bench" },
+    [193] = { name = "Salvaged Pump Action", type = "Gun" },
+    [194] = { name = "Bed", type = "Bench" },
+    [195] = { name = "Wooden Spikes", type = "Bench" },
+    [196] = { name = "Military ACOG Sight", type = "Attachment" },
+    [197] = { name = "Metal Barricade", type = "Bench" },
+    [198] = { name = "Military M4A1", type = "Gun" },
+    [199] = { name = "Small Wooden Sign", type = "Bench" },
+    [200] = { name = "Large Wooden Sign", type = "Bench" },
+    [201] = { name = "Storage Cabinet", type = "Bench" },
+    [202] = { name = "External Stone Gate", type = "Bench" },
+    [203] = { name = "Bone Tool", type = "Tool" },
+    [204] = { name = "Salvaged Skorpion", type = "Gun" },
+    [205] = { name = "Candy Cane", type = "Tool" },
+    [206] = { name = "Christmas Tree", type = "Bench" },
+    [207] = { name = "Santa Hat", type = "Armor", armor_type = "Hat" },
+    [208] = { name = "External Stone Wall", type = "Bench" },
+    [209] = { name = "Blast Furnace", type = "Bench" },
+    [210] = { name = "Military Barrett", type = "Gun" },
+    [211] = { name = "Shotgun Turret", type = "Bench" },
+    [212] = { name = "Military Grenade", type = "Tool" },
+    [213] = { name = "Floor Grill", type = "Bench" },
+    [214] = { name = "Bear Trap", type = "Bench" },
+    [215] = { name = "Landmine Trap", type = "Bench" },
+    [216] = { name = "Saw Bat", type = "Tool" },
+    [217] = { name = "Machete", type = "Tool" },
+    [218] = { name = "Military PKM", type = "Gun" },
+    [219] = { name = "Bruno\\'s ACOG Sight", type = "Attachment" },
+    [220] = { name = "Military Lasersight", type = "Attachment" },
+    [221] = { name = "Bruno\\'s M4A1", type = "Gun" },
+    [222] = { name = "Boss Chestplate", type = "Armor", armor_type = "Chestplate" },
+    [223] = { name = "Boss Helmet", type = "Armor", armor_type = "Helmet" },
+    [224] = { name = "Bunny Ears", type = "Armor", armor_type = "Hat" },
+    [225] = { name = "Carrot Blade", type = "Tool" },
+    [226] = { name = "Metal Spikes", type = "Bench" },
+    [227] = { name = "Rug", type = "Bench" },
+    [228] = { name = "Shop Machine", type = "Bench" },
+    [229] = { name = "Chainsaw", type = "Tool" },
+    [230] = { name = "Mining Drill", type = "Tool" },
+    [231] = { name = "Extended Mag", type = "Attachment" },
+    [232] = { name = "Jukebox", type = "Bench" },
+    [233] = { name = "Wool Plant Seed", type = "Bench" },
+    [234] = { name = "Wool", type = "Resource" },
+    [235] = { name = "Loom", type = "Bench" },
+    [236] = { name = "Small Planter Box", type = "Bench" },
+    [237] = { name = "Large Planter Box", type = "Bench" },
+    [238] = { name = "Tomato Plant Seed", type = "Bench" },
+    [239] = { name = "Corn Plant Seed", type = "Bench" },
+    [240] = { name = "Tomato", type = "Consumable" },
+    [241] = { name = "Corn", type = "Consumable" },
+    [242] = { name = "Chicken Egg", type = "Consumable" },
+    [243] = { name = "Milk", type = "Consumable" },
+    [244] = { name = "Raspberry Pie I", type = "Consumable" },
+    [245] = { name = "Raspberry Pie II", type = "Consumable" },
+    [246] = { name = "Raspberry Pie III", type = "Consumable" },
+    [247] = { name = "Raspberry Pie IV", type = "Consumable" },
+    [248] = { name = "Blueberry Pie I", type = "Consumable" },
+    [249] = { name = "Blueberry Pie II", type = "Consumable" },
+    [250] = { name = "Blueberry Pie III", type = "Consumable" },
+    [251] = { name = "Blueberry Pie IV", type = "Consumable" },
+    [252] = { name = "Lemon Cake I", type = "Consumable" },
+    [253] = { name = "Lemon Cake II", type = "Consumable" },
+    [254] = { name = "Lemon Cake III", type = "Consumable" },
+    [255] = { name = "Lemon Cake IV", type = "Consumable" },
+    [256] = { name = "Corn Bread I", type = "Consumable" },
+    [257] = { name = "Corn Bread II", type = "Consumable" },
+    [258] = { name = "Corn Bread III", type = "Consumable" },
+    [259] = { name = "Corn Bread IV", type = "Consumable" },
+    [260] = { name = "Cow Pasture", type = "Bench" },
+    [261] = { name = "Chicken House", type = "Bench" },
+    [262] = { name = "Barrel Light", type = "Bench" },
+    [263] = { name = "Raspberries", type = "Consumable" },
+    [264] = { name = "Blueberries", type = "Consumable" },
+    [265] = { name = "Lemon", type = "Consumable" },
+    [266] = { name = "Lemon Plant Seed", type = "Bench" },
+    [267] = { name = "Raspberry Plant Seed", type = "Bench" },
+    [268] = { name = "Blueberry Plant Seed", type = "Bench" },
+    [269] = { name = "Military MP7", type = "Gun" },
+    [270] = { name = "Red Keycard", type = "Tool" },
+    [271] = { name = "Salvaged Double Barrel", type = "Gun" },
+    [272] = { name = "Military Boat", type = "Resource" },
+    [273] = { name = "Clan Table", type = "Bench" },
+    [274] = { name = "Wooden Boat", type = "Resource" },
+    [275] = { name = "Military USP", type = "Gun" },
+    [276] = { name = "Common Goodie Bag", type = "Misc" },
+    [277] = { name = "Rare Goodie Bag", type = "Misc" },
+    [278] = { name = "Epic Goodie Bag", type = "Misc" },
+    [279] = { name = "Candle", type = "Bench" },
+    [280] = { name = "Armor Stand", type = "Bench" },
+    [281] = { name = "Jack-O-Lantern", type = "Bench" },
+    [282] = { name = "Small Cobweb", type = "Bench" },
+    [283] = { name = "Large Cobweb", type = "Bench" },
+    [284] = { name = "Pumpkin Plant Seed", type = "Bench" },
+    [285] = { name = "Pumpkin", type = "ConsumableAmmoArmor", armor_type = "Helmet" },
+    [286] = { name = "Halloween Scythe", type = "Tool" },
+    [287] = { name = "Pumpkin Launcher", type = "Gun" },
+    [288] = { name = "Raw Wolf", type = "Consumable" },
+    [289] = { name = "Cooked Wolf", type = "Consumable" },
+    [290] = { name = "Pumpkin Pie", type = "Consumable" },
+    [291] = { name = "Cursed Pumpkin", type = "Ammo" },
+    [292] = { name = "Marsh Bar", type = "Consumable" },
+    [293] = { name = "Peanut Butter Cup", type = "Consumable" },
+    [294] = { name = "Candy Roll", type = "Consumable" },
+    [295] = { name = "Scarecrow", type = "Bench" },
+    [296] = { name = "Salvaged Shotgun", type = "Gun" },
+    [297] = { name = "Salvaged Shell", type = "Ammo" },
+    [298] = { name = "Bone Armor", type = "Armor", armor_type = "All" },
+    [299] = { name = "Armor Plate", type = "Attachment" },
+    [300] = { name = "Heavy Padding", type = "Attachment" },
+    [301] = { name = "Night Vision Goggles", type = "Attachment", attribute = "NVG" },
+    [302] = { name = "Lightweight Padding", type = "Attachment", attribute = "SilentSteps" },
+    [303] = { name = "Resistant Rubber", type = "Attachment" },
+    [304] = { name = "Armor Polish", type = "Attachment" },
+    [305] = { name = "Water Filter", type = "Attachment", attribute = "WaterFilter" },
+    [306] = { name = "Steel Toes", type = "Attachment", attribute = "SteelToes" },
+    [307] = { name = "Snorkle", type = "Attachment", attribute = "Snorkle" },
+    [308] = { name = "Military Backpack", type = "Backpack" },
+    [309] = { name = "Salvaged Backpack", type = "Backpack" },
+    [310] = { name = "Salvaged Sniper", type = "Gun" },
+    [311] = { name = "Military Grenade Launcher", type = "Gun" },
+    [312] = { name = "Explosive Shell", type = "Ammo" },
+    [313] = { name = "Salvaged Flycopter", type = "Resource" },
+    [314] = { name = "Fireplace", type = "Bench" },
+    [315] = { name = "Black Keycard", type = "Tool" },
+    [316] = { name = "Salvaged Grenade Launcher", type = "Gun" },
+    [317] = { name = "Salvaged Explosive Shell", type = "Ammo" },
+    [318] = { name = "Shotgun Shell", type = "Ammo" },
+    [319] = { name = "Large Medkit", type = "Consumable" },
+    [320] = { name = "Small Battery", type = "Bench" },
+    [321] = { name = "Medium Battery", type = "Bench" },
+    [322] = { name = "Large Battery", type = "Bench" },
+    [323] = { name = "Crude Fuel Generator", type = "Bench" },
+    [324] = { name = "Solar Panel", type = "Bench" },
+    [325] = { name = "Water Turbine", type = "Bench" },
+    [326] = { name = "Wire Cutters", type = "Tool" },
+    [327] = { name = "Button", type = "Bench" },
+    [328] = { name = "Electric Furnace", type = "Bench" },
+    [329] = { name = "Electric Heater", type = "Bench" },
+    [330] = { name = "Switch", type = "Bench" },
+    [331] = { name = "Windmill", type = "Bench" },
+    [332] = { name = "Splitter", type = "Bench" },
+    [333] = { name = "Military Boat", type = "Resource" },
+    [334] = { name = "Auto Turret", type = "Bench" },
+    [335] = { name = "Military M39", type = "Gun" },
+    [336] = { name = "White Ornament", type = "Resource" },
+    [337] = { name = "Red Ornament", type = "Resource" },
+    [338] = { name = "Purple Ornament", type = "Resource" },
+    [339] = { name = "Wreath", type = "Bench" },
+    [340] = { name = "Christmas Lights", type = "Bench" },
+    [341] = { name = "Admin Tool", type = "Tool" },
+}
+
+M.by_attribute = {
+    ["HasFlippers"] = "Flippers",
+    ["HasGoggles"] = "Diving Goggles",
+    ["HasTank"] = "Diving Tank",
+    ["NVG"] = "Night Vision Goggles",
+    ["ResistWet"] = "Wetsuit",
+    ["SilentSteps"] = "Lightweight Padding",
+    ["Snorkle"] = "Snorkle",
+    ["SteelToes"] = "Steel Toes",
+    ["WaterFilter"] = "Water Filter",
+}
+
+M.by_name = {
+    ["Wood Log"] = { id = 1, type = "Resource" },
+    ["Bandage"] = { id = 2, type = "Tool" },
+    ["Stone Hatchet"] = { id = 3, type = "Tool" },
+    ["Heavy Ammo"] = { id = 4, type = "Ammo" },
+    ["Salvaged AK47"] = { id = 5, type = "Gun" },
+    ["Bottle Caps"] = { id = 6, type = "Resource" },
+    ["Holo Sight"] = { id = 7, type = "Attachment" },
+    ["Silencer"] = { id = 8, type = "Attachment" },
+    ["Salvaged M14"] = { id = 9, type = "Gun" },
+    ["Lighter"] = { id = 10, type = "Tool" },
+    ["Swift Heavy Ammo"] = { id = 11, type = "Ammo" },
+    ["Salvaged Sight"] = { id = 12, type = "Attachment" },
+    ["Muzzle Boost"] = { id = 13, type = "Attachment" },
+    ["Compensator"] = { id = 14, type = "Attachment" },
+    ["Salvaged Lasersight"] = { id = 15, type = "Attachment" },
+    ["Weapon Flashlight"] = { id = 16, type = "Attachment" },
+    ["Salvaged Sniper Scope"] = { id = 17, type = "Attachment" },
+    ["Military Sniper Scope"] = { id = 18, type = "Attachment" },
+    ["Wooden Spear"] = { id = 19, type = "Tool" },
+    ["Stone Spear"] = { id = 20, type = "Tool" },
+    ["Stone Pickaxe"] = { id = 21, type = "Tool" },
+    ["Crossbow"] = { id = 22, type = "Gun" },
+    ["Wooden Bow"] = { id = 23, type = "Gun" },
+    ["Cloth"] = { id = 24, type = "Resource" },
+    ["Cactus Flesh"] = { id = 25, type = "Consumable" },
+    ["Stone"] = { id = 26, type = "Resource" },
+    ["Iron Ore"] = { id = 27, type = "Resource" },
+    ["Quality Iron Ore"] = { id = 28, type = "Resource" },
+    ["Campfire"] = { id = 29, type = "Bench" },
+    ["Blueprint"] = { id = 30, type = "Tool" },
+    ["Hammer"] = { id = 31, type = "Tool" },
+    ["Raw Pork"] = { id = 32, type = "Consumable" },
+    ["Cooked Pork"] = { id = 33, type = "Consumable" },
+    ["Charcoal"] = { id = 34, type = "Resource" },
+    ["Salvaged P250"] = { id = 35, type = "Gun" },
+    ["Light Ammo"] = { id = 36, type = "Ammo" },
+    ["Boulder"] = { id = 37, type = "Tool" },
+    ["Salvaged SMG"] = { id = 38, type = "Gun" },
+    ["Salvaged Python"] = { id = 39, type = "Gun" },
+    ["Combustive Heavy Ammo"] = { id = 40, type = "Ammo" },
+    ["Animal Fat"] = { id = 41, type = "Resource" },
+    ["Small Storage Box"] = { id = 42, type = "Bench" },
+    ["Raw Venison"] = { id = 43, type = "Consumable" },
+    ["Cooked Venison"] = { id = 44, type = "Consumable" },
+    ["Iron Shards"] = { id = 45, type = "Resource" },
+    ["Steel Metal"] = { id = 46, type = "Resource" },
+    ["Wooden Door"] = { id = 47, type = "Bench" },
+    ["Wooden Lock"] = { id = 48, type = "Lock" },
+    ["Combination Lock"] = { id = 49, type = "Lock" },
+    ["Salvaged Metal Door"] = { id = 50, type = "Bench" },
+    ["Base Cabinet"] = { id = 51, type = "Bench" },
+    ["Wooden Double Door"] = { id = 52, type = "Bench" },
+    ["Wooden Window Bars"] = { id = 53, type = "Bench" },
+    ["Metal Window Bars"] = { id = 54, type = "Bench" },
+    ["Glass Window"] = { id = 55, type = "Bench" },
+    ["Steel Glass Window"] = { id = 56, type = "Bench" },
+    ["Trap Door"] = { id = 57, type = "Bench" },
+    ["Radiation Vitamins"] = { id = 58, type = "Consumable" },
+    ["Hoodie"] = { id = 59, type = "Armor", armor_type = "Shirt" },
+    ["Hazmat Suit"] = { id = 60, type = "Armor", armor_type = "All", attribute = "ResistWet" },
+    ["Chicken MRE"] = { id = 61, type = "Consumable" },
+    ["Beef MRE"] = { id = 62, type = "Consumable" },
+    ["Pants"] = { id = 63, type = "Armor", armor_type = "Pants" },
+    ["Phosphate Ore"] = { id = 64, type = "Resource" },
+    ["Phosphate Dust"] = { id = 65, type = "Resource" },
+    ["Leather"] = { id = 66, type = "Resource" },
+    ["Furnace"] = { id = 67, type = "Bench" },
+    ["Crude Fuel"] = { id = 68, type = "Resource" },
+    ["Gunpowder"] = { id = 69, type = "Resource" },
+    ["Bone Shards"] = { id = 70, type = "Resource" },
+    ["Metal Door"] = { id = 71, type = "Bench" },
+    ["Metal Double Door"] = { id = 72, type = "Bench" },
+    ["Steel Door"] = { id = 73, type = "Bench" },
+    ["Steel Double Door"] = { id = 74, type = "Bench" },
+    ["Nail Gun"] = { id = 75, type = "Gun" },
+    ["Steel Axe"] = { id = 76, type = "Tool" },
+    ["Steel Pickaxe"] = { id = 77, type = "Tool" },
+    ["Power Cell"] = { id = 78, type = "Misc" },
+    ["Copper Cogs"] = { id = 79, type = "Misc" },
+    ["Pipe"] = { id = 80, type = "Misc" },
+    ["Propane Tank"] = { id = 81, type = "Misc" },
+    ["Rope"] = { id = 82, type = "Misc" },
+    ["Blade"] = { id = 83, type = "Misc" },
+    ["Thread"] = { id = 84, type = "Misc" },
+    ["Metal Plating"] = { id = 85, type = "Misc" },
+    ["Spring"] = { id = 86, type = "Misc" },
+    ["Tarp"] = { id = 87, type = "Misc" },
+    ["Circuit Boards"] = { id = 88, type = "Misc" },
+    ["Metal Scraps"] = { id = 89, type = "Misc" },
+    ["Swift Light Ammo"] = { id = 90, type = "Ammo" },
+    ["Sleeping Bag"] = { id = 91, type = "Bench" },
+    ["Timed Charge"] = { id = 92, type = "Tool" },
+    ["Nails"] = { id = 93, type = "Ammo" },
+    ["Garage Door"] = { id = 94, type = "Bench" },
+    ["Dynamite Bundle"] = { id = 95, type = "Tool" },
+    ["Dynamite Stick"] = { id = 96, type = "Tool" },
+    ["Salvaged RPG"] = { id = 97, type = "Gun" },
+    ["Rocket"] = { id = 98, type = "Ammo" },
+    ["Swift Rocket"] = { id = 99, type = "Ammo" },
+    ["Combustive Rocket"] = { id = 100, type = "Ammo" },
+    ["External Wooden Wall"] = { id = 101, type = "Bench" },
+    ["External Wooden Gate"] = { id = 102, type = "Bench" },
+    ["Vertical Window Cover"] = { id = 103, type = "Bench" },
+    ["Horizontal Window Cover"] = { id = 104, type = "Bench" },
+    ["Jail Wall"] = { id = 105, type = "Bench" },
+    ["Jail Door"] = { id = 106, type = "Bench" },
+    ["%s\\'s Trophy"] = { id = 107, type = "Bench" },
+    ["Salvaged AK74u"] = { id = 108, type = "Gun" },
+    ["Salvaged Pipe Rifle"] = { id = 109, type = "Gun" },
+    ["Petroleum"] = { id = 110, type = "Resource" },
+    ["Boots"] = { id = 111, type = "Armor", armor_type = "Boots" },
+    ["Collared Shirt"] = { id = 112, type = "Armor", armor_type = "Shirt" },
+    ["Shorts"] = { id = 113, type = "Armor", armor_type = "Pants" },
+    ["Tank Top"] = { id = 114, type = "Armor", armor_type = "Shirt" },
+    ["Cloth Shirt"] = { id = 115, type = "Armor", armor_type = "Shirt" },
+    ["Cloth Pants"] = { id = 116, type = "Armor", armor_type = "Pants" },
+    ["Cloth Footwraps"] = { id = 117, type = "Armor", armor_type = "Boots" },
+    ["Leather Poncho"] = { id = 118, type = "Armor", armor_type = "Chestplate" },
+    ["Leather Pants"] = { id = 119, type = "Armor", armor_type = "Pants" },
+    ["Leather Shirt"] = { id = 120, type = "Armor", armor_type = "Shirt" },
+    ["Leather Boots"] = { id = 121, type = "Armor", armor_type = "Boots" },
+    ["Flannel Jacket"] = { id = 122, type = "Armor", armor_type = "Chestplate" },
+    ["Wooden Helmet"] = { id = 123, type = "Armor", armor_type = "Hat" },
+    ["Wooden Chestplate"] = { id = 124, type = "Armor", armor_type = "Chestplate" },
+    ["Wooden Leggings"] = { id = 125, type = "Armor", armor_type = "Kilt" },
+    ["Wooden Arrow"] = { id = 126, type = "Ammo" },
+    ["Swift Arrow"] = { id = 127, type = "Ammo" },
+    ["Bone Arrow"] = { id = 128, type = "Ammo" },
+    ["Combustive Arrow"] = { id = 129, type = "Ammo" },
+    ["Iron Shard Hatchet"] = { id = 130, type = "Tool" },
+    ["Iron Shard Pickaxe"] = { id = 131, type = "Tool" },
+    ["Large Furnace"] = { id = 132, type = "Bench" },
+    ["Yellow Keycard"] = { id = 133, type = "Tool" },
+    ["Purple Keycard"] = { id = 134, type = "Tool" },
+    ["Pink Keycard"] = { id = 135, type = "Tool" },
+    ["Small Medkit"] = { id = 136, type = "Tool" },
+    ["Salvaged Break Action"] = { id = 137, type = "Gun" },
+    ["Buckshot"] = { id = 138, type = "Ammo" },
+    ["Slug"] = { id = 139, type = "Ammo" },
+    ["Combustive Buckshot"] = { id = 140, type = "Ammo" },
+    ["Steel Helmet"] = { id = 141, type = "Armor", armor_type = "Helmet" },
+    ["Steel Chestplate"] = { id = 142, type = "Armor", armor_type = "Chestplate" },
+    ["Steel Leggings"] = { id = 143, type = "Armor", armor_type = "Kilt" },
+    ["Large Storage Box"] = { id = 144, type = "Bench" },
+    ["Salvaged Helmet"] = { id = 145, type = "Armor", armor_type = "Helmet" },
+    ["Salvaged Chestplate"] = { id = 146, type = "Armor", armor_type = "Chestplate" },
+    ["Salvaged Leggings"] = { id = 147, type = "Armor", armor_type = "Kilt" },
+    ["Military Helmet"] = { id = 148, type = "Armor", armor_type = "Helmet" },
+    ["Military Chestplate"] = { id = 149, type = "Armor", armor_type = "Chestplate" },
+    ["Military Leggings"] = { id = 150, type = "Armor", armor_type = "Kilt" },
+    ["Hard Hat"] = { id = 151, type = "Armor", armor_type = "Hat" },
+    ["Balaclava"] = { id = 152, type = "Armor", armor_type = "Face" },
+    ["Cloth Headwrap"] = { id = 153, type = "Armor", armor_type = "Helmet" },
+    ["Baseball Cap"] = { id = 154, type = "Armor", armor_type = "Hat" },
+    ["Salvaged Gloves"] = { id = 155, type = "Armor", armor_type = "Gloves" },
+    ["Cloth Handwraps"] = { id = 156, type = "Armor", armor_type = "Gloves" },
+    ["Military Gloves"] = { id = 157, type = "Armor", armor_type = "Gloves" },
+    ["Leather Gloves"] = { id = 158, type = "Armor", armor_type = "Gloves" },
+    ["Wetsuit"] = { id = 159, type = "Armor", armor_type = "Wetsuit", attribute = "ResistWet" },
+    ["Flippers"] = { id = 160, type = "Armor", armor_type = "Boots", attribute = "HasFlippers" },
+    ["Diving Tank"] = { id = 161, type = "Armor", armor_type = "Chestplate", attribute = "HasTank" },
+    ["Diving Goggles"] = { id = 162, type = "Armor", armor_type = "Helmet", attribute = "HasGoggles" },
+    ["Cooking Pot"] = { id = 163, type = "Bench" },
+    ["Ladder"] = { id = 164, type = "Bench" },
+    ["Chocolate Bar"] = { id = 165, type = "Consumable" },
+    ["Bean Can"] = { id = 166, type = "Consumable" },
+    ["Meatball Can"] = { id = 167, type = "Consumable" },
+    ["Fish Can"] = { id = 168, type = "Consumable" },
+    ["Water Bottle"] = { id = 169, type = "Consumable" },
+    ["Piercing Heavy Ammo"] = { id = 170, type = "Ammo" },
+    ["Piercing Light Ammo"] = { id = 171, type = "Ammo" },
+    ["Semi Receiver"] = { id = 172, type = "Misc" },
+    ["SMG Receiver"] = { id = 173, type = "Misc" },
+    ["Rifle Receiver"] = { id = 174, type = "Misc" },
+    ["Steel Shovel"] = { id = 175, type = "Tool" },
+    ["Empty Can"] = { id = 176, type = "Misc" },
+    ["Care Package Signal"] = { id = 177, type = "Tool" },
+    ["Duct Tape"] = { id = 178, type = "Misc" },
+    ["Glue"] = { id = 179, type = "Misc" },
+    ["Pistol Receiver"] = { id = 180, type = "Misc" },
+    ["Salvaged Shovel"] = { id = 181, type = "Tool" },
+    ["ez shovel"] = { id = 182, type = "Tool" },
+    ["Anvil"] = { id = 183, type = "Bench" },
+    ["Chemistry Lab"] = { id = 184, type = "Bench" },
+    ["Carpentry Table"] = { id = 185, type = "Bench" },
+    ["Sewing Table"] = { id = 186, type = "Bench" },
+    ["Ammo Press"] = { id = 187, type = "Bench" },
+    ["Culinary Table"] = { id = 188, type = "Bench" },
+    ["Petroleum Refinery"] = { id = 189, type = "Bench" },
+    ["Triangle Trap Door"] = { id = 190, type = "Bench" },
+    ["Military AA12"] = { id = 191, type = "Gun" },
+    ["Repair Table"] = { id = 192, type = "Bench" },
+    ["Salvaged Pump Action"] = { id = 193, type = "Gun" },
+    ["Bed"] = { id = 194, type = "Bench" },
+    ["Wooden Spikes"] = { id = 195, type = "Bench" },
+    ["Military ACOG Sight"] = { id = 196, type = "Attachment" },
+    ["Metal Barricade"] = { id = 197, type = "Bench" },
+    ["Military M4A1"] = { id = 198, type = "Gun" },
+    ["Small Wooden Sign"] = { id = 199, type = "Bench" },
+    ["Large Wooden Sign"] = { id = 200, type = "Bench" },
+    ["Storage Cabinet"] = { id = 201, type = "Bench" },
+    ["External Stone Gate"] = { id = 202, type = "Bench" },
+    ["Bone Tool"] = { id = 203, type = "Tool" },
+    ["Salvaged Skorpion"] = { id = 204, type = "Gun" },
+    ["Candy Cane"] = { id = 205, type = "Tool" },
+    ["Christmas Tree"] = { id = 206, type = "Bench" },
+    ["Santa Hat"] = { id = 207, type = "Armor", armor_type = "Hat" },
+    ["External Stone Wall"] = { id = 208, type = "Bench" },
+    ["Blast Furnace"] = { id = 209, type = "Bench" },
+    ["Military Barrett"] = { id = 210, type = "Gun" },
+    ["Shotgun Turret"] = { id = 211, type = "Bench" },
+    ["Military Grenade"] = { id = 212, type = "Tool" },
+    ["Floor Grill"] = { id = 213, type = "Bench" },
+    ["Bear Trap"] = { id = 214, type = "Bench" },
+    ["Landmine Trap"] = { id = 215, type = "Bench" },
+    ["Saw Bat"] = { id = 216, type = "Tool" },
+    ["Machete"] = { id = 217, type = "Tool" },
+    ["Military PKM"] = { id = 218, type = "Gun" },
+    ["Bruno\\'s ACOG Sight"] = { id = 219, type = "Attachment" },
+    ["Military Lasersight"] = { id = 220, type = "Attachment" },
+    ["Bruno\\'s M4A1"] = { id = 221, type = "Gun" },
+    ["Boss Chestplate"] = { id = 222, type = "Armor", armor_type = "Chestplate" },
+    ["Boss Helmet"] = { id = 223, type = "Armor", armor_type = "Helmet" },
+    ["Bunny Ears"] = { id = 224, type = "Armor", armor_type = "Hat" },
+    ["Carrot Blade"] = { id = 225, type = "Tool" },
+    ["Metal Spikes"] = { id = 226, type = "Bench" },
+    ["Rug"] = { id = 227, type = "Bench" },
+    ["Shop Machine"] = { id = 228, type = "Bench" },
+    ["Chainsaw"] = { id = 229, type = "Tool" },
+    ["Mining Drill"] = { id = 230, type = "Tool" },
+    ["Extended Mag"] = { id = 231, type = "Attachment" },
+    ["Jukebox"] = { id = 232, type = "Bench" },
+    ["Wool Plant Seed"] = { id = 233, type = "Bench" },
+    ["Wool"] = { id = 234, type = "Resource" },
+    ["Loom"] = { id = 235, type = "Bench" },
+    ["Small Planter Box"] = { id = 236, type = "Bench" },
+    ["Large Planter Box"] = { id = 237, type = "Bench" },
+    ["Tomato Plant Seed"] = { id = 238, type = "Bench" },
+    ["Corn Plant Seed"] = { id = 239, type = "Bench" },
+    ["Tomato"] = { id = 240, type = "Consumable" },
+    ["Corn"] = { id = 241, type = "Consumable" },
+    ["Chicken Egg"] = { id = 242, type = "Consumable" },
+    ["Milk"] = { id = 243, type = "Consumable" },
+    ["Raspberry Pie I"] = { id = 244, type = "Consumable" },
+    ["Raspberry Pie II"] = { id = 245, type = "Consumable" },
+    ["Raspberry Pie III"] = { id = 246, type = "Consumable" },
+    ["Raspberry Pie IV"] = { id = 247, type = "Consumable" },
+    ["Blueberry Pie I"] = { id = 248, type = "Consumable" },
+    ["Blueberry Pie II"] = { id = 249, type = "Consumable" },
+    ["Blueberry Pie III"] = { id = 250, type = "Consumable" },
+    ["Blueberry Pie IV"] = { id = 251, type = "Consumable" },
+    ["Lemon Cake I"] = { id = 252, type = "Consumable" },
+    ["Lemon Cake II"] = { id = 253, type = "Consumable" },
+    ["Lemon Cake III"] = { id = 254, type = "Consumable" },
+    ["Lemon Cake IV"] = { id = 255, type = "Consumable" },
+    ["Corn Bread I"] = { id = 256, type = "Consumable" },
+    ["Corn Bread II"] = { id = 257, type = "Consumable" },
+    ["Corn Bread III"] = { id = 258, type = "Consumable" },
+    ["Corn Bread IV"] = { id = 259, type = "Consumable" },
+    ["Cow Pasture"] = { id = 260, type = "Bench" },
+    ["Chicken House"] = { id = 261, type = "Bench" },
+    ["Barrel Light"] = { id = 262, type = "Bench" },
+    ["Raspberries"] = { id = 263, type = "Consumable" },
+    ["Blueberries"] = { id = 264, type = "Consumable" },
+    ["Lemon"] = { id = 265, type = "Consumable" },
+    ["Lemon Plant Seed"] = { id = 266, type = "Bench" },
+    ["Raspberry Plant Seed"] = { id = 267, type = "Bench" },
+    ["Blueberry Plant Seed"] = { id = 268, type = "Bench" },
+    ["Military MP7"] = { id = 269, type = "Gun" },
+    ["Red Keycard"] = { id = 270, type = "Tool" },
+    ["Salvaged Double Barrel"] = { id = 271, type = "Gun" },
+    ["Military Boat"] = { id = 272, type = "Resource" },
+    ["Clan Table"] = { id = 273, type = "Bench" },
+    ["Wooden Boat"] = { id = 274, type = "Resource" },
+    ["Military USP"] = { id = 275, type = "Gun" },
+    ["Common Goodie Bag"] = { id = 276, type = "Misc" },
+    ["Rare Goodie Bag"] = { id = 277, type = "Misc" },
+    ["Epic Goodie Bag"] = { id = 278, type = "Misc" },
+    ["Candle"] = { id = 279, type = "Bench" },
+    ["Armor Stand"] = { id = 280, type = "Bench" },
+    ["Jack-O-Lantern"] = { id = 281, type = "Bench" },
+    ["Small Cobweb"] = { id = 282, type = "Bench" },
+    ["Large Cobweb"] = { id = 283, type = "Bench" },
+    ["Pumpkin Plant Seed"] = { id = 284, type = "Bench" },
+    ["Pumpkin"] = { id = 285, type = "ConsumableAmmoArmor", armor_type = "Helmet" },
+    ["Halloween Scythe"] = { id = 286, type = "Tool" },
+    ["Pumpkin Launcher"] = { id = 287, type = "Gun" },
+    ["Raw Wolf"] = { id = 288, type = "Consumable" },
+    ["Cooked Wolf"] = { id = 289, type = "Consumable" },
+    ["Pumpkin Pie"] = { id = 290, type = "Consumable" },
+    ["Cursed Pumpkin"] = { id = 291, type = "Ammo" },
+    ["Marsh Bar"] = { id = 292, type = "Consumable" },
+    ["Peanut Butter Cup"] = { id = 293, type = "Consumable" },
+    ["Candy Roll"] = { id = 294, type = "Consumable" },
+    ["Scarecrow"] = { id = 295, type = "Bench" },
+    ["Salvaged Shotgun"] = { id = 296, type = "Gun" },
+    ["Salvaged Shell"] = { id = 297, type = "Ammo" },
+    ["Bone Armor"] = { id = 298, type = "Armor", armor_type = "All" },
+    ["Armor Plate"] = { id = 299, type = "Attachment" },
+    ["Heavy Padding"] = { id = 300, type = "Attachment" },
+    ["Night Vision Goggles"] = { id = 301, type = "Attachment", attribute = "NVG" },
+    ["Lightweight Padding"] = { id = 302, type = "Attachment", attribute = "SilentSteps" },
+    ["Resistant Rubber"] = { id = 303, type = "Attachment" },
+    ["Armor Polish"] = { id = 304, type = "Attachment" },
+    ["Water Filter"] = { id = 305, type = "Attachment", attribute = "WaterFilter" },
+    ["Steel Toes"] = { id = 306, type = "Attachment", attribute = "SteelToes" },
+    ["Snorkle"] = { id = 307, type = "Attachment", attribute = "Snorkle" },
+    ["Military Backpack"] = { id = 308, type = "Backpack" },
+    ["Salvaged Backpack"] = { id = 309, type = "Backpack" },
+    ["Salvaged Sniper"] = { id = 310, type = "Gun" },
+    ["Military Grenade Launcher"] = { id = 311, type = "Gun" },
+    ["Explosive Shell"] = { id = 312, type = "Ammo" },
+    ["Salvaged Flycopter"] = { id = 313, type = "Resource" },
+    ["Fireplace"] = { id = 314, type = "Bench" },
+    ["Black Keycard"] = { id = 315, type = "Tool" },
+    ["Salvaged Grenade Launcher"] = { id = 316, type = "Gun" },
+    ["Salvaged Explosive Shell"] = { id = 317, type = "Ammo" },
+    ["Shotgun Shell"] = { id = 318, type = "Ammo" },
+    ["Large Medkit"] = { id = 319, type = "Consumable" },
+    ["Small Battery"] = { id = 320, type = "Bench" },
+    ["Medium Battery"] = { id = 321, type = "Bench" },
+    ["Large Battery"] = { id = 322, type = "Bench" },
+    ["Crude Fuel Generator"] = { id = 323, type = "Bench" },
+    ["Solar Panel"] = { id = 324, type = "Bench" },
+    ["Water Turbine"] = { id = 325, type = "Bench" },
+    ["Wire Cutters"] = { id = 326, type = "Tool" },
+    ["Button"] = { id = 327, type = "Bench" },
+    ["Electric Furnace"] = { id = 328, type = "Bench" },
+    ["Electric Heater"] = { id = 329, type = "Bench" },
+    ["Switch"] = { id = 330, type = "Bench" },
+    ["Windmill"] = { id = 331, type = "Bench" },
+    ["Splitter"] = { id = 332, type = "Bench" },
+    ["Military Boat"] = { id = 333, type = "Resource" },
+    ["Auto Turret"] = { id = 334, type = "Bench" },
+    ["Military M39"] = { id = 335, type = "Gun" },
+    ["White Ornament"] = { id = 336, type = "Resource" },
+    ["Red Ornament"] = { id = 337, type = "Resource" },
+    ["Purple Ornament"] = { id = 338, type = "Resource" },
+    ["Wreath"] = { id = 339, type = "Bench" },
+    ["Christmas Lights"] = { id = 340, type = "Bench" },
+    ["Admin Tool"] = { id = 341, type = "Tool" },
+}
+
+function M.get_by_name(name)
+    return name and M.by_name[name] or nil
+end
+
+function M.get(id)
+    return id and M.by_id[id] or nil
+end
+
+function M.get_by_attribute(attr)
+    local name = attr and M.by_attribute[attr]
+    if not name then return nil end
+    return { name = name }
+end
+
+function M.name_for_armor_model(model_name)
+    if not model_name or model_name:sub(1, 6) ~= "Armor_" then return nil end
+    local id, skin = model_name:match("^Armor_(%d+)/(.+)$")
+    if not id then
+        id = model_name:match("^Armor_(%d+)$")
+        skin = nil
+    end
+    if id then
+        local row = M.by_id[tonumber(id)]
+        if row then return row.name, skin end
+    end
+    local key = model_name:match("^(.-)/") or model_name
+    key = key:gsub(" ", "_")
+    local num = key:match("^Armor_(%d+)$")
+    if num then
+        local row = M.by_id[tonumber(num)]
+        if row then return row.name, model_name:match("^.-/(.+)$") end
+    end
+    local attr = key:match("^Armor_(.+)$")
+    if attr then
+        local row = M.get_by_attribute(attr)
+        if row then return row.name, model_name:match("^.-/(.+)$") end
+    end
+    return nil
+end
+
+return M
+
+end)()
+
 -- ── game/items.lua ──
 April._mods["game.items"] = (function()
 local env = April.require("core.env")
 local item_images = April.require("game.item_images")
+local item_catalog = April.require("game.item_catalog")
 local asset_urls = April.require("game.asset_urls")
 
 local M = {}
@@ -2583,6 +3921,26 @@ local FALLBACK = {
     ["Bandage"] = { Type = "Tool" },
     ["Salvaged M14"] = { Type = "Tool" },
 }
+
+local NAME_ALIASES = {
+    ["Cloth Head Wrap"] = "Cloth Headwrap",
+}
+
+local HELD_TYPES = {
+    Gun = true,
+    Tool = true,
+    Bench = true,
+    Attachment = true,
+}
+
+local function parse_variant_name(name)
+    if not name then return nil, nil end
+    local base, variant = name:match("^([^/]+)/(.+)$")
+    if base and variant then
+        return base, variant
+    end
+    return name, nil
+end
 
 local function index_data(data)
     if data[1] and type(data[1]) == "table" then
@@ -2597,6 +3955,11 @@ local function index_data(data)
             end
         end
     end
+end
+
+function M.normalize_name(name)
+    if not name then return nil end
+    return NAME_ALIASES[name] or name
 end
 
 function M.load()
@@ -2637,9 +4000,31 @@ function M.get(name)
     return by_name[name] or FALLBACK[name]
 end
 
+function M.get_catalog(name)
+    return item_catalog.get_by_name(M.normalize_name(name))
+end
+
+function M.get_by_id(id)
+    return item_catalog.get(id)
+end
+
 function M.get_type(name)
+    local row = M.get_catalog(name)
+    if row then return row.type end
+
     local item = M.get(name)
     return item and item.Type or "Unknown"
+end
+
+function M.is_held_display(name)
+    if not name or name == "" then return false end
+
+    local base = select(1, parse_variant_name(name))
+    local row = M.get_catalog(base)
+    if row and HELD_TYPES[row.type] then return true end
+
+    local t = M.get_type(base)
+    return HELD_TYPES[t] == true
 end
 
 local function rbx_id_from_image(img)
@@ -2658,8 +4043,15 @@ end
 function M.get_image_asset_id(name, variant)
     if not name then return nil end
 
+    name = M.normalize_name(name)
+
     local id = item_images.get_asset_id(name, variant)
     if id then return id end
+
+    if variant and variant ~= "" and variant ~= "Default" then
+        id = item_images.get_asset_id(name, "Default")
+        if id then return id end
+    end
 
     if not loaded then M.load() end
     local item = by_name[name]
@@ -2675,6 +4067,49 @@ function M.get_image_asset_id(name, variant)
         end
         return rbx_id_from_image(img)
     end
+    return nil
+end
+
+function M.make_piece(name, variant)
+    name = M.normalize_name(name)
+    if not name or name == "" then return nil end
+    return {
+        name = name,
+        variant = variant,
+        asset_id = M.get_image_asset_id(name, variant),
+    }
+end
+
+function M.resolve_armor_model(model_name)
+    if not model_name then return nil end
+    local item_name, variant = item_catalog.name_for_armor_model(model_name)
+    if not item_name then return nil end
+    return M.make_piece(item_name, variant)
+end
+
+function M.resolve_item_label(label)
+    if not label or label == "" then return nil end
+
+    local base, variant = parse_variant_name(label)
+    base = M.normalize_name(base)
+
+    local numeric = tonumber(base)
+    if numeric then
+        local row = item_catalog.get(numeric)
+        if row then
+            return M.make_piece(row.name, variant)
+        end
+    end
+
+    if item_catalog.get_by_name(base) or item_images.get_asset_id(base, variant) then
+        return M.make_piece(base, variant)
+    end
+
+    if not loaded then M.load() end
+    if by_name[base] then
+        return M.make_piece(base, variant)
+    end
+
     return nil
 end
 
@@ -2695,7 +4130,7 @@ April._mods["game.armor_map"] = (function()
 local M = {}
 
 M.BY_MODEL = {
-    ["Armor_153"] = "Cloth Head Wrap",
+    ["Armor_153"] = "Cloth Headwrap",
     ["Armor_115"] = "Cloth Shirt",
     ["Armor_116"] = "Cloth Pants",
     ["Armor_156"] = "Cloth Handwraps",
@@ -3196,20 +4631,143 @@ end)()
 -- ── game/player_gear.lua ──
 April._mods["game.player_gear"] = (function()
 local env = April.require("core.env")
-local armor_map = April.require("game.armor_map")
 local items = April.require("game.items")
+local item_catalog = April.require("game.item_catalog")
 local weapons = April.require("game.weapons")
 
 local M = {}
 
-local function parse_armor_child(name)
-    if not name or not name:find("Armor_", 1, true) then return nil end
-    local model_key, variant = name:match("^(Armor_%d+)[%/]?(%w*)")
-    if not model_key then
-        model_key = name:match("^(Armor_%d+)")
+local ARMOR_ATTRIBUTES = {
+    "ResistWet",
+    "HasFlippers",
+    "HasTank",
+    "HasGoggles",
+    "NVG",
+    "SilentSteps",
+    "WaterFilter",
+    "SteelToes",
+    "Snorkle",
+}
+
+local function parse_variant_name(name)
+    if not name then return nil, nil end
+    local base, variant = name:match("^([^/]+)/(.+)$")
+    if base and variant then
+        return base, variant
     end
-    if variant == "" then variant = nil end
-    return model_key, variant
+    return name, nil
+end
+
+local function read_attribute(inst, key)
+    if not inst or not key then return nil end
+    if inst.GetAttribute then
+        return inst:GetAttribute(key)
+    end
+    if inst.get_attribute then
+        return inst:get_attribute(key)
+    end
+    return nil
+end
+
+local function add_armor_piece(out, seen, piece)
+    if not piece or not piece.name then return end
+    if seen[piece.name] then return end
+    seen[piece.name] = true
+    table.insert(out, piece)
+end
+
+local function add_held_piece(out, label)
+    if not label or label == "" then return false end
+
+    local piece = items.resolve_item_label(label)
+    if not piece then
+        local base, variant = parse_variant_name(label)
+        piece = items.make_piece(base or label, variant)
+    end
+
+    out.held = piece
+    return true
+end
+
+local function try_armor_model(out, seen, name)
+    if not name then return end
+
+    if name:sub(1, 6) == "Armor_" then
+        local piece = items.resolve_armor_model(name)
+        add_armor_piece(out, seen, piece)
+        return
+    end
+
+    if name:sub(1, 6) == "Armor:" then
+        local piece = items.resolve_item_label(name:sub(7))
+        add_armor_piece(out, seen, piece)
+    end
+end
+
+local function try_held_from_name(out, name)
+    if not name or name == "" or out.held then return end
+
+    if add_held_piece(out, name) then return end
+
+    local base, variant = parse_variant_name(name)
+    if weapons.is_weapon_name(base or name) or items.is_held_display(base or name) then
+        add_held_piece(out, name)
+    end
+end
+
+local function scan_armor_attributes(char, out, seen)
+    for _, attr in ipairs(ARMOR_ATTRIBUTES) do
+        local key = "Armor_" .. attr
+        local val = read_attribute(char, key)
+        if val then
+            if attr == "ResistWet" then
+                if seen["Hazmat Suit"] or seen["Wetsuit"] then
+                    goto continue_attr
+                end
+            end
+
+            local row = item_catalog.get_by_attribute(attr)
+            if row and row.name then
+                add_armor_piece(out, seen, items.make_piece(row.name, nil))
+            end
+        end
+
+        ::continue_attr::
+    end
+end
+
+local function scan_character_tree(char, out, seen, depth)
+    if not env.is_valid(char) or depth > 3 then return end
+
+    local children = env.safe_call(function() return char:get_children() end) or {}
+    for _, child in ipairs(children) do
+        if not env.is_valid(child) then goto continue end
+
+        local name = child.Name or child.name
+        if not name or name == "" then goto continue end
+
+        local cn = child.ClassName or child.class_name
+
+        if cn == "Model" then
+            if name:sub(1, 6) == "Armor_" or name:sub(1, 6) == "Armor:" then
+                try_armor_model(out, seen, name)
+            end
+        end
+
+        if not out.held then
+            if cn == "Tool" then
+                add_held_piece(out, name)
+            elseif items.is_held_display(name) or weapons.is_weapon_name(name) then
+                try_held_from_name(out, name)
+            end
+        end
+
+        if cn == "Model" or cn == "Folder" then
+            scan_character_tree(child, out, seen, depth + 1)
+        end
+
+        ::continue::
+    end
 end
 
 function M.scan_player(player)
@@ -3221,40 +4779,15 @@ function M.scan_player(player)
     if not player then return out end
 
     if player.tool_name and player.tool_name ~= "" then
-        out.held = player.tool_name
+        add_held_piece(out, player.tool_name)
     end
 
     local char = player.character
     if not char or not env.is_valid(char) then return out end
 
-    local children = env.safe_call(function() return char:get_children() end) or {}
     local seen = {}
-
-    for _, child in ipairs(children) do
-        if not env.is_valid(child) then goto continue end
-        local name = child.Name or child.name
-        if not name then goto continue end
-
-        if not out.held and weapons.is_weapon_name(name) then
-            out.held = name
-        end
-
-        local model_key, variant = parse_armor_child(name)
-        if model_key then
-            local item_name = armor_map.item_name(model_key)
-            if item_name and not seen[item_name] then
-                seen[item_name] = true
-                table.insert(out.armor, {
-                    name = item_name,
-                    variant = variant,
-                    asset_id = items.get_image_asset_id(item_name, variant),
-                    model_key = model_key,
-                })
-            end
-        end
-
-        ::continue::
-    end
+    scan_character_tree(char, out, seen, 0)
+    scan_armor_attributes(char, out, seen)
 
     return out
 end
@@ -3608,39 +5141,94 @@ local function try_add_npc(out, model, seen)
     if not head or not env.is_valid(head) then return end
 
     seen[addr] = true
-    table.insert(out, {
+
+    local pos = head.Position or head.position
+    local entry = {
         inst = model,
         name = name,
         kind = M.kind(name),
         head = head,
-    })
+    }
+    if pos and pos.x then
+        entry.lx = pos.x
+        entry.ly = pos.y
+        entry.lz = pos.z
+    end
+    table.insert(out, entry)
 end
 
-local function scan_container(out, container, seen, depth)
-    if not env.is_valid(container) or depth > 2 then return end
-    try_add_npc(out, container, seen)
+function M.begin_scan()
+    return {
+        monuments = nil,
+        mi = 1,
+        queue = {},
+        qi = 1,
+        out = {},
+        seen = {},
+    }
+end
 
-    local children = env.safe_call(function() return container:get_children() end) or {}
-    for _, child in ipairs(children) do
-        try_add_npc(out, child, seen)
-        if depth < 2 then
-            scan_container(out, child, seen, depth + 1)
-        end
+function M.step_scan(state, batch)
+    if not state.monuments then
+        state.monuments = env.safe_call(function()
+            local military = folders.from_key("military")
+            if not env.is_valid(military) then return {} end
+            return military:get_children()
+        end) or {}
+        state.mi = 1
+        state.queue = {}
+        state.qi = 1
     end
+
+    local processed = 0
+
+    while processed < batch do
+        if state.qi > #state.queue then
+            if state.mi > #state.monuments then
+                return true
+            end
+
+            local monument = state.monuments[state.mi]
+            state.mi = state.mi + 1
+            processed = processed + 1
+
+            if env.is_valid(monument) then
+                table.insert(state.queue, { inst = monument, depth = 0 })
+            end
+            goto continue
+        end
+
+        local item = state.queue[state.qi]
+        state.qi = state.qi + 1
+        processed = processed + 1
+
+        local container = item.inst
+        if not env.is_valid(container) or item.depth > 4 then goto continue end
+
+        try_add_npc(state.out, container, state.seen)
+
+        local children = env.safe_call(function() return container:get_children() end) or {}
+        for _, child in ipairs(children) do
+            try_add_npc(state.out, child, state.seen)
+            if item.depth < 4 and env.is_valid(child) then
+                table.insert(state.queue, { inst = child, depth = item.depth + 1 })
+            end
+        end
+
+        ::continue::
+    end
+
+    return false
+end
+
+function M.complete_scan(state)
+    return state.out or {}
 end
 
 function M.scan()
-    local out = {}
-    local seen = {}
-    local military = folders.from_key("military")
-    if not env.is_valid(military) then return out end
-
-    local monuments = env.safe_call(function() return military:get_children() end) or {}
-    for _, monument in ipairs(monuments) do
-        scan_container(out, monument, seen, 0)
-    end
-
-    return out
+    local state = M.begin_scan()
+    while not M.step_scan(state, 9999) do end
+    return M.complete_scan(state)
 end
 
 return M
@@ -4093,12 +5681,134 @@ end
 
 function M.make_entry(model, name, toggle_id, opts)
     opts = opts or {}
-    return {
+    local entry = {
         inst = model,
         name = name,
         toggle_id = toggle_id,
         dynamic = opts.dynamic == true,
     }
+    if opts.hydrate ~= false then
+        M.hydrate_entry(entry)
+    end
+    return entry
+end
+
+function M.hydrate_entry(entry)
+    if not entry or not env.is_valid(entry.inst) then return entry end
+
+    local main = M.find_main_part(entry.inst)
+    entry.main_part = main
+
+    if main then
+        local box = M.read_part_box(main)
+        entry.box = box
+        if box then
+            entry.lx = box.x
+            entry.ly = box.y + box.hy + 0.25
+            entry.lz = box.z
+        else
+            local pos = main.Position or main.position
+            if pos then
+                entry.lx = vec3(pos, "x")
+                entry.ly = vec3(pos, "y")
+                entry.lz = vec3(pos, "z")
+            end
+        end
+    end
+
+    return entry
+end
+
+function M.refresh_entry_position(entry)
+    if not entry or not env.is_valid(entry.inst) then return false end
+
+    if entry.main_part and env.is_valid(entry.main_part) then
+        local box = M.read_part_box(entry.main_part)
+        if box then
+            entry.box = box
+            entry.lx = box.x
+            entry.ly = box.y + box.hy + 0.25
+            entry.lz = box.z
+            return true
+        end
+    end
+
+    M.hydrate_entry(entry)
+    return entry.lx ~= nil
+end
+
+function M.entry_coords(entry)
+    if entry and entry.lx and entry.ly and entry.lz then
+        return entry.lx, entry.ly, entry.lz
+    end
+    return M.label_position(entry)
+end
+
+function M.create_folder_scan(folder_keys, name_map, label_map, dynamic)
+    return {
+        folder_keys = folder_keys,
+        name_map = name_map,
+        label_map = label_map,
+        dynamic = dynamic == true,
+        fi = 1,
+        ci = 1,
+        children = nil,
+        folder = nil,
+        out = {},
+        seen = {},
+    }
+end
+
+function M.folder_scan_step(state, max_items)
+    max_items = max_items or 16
+    local processed = 0
+    local folders_mod = April.require("game.folders")
+
+    while processed < max_items do
+        if state.fi > #state.folder_keys then
+            return true, state.out
+        end
+
+        if not state.folder or not state.children then
+            state.folder = folders_mod.from_key(state.folder_keys[state.fi])
+            state.ci = 1
+            if env.is_valid(state.folder) then
+                state.children = env.safe_call(function() return state.folder:get_children() end) or {}
+            else
+                state.children = {}
+            end
+        end
+
+        if state.ci > #state.children then
+            state.fi = state.fi + 1
+            state.folder = nil
+            state.children = nil
+            goto continue
+        end
+
+        local model = state.children[state.ci]
+        state.ci = state.ci + 1
+        processed = processed + 1
+
+        if not env.is_valid(model) then goto continue end
+
+        local inst_name = model.Name or model.name
+        if not inst_name then goto continue end
+
+        local toggle_id = state.name_map[inst_name]
+        if not toggle_id then goto continue end
+
+        local key = tostring(model.Address or model) .. ":" .. toggle_id
+        if state.seen[key] then goto continue end
+        state.seen[key] = true
+
+        local label = (state.label_map and state.label_map[inst_name]) or inst_name
+        table.insert(state.out, M.make_entry(model, label, toggle_id, { dynamic = state.dynamic }))
+
+        ::continue::
+    end
+
+    return false, state.out
 end
 
 --[[ Scan direct children of folder keys against a name→toggle map. ]]
@@ -4132,451 +5842,6 @@ function M.scan_folders(folder_keys, name_map, label_map, dynamic)
     end
 
     return out
-end
-
-return M
-
-end)()
-
--- ── game/hit_tracker.lua ──
-April._mods["game.hit_tracker"] = (function()
---[[
-    Hit detection — health-drop while shooting, impact point via camera-ray vs body parts.
-    (Fallen references hook VFXModule.CreateBlood for exact position; Vector uses ray pick.)
-]]
-
-local settings = April.require("core.settings")
-local env = April.require("core.env")
-local cache = April.require("core.cache")
-local math_util = April.require("core.math_util")
-local esp_util = April.require("core.esp_util")
-local draw_util = April.require("core.draw_util")
-
-local weapons = April.require("game.weapons")
-local player_state = April.require("game.player_state")
-
-local M = {}
-
-local health_history = {}
-local last_hit_at = {}
-local last_shoot_tick = 0
-local last_idle_sync = 0
-local was_shooting = false
-local fire_origin = { x = 0, y = 0, z = 0 }
-local fire_origin_tick = 0
-local MAX_HIT_DIST = 1000
-local IDLE_SYNC_MS = 800
-local SHOOT_WINDOW_MS = 400
-local FIRE_ORIGIN_MS = 600
-local HIT_DEBOUNCE_MS = 40
-local DEFAULT_AIM_FOV = 250
-local MUZZLE_OFFSET = 1.25
-
-local AIM_BONES = {
-    "Head", "UpperTorso", "LowerTorso", "HumanoidRootPart",
-    "LeftUpperArm", "RightUpperArm", "LeftLowerArm", "RightLowerArm",
-    "LeftHand", "RightHand", "LeftUpperLeg", "RightUpperLeg",
-    "LeftLowerLeg", "RightLowerLeg", "LeftFoot", "RightFoot",
-    "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg",
-}
-
-local function tick()
-    return utility and utility.get_tick_count and utility.get_tick_count() or 0
-end
-
-local function vec3(v)
-    if not v then return nil end
-    local x = v.x or v.X
-    local y = v.y or v.Y
-    local z = v.z or v.Z
-    if x == nil then return nil end
-    return x, y, z
-end
-
-local function normalize(dx, dy, dz)
-    local mag = math_util.distance3(dx, dy, dz)
-    if mag < 0.0001 then return 0, 0, 1 end
-    return dx / mag, dy / mag, dz / mag
-end
-
-local function ray_point_dist_sq(ox, oy, oz, dx, dy, dz, px, py, pz)
-    local vx, vy, vz = px - ox, py - oy, pz - oz
-    local t = math_util.dot(vx, vy, vz, dx, dy, dz)
-    if t < 0 then return math.huge, t end
-    local qx = ox + dx * t - px
-    local qy = oy + dy * t - py
-    local qz = oz + dz * t - pz
-    return qx * qx + qy * qy + qz * qz, t
-end
-
-local function part_world_pos(inst)
-    if not inst or not env.is_valid(inst) then return nil end
-    return vec3(inst.Position or inst.position)
-end
-
-local function find_child_part(char, name)
-    if not char then return nil end
-    return env.safe_call(function()
-        return char:find_first_child(name) or char:FindFirstChild(name)
-    end)
-end
-
-local function collect_hit_candidates(p)
-    local out = {}
-    local seen = {}
-
-    local function add(name, x, y, z)
-        if not x then return end
-        local key = string.format("%.1f,%.1f,%.1f", x, y, z)
-        if seen[key] then return end
-        seen[key] = true
-        table.insert(out, { name = name or "Body", x = x, y = y, z = z })
-    end
-
-    if p.head_position then
-        add("Head", vec3(p.head_position))
-    end
-    if p.position then
-        add("Torso", vec3(p.position))
-    end
-
-    local char = p.character
-    if char and env.is_valid(char) then
-        for _, bone in ipairs(AIM_BONES) do
-            local part = find_child_part(char, bone)
-            local x, y, z = part_world_pos(part)
-            if x then add(bone, x, y, z) end
-        end
-
-        local children = env.safe_call(function() return char:get_children() end) or {}
-        for _, child in ipairs(children) do
-            if env.is_valid(child) then
-                local is_part = env.safe_call(function()
-                    return child:is_a("BasePart") or child.ClassName == "Part"
-                        or child.ClassName == "MeshPart"
-                end)
-                if is_part then
-                    local n = child.Name or child.name or "Part"
-                    add(n, part_world_pos(child))
-                end
-            end
-        end
-    end
-
-    return out
-end
-
-function M.resolve_impact_point(player)
-    if not camera or not camera.get_position or not camera.get_look_vector then
-        if player.head_position then
-            local x, y, z = vec3(player.head_position)
-            return x, y, z, "Head"
-        end
-        if player.position then
-            local x, y, z = vec3(player.position)
-            return x, y, z, "Body"
-        end
-        return nil
-    end
-
-    local cam = camera.get_position()
-    local look = camera.get_look_vector()
-    if not cam or not look then return nil end
-
-    local ox, oy, oz = vec3(cam)
-    local dx, dy, dz = normalize(vec3(look))
-    if not ox then return nil end
-
-    local best_dist = math.huge
-    local best_x, best_y, best_z, best_name
-
-    for _, c in ipairs(collect_hit_candidates(player)) do
-        local dsq = ray_point_dist_sq(ox, oy, oz, dx, dy, dz, c.x, c.y, c.z)
-        if dsq < best_dist then
-            best_dist = dsq
-            best_x, best_y, best_z, best_name = c.x, c.y, c.z, c.name
-        end
-    end
-
-    if best_dist > 16 then
-        if player.head_position then
-            local x, y, z = vec3(player.head_position)
-            if x then return x, y, z, "Head" end
-        end
-        if player.position then
-            local x, y, z = vec3(player.position)
-            if x then return x, y, z, "Body" end
-        end
-        return nil
-    end
-
-    return best_x, best_y, best_z, best_name
-end
-
-local function read_npc_health(npc)
-    if not npc or not env.is_valid(npc.inst) then return nil end
-    local hum = env.safe_call(function()
-        if npc.inst.find_first_child_of_class then
-            return npc.inst:find_first_child_of_class("Humanoid")
-        end
-        return nil
-    end)
-    if not hum then return nil end
-    return hum.Health or hum.health
-end
-
-local function npc_impact_point(npc)
-    if npc.head and env.is_valid(npc.head) then
-        local x, y, z = part_world_pos(npc.head)
-        if x then return x, y, z, "Head" end
-    end
-    local scan = April.require("game.esp_scan")
-    local x, y, z = scan.label_position({ inst = npc.inst })
-    if x then return x, y, z, npc.name or "NPC" end
-    return nil
-end
-
-local function shooting_recently(now)
-    if input and input.is_key_down and input.is_key_down(0x01) then return true end
-    return (now - last_shoot_tick) < SHOOT_WINDOW_MS
-end
-
-local function tracer_origin()
-    if camera and camera.get_position then
-        local cam = camera.get_position()
-        local x, y, z = vec3(cam)
-        if x then return x, y, z end
-    end
-    local me = env.get_local_player()
-    if me and me.head_position then
-        return vec3(me.head_position)
-    end
-    return 0, 0, 0
-end
-
-local function muzzle_origin()
-    local x, y, z = tracer_origin()
-    if camera and camera.get_look_vector then
-        local look = camera.get_look_vector()
-        local lx, ly, lz = vec3(look)
-        if lx then
-            return x + lx * MUZZLE_OFFSET, y + ly * MUZZLE_OFFSET, z + lz * MUZZLE_OFFSET
-        end
-    end
-    return x, y, z
-end
-
-local function player_id(p)
-    return p.user_id or p.name or tostring(p)
-end
-
-local function get_mouse()
-    if not utility or not utility.get_mouse_pos then return nil, nil end
-    local ok, a, b = pcall(utility.get_mouse_pos)
-    if not ok then return nil, nil end
-    if type(a) == "table" then
-        return a.x or a.X, a.y or a.Y
-    end
-    if type(a) == "number" then
-        return a, b
-    end
-    return nil, nil
-end
-
-local function aim_fov_px()
-    return settings.num("april_hit_aim_fov", settings.num("april_target_overlay_fov", DEFAULT_AIM_FOV))
-end
-
-function M.find_closest_player_to_mouse(fov_px)
-    if not entity or not entity.get_players then return nil end
-
-    fov_px = fov_px or aim_fov_px()
-    local mx, my = get_mouse()
-    if not mx then
-        local sw, sh = draw_util.screen_size()
-        mx, my = sw * 0.5, sh * 0.5
-    end
-
-    local best, best_screen = nil, fov_px
-
-    for _, p in ipairs(entity.get_players()) do
-        if not player_state.is_combat_target(p) then goto continue end
-
-        local pos = p.head_position or p.position
-        if not pos then goto continue end
-
-        local sx, sy, vis = esp_util.w2s(pos.x, pos.y, pos.z)
-        if not vis then goto continue end
-
-        local screen_dist = math_util.screen_fov_dist(sx, sy, mx, my)
-        if screen_dist <= fov_px and screen_dist < best_screen then
-            best_screen = screen_dist
-            best = p
-        end
-
-        ::continue::
-    end
-
-    return best, best_screen
-end
-
-local function player_distance(p)
-    local me = env.get_local_player()
-    if not me or not me.position or not p.position then return 0 end
-    local ax, ay, az = vec3(me.position)
-    local bx, by, bz = vec3(p.position)
-    if not ax or not bx then return 0 end
-    return math_util.distance3(bx - ax, by - ay, bz - az)
-end
-
-local function impact_point_for(p)
-    local hx, hy, hz, part = M.resolve_impact_point(p)
-    if hx then return hx, hy, hz, part end
-    if p.head_position then
-        local x, y, z = vec3(p.head_position)
-        if x then return x, y, z, "Head" end
-    end
-    if p.position then
-        local x, y, z = vec3(p.position)
-        if x then return x, y, z, "Body" end
-    end
-    return nil
-end
-
-local function is_plausible_player_hit(p, aim_id)
-    if not p or not aim_id then return false end
-    if player_id(p) ~= aim_id then return false end
-
-    local dist = player_distance(p)
-    if dist <= 0 or dist > MAX_HIT_DIST then return false end
-
-    local hx, hy, hz, part = impact_point_for(p)
-    if not hx then return false end
-
-    return true, dist, hx, hy, hz, part
-end
-
-function M.sync_baselines()
-    if entity and entity.get_players then
-        for _, p in ipairs(entity.get_players()) do
-            if player_state.is_combat_target(p) then
-                local id = p.user_id or p.name or tostring(p)
-                health_history[id] = p.health
-            end
-        end
-    end
-    for _, npc in ipairs(cache.npcs or {}) do
-        local id = "npc:" .. (npc.name or "") .. ":" .. tostring(npc.inst)
-        health_history[id] = read_npc_health(npc)
-    end
-end
-
-function M.track(callback)
-    local now = tick()
-
-    if not weapons.holding_ranged_weapon() then
-        if now - last_idle_sync >= IDLE_SYNC_MS then
-            last_idle_sync = now
-            M.sync_baselines()
-        end
-        return
-    end
-
-    local shooting = input and input.is_key_down and input.is_key_down(0x01)
-
-    if shooting then
-        last_shoot_tick = now
-        if not was_shooting then
-            M.sync_baselines()
-            fire_origin.x, fire_origin.y, fire_origin.z = muzzle_origin()
-            fire_origin_tick = now
-        end
-    end
-    was_shooting = shooting == true
-
-    if not shooting_recently(now) then
-        if now - last_idle_sync >= IDLE_SYNC_MS then
-            last_idle_sync = now
-            M.sync_baselines()
-        end
-        return
-    end
-
-    local ox, oy, oz
-    if (now - fire_origin_tick) <= FIRE_ORIGIN_MS then
-        ox, oy, oz = fire_origin.x, fire_origin.y, fire_origin.z
-    else
-        ox, oy, oz = muzzle_origin()
-    end
-    local aim_player = M.find_closest_player_to_mouse()
-    local aim_id = aim_player and player_id(aim_player)
-
-    if entity and entity.get_players then
-        for _, p in ipairs(entity.get_players()) do
-            if not player_state.is_combat_target(p) then goto next_player end
-            local id = player_id(p)
-            local cur = p.health
-            local last = health_history[id]
-            if id == aim_id
-                and type(last) == "number"
-                and type(cur) == "number"
-                and cur < last
-                and cur >= 0
-            then
-                local ok, dist, hx, hy, hz, part = is_plausible_player_hit(p, aim_id)
-                if ok and (now - (last_hit_at[id] or 0)) >= HIT_DEBOUNCE_MS then
-                    last_hit_at[id] = now
-                    callback({
-                        target_id = id,
-                        name = p.display_name or p.name or "Player",
-                        damage = last - cur,
-                        health = cur,
-                        max_health = p.max_health,
-                        distance = dist,
-                        part = part or "Body",
-                        is_player = true,
-                        ox = ox, oy = oy, oz = oz,
-                        hx = hx, hy = hy, hz = hz,
-                        time = now,
-                    })
-                end
-            end
-            health_history[id] = cur
-            ::next_player::
-        end
-    end
-
-    for _, npc in ipairs(cache.npcs or {}) do
-        local id = "npc:" .. (npc.name or "") .. ":" .. tostring(npc.inst)
-        local cur = read_npc_health(npc)
-        local last = health_history[id]
-        if type(last) == "number" and type(cur) == "number" and cur < last and cur >= 0 then
-            local damage = last - cur
-            local hx, hy, hz, part = npc_impact_point(npc)
-            if hx and (now - (last_hit_at[id] or 0)) >= HIT_DEBOUNCE_MS then
-                last_hit_at[id] = now
-                callback({
-                    target_id = id,
-                    name = npc.name or "NPC",
-                    damage = damage,
-                    health = cur,
-                    distance = 0,
-                    part = part or "Body",
-                    is_player = false,
-                    ox = ox, oy = oy, oz = oz,
-                    hx = hx, hy = hy, hz = hz,
-                    time = now,
-                })
-            end
-        end
-        health_history[id] = cur
-    end
-end
-
-function M.enabled()
-    return settings.enabled("april_bullet_tracer_enabled")
-        or settings.enabled("april_hitmarker_enabled")
-        or settings.enabled("april_hit_notify_enabled")
 end
 
 return M
@@ -4755,6 +6020,7 @@ function M.register_menu()
     menu.add_checkbox(T, G.COMBAT, P, "Farm Helper", false)
     menu.add_slider_int(T, G.COMBAT, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
     menu.add_slider_int(T, G.COMBAT, P_SMOOTH, "Aim Smoothness", 1, 30, 8, root)
+    menu_util.bind_master(P, { P_RADIUS, P_SMOOTH })
 end
 
 function M.update(_dt)
@@ -4885,6 +6151,16 @@ function M.register_menu()
 
     menu.add_checkbox(T, G.COMBAT, "april_gm_range", "Gun Range Mod", false, root)
     menu.add_slider_int(T, G.COMBAT, "april_gm_range_mult", "RangeMult", 1, 20, 10, root)
+
+    menu_util.bind_master(P, {
+        "april_combat_skip_downed",
+        "april_gm_recoil", "april_gm_recoil_pct",
+        "april_gm_spread", "april_gm_spread_pct",
+        "april_gm_sway",
+        "april_gm_fire_rate", "april_gm_fire_rate_mult",
+        "april_gm_speed", "april_gm_speed_mult",
+        "april_gm_range", "april_gm_range_mult",
+    })
 
     settings.on_change(P, function()
         if settings.bool(P, false) then
@@ -5020,6 +6296,7 @@ function M.register_menu()
 
     menu.add_checkbox(T, G.VISUALS, P, "Tung ESP", false, { key = 0 })
     menu.add_slider_int(T, G.VISUALS, "april_tung_esp_max_dist", "Tung ESP Max Distance", 50, 5000, 1000, root)
+    menu_util.bind_master(P, { "april_tung_esp_max_dist" })
 end
 
 function M.scan()
@@ -5094,11 +6371,9 @@ local P = "april_target_overlay"
 local GEAR_SLOTS = 7
 
 local gear_cache = {}
-local GEAR_TTL = 1000
-local TARGET_TTL = 150
+local GEAR_TTL = 150
 
 M._target = nil
-M._target_at = 0
 M._layout = nil
 
 local SLOT_BG = { 0.14, 0.14, 0.16, 0.72 }
@@ -5115,13 +6390,55 @@ local function img_key(prefix, id)
     return prefix .. tostring(id)
 end
 
-local function ensure_item_image(name, variant)
-    if not name then return nil end
-    local asset_id = items.get_image_asset_id(name, variant)
-    if not asset_id then return nil end
-    local key = img_key("item_", asset_id)
-    image_cache.ensure(key, asset_id)
-    return key
+local function resolve_image_key(piece)
+    if not piece then return nil end
+
+    if type(piece) == "table" and piece.asset_id then
+        local key = img_key("item_", piece.asset_id)
+        image_cache.ensure(key, piece.asset_id)
+        return key
+    end
+
+    if type(piece) == "table" and piece.name then
+        local resolved = items.resolve_item_label(
+            piece.variant and (piece.name .. "/" .. piece.variant) or piece.name
+        )
+        if resolved and resolved.asset_id then
+            local key = img_key("item_", resolved.asset_id)
+            image_cache.ensure(key, resolved.asset_id)
+            return key
+        end
+        local asset_id = items.get_image_asset_id(piece.name, piece.variant)
+        if asset_id then
+            local key = img_key("item_", asset_id)
+            image_cache.ensure(key, asset_id)
+            return key
+        end
+    end
+
+    if type(piece) == "string" then
+        local resolved = items.resolve_item_label(piece)
+        if resolved and resolved.asset_id then
+            local key = img_key("item_", resolved.asset_id)
+            image_cache.ensure(key, resolved.asset_id)
+            return key
+        end
+    end
+
+    return nil
+end
+
+local function preload_layout_images(layout)
+    if not layout then return end
+    if layout.held then
+        local key = resolve_image_key(layout.held)
+        if key then image_cache.begin_load(key) end
+    end
+    for i = 1, layout.filled or 0 do
+        local piece = layout.packed[i]
+        local key = resolve_image_key(piece)
+        if key then image_cache.begin_load(key) end
+    end
 end
 
 local function get_gear(player)
@@ -5137,28 +6454,15 @@ local function get_gear(player)
     return data
 end
 
-local function get_mouse()
-    if not utility or not utility.get_mouse_pos then return nil, nil end
-    local ok, a, b = pcall(utility.get_mouse_pos)
-    if not ok then return nil, nil end
-    if type(a) == "table" then
-        return a.x or a.X, a.y or a.Y
-    end
-    if type(a) == "number" then
-        return a, b
-    end
-    return nil, nil
+local function crosshair_center()
+    local sw, sh = draw_util.screen_size()
+    return sw * 0.5, sh * 0.5
 end
 
-local function find_mouse_target(fov_px)
+local function find_crosshair_target(fov_px)
     if not entity or not entity.get_players then return nil end
 
-    local mx, my = get_mouse()
-    if not mx then
-        local sw, sh = draw_util.screen_size()
-        mx, my = sw * 0.5, sh * 0.5
-    end
-
+    local cx, cy = crosshair_center()
     local best, best_dist = nil, fov_px
 
     for _, p in ipairs(entity.get_players()) do
@@ -5167,10 +6471,15 @@ local function find_mouse_target(fov_px)
         local pos = p.head_position or p.position
         if not pos then goto continue end
 
-        local sx, sy, vis = esp_util.w2s(pos.x, pos.y, pos.z)
+        local px = pos.x or pos[1]
+        local py = pos.y or pos[2]
+        local pz = pos.z or pos[3]
+        if not px then goto continue end
+
+        local sx, sy, vis = esp_util.w2s(px, py, pz)
         if not vis then goto continue end
 
-        local dist = math_util.screen_fov_dist(sx, sy, mx, my)
+        local dist = math_util.screen_fov_dist(sx, sy, cx, cy)
         if dist <= fov_px and dist < best_dist then
             best_dist = dist
             best = p
@@ -5272,14 +6581,23 @@ local function draw_slot(x, y, size, key, piece, style)
         if image_cache.draw_fit(key, x + pad, y + pad, size - pad * 2, size - pad * 2) then
             return
         end
+        local st = image_cache.state(key)
+        if st == "loading" or st == "none" then
+            return
+        end
+    end
+
+    local label = "?"
+    if type(piece) == "table" and piece.name and piece.name ~= "" then
+        label = piece.name:sub(1, 1):upper()
     end
 
     local fs = math.max(10, math.floor(size * 0.34))
-    local tw = select(1, draw.get_text_size("?", fs))
+    local tw = select(1, draw.get_text_size(label, fs))
     draw.text(
         x + size * 0.5 - tw * 0.5,
         y + size * 0.5 - fs * 0.45,
-        "?",
+        label,
         { 0.55, 0.55, 0.58, 0.85 },
         fs
     )
@@ -5294,67 +6612,72 @@ function M.register_menu()
     menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Target FOV", 40, 400, 150, menu_util.parent(P))
     menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, menu_util.parent(P))
     menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, menu_util.parent(P))
+
+    menu_util.bind_master(P, { P .. "_fov", P .. "_gear_size", P .. "_top" })
 end
 
-function M.update(_dt)
-    if not settings.bool(P, false) then
+function M.refresh_target()
+    if not settings.enabled(P) then
         M._target = nil
         M._layout = nil
         return
     end
 
-    local now = tick_ms()
-    if now - M._target_at < TARGET_TTL then return end
-    M._target_at = now
-
     local fov = settings.num(P .. "_fov", 150)
-    local target = find_mouse_target(fov)
+    local gear_sz = settings.num(P .. "_gear_size", 48)
+    local target = find_crosshair_target(fov)
+
     if target and player_state.is_combat_target(target) then
         M._target = target
-        M._layout = build_layout(get_gear(target), settings.num(P .. "_gear_size", 48))
+        M._layout = build_layout(get_gear(target), gear_sz)
+        preload_layout_images(M._layout)
     else
         M._target = nil
         M._layout = nil
     end
 end
 
+function M.update(_dt)
+    M.refresh_target()
+end
+
 function M.draw()
-    if not settings.bool(P, false) then return end
+    if not settings.enabled(P) then return end
     if not draw or not draw.text or not draw.rect_filled then return end
+
+    M.refresh_target()
 
     local target = M._target
     local layout = M._layout
     if not target or not layout then return end
 
-    if layout.held then ensure_item_image(layout.held) end
-    for i = 1, layout.filled do
-        local piece = layout.packed[i]
-        if piece then
-            ensure_item_image(piece.name, piece.variant)
-        end
-    end
-
     local sw, _ = draw_util.screen_size()
     local top = settings.num(P .. "_top", 88)
     local cx = sw * 0.5
 
-    local name = target.name or "Unknown"
+    local name = target.display_name or target.name or "Unknown"
     local nw = select(1, draw.get_text_size(name, layout.name_fs))
     draw.text(cx - nw * 0.5, top, name, { 1, 1, 1, 1 }, layout.name_fs)
 
     local y = top + layout.name_fs + 6
 
     local held = held_piece(layout.held)
-    local held_key = held and ensure_item_image(held.name, held.variant) or nil
+    local held_key = held and resolve_image_key(held) or nil
     draw_slot(cx - layout.held_sz * 0.5, y, layout.held_sz, held_key, held, held and "held" or "empty")
     y = y + layout.held_sz + layout.row_gap
 
     local start_x = cx - layout.row_w * 0.5
     for i = 1, GEAR_SLOTS do
         local piece = i <= layout.filled and layout.packed[i] or nil
-        local key = piece and ensure_item_image(piece.name, piece.variant) or nil
+        local key = piece and resolve_image_key(piece) or nil
         local sx = start_x + (i - 1) * (layout.gear_sz + layout.gap)
         draw_slot(sx, y, layout.gear_sz, key, piece, piece and "gear" or "empty")
+    end
+
+    if not held and layout.filled == 0 then
+        local hint = "No gear detected"
+        local hw = select(1, draw.get_text_size(hint, 10))
+        draw.text(cx - hw * 0.5, y + layout.gear_sz + 6, hint, { 0.55, 0.55, 0.58, 0.85 }, 10)
     end
 end
 
@@ -5385,6 +6708,12 @@ function M.register_menu()
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_outline", "Outline", true, { parent = P, colorpicker = { 0, 0, 0, 1 } })
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_rainbow", "Rainbow Crosshair", false, { parent = P })
     menu.add_slider_int(T, G.VISUALS, "april_crosshair_rainbow_speed", "Rainbow Speed", 1, 100, 10, { parent = P })
+
+    menu_util.bind_master(P, {
+        "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap", "april_crosshair_thickness",
+        "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
+        "april_crosshair_rainbow", "april_crosshair_rainbow_speed",
+    })
 end
 
 local function crosshair_color()
@@ -5432,245 +6761,6 @@ return M
 
 end)()
 
--- ── features/visuals/feedback.lua ──
-April._mods["features.visuals.feedback"] = (function()
-local settings = April.require("core.settings")
-local esp_util = April.require("core.esp_util")
-local menu_util = April.require("core.menu_util")
-local notify = April.require("core.notify")
-
-local M = {}
-
-local P = "april_hitmarker_enabled"
-local P_NOTIFY = "april_hit_notify_enabled"
-
-local world_hits = {}
-
-local function tick()
-    return utility and utility.get_tick_count and utility.get_tick_count() or 0
-end
-
-local function format_part(name)
-    if not name or name == "" then return "body" end
-    return name:gsub("(%l)(%u)", "%1 %2"):lower()
-end
-
-local function show_hit_toast(hit)
-    if not settings.enabled(P_NOTIFY) then return end
-
-    local dmg = math.floor((hit.damage or 0) + 0.5)
-    if dmg <= 0 then return end
-
-    local dist = math.floor(hit.distance or 0)
-    local part = format_part(hit.part)
-    local hp_left = ""
-    if hit.health and hit.max_health and hit.max_health > 0 then
-        hp_left = string.format(" - %d HP left", math.floor(hit.health))
-    end
-
-    local msg
-    if hit.is_player then
-        msg = string.format("Hit %s - %d dmg - %dm - %s%s", hit.name, dmg, dist, part, hp_left)
-    else
-        msg = string.format("Hit %s - %d dmg - %s", hit.name, dmg, part)
-    end
-
-    notify.toast(msg, "danger", settings.num("april_hit_notify_duration", 1000), true)
-end
-
-function M.on_hit(hit)
-    if not hit or not hit.hx then return end
-
-    table.insert(world_hits, {
-        hx = hit.hx,
-        hy = hit.hy,
-        hz = hit.hz,
-        time = tick(),
-    })
-    while #world_hits > 12 do
-        table.remove(world_hits, 1)
-    end
-
-    show_hit_toast(hit)
-end
-
-function M.register_menu()
-    local G = menu_util.G
-    local T, _ = menu_util.group(G.VISUALS)
-    local notify_root = menu_util.parent(P_NOTIFY)
-
-    menu_util.section(T, G.VISUALS, "Hitmarkers")
-    menu.add_checkbox(T, G.VISUALS, P, "Hitmarker", false, { colorpicker = { 1, 1, 1, 1 } })
-    menu.add_checkbox(T, G.VISUALS, "april_hitmarker_at_impact", "At Impact Point", true, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, "april_hitmarker_glow", "Hitmarker Glow", false, { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_hitmarker_size", "Hitmarker Size", 1, 20, 5, { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_hitmarker_duration", "Duration (ms)", 100, 2000, 500, { parent = P })
-
-    menu_util.section(T, G.VISUALS, "Hit Notifications")
-    menu.add_checkbox(T, G.VISUALS, P_NOTIFY, "Hit Toasts", false)
-    menu.add_slider_int(T, G.VISUALS, "april_hit_notify_duration", "Toast Duration (ms)", 500, 3000, 1000, notify_root)
-end
-
-function M.trigger_hit()
-    M.on_hit({
-        hx = 0, hy = 0, hz = 0,
-        damage = 0,
-        name = "",
-        is_player = false,
-    })
-end
-
-function M.update(_dt)
-    if not settings.bool(P, false) then
-        if #world_hits > 0 then world_hits = {} end
-        return
-    end
-
-    local now = tick()
-    local dur = settings.num("april_hitmarker_duration", 500)
-    local i = 1
-    while i <= #world_hits do
-        if now - world_hits[i].time > dur then
-            table.remove(world_hits, i)
-        else
-            i = i + 1
-        end
-    end
-end
-
-function M.draw()
-    if not settings.bool(P, false) or #world_hits == 0 then return end
-
-    local now = tick()
-    local dur = settings.num("april_hitmarker_duration", 500)
-    local col = settings.color(P, { 1, 1, 1, 1 })
-    local size_studs = settings.num("april_hitmarker_size", 5) * 0.08
-    local thick = 2
-
-    for _, hit in ipairs(world_hits) do
-        local age = now - hit.time
-        if age > dur then goto next_hit end
-
-        local alpha = 1 - (age / dur)
-        local c = { col[1], col[2], col[3], (col[4] or 1) * alpha }
-
-        if settings.bool("april_hitmarker_at_impact", true) and hit.hx then
-            esp_util.draw_world_cross(hit.hx, hit.hy, hit.hz, size_studs, c, thick)
-
-            if settings.bool("april_hitmarker_glow", false) then
-                local sx, sy, vis = esp_util.w2s(hit.hx, hit.hy, hit.hz)
-                if vis and draw and draw.circle_filled then
-                    draw.circle_filled(sx, sy, size_studs * 12, { c[1], c[2], c[3], c[4] * 0.25 }, 12)
-                end
-            end
-        end
-
-        ::next_hit::
-    end
-end
-
-return M
-
-end)()
-
--- ── features/visuals/bullet_tracers.lua ──
-April._mods["features.visuals.bullet_tracers"] = (function()
-local settings = April.require("core.settings")
-local esp_util = April.require("core.esp_util")
-local menu_util = April.require("core.menu_util")
-local hit_tracker = April.require("game.hit_tracker")
-
-local M = {}
-local P = "april_bullet_tracer_enabled"
-
-local tracers = {}
-
-local function tick()
-    return utility and utility.get_tick_count and utility.get_tick_count() or 0
-end
-
-local function add_tracer(ox, oy, oz, tx, ty, tz)
-    table.insert(tracers, {
-        ox = ox, oy = oy, oz = oz,
-        tx = tx, ty = ty, tz = tz,
-        created = tick(),
-    })
-    while #tracers > 16 do
-        table.remove(tracers, 1)
-    end
-end
-
-local function on_hit(hit)
-    if settings.enabled(P) then
-        add_tracer(hit.ox, hit.oy, hit.oz, hit.hx, hit.hy, hit.hz)
-    end
-
-    pcall(function()
-        local feedback = April.require("features.visuals.feedback")
-        if feedback.on_hit then feedback.on_hit(hit) end
-    end)
-end
-
-function M.register_menu()
-    local G = menu_util.G
-    local T, _ = menu_util.group(G.VISUALS)
-    menu_util.section(T, G.VISUALS, "Bullet Tracers")
-    menu.add_checkbox(T, G.VISUALS, P, "Bullet Tracers", false, { colorpicker = { 1, 0.6, 0.2, 1 } })
-    menu.add_slider_int(T, G.VISUALS, "april_hit_aim_fov", "Aim FOV (px)", 40, 600, 250, { parent = P })
-    menu.add_slider_float(T, G.VISUALS, "april_bullet_tracer_lifetime", "Tracer Fade Time", 0.1, 2.0, 0.35, "%.1fs", { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_bullet_tracer_thickness", "Tracer Thickness", 1, 4, 2, { parent = P })
-end
-
-function M.update(_dt)
-    if hit_tracker.enabled() then
-        hit_tracker.track(on_hit)
-    end
-
-    if not settings.enabled(P) then
-        if #tracers > 0 then tracers = {} end
-        return
-    end
-
-    local now = tick()
-    local lifetime_ms = settings.num("april_bullet_tracer_lifetime", 0.35) * 1000
-    local i = 1
-    while i <= #tracers do
-        if now - tracers[i].created > lifetime_ms then
-            table.remove(tracers, i)
-        else
-            i = i + 1
-        end
-    end
-end
-
-function M.draw()
-    if not settings.enabled(P) or #tracers == 0 then return end
-
-    local now = tick()
-    local color = settings.color(P, { 1, 0.6, 0.2, 1 })
-    local thickness = settings.num("april_bullet_tracer_thickness", 2)
-    local lifetime_ms = settings.num("april_bullet_tracer_lifetime", 0.35) * 1000
-    local cr, cg, cb, ca = color[1], color[2], color[3], color[4] or 1
-
-    for _, tr in ipairs(tracers) do
-        local alpha = 1.0 - ((now - tr.created) / lifetime_ms)
-        if alpha <= 0 then goto next_tracer end
-
-        esp_util.draw_world_line(
-            tr.ox, tr.oy, tr.oz,
-            tr.tx, tr.ty, tr.tz,
-            { cr, cg, cb, alpha * ca },
-            thickness
-        )
-
-        ::next_tracer::
-    end
-end
-
-return M
-
-end)()
-
 -- ── features/world/world_esp.lua ──
 April._mods["features.world.world_esp"] = (function()
 local settings = April.require("core.settings")
@@ -5684,9 +6774,11 @@ local esp_scan = April.require("game.esp_scan")
 
 local M = {}
 local P = "april_world_enabled"
+local POS_REFRESH_BATCH = 10
 
 M._static = {}
 M._dynamic = {}
+M._pos_idx = 0
 
 local function rebuild_cache()
     cache.world = {}
@@ -5695,6 +6787,19 @@ local function rebuild_cache()
     end
     for _, entry in ipairs(M._dynamic) do
         table.insert(cache.world, entry)
+    end
+end
+
+local function refresh_dynamic_positions()
+    local n = #M._dynamic
+    if n == 0 then return end
+
+    for _ = 1, POS_REFRESH_BATCH do
+        M._pos_idx = (M._pos_idx % n) + 1
+        local entry = M._dynamic[M._pos_idx]
+        if entry and env.is_valid(entry.inst) then
+            esp_scan.refresh_entry_position(entry)
+        end
     end
 end
 
@@ -5709,25 +6814,74 @@ function M.register_menu()
     menu.add_checkbox(T, G.WORLD, "april_world_show_name", "World Show Name", true, { parent = P })
     menu.add_checkbox(T, G.WORLD, "april_world_show_distance", "World Show Distance", true, { parent = P })
     menu.add_slider_int(T, G.WORLD, "april_world_range", "World Range", 50, 2000, 500, { parent = P })
+
+    local child_ids = { "april_world_boxes", "april_world_show_name", "april_world_show_distance", "april_world_range" }
+    for _, t in ipairs(maps.WORLD_TOGGLES) do
+        child_ids[#child_ids + 1] = t.id
+    end
+    menu_util.bind_master(P, child_ids)
 end
 
-function M.scan_static()
-    M._static = {}
+function M.begin_static_scan()
+    return {
+        phase = 1,
+        node_state = esp_scan.create_folder_scan(maps.NODE_FOLDERS, maps.NODE_MAP, maps.NODE_LABELS, false),
+        plant_state = esp_scan.create_folder_scan(maps.PLANT_FOLDERS, maps.PLANT_MAP, maps.PLANT_LABELS, false),
+        out = {},
+    }
+end
 
-    for _, entry in ipairs(esp_scan.scan_folders(maps.NODE_FOLDERS, maps.NODE_MAP, maps.NODE_LABELS, false)) do
-        table.insert(M._static, entry)
-    end
-    for _, entry in ipairs(esp_scan.scan_folders(maps.PLANT_FOLDERS, maps.PLANT_MAP, maps.PLANT_LABELS, false)) do
-        table.insert(M._static, entry)
+function M.step_static_scan(state, batch)
+    if state.phase == 1 then
+        local done = esp_scan.folder_scan_step(state.node_state, batch)
+        if done then
+            state.phase = 2
+        end
+        return false
     end
 
+    local done = esp_scan.folder_scan_step(state.plant_state, batch)
+    if done then
+        state.out = {}
+        for _, entry in ipairs(state.node_state.out) do
+            table.insert(state.out, entry)
+        end
+        for _, entry in ipairs(state.plant_state.out) do
+            table.insert(state.out, entry)
+        end
+    end
+    return done
+end
+
+function M.complete_static_scan(state)
+    M._static = state.out or {}
     rebuild_cache()
     cache.stats.last_world_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
-function M.scan_dynamic()
-    M._dynamic = esp_scan.scan_folders(maps.ANIMAL_FOLDERS, maps.ANIMAL_MAP, maps.ANIMAL_LABELS, true)
+function M.begin_dynamic_scan()
+    return esp_scan.create_folder_scan(maps.ANIMAL_FOLDERS, maps.ANIMAL_MAP, maps.ANIMAL_LABELS, true)
+end
+
+function M.step_dynamic_scan(state, batch)
+    return esp_scan.folder_scan_step(state, batch)
+end
+
+function M.complete_dynamic_scan(state)
+    M._dynamic = state.out or {}
     rebuild_cache()
+end
+
+function M.scan_static()
+    local state = M.begin_static_scan()
+    while not M.step_static_scan(state, 9999) do end
+    M.complete_static_scan(state)
+end
+
+function M.scan_dynamic()
+    local state = M.begin_dynamic_scan()
+    while not M.step_dynamic_scan(state, 9999) do end
+    M.complete_dynamic_scan(state)
 end
 
 function M.scan()
@@ -5735,36 +6889,46 @@ function M.scan()
     M.scan_dynamic()
 end
 
-function M.update(_dt) end
+function M.update(_dt)
+    if not settings.enabled(P) then return end
+    if #M._dynamic > 0 then
+        refresh_dynamic_positions()
+    end
+end
 
 function M.draw()
     if not settings.enabled(P) then return end
 
     local range = settings.num("april_world_range", 500)
+    local range_sq = range * range
     local draw_boxes = settings.enabled("april_world_boxes")
     local show_name = settings.bool("april_world_show_name", true)
     local show_dist = settings.bool("april_world_show_distance", true)
     local me = env.get_local_player()
+    local me_pos = me and me.position
     local text_size = esp_util.text_size()
 
     for _, entry in ipairs(cache.world) do
         if not settings.enabled(entry.toggle_id) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
 
-        local lx, ly, lz = esp_scan.label_position(entry)
+        local lx, ly, lz = esp_scan.entry_coords(entry)
         if not lx then goto continue end
 
-        local dist = 0
-        if me and me.position then
-            local dx = lx - me.position.x
-            local dy = ly - me.position.y
-            local dz = lz - me.position.z
-            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-            if dist > range then goto continue end
+        local dist_sq = 0
+        if me_pos then
+            local dx = lx - me_pos.x
+            local dy = ly - me_pos.y
+            local dz = lz - me_pos.z
+            dist_sq = dx * dx + dy * dy + dz * dz
+            if dist_sq > range_sq then goto continue end
         end
 
         local col = settings.color(entry.toggle_id, maps.toggle_color(maps.WORLD_TOGGLES, entry.toggle_id))
         if draw_boxes then
+            if entry.dynamic then
+                esp_scan.refresh_entry_position(entry)
+            end
             esp_util.draw_entry_boxes(entry, col, 1)
         end
 
@@ -5772,8 +6936,8 @@ function M.draw()
             local sx, sy, vis = esp_util.w2s(lx, ly, lz)
             if vis then
                 local label = show_name and (entry.name or "?") or ""
-                if show_dist and me and me.position then
-                    local dist_text = string.format("%dm", math.floor(dist))
+                if show_dist and me_pos then
+                    local dist_text = string.format("%dm", math.floor(math.sqrt(dist_sq)))
                     if label ~= "" then
                         label = label .. " [" .. dist_text .. "]"
                     else
@@ -5808,9 +6972,11 @@ local esp_scan = April.require("game.esp_scan")
 
 local M = {}
 local P = "april_loot_enabled"
+local POS_REFRESH_BATCH = 12
 
 M._static = {}
 M._drops = {}
+M._pos_idx = 0
 
 local UNLIMITED_RANGE = {
     april_timed_crate = true,
@@ -5818,10 +6984,38 @@ local UNLIMITED_RANGE = {
     april_btr_crate = true,
 }
 
-local function append_loot_model(out, model, base_name, toggle_id, dynamic)
-    if not env.is_valid(model) then return end
+local STATIC_SOURCES = {
+    { kind = "root", key = "loners" },
+    { kind = "root", key = "vegetation" },
+    { kind = "root", key = "events" },
+    { kind = "nested", key = "military" },
+    { kind = "nested", key = "monuments" },
+}
 
-    local display = base_name
+local function rebuild_cache()
+    cache.loot = {}
+    for _, entry in ipairs(M._static) do
+        table.insert(cache.loot, entry)
+    end
+    for _, entry in ipairs(M._drops) do
+        table.insert(cache.loot, entry)
+    end
+end
+
+local function refresh_dynamic_positions()
+    local n = #M._drops
+    if n == 0 then return end
+
+    for _ = 1, POS_REFRESH_BATCH do
+        M._pos_idx = (M._pos_idx % n) + 1
+        local entry = M._drops[M._pos_idx]
+        if entry and env.is_valid(entry.inst) then
+            esp_scan.refresh_entry_position(entry)
+        end
+    end
+end
+
+local function loot_display_name(model, base_name)
     if base_name == "Sleeper" then
         local label = env.safe_call(function()
             local desc = model:get_descendants()
@@ -5833,7 +7027,7 @@ local function append_loot_model(out, model, base_name, toggle_id, dynamic)
             end
             return nil
         end)
-        if label then display = label end
+        if label then return label end
     elseif base_name == "Timed Crate" then
         local extra = env.safe_call(function()
             local desc = model:get_descendants()
@@ -5845,9 +7039,14 @@ local function append_loot_model(out, model, base_name, toggle_id, dynamic)
             end
             return nil
         end)
-        if extra then display = base_name .. " (" .. extra .. ")" end
+        if extra then return base_name .. " (" .. extra .. ")" end
     end
+    return base_name
+end
 
+local function append_loot_model(out, model, base_name, toggle_id, dynamic)
+    if not env.is_valid(model) then return end
+    local display = loot_display_name(model, base_name)
     table.insert(out, esp_scan.make_entry(model, display, toggle_id, { dynamic = dynamic }))
 end
 
@@ -5865,65 +7064,141 @@ local function collect_loot_container(container, type_name, toggle_id, out, dyna
     end
 end
 
-local function scan_loot_root(folder, out, dynamic)
-    if not env.is_valid(folder) then return end
-    local children = env.safe_call(function() return folder:get_children() end) or {}
-    for _, child in ipairs(children) do
-        if not env.is_valid(child) then goto continue end
-        local name = child.Name or child.name
-        local toggle_id = name and maps.LOOT_MAP[name]
-        if toggle_id then
-            collect_loot_container(child, name, toggle_id, out, dynamic)
-        end
-        ::continue::
-    end
+function M.begin_static_scan()
+    return {
+        si = 1,
+        phase = "top",
+        ci = 1,
+        sub_ci = 1,
+        children = nil,
+        subs = nil,
+        current = nil,
+        out = {},
+    }
 end
 
-local function scan_loot_nested(folder, out, dynamic)
-    if not env.is_valid(folder) then return end
-    local children = env.safe_call(function() return folder:get_children() end) or {}
-    for _, child in ipairs(children) do
-        if not env.is_valid(child) then goto continue end
-        local name = child.Name or child.name
-        local toggle_id = name and maps.LOOT_MAP[name]
-        if toggle_id then
-            collect_loot_container(child, name, toggle_id, out, dynamic)
+function M.step_static_scan(state, batch)
+    local processed = 0
+
+    while processed < batch do
+        if state.si > #STATIC_SOURCES then
+            return true
+        end
+
+        local source = STATIC_SOURCES[state.si]
+        if not state.children then
+            state.phase = "top"
+            state.ci = 1
+            state.sub_ci = 1
+            state.subs = nil
+            state.current = nil
+            state.children = env.safe_call(function()
+                local folder = folders.from_key(source.key)
+                if not env.is_valid(folder) then return {} end
+                return folder:get_children()
+            end) or {}
+        end
+
+        if state.ci > #state.children then
+            state.si = state.si + 1
+            state.children = nil
+            goto continue
+        end
+
+        local child = state.children[state.ci]
+
+        if state.phase == "top" then
+            if not env.is_valid(child) then
+                state.ci = state.ci + 1
+                processed = processed + 1
+                goto continue
+            end
+
+            local name = child.Name or child.name
+            local toggle_id = name and maps.LOOT_MAP[name]
+
+            if toggle_id then
+                collect_loot_container(child, name, toggle_id, state.out, false)
+                state.ci = state.ci + 1
+                processed = processed + 1
+            elseif source.kind == "nested" then
+                state.current = child
+                state.subs = env.safe_call(function() return child:get_children() end) or {}
+                state.sub_ci = 1
+                state.phase = "nested"
+            else
+                state.ci = state.ci + 1
+                processed = processed + 1
+            end
         else
-            local subs = env.safe_call(function() return child:get_children() end) or {}
-            for _, sub in ipairs(subs) do
-                local sub_name = sub.Name or sub.name
-                local sub_tid = sub_name and maps.LOOT_MAP[sub_name]
-                if sub_tid then
-                    collect_loot_container(sub, sub_name, sub_tid, out, dynamic)
-                end
+            if not state.subs or state.sub_ci > #state.subs then
+                state.phase = "top"
+                state.ci = state.ci + 1
+                state.current = nil
+                state.subs = nil
+                goto continue
+            end
+
+            local sub = state.subs[state.sub_ci]
+            state.sub_ci = state.sub_ci + 1
+            processed = processed + 1
+
+            if not env.is_valid(sub) then goto continue end
+
+            local sub_name = sub.Name or sub.name
+            local sub_tid = sub_name and maps.LOOT_MAP[sub_name]
+            if sub_tid then
+                collect_loot_container(sub, sub_name, sub_tid, state.out, false)
             end
         end
+
         ::continue::
     end
+
+    return false
 end
 
-local function collect_drops(out)
-    local drops = folders.from_key("drops")
-    if not env.is_valid(drops) then return end
-    local children = env.safe_call(function() return drops:get_children() end) or {}
-    for _, model in ipairs(children) do
+function M.complete_static_scan(state)
+    M._static = state.out or {}
+    rebuild_cache()
+    cache.stats.last_loot_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+function M.begin_drops_scan()
+    return { ci = 1, children = nil, out = {} }
+end
+
+function M.step_drops_scan(state, batch)
+    if not state.children then
+        state.children = env.safe_call(function()
+            local drops = folders.from_key("drops")
+            if not env.is_valid(drops) then return {} end
+            return drops:get_children()
+        end) or {}
+        state.ci = 1
+    end
+
+    local processed = 0
+    while processed < batch and state.ci <= #state.children do
+        local model = state.children[state.ci]
+        state.ci = state.ci + 1
+        processed = processed + 1
+
         if not env.is_valid(model) then goto continue end
         local name = model.Name or model.name
         if name and name ~= "" then
-            append_loot_model(out, model, name, "april_dropped_item", true)
+            append_loot_model(state.out, model, name, "april_dropped_item", true)
         end
+
         ::continue::
     end
+
+    return state.ci > #state.children
 end
 
-local function rebuild_cache()
-    cache.loot = {}
-    for _, entry in ipairs(M._static) do
-        table.insert(cache.loot, entry)
-    end
-    for _, entry in ipairs(M._drops) do
-        table.insert(cache.loot, entry)
-    end
+function M.complete_drops_scan(state)
+    M._drops = state.out or {}
+    rebuild_cache()
 end
 
 function M.register_menu()
@@ -5938,25 +7213,24 @@ function M.register_menu()
     menu.add_checkbox(T, G.WORLD, "april_loot_show_name", "Loot Show Name", true, { parent = P })
     menu.add_checkbox(T, G.WORLD, "april_loot_show_distance", "Loot Show Distance", true, { parent = P })
     menu.add_slider_int(T, G.WORLD, "april_loot_range", "Loot Range", 50, 2000, 300, { parent = P })
+
+    local child_ids = { "april_loot_boxes", "april_loot_show_name", "april_loot_show_distance", "april_loot_range" }
+    for _, t in ipairs(maps.LOOT_TOGGLES) do
+        child_ids[#child_ids + 1] = t.id
+    end
+    menu_util.bind_master(P, child_ids)
 end
 
 function M.scan_drops()
-    M._drops = {}
-    collect_drops(M._drops)
-    rebuild_cache()
+    local state = M.begin_drops_scan()
+    while not M.step_drops_scan(state, 9999) do end
+    M.complete_drops_scan(state)
 end
 
 function M.scan_static()
-    M._static = {}
-
-    scan_loot_root(folders.from_key("loners"), M._static, false)
-    scan_loot_root(folders.from_key("vegetation"), M._static, false)
-    scan_loot_root(folders.from_key("events"), M._static, false)
-    scan_loot_nested(folders.from_key("military"), M._static, false)
-    scan_loot_nested(folders.from_key("monuments"), M._static, false)
-
-    rebuild_cache()
-    cache.stats.last_loot_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
+    local state = M.begin_static_scan()
+    while not M.step_static_scan(state, 9999) do end
+    M.complete_static_scan(state)
 end
 
 function M.scan()
@@ -5964,36 +7238,46 @@ function M.scan()
     M.scan_drops()
 end
 
-function M.update(_dt) end
+function M.update(_dt)
+    if not settings.enabled(P) then return end
+    if #M._drops > 0 then
+        refresh_dynamic_positions()
+    end
+end
 
 function M.draw()
     if not settings.enabled(P) then return end
 
     local range = settings.num("april_loot_range", 300)
+    local range_sq = range * range
     local draw_boxes = settings.enabled("april_loot_boxes")
     local show_name = settings.bool("april_loot_show_name", true)
     local show_dist = settings.bool("april_loot_show_distance", true)
     local me = env.get_local_player()
+    local me_pos = me and me.position
     local text_size = esp_util.text_size()
 
     for _, entry in ipairs(cache.loot) do
         if not settings.enabled(entry.toggle_id) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
 
-        local lx, ly, lz = esp_scan.label_position(entry)
+        local lx, ly, lz = esp_scan.entry_coords(entry)
         if not lx then goto continue end
 
-        local dist = 0
-        if me and me.position then
-            local dx = lx - me.position.x
-            local dy = ly - me.position.y
-            local dz = lz - me.position.z
-            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-            if not UNLIMITED_RANGE[entry.toggle_id] and dist > range then goto continue end
+        local dist_sq = 0
+        if me_pos then
+            local dx = lx - me_pos.x
+            local dy = ly - me_pos.y
+            local dz = lz - me_pos.z
+            dist_sq = dx * dx + dy * dy + dz * dz
+            if not UNLIMITED_RANGE[entry.toggle_id] and dist_sq > range_sq then goto continue end
         end
 
         local col = settings.color(entry.toggle_id, maps.toggle_color(maps.LOOT_TOGGLES, entry.toggle_id))
         if draw_boxes then
+            if entry.dynamic then
+                esp_scan.refresh_entry_position(entry)
+            end
             esp_util.draw_entry_boxes(entry, col, 1)
         end
 
@@ -6001,8 +7285,8 @@ function M.draw()
             local sx, sy, vis = esp_util.w2s(lx, ly, lz)
             if vis then
                 local label = show_name and (entry.name or "Loot") or ""
-                if show_dist and me and me.position then
-                    local dist_text = string.format("%dm", math.floor(dist))
+                if show_dist and me_pos then
+                    local dist_text = string.format("%dm", math.floor(math.sqrt(dist_sq)))
                     if label ~= "" then
                         label = label .. " [" .. dist_text .. "]"
                     else
@@ -6087,46 +7371,103 @@ function M.register_menu()
     menu.add_checkbox(T, G.WORLD, "april_base_show_name", "Base Show Name", true, { parent = P })
     menu.add_checkbox(T, G.WORLD, "april_base_show_distance", "Base Show Distance", false, { parent = P })
     menu.add_slider_int(T, G.WORLD, "april_base_range", "Base Range", 50, 500, 150, { parent = P })
+
+    local child_ids = { "april_base_boxes", "april_base_show_name", "april_base_show_distance", "april_base_range" }
+    for _, t in ipairs(maps.BASE_TOGGLES) do
+        child_ids[#child_ids + 1] = t.id
+    end
+    menu_util.bind_master(P, child_ids)
+end
+
+function M.begin_scan()
+    return {
+        areas = nil,
+        ai = 1,
+        items = nil,
+        ii = 1,
+        out = {},
+    }
+end
+
+function M.step_scan(state, batch)
+    if not state.areas then
+        state.areas = env.safe_call(function()
+            local bases = folders.from_key("bases")
+            if not env.is_valid(bases) then return {} end
+            return bases:get_children()
+        end) or {}
+        state.ai = 1
+        state.items = nil
+        state.ii = 1
+    end
+
+    local processed = 0
+
+    while processed < batch do
+        if state.ai > #state.areas then
+            return true
+        end
+
+        if not state.items then
+            local area = state.areas[state.ai]
+            if not env.is_valid(area) then
+                state.ai = state.ai + 1
+                processed = processed + 1
+                goto continue
+            end
+
+            local area_name = area.Name or area.name or ""
+            if maps.BASE_SKIP_AREAS[area_name] then
+                state.ai = state.ai + 1
+                processed = processed + 1
+                goto continue
+            end
+
+            if maps.BASE_MAP[area_name] then
+                state.items = { area }
+            else
+                state.items = env.safe_call(function() return area:get_children() end) or {}
+            end
+            state.ii = 1
+        end
+
+        if state.ii > #state.items then
+            state.ai = state.ai + 1
+            state.items = nil
+            goto continue
+        end
+
+        local type_folder = state.items[state.ii]
+        state.ii = state.ii + 1
+        processed = processed + 1
+
+        if not env.is_valid(type_folder) then goto continue end
+
+        local type_name = type_folder.Name or type_folder.name or ""
+        local toggle_id = maps.BASE_MAP[type_name]
+        if not toggle_id then goto continue end
+
+        local model = resolve_model(type_folder, type_name)
+        if not model or not env.is_valid(model) then goto continue end
+        if not esp_scan.find_main_part(model) and not esp_scan.is_part(model) then goto continue end
+
+        table.insert(state.out, esp_scan.make_entry(model, type_name, toggle_id))
+
+        ::continue::
+    end
+
+    return false
+end
+
+function M.complete_scan(state)
+    cache.base = state.out or {}
+    cache.stats.last_base_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
 function M.scan()
-    cache.base = {}
-    local bases = folders.from_key("bases")
-    if not env.is_valid(bases) then return end
-
-    local areas = env.safe_call(function() return bases:get_children() end) or {}
-    for _, area in ipairs(areas) do
-        if not env.is_valid(area) then goto continue_area end
-
-        local area_name = area.Name or area.name or ""
-        if maps.BASE_SKIP_AREAS[area_name] then goto continue_area end
-
-        local items = {}
-        if maps.BASE_MAP[area_name] then
-            items[1] = area
-        else
-            items = env.safe_call(function() return area:get_children() end) or {}
-        end
-
-        for _, type_folder in ipairs(items) do
-            if not env.is_valid(type_folder) then goto continue_item end
-
-            local type_name = type_folder.Name or type_folder.name or ""
-            local toggle_id = maps.BASE_MAP[type_name]
-            if not toggle_id then goto continue_item end
-
-            local model = resolve_model(type_folder, type_name)
-            if not model or not env.is_valid(model) then goto continue_item end
-            if not esp_scan.find_main_part(model) and not esp_scan.is_part(model) then goto continue_item end
-
-            table.insert(cache.base, esp_scan.make_entry(model, type_name, toggle_id))
-            ::continue_item::
-        end
-
-        ::continue_area::
-    end
-
-    cache.stats.last_base_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
+    local state = M.begin_scan()
+    while not M.step_scan(state, 9999) do end
+    M.complete_scan(state)
 end
 
 function M.update(_dt) end
@@ -6135,26 +7476,28 @@ function M.draw()
     if not settings.enabled(P) then return end
 
     local range = settings.num("april_base_range", 150)
+    local range_sq = range * range
     local draw_boxes = settings.enabled("april_base_boxes")
     local show_name = settings.bool("april_base_show_name", true)
     local show_dist = settings.bool("april_base_show_distance", false)
     local me = env.get_local_player()
+    local me_pos = me and me.position
     local text_size = esp_util.text_size()
 
     for _, entry in ipairs(cache.base) do
         if not settings.enabled(entry.toggle_id) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
 
-        local lx, ly, lz = esp_scan.label_position(entry)
+        local lx, ly, lz = esp_scan.entry_coords(entry)
         if not lx then goto continue end
 
-        local dist = 0
-        if me and me.position then
-            local dx = lx - me.position.x
-            local dy = ly - me.position.y
-            local dz = lz - me.position.z
-            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-            if dist > range then goto continue end
+        local dist_sq = 0
+        if me_pos then
+            local dx = lx - me_pos.x
+            local dy = ly - me_pos.y
+            local dz = lz - me_pos.z
+            dist_sq = dx * dx + dy * dy + dz * dz
+            if dist_sq > range_sq then goto continue end
         end
 
         local col = settings.color(entry.toggle_id, maps.toggle_color(maps.BASE_TOGGLES, entry.toggle_id))
@@ -6166,8 +7509,8 @@ function M.draw()
             local sx, sy, vis = esp_util.w2s(lx, ly, lz)
             if vis then
                 local label = show_name and (entry.name or "Base") or ""
-                if show_dist and me and me.position then
-                    local dist_text = string.format("%dm", math.floor(dist))
+                if show_dist and me_pos then
+                    local dist_text = string.format("%dm", math.floor(math.sqrt(dist_sq)))
                     if label ~= "" then
                         label = label .. " [" .. dist_text .. "]"
                     else
@@ -6200,6 +7543,9 @@ local npcs = April.require("game.npcs")
 
 local M = {}
 local P = "april_npc_enabled"
+local POS_REFRESH_BATCH = 8
+
+M._pos_idx = 0
 
 function M.register_menu()
     local G = menu_util.G
@@ -6217,11 +7563,31 @@ function M.register_menu()
     menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "NPC Show Name", true, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "NPC Show Distance", true, root)
     menu.add_slider_int(T, G.WORLD, "april_npc_range", "NPC Range", 50, 2000, 500, root)
+
+    menu_util.bind_master(P, {
+        "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode", "april_npc_health",
+        "april_npc_skeleton", "april_npc_offscreen", "april_npc_show_name", "april_npc_show_distance",
+        "april_npc_range",
+    })
+end
+
+function M.begin_scan()
+    return npcs.begin_scan()
+end
+
+function M.step_scan(state, batch)
+    return npcs.step_scan(state, batch)
+end
+
+function M.complete_scan(state)
+    cache.npcs = npcs.complete_scan(state)
+    cache.stats.last_npc_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
 function M.scan()
-    cache.npcs = npcs.scan()
-    cache.stats.last_npc_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
+    local state = M.begin_scan()
+    while not M.step_scan(state, 9999) do end
+    M.complete_scan(state)
 end
 
 local function kind_enabled(kind)
@@ -6235,43 +7601,211 @@ local function kind_color(kind)
     return settings.color("april_npc_soldiers", { 1, 0.3, 0.3, 1 })
 end
 
-function M.update(dt) end
+local function entity_addr(p)
+    if not p then return nil end
+    if p.character then
+        local addr = p.character.Address or p.character.address
+        if addr then return tostring(addr) end
+    end
+    return (p.name or "?") .. ":" .. tostring(p.user_id or 0)
+end
+
+local function instance_addr(entry)
+    if not entry or not entry.inst then return nil end
+    return tostring(entry.inst.Address or entry.inst.address or entry.inst)
+end
+
+local function refresh_npc_position(entry)
+    if entry.entity then
+        local p = entry.entity
+        if not p.is_alive then return false end
+        if p.head_position then
+            local pos = p.head_position
+            entry.lx = pos.x
+            entry.ly = pos.y
+            entry.lz = pos.z
+            return true
+        end
+        if p.position then
+            local pos = p.position
+            entry.lx = pos.x
+            entry.ly = pos.y
+            entry.lz = pos.z
+            return true
+        end
+        return false
+    end
+
+    if not entry or not env.is_valid(entry.inst) then return false end
+    local head = entry.head
+    if head and env.is_valid(head) then
+        local pos = head.Position or head.position
+        if pos and pos.x then
+            entry.lx = pos.x
+            entry.ly = pos.y
+            entry.lz = pos.z
+            return true
+        end
+    end
+    return false
+end
+
+local function collect_draw_targets()
+    local out = {}
+    local seen = {}
+
+    if entity and entity.get_players then
+        for _, p in ipairs(entity.get_players()) do
+            if p.is_local or not p.is_alive then goto continue end
+
+            local kind = npcs.kind(p.name)
+            if not kind then goto continue end
+            if not p.is_workspace_entity and p.user_id ~= 0 then goto continue end
+
+            local addr = entity_addr(p)
+            if addr and seen[addr] then goto continue end
+            if addr then seen[addr] = true end
+
+            out[#out + 1] = {
+                entity = p,
+                name = p.name,
+                kind = kind,
+            }
+
+            ::continue::
+        end
+    end
+
+    for _, entry in ipairs(cache.npcs or {}) do
+        local addr = instance_addr(entry)
+        if addr and seen[addr] then goto continue_scan end
+        if addr then seen[addr] = true end
+        out[#out + 1] = entry
+        ::continue_scan::
+    end
+
+    return out
+end
+
+local function screen_bounds(entry)
+    if entry.entity and entry.entity.get_bounds then
+        local b = entry.entity:get_bounds()
+        if b and b.valid and b.w > 0 and b.h > 0 then
+            return b
+        end
+    end
+
+    if entry.inst then
+        return esp_util.model_screen_bounds(entry.inst)
+    end
+
+    return nil
+end
+
+local function draw_npc_box(bounds, col, box_mode)
+    if not bounds or not bounds.valid then return end
+    local x, y, w, h = bounds.x, bounds.y, bounds.w, bounds.h
+    if box_mode == 1 then
+        draw_util.box_esp(x, y, w, h, col, 0)
+    else
+        draw_util.box_esp(x, y, w, h, col, 1)
+    end
+end
+
+local function draw_npc_health(bounds, entry)
+    if not settings.bool("april_npc_health", false) then return end
+    if not bounds or not bounds.valid or not draw or not draw.health_bar then return end
+
+    local hp, max_hp
+    if entry.entity then
+        hp = entry.entity.health
+        max_hp = entry.entity.max_health
+    elseif entry.inst then
+        local hum = env.safe_call(function()
+            if entry.inst.find_first_child_of_class then
+                return entry.inst:find_first_child_of_class("Humanoid")
+            end
+            return entry.inst:FindFirstChild("Humanoid")
+        end)
+        if hum then
+            hp = hum.Health or hum.health
+            max_hp = hum.MaxHealth or hum.max_health
+        end
+    end
+
+    if not hp or not max_hp or max_hp <= 0 then return end
+    draw.health_bar(bounds.x - 6, bounds.y, bounds.h, hp, max_hp)
+end
+
+function M.update(_dt)
+    if not settings.bool(P, false) then return end
+
+    local list = collect_draw_targets()
+    local n = #list
+    if n == 0 then return end
+
+    for _ = 1, POS_REFRESH_BATCH do
+        M._pos_idx = (M._pos_idx % n) + 1
+        refresh_npc_position(list[M._pos_idx])
+    end
+end
 
 function M.draw()
     if not settings.bool(P, false) then return end
 
     local range = settings.num("april_npc_range", 500)
+    local range_sq = range * range
     local box_mode = settings.num("april_npc_box_mode", 0)
     local text_size = esp_util.text_size()
     local me = env.get_local_player()
+    local me_pos = me and me.position
     local sw, sh = draw_util.screen_size()
     local cx, cy = sw * 0.5, sh * 0.5
 
-    for _, entry in ipairs(cache.npcs) do
+    for _, entry in ipairs(collect_draw_targets()) do
         if not kind_enabled(entry.kind) then goto continue end
-        if not env.is_valid(entry.inst) then goto continue end
+
+        if entry.entity then
+            if not entry.entity.is_alive then goto continue end
+        elseif not env.is_valid(entry.inst) then
+            goto continue
+        end
 
         local col = kind_color(entry.kind)
-        local head = entry.head
-        local pos = head and (head.Position or head.position)
-        if not pos or pos.x == nil then
-            pos = entry.inst.Position or entry.inst.position
-        end
-        if not pos or pos.x == nil then goto continue end
 
-        if me and me.position then
-            local dx = pos.x - me.position.x
-            local dy = pos.y - me.position.y
-            local dz = pos.z - me.position.z
-            if math.sqrt(dx * dx + dy * dy + dz * dz) > range then goto continue end
+        refresh_npc_position(entry)
+        local lx, ly, lz = entry.lx, entry.ly, entry.lz
+
+        if not lx and entry.entity and entry.entity.position then
+            local pos = entry.entity.position
+            lx, ly, lz = pos.x, pos.y, pos.z
+            entry.lx, entry.ly, entry.lz = lx, ly, lz
+        end
+        if not lx then goto continue end
+
+        local dist_sq = 0
+        if me_pos then
+            local dx = lx - me_pos.x
+            local dy = ly - me_pos.y
+            local dz = lz - me_pos.z
+            dist_sq = dx * dx + dy * dy + dz * dz
+            if dist_sq > range_sq then goto continue end
         end
 
-        local sx, sy, vis = esp_util.w2s(pos.x, pos.y, pos.z)
-        if not vis then
-            if settings.bool("april_npc_offscreen", false) then
-                esp_util.draw_offscreen_arrow(cx, cy, sx, sy, col, 12)
+        local bounds = screen_bounds(entry)
+        local label_y = ly
+
+        if bounds and bounds.valid then
+            label_y = bounds.y
+        else
+            local sx, sy, vis = esp_util.w2s(lx, ly, lz)
+            if not vis then
+                if settings.bool("april_npc_offscreen", false) then
+                    esp_util.draw_offscreen_arrow(cx, cy, sx, sy, col, 12)
+                end
+                goto continue
             end
-            goto continue
+            label_y = sy
         end
 
         local label = entry.name or "NPC"
@@ -6279,11 +7813,8 @@ function M.draw()
         local show_dist = settings.bool("april_npc_show_distance", true)
 
         if show_name or show_dist then
-            if show_dist and me and me.position then
-                local dx = pos.x - me.position.x
-                local dy = pos.y - me.position.y
-                local dz = pos.z - me.position.z
-                local dist_text = string.format("%dm", math.floor(math.sqrt(dx * dx + dy * dy + dz * dz)))
+            if show_dist and me_pos then
+                local dist_text = string.format("%dm", math.floor(math.sqrt(dist_sq)))
                 if show_name then
                     label = label .. " [" .. dist_text .. "]"
                 else
@@ -6294,23 +7825,38 @@ function M.draw()
             end
 
             if label then
-                draw_util.text_centered(sx, sy - 14, label, col, text_size)
+                local tx = bounds and bounds.valid and (bounds.x + bounds.w * 0.5) or lx
+                local ty = label_y - 14
+                if bounds and bounds.valid then
+                    draw_util.text_centered(tx, ty, label, col, text_size)
+                else
+                    local sx, sy, vis = esp_util.w2s(lx, ly, lz)
+                    if vis then
+                        draw_util.text_centered(sx, sy - 14, label, col, text_size)
+                    end
+                end
             end
         end
 
         if settings.bool("april_npc_skeleton", false) then
             local sk = settings.color("april_npc_skeleton", { 1, 1, 1, 0.85 })
-            esp_util.draw_model_skeleton(entry.inst, sk, 1.5)
+            if entry.entity and entry.entity.get_bones_screen then
+                esp_util.draw_player_skeleton(entry.entity, sk, 1.5)
+            elseif entry.inst then
+                esp_util.draw_model_skeleton(entry.inst, sk, 1.5)
+            end
         end
 
         if box_mode > 0 then
-            local pad = 18
-            if box_mode == 1 then
-                draw_util.box_esp(sx - pad, sy - pad * 2, pad * 2, pad * 3, col, 0)
-            else
-                draw_util.box_esp(sx - pad, sy - pad * 2, pad * 2, pad * 3, col, 1)
+            if not bounds or not bounds.valid then
+                bounds = screen_bounds(entry)
+            end
+            if bounds and bounds.valid then
+                draw_npc_box(bounds, col, box_mode)
             end
         end
+
+        draw_npc_health(bounds, entry)
 
         ::continue::
     end
@@ -6343,6 +7889,9 @@ function M.register_menu()
 
     menu.add_checkbox(T, G.MISC, "april_spider_enabled", "Spider Climb", false, { key = 0 })
     menu.add_slider_int(T, G.MISC, "april_spider_speed", "Wall Speed", 1, 50, 20, { parent = "april_spider_enabled" })
+
+    menu_util.bind_master("april_noclip_enabled", { "april_noclip_mode", "april_noclip_speed" })
+    menu_util.bind_master("april_spider_enabled", { "april_spider_speed" })
 end
 
 local function noclip_active()
@@ -6500,7 +8049,7 @@ function M.register_menu()
     menu.add_checkbox(T, G.RADAR, "april_wp_draw", "Draw Markers", false, menu_util.parent(P, { colorpicker = { 0.2, 1, 0.8, 1 } }))
     menu.add_slider_int(T, G.RADAR, "april_wp_slot", "Waypoint Active Slot", 1, 5, 1, root)
 
-    menu.add_button(T, G.RADAR, "april_wp_set", "Set Active Waypoint", function()
+    menu_util.button(T, G.RADAR, "april_wp_set", "Set Active Waypoint", function()
         local slot = settings.num("april_wp_slot", 1)
         local lp = env.get_local_player()
         if lp and lp.position then
@@ -6509,16 +8058,21 @@ function M.register_menu()
                 pos = { x = lp.position.x, y = lp.position.y, z = lp.position.z },
             }
         end
-    end)
+    end, P)
 
-    menu.add_button(T, G.RADAR, "april_wp_clear", "Clear Active Waypoint", function()
+    menu_util.button(T, G.RADAR, "april_wp_clear", "Clear Active Waypoint", function()
         local slot = settings.num("april_wp_slot", 1)
         cache.waypoints[slot] = nil
-    end)
+    end, P)
 
-    menu.add_button(T, G.RADAR, "april_wp_clear_all", "Clear All Waypoints", function()
+    menu_util.button(T, G.RADAR, "april_wp_clear_all", "Clear All Waypoints", function()
         cache.waypoints = {}
-    end)
+    end, P)
+
+    menu_util.bind_master(P, {
+        "april_wp_dist", "april_wp_beacon", "april_wp_beacon_h", "april_wp_draw",
+        "april_wp_slot", "april_wp_set", "april_wp_clear", "april_wp_clear_all",
+    })
 end
 
 function M.update(dt) end
@@ -6571,6 +8125,8 @@ local cache = April.require("core.cache")
 local env = April.require("core.env")
 local player_state = April.require("game.player_state")
 local menu_util = April.require("core.menu_util")
+local esp_scan = April.require("game.esp_scan")
+local theme = April.require("core.ui_theme")
 
 local M = {}
 local P = "april_map_enabled"
@@ -6582,6 +8138,7 @@ M._drag_mx = 0
 M._drag_my = 0
 M._old_off_x = 0
 M._old_off_y = 0
+M._hover_items = {}
 
 function M.register_menu()
     local G = menu_util.G
@@ -6596,38 +8153,58 @@ function M.register_menu()
     menu.add_slider_int(T, G.RADAR, "april_map_icon_scale", "Icon Scale", 1, 8, 3, root)
 
     menu.add_separator(T, G.RADAR)
-    menu.add_checkbox(T, G.RADAR, "april_map_show_players", "Players", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_show_players", "Players", true, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_npcs", "NPCs", false, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_loot", "Loot", false, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_world", "World Resources", false, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_base", "Base Parts", false, root)
-    menu.add_checkbox(T, G.RADAR, "april_map_show_waypoints", "Waypoints", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_show_waypoints", "Waypoints", true, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_local", "Local Player", true, root)
 
     menu.add_separator(T, G.RADAR)
-    menu.add_colorpicker(T, G.RADAR, "april_map_bg", "Background Color", { 0.05, 0.05, 0.08, 0.95 }, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_grid", "Grid Color", { 1, 1, 1, 0.04 }, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_player_col", "Player Color", { 1, 0.35, 0.35, 1 }, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_npc_col", "NPC Color", { 1, 0.6, 0.2, 1 }, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_loot_col", "Loot Color", { 1, 0.85, 0.2, 1 }, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_world_col", "World Color", { 0.4, 0.9, 0.5, 1 }, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_base_col", "Base Color", { 0.5, 0.5, 1, 1 }, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_wp_col", "Waypoint Color", { 0.2, 1, 0.8, 1 }, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_local", "Local Player Color", { 0.2, 0.8, 1, 1 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_bg", "Background Color", theme.MAP_BG, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_grid", "Grid Color", theme.MAP_GRID, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_player_col", "Player Color", theme.RED, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_npc_col", "NPC Color", theme.ORANGE, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_loot_col", "Loot Color", { 1, 0.85, 0.35, 1 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_world_col", "World Color", theme.GREEN, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_base_col", "Base Color", { 0.55, 0.55, 1, 1 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_wp_col", "Waypoint Color", theme.CYAN, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_local", "Local Player Color", theme.CYAN, root)
 
     menu.add_separator(T, G.RADAR)
     menu.add_checkbox(T, G.RADAR, "april_map_labels", "Show Labels", false, root)
     menu.add_checkbox(T, G.RADAR, "april_map_coords", "Show Coordinates", false, root)
-    menu.add_checkbox(T, G.RADAR, "april_map_compass", "Compass Overlay", false, menu_util.parent(P, { colorpicker = { 0.2, 0.8, 1, 0.8 } }))
-    menu.add_checkbox(T, G.RADAR, "april_map_tooltips", "Hover Tooltips", false, root)
-    menu.add_button(T, G.RADAR, "april_map_recenter", "Recenter Map", function()
+    menu.add_checkbox(T, G.RADAR, "april_map_compass", "Compass Overlay", false, menu_util.parent(P, { colorpicker = theme.CYAN }))
+    menu.add_checkbox(T, G.RADAR, "april_map_tooltips", "Hover Tooltips (Fullscreen)", false, root)
+
+    menu_util.button(T, G.RADAR, "april_map_recenter", "Recenter Map", function()
         M._offset_x = 0
         M._offset_y = 0
     end)
+
+    menu_util.bind_when(function()
+        return settings.enabled(P) and settings.num("april_map_mode", 0) == 1
+    end, { "april_map_tooltips", "april_map_recenter" }, { P, "april_map_mode" })
+
+    menu_util.bind_when(function()
+        return settings.enabled(P) and settings.num("april_map_mode", 0) == 0
+    end, { "april_map_size" }, { P, "april_map_mode" })
+
+    menu_util.bind_master(P, {
+        "april_map_mode", "april_map_zoom", "april_map_size", "april_map_icon_scale",
+        "april_map_show_players", "april_map_show_npcs", "april_map_show_loot",
+        "april_map_show_world", "april_map_show_base", "april_map_show_waypoints",
+        "april_map_show_local",
+        "april_map_bg", "april_map_grid", "april_map_player_col", "april_map_npc_col",
+        "april_map_loot_col", "april_map_world_col", "april_map_base_col",
+        "april_map_wp_col", "april_map_local",
+        "april_map_labels", "april_map_coords", "april_map_compass", "april_map_tooltips",
+    })
 end
 
 local function key_active()
-    if settings.bool(P, false) then return true end
+    if settings.enabled(P) then return true end
     if not menu or not menu.get_key then return false end
     local vk = menu.get_key(P)
     return vk and vk > 0 and input and input.is_key_down and input.is_key_down(vk)
@@ -6659,7 +8236,6 @@ local function get_look_vector()
     return nil
 end
 
--- Horizontal camera yaw (radians). Forward on XZ = (sin(yaw), cos(yaw)).
 local function get_camera_yaw()
     if camera and camera.get_angles then
         local ok, a = pcall(camera.get_angles)
@@ -6719,20 +8295,23 @@ local function map_layout(sw, sh, fullscreen)
     return x, y, size, size, x + size * 0.5, y + size * 0.5
 end
 
--- Camera-relative: forward = up on screen, right = right on screen.
+local function map_basis(yaw)
+    local fx, fz = math.sin(yaw), math.cos(yaw)
+    local rx, rz = -math.cos(yaw), math.sin(yaw)
+    return fx, fz, rx, rz
+end
+
 local function world_to_map(wx, wz, view_x, view_z, map_cx, map_cy, zoom, yaw)
     local wdx = wx - view_x
     local wdz = wz - view_z
-    local fx, fz = math.sin(yaw), math.cos(yaw)
-    local rx, rz = math.cos(yaw), -math.sin(yaw)
+    local fx, fz, rx, rz = map_basis(yaw)
     local local_fwd = wdx * fx + wdz * fz
     local local_right = wdx * rx + wdz * rz
     return map_cx + local_right * zoom, map_cy - local_fwd * zoom
 end
 
 local function world_dir_to_screen(dx, dz, yaw, radius)
-    local fx, fz = math.sin(yaw), math.cos(yaw)
-    local rx, rz = math.cos(yaw), -math.sin(yaw)
+    local fx, fz, rx, rz = map_basis(yaw)
     local local_fwd = dx * fx + dz * fz
     local local_right = dx * rx + dz * rz
     return local_right * radius, -local_fwd * radius
@@ -6747,22 +8326,49 @@ local function draw_dot(mx, my, scale, col)
 end
 
 local function entry_world_xz(entry)
-    if entry.x and entry.z then return entry.x, entry.z end
+    if not entry then return nil, nil end
+
+    local lx, ly, lz = esp_scan.entry_coords(entry)
+    if lx and lz then return lx, lz end
+
+    if entry.lx and entry.lz then return entry.lx, entry.lz end
+
+    if entry.pos then
+        return entry.pos.x, entry.pos.z
+    end
+
     local inst = entry.inst
-    if inst then
+    if inst and env.is_valid(inst) then
         local pos = inst.Position or inst.position
         if pos and pos.x then return pos.x, pos.z end
     end
+
     return nil, nil
 end
 
-local function draw_map_item(wx, wz, col, label, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h)
+local function register_hover(mx, my, scale, label, extra)
+    if not label or label == "" then return end
+    M._hover_items[#M._hover_items + 1] = {
+        mx = mx,
+        my = my,
+        r = scale + 8,
+        label = label,
+        extra = extra,
+    }
+end
+
+local function draw_map_item(wx, wz, col, label, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h, track_hover, hover_extra)
     if not wx or not wz then return end
     local mx, my = world_to_map(wx, wz, view_x, view_z, map_cx, map_cy, zoom, yaw)
     if mx < x - 8 or mx > x + w + 8 or my < y - 8 or my > y + h + 8 then return end
     draw_dot(mx, my, scale, col)
     if settings.bool("april_map_labels", false) and label and label ~= "" then
         draw_util.text(mx + scale + 2, my - 6, label, col, 10)
+    end
+    if track_hover then
+        register_hover(mx, my, scale, label, hover_extra)
+        M._hover_items[#M._hover_items].wx = wx
+        M._hover_items[#M._hover_items].wz = wz
     end
 end
 
@@ -6776,12 +8382,12 @@ local function draw_grid(x, y, w, h, grid, map_cx, map_cy, zoom)
     end
 end
 
-local function draw_compass_rose(cx, cy, radius, yaw, cmp_col, inside_x, inside_y, inside_w, inside_h)
+local function draw_compass_rose(cx, cy, radius, yaw, cmp_col)
     if draw and draw.circle_filled then
-        draw.circle_filled(cx, cy, radius, { 0.05, 0.05, 0.08, 0.75 }, 24)
+        draw.circle_filled(cx, cy, radius, theme.alpha(theme.PANEL_DEEP, 0.82), 24)
     end
     if draw and draw.circle then
-        draw.circle(cx, cy, radius, cmp_col, 24, 1.5)
+        draw.circle(cx, cy, radius, theme.alpha(theme.CYAN, 0.55), 24, 1.5)
     end
 
     local function marker(lbl, wdx, wdz, col)
@@ -6789,14 +8395,14 @@ local function draw_compass_rose(cx, cy, radius, yaw, cmp_col, inside_x, inside_
         draw_util.text(cx + sx - 4, cy + sy - 6, lbl, col, 11)
     end
 
-    marker("N", 0, -1, { 1, 0.2, 0.2, 1 })
+    marker("N", 0, -1, theme.RED)
     marker("S", 0, 1, cmp_col)
     marker("E", 1, 0, cmp_col)
     marker("W", -1, 0, cmp_col)
 
     if draw and draw.line then
         local nx, ny = world_dir_to_screen(0, -1, yaw, radius - 4)
-        draw.line(cx, cy, cx + nx, cy + ny, { 1, 0.2, 0.2, 0.9 }, 2)
+        draw.line(cx, cy, cx + nx, cy + ny, theme.alpha(theme.CYAN, 0.9), 2)
     end
 end
 
@@ -6819,8 +8425,7 @@ local function handle_fullscreen_pan(zoom, mx, my, yaw)
         elseif zoom > 0 then
             local dx = (mx - M._drag_mx) / zoom
             local dy = (my - M._drag_my) / zoom
-            local fx, fz = math.sin(yaw), math.cos(yaw)
-            local rx, rz = math.cos(yaw), -math.sin(yaw)
+            local fx, fz, rx, rz = map_basis(yaw)
             M._offset_x = M._old_off_x - (dx * rx + dy * rz)
             M._offset_y = M._old_off_y - (-dx * fx + dy * fz)
         end
@@ -6829,19 +8434,51 @@ local function handle_fullscreen_pan(zoom, mx, my, yaw)
     end
 end
 
-function M.update(dt) end
+local function draw_hover_tooltip(mx, my, me)
+    local best = nil
+    local best_d = 9999
+
+    for _, item in ipairs(M._hover_items) do
+        local dx = mx - item.mx
+        local dy = my - item.my
+        local d = math.sqrt(dx * dx + dy * dy)
+        if d <= item.r and d < best_d then
+            best = item
+            best_d = d
+        end
+    end
+
+    if not best then return end
+
+    local lines = { best.label or "?" }
+    if best.extra then
+        lines[#lines + 1] = best.extra
+    elseif me and me.position and best.wx and best.wz then
+        local dx = best.wx - me.position.x
+        local dz = best.wz - me.position.z
+        lines[#lines + 1] = string.format("%.0fm away", math.sqrt(dx * dx + dz * dz))
+    end
+
+    theme.draw_tooltip_box(mx + 14, my + 14, lines)
+end
+
+function M.update(_dt) end
 
 function M.draw()
     if not key_active() then return end
     if not draw then return end
+
+    M._hover_items = {}
 
     local sw, sh = draw_util.screen_size()
     local fullscreen = settings.num("april_map_mode", 0) == 1
     local x, y, w, h, map_cx, map_cy = map_layout(sw, sh, fullscreen)
     local zoom = settings.num("april_map_zoom", 1.0)
     local scale = settings.num("april_map_icon_scale", 3)
-    local bg = settings.color("april_map_bg", { 0.05, 0.05, 0.08, 0.95 })
-    local grid = settings.color("april_map_grid", { 1, 1, 1, 0.04 })
+    local bg = settings.color("april_map_bg", theme.MAP_BG)
+    local grid = settings.color("april_map_grid", theme.MAP_GRID)
+    local track_hover = fullscreen and settings.bool("april_map_tooltips", false)
+    local me = env.get_local_player()
 
     local cam_x, cam_y, cam_z, body_x, body_y, body_z = get_view_origin()
     local yaw = get_camera_yaw()
@@ -6860,31 +8497,21 @@ function M.draw()
     local view_z = cam_z + M._offset_y
 
     if draw.rect_filled then
-        draw.rect_filled(x, y, w, h, bg, fullscreen and 0 or 1)
+        draw.rect_filled(x, y, w, h, bg, fullscreen and 0 or theme.ROUND)
         if draw.rect then
-            draw.rect(x, y, w, h, { 1, 1, 1, 0.15 }, fullscreen and 0 or 1, 1)
+            draw.rect(x, y, w, h, theme.BORDER_CYAN, fullscreen and 0 or theme.ROUND, 1)
         end
     end
 
     draw_grid(x, y, w, h, grid, map_cx, map_cy, zoom)
 
-    if settings.bool("april_map_show_players", false) and entity and entity.get_players then
-        local col = settings.color("april_map_player_col", { 1, 0.35, 0.35, 1 })
-        for _, p in ipairs(entity.get_players()) do
-            if player_state.is_combat_target(p) and p.position then
-                draw_map_item(p.position.x, p.position.z, col, p.name, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h)
-            end
-        end
-    end
-
-    if settings.bool("april_map_show_npcs", false) then
-        local col = settings.color("april_map_npc_col", { 1, 0.6, 0.2, 1 })
-        for _, entry in ipairs(cache.npcs) do
-            local inst = entry.inst
-            if inst and env.is_valid(inst) then
-                local pos = inst.Position or inst.position
-                if pos then
-                    draw_map_item(pos.x, pos.z, col, entry.name, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h)
+    if settings.bool("april_map_show_world", false) then
+        local col = settings.color("april_map_world_col", { 0.4, 0.9, 0.5, 1 })
+        for _, item in ipairs(cache.world) do
+            if env.is_valid(item.inst) then
+                local wx, wz = entry_world_xz(item)
+                if wx then
+                    draw_map_item(wx, wz, col, item.name, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h, track_hover, item.name)
                 end
             end
         end
@@ -6893,19 +8520,11 @@ function M.draw()
     if settings.bool("april_map_show_loot", false) then
         local col = settings.color("april_map_loot_col", { 1, 0.85, 0.2, 1 })
         for _, item in ipairs(cache.loot) do
-            local wx, wz = entry_world_xz(item)
-            if wx then
-                draw_map_item(wx, wz, col, item.name, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h)
-            end
-        end
-    end
-
-    if settings.bool("april_map_show_world", false) then
-        local col = settings.color("april_map_world_col", { 0.4, 0.9, 0.5, 1 })
-        for _, item in ipairs(cache.world) do
-            local wx, wz = entry_world_xz(item)
-            if wx then
-                draw_map_item(wx, wz, col, item.name, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h)
+            if env.is_valid(item.inst) then
+                local wx, wz = entry_world_xz(item)
+                if wx then
+                    draw_map_item(wx, wz, col, item.name, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h, track_hover, item.name)
+                end
             end
         end
     end
@@ -6913,9 +8532,24 @@ function M.draw()
     if settings.bool("april_map_show_base", false) then
         local col = settings.color("april_map_base_col", { 0.5, 0.5, 1, 1 })
         for _, item in ipairs(cache.base) do
-            local wx, wz = entry_world_xz(item)
-            if wx then
-                draw_map_item(wx, wz, col, item.label or item.name, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h)
+            if env.is_valid(item.inst) then
+                local wx, wz = entry_world_xz(item)
+                if wx then
+                    draw_map_item(wx, wz, col, item.name, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h, track_hover, item.name)
+                end
+            end
+        end
+    end
+
+    if settings.bool("april_map_show_npcs", false) then
+        local col = settings.color("april_map_npc_col", { 1, 0.6, 0.2, 1 })
+        for _, entry in ipairs(cache.npcs) do
+            if env.is_valid(entry.inst) then
+                local wx, wz = entry_world_xz(entry)
+                if not wx and entry.lx and entry.lz then wx, wz = entry.lx, entry.lz end
+                if wx then
+                    draw_map_item(wx, wz, col, entry.name, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h, track_hover, entry.name)
+                end
             end
         end
     end
@@ -6924,7 +8558,19 @@ function M.draw()
         local col = settings.color("april_map_wp_col", { 0.2, 1, 0.8, 1 })
         for i, wp in pairs(cache.waypoints) do
             if wp and wp.pos then
-                draw_map_item(wp.pos.x, wp.pos.z, col, wp.name or ("WP" .. i), view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h)
+                local wx, wz = wp.pos.x, wp.pos.z
+                draw_map_item(wx, wz, col, wp.name or ("WP" .. i), view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h, track_hover, wp.name)
+            end
+        end
+    end
+
+    if settings.bool("april_map_show_players", false) and entity and entity.get_players then
+        local col = settings.color("april_map_player_col", { 1, 0.35, 0.35, 1 })
+        for _, p in ipairs(entity.get_players()) do
+            if player_state.is_combat_target(p) and p.position then
+                local wx, wz = p.position.x, p.position.z
+                local extra = p.display_name and p.display_name ~= "" and p.display_name or p.name
+                draw_map_item(wx, wz, col, p.name, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, x, y, w, h, track_hover, extra)
             end
         end
     end
@@ -6935,7 +8581,7 @@ function M.draw()
     end
 
     if show_local then
-        local col = settings.color("april_map_local", { 0.2, 0.8, 1, 1 })
+        local col = settings.color("april_map_local", theme.CYAN)
         local dot_x, dot_y = map_cx, map_cy
 
         if body_x and body_z then
@@ -6956,24 +8602,27 @@ function M.draw()
     end
 
     if settings.bool("april_map_compass", false) then
-        local cmp_col = settings.color("april_map_compass", { 0.2, 0.8, 1, 0.8 })
+        local cmp_col = settings.color("april_map_compass", theme.CYAN)
         if fullscreen then
             draw_compass_rose(sw - 60, sh - 60, 42, yaw, cmp_col)
         else
-            draw_compass_rose(map_cx, map_cy, math.min(w, h) * 0.42, yaw, cmp_col, x, y, w, h)
+            draw_compass_rose(map_cx, map_cy, math.min(w, h) * 0.42, yaw, cmp_col)
         end
     end
 
     if settings.bool("april_map_coords", false) then
         local coord_y = fullscreen and (sh - 22) or (y + h + 4)
-        draw_util.text(x + 6, coord_y, string.format("Cam: %.0f, %.0f, %.0f", cam_x, cam_y, cam_z), { 1, 1, 1, 0.8 }, 11)
+        draw_util.text(x + 6, coord_y, string.format("Cam: %.0f, %.0f, %.0f", cam_x, cam_y, cam_z), theme.TEXT, 11)
         if body_x then
-            draw_util.text(x + 6, coord_y + 13, string.format("Body: %.0f, %.0f, %.0f", body_x, body_y or 0, body_z or 0), { 0.7, 0.7, 0.7, 0.75 }, 10)
+            draw_util.text(x + 6, coord_y + 13, string.format("Body: %.0f, %.0f, %.0f", body_x, body_y or 0, body_z or 0), theme.TEXT_MUTED, 10)
         end
     end
 
-    if fullscreen then
-        draw_util.text(10, sh - 18, "Drag: LMB pan  |  Recenter: MMB  |  Forward = up", { 1, 1, 1, 0.35 }, 10)
+    if track_hover then
+        draw_hover_tooltip(mx, my, me)
+        draw_util.text(10, sh - 18, "Drag: LMB pan  |  Recenter: MMB  |  Hover icons for info", theme.TEXT_DIM, 10)
+    elseif fullscreen then
+        draw_util.text(10, sh - 18, "Drag: LMB pan  |  Recenter: MMB  |  Forward = up", theme.TEXT_DIM, 10)
     end
 end
 
@@ -6992,20 +8641,47 @@ local env = April.require("core.env")
 local esp_util = April.require("core.esp_util")
 local image_cache = April.require("core.image_cache")
 local asset_urls = April.require("game.asset_urls")
+local theme = April.require("core.ui_theme")
 
 local M = {}
 local P = "april_mod_checker_enabled"
 local MOD_ICON_KEY = "mod_warning"
-local ICON_SIZE = 28
 local HEAD_OFFSET = 3.5
 
 local seen = {}
 local active = {}
 local last_scan = 0
 local SCAN_MS = 2500
+M._session = nil
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function session_id()
+    if not game then return "none" end
+    local pid = game.place_id or 0
+    local ws = game.workspace
+    local ws_addr = (ws and (ws.Address or ws.address)) or 0
+    return pid .. ":" .. ws_addr
+end
+
+function M.reset_state()
+    seen = {}
+    active = {}
+    last_scan = 0
+end
+
+function M.tick_session()
+    local sid = session_id()
+    if M._session == nil then
+        M._session = sid
+        return
+    end
+    if sid ~= M._session then
+        M._session = sid
+        M.reset_state()
+    end
 end
 
 local function player_label(p)
@@ -7024,18 +8700,6 @@ local function format_duration(ms)
     local hr = math.floor(min / 60)
     min = min % 60
     return string.format("%dh %02dm", hr, min)
-end
-
-local function role_accent(role)
-    if not role then return { 1, 0.75, 0.2, 1 } end
-    local r = role:lower()
-    if r:find("founder") or r:find("developer") then
-        return { 0.95, 0.45, 1, 1 }
-    end
-    if r:find("moderator") then
-        return { 1, 0.35, 0.35, 1 }
-    end
-    return { 0.35, 0.75, 1, 1 }
 end
 
 local function head_world_pos(p)
@@ -7059,6 +8723,7 @@ function M.register_menu()
     menu_util.section(T, G.MISC, "Mod Checker")
     menu.add_checkbox(T, G.MISC, P, "Mod Checker", false, { key = 0 })
     menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Mod Scan Interval (ms)", 1000, 10000, 2500, { parent = P })
+    menu_util.bind_master(P, { "april_mod_checker_interval" })
 end
 
 function M.init()
@@ -7104,11 +8769,46 @@ function M.check_player(p)
     notify.warning(string.format("MOD: %s (%s) — %s", label, p.name or "?", role), 6000)
 end
 
+function M.reconcile_active()
+    if not entity or not entity.get_players then
+        M.reset_state()
+        return
+    end
+
+    local players = entity.get_players()
+    if #players == 0 then
+        M.reset_state()
+        return
+    end
+
+    local present = {}
+    for _, p in ipairs(players) do
+        if p.is_local then goto continue end
+        local uid = p.user_id
+        if not uid or uid == 0 then goto continue end
+
+        local role = mod_ids.role_for(uid)
+        if role then
+            present[uid] = true
+            M.track_player(p, role)
+        end
+
+        ::continue::
+    end
+
+    for uid in pairs(active) do
+        if not present[uid] then
+            active[uid] = nil
+            seen[uid] = nil
+        end
+    end
+end
+
 function M.scan_all()
     if not settings.enabled(P) then return end
-    if not entity or not entity.get_players then return end
+    M.reconcile_active()
 
-    for _, p in ipairs(entity.get_players()) do
+    for _, p in ipairs(entity and entity.get_players and entity.get_players() or {}) do
         M.check_player(p)
     end
 end
@@ -7127,9 +8827,10 @@ function M.on_player_removed(p)
 end
 
 function M.update(_dt)
+    M.tick_session()
+
     if not settings.enabled(P) then
-        seen = {}
-        active = {}
+        M.reset_state()
         return
     end
 
@@ -7144,9 +8845,6 @@ end
 function M.draw_mod_markers()
     if not settings.enabled(P) then return end
     if not entity or not entity.get_players then return end
-    if not draw or not draw.text then return end
-
-    image_cache.begin_load(MOD_ICON_KEY)
 
     for _, p in ipairs(entity.get_players()) do
         if p.is_local then goto continue end
@@ -7161,15 +8859,7 @@ function M.draw_mod_markers()
         local sx, sy, vis = esp_util.w2s(wx, wy, wz)
         if not vis then goto continue end
 
-        local label = "[MOD]"
-        local text_w = #label * 7
-        local gap = 4
-        local total_w = ICON_SIZE + gap + text_w
-        local x = math.floor(sx - total_w * 0.5)
-        local y = math.floor(sy - ICON_SIZE - 6)
-
-        image_cache.draw_fit(MOD_ICON_KEY, x, y, ICON_SIZE, ICON_SIZE)
-        draw.text(x + ICON_SIZE + gap, y + 7, label, { 1, 0.72, 0.18, 1 }, 12)
+        theme.draw_mod_marker(sx, sy, image_cache, MOD_ICON_KEY)
 
         ::continue::
     end
@@ -7186,9 +8876,12 @@ function M.draw()
     local now = tick_ms()
 
     for uid, entry in pairs(active) do
+        local still_here = false
         local dist = nil
+
         for _, p in ipairs(entity and entity.get_players and entity.get_players() or {}) do
             if p.user_id == uid then
+                still_here = true
                 if me and me.position and p.position then
                     local dx = p.position.x - me.position.x
                     local dy = p.position.y - me.position.y
@@ -7198,11 +8891,20 @@ function M.draw()
                 break
             end
         end
+
+        if not still_here then
+            active[uid] = nil
+            seen[uid] = nil
+            goto continue
+        end
+
         rows[#rows + 1] = {
             entry = entry,
             dist = dist,
             duration = format_duration(now - (entry.first_seen or now)),
         }
+
+        ::continue::
     end
 
     if #rows == 0 then return end
@@ -7211,57 +8913,34 @@ function M.draw()
         return (a.entry.first_seen or 0) < (b.entry.first_seen or 0)
     end)
 
-    local sw, sh = draw_util.screen_size()
-    local pad = 12
-    local row_h = 54
-    local title_h = 28
-    local width = 250
-    local x = sw - width - 18
-    local count = math.min(#rows, 4)
-    local height = title_h + count * row_h + pad
+    if not draw.window then return end
 
-    if draw.rect_filled then
-        draw.rect_filled(x, 72, width, height, { 0.04, 0.05, 0.08, 0.88 })
-    end
-    if draw.rect then
-        draw.rect(x, 72, width, height, { 1, 1, 1, 0.08 }, 0, 1)
-    end
-    if draw.line then
-        draw.line(x, 72, x, 72 + height, { 1, 0.45, 0.35, 0.95 }, 3)
-    end
+    local sw, _ = draw_util.screen_size()
+    local panel_w = 260
+    local x = sw - panel_w - 16
+    local items = {}
 
-    draw.text(x + pad, 78, "Staff In Lobby", { 0.92, 0.94, 0.98, 1 }, 13)
-
-    local y = 72 + title_h
-    for i = 1, count do
+    for i = 1, #rows do
         local row = rows[i]
         local entry = row.entry
-        local accent = role_accent(entry.role)
-
-        if draw.line then
-            draw.line(x + pad, y, x + width - pad, y, { 1, 1, 1, 0.06 }, 1)
-        end
-
-        if draw.circle_filled then
-            draw.circle_filled(x + pad + 4, y + 16, 4, accent, 12)
-        end
-
-        local name = entry.label
-        if #name > 18 then name = name:sub(1, 16) .. ".." end
-        draw.text(x + pad + 14, y + 4, name, { 1, 1, 1, 0.96 }, 13)
-
-        local role_text = entry.role or "Staff"
-        if #role_text > 22 then role_text = role_text:sub(1, 20) .. ".." end
-        draw.text(x + pad + 14, y + 20, role_text, { accent[1], accent[2], accent[3], 0.85 }, 11)
-
         local meta = row.duration
         if row.dist then
             meta = meta .. "  ·  " .. row.dist .. "m"
         end
-        draw.text(x + pad + 14, y + 34, meta, { 0.65, 0.68, 0.74, 0.9 }, 11)
 
-        y = y + row_h
+        local name = entry.label or entry.username or "Unknown"
+        if #name > 18 then name = name:sub(1, 16) .. ".." end
+
+        local role = entry.role or "Staff"
+        items[#items + 1] = { name .. "  ·  " .. role, meta }
     end
+
+    local title = "Staff In Lobby"
+    if #items > 1 then
+        title = title .. " (" .. #items .. ")"
+    end
+
+    draw.window(x, 72, "april_staff_lobby", title, items)
 end
 
 return M
@@ -7401,6 +9080,8 @@ function M.register_menu()
             M.schedule_apply()
         end
     end)
+
+    menu_util.bind_master("april_mod_checker_enabled", { P })
 end
 
 function M.schedule_apply()
@@ -7476,6 +9157,7 @@ April._mods["features.utility.config"] = (function()
 local settings = April.require("core.settings")
 local menu_util = April.require("core.menu_util")
 local store = April.require("core.config_store")
+local notify = April.require("core.notify")
 
 local M = {}
 
@@ -7486,6 +9168,10 @@ local function active_slot()
     return slot
 end
 
+local function profile_label()
+    return settings.str("april_cfg_profile_name", "Default")
+end
+
 function M.get_config_path(name)
     return store.get_config_path(name)
 end
@@ -7494,8 +9180,10 @@ function M.save_slot(slot)
     slot = slot or active_slot()
     if store.save_slot(slot) then
         store.save_meta()
+        notify.success(string.format('Saved "%s" → Slot %d', profile_label(), slot), 3500)
         return true
     end
+    notify.error("Failed to save config", 3500)
     return false
 end
 
@@ -7503,8 +9191,10 @@ function M.load_slot(slot)
     slot = slot or active_slot()
     if store.load_slot(slot) then
         store.save_meta()
+        notify.success(string.format('Loaded "%s" from Slot %d', profile_label(), slot), 3500)
         return true
     end
+    notify.error(string.format("Slot %d is empty or unreadable", slot), 3500)
     return false
 end
 
@@ -7512,8 +9202,10 @@ function M.delete_slot(slot)
     slot = slot or active_slot()
     if store.delete_slot(slot) then
         store.save_meta()
+        notify.warning(string.format("Deleted Slot %d", slot), 3500)
         return true
     end
+    notify.error(string.format("Could not delete Slot %d", slot), 3500)
     return false
 end
 
@@ -7526,40 +9218,55 @@ function M.register_menu()
     local T, _ = menu_util.group(G.CONFIG)
 
     menu_util.section(T, G.CONFIG, "Config Profiles")
-    menu.add_slider_int(T, G.CONFIG, "april_cfg_slot", "Config Active Slot", store.SLOT_MIN, store.SLOT_MAX, 1)
-    menu.add_button(T, G.CONFIG, "april_cfg_save", "Save Active Config", function()
+
+    menu_util.input(T, G.CONFIG, "april_cfg_profile_name", "Profile Name", "Default")
+
+    menu.add_slider_int(T, G.CONFIG, "april_cfg_slot", "Active Slot (1–5)", store.SLOT_MIN, store.SLOT_MAX, 1)
+
+    menu_util.button(T, G.CONFIG, "april_cfg_save", "Save to Active Slot", function()
         M.save_slot(active_slot())
     end)
-    menu.add_button(T, G.CONFIG, "april_cfg_load", "Load Active Config", function()
+    menu_util.button(T, G.CONFIG, "april_cfg_load", "Load Active Slot", function()
         M.load_slot(active_slot())
     end)
-    menu.add_button(T, G.CONFIG, "april_cfg_delete", "Delete Active Config", function()
+    menu_util.button(T, G.CONFIG, "april_cfg_delete", "Delete Active Slot", function()
         M.delete_slot(active_slot())
     end)
 
     menu.add_separator(T, G.CONFIG)
-    menu.add_checkbox(T, G.CONFIG, "april_cfg_autoload", "Autoload Config on Start", false)
+    menu_util.label(T, G.CONFIG, "Autoload on script start")
+
+    menu.add_checkbox(T, G.CONFIG, "april_cfg_autoload", "Enable Autoload", false)
+    menu_util.input(T, G.CONFIG, "april_cfg_autoload_profile", "Autoload Profile Name", "")
     menu.add_slider_int(
-        T, G.CONFIG, "april_cfg_autoload_slot", "Autoload Slot",
+        T, G.CONFIG, "april_cfg_autoload_slot", "Autoload Slot (fallback)",
         store.SLOT_MIN, store.SLOT_MAX, 1,
         menu_util.parent("april_cfg_autoload")
     )
 
-    settings.on_change("april_cfg_autoload", function() store.save_meta() end)
-    settings.on_change("april_cfg_autoload_slot", function() store.save_meta() end)
-    settings.on_change("april_cfg_slot", function() store.save_meta() end)
-
     menu.add_separator(T, G.CONFIG)
+    menu_util.label(T, G.CONFIG, "Display & modules")
+
     menu.add_slider_int(T, G.CONFIG, "april_esp_text_size", "ESP Text Size", 8, 24, 13)
     menu.add_button(T, G.CONFIG, "april_reload_modules", "Reload Game Modules", function()
         April.require("game.bootstrap").force_reload()
+        notify.info("Reloading game modules…", 2500)
     end)
+
+    settings.on_change("april_cfg_autoload", function()
+        store.save_meta()
+    end)
+    settings.on_change("april_cfg_autoload_slot", function() store.save_meta() end)
+    settings.on_change("april_cfg_autoload_profile", function() store.save_meta() end)
+    settings.on_change("april_cfg_slot", function() store.save_meta() end)
+    settings.on_change("april_cfg_profile_name", function() store.save_meta() end)
+
+    menu_util.bind_master("april_cfg_autoload", { "april_cfg_autoload_profile", "april_cfg_autoload_slot" })
 end
 
-function M.update(dt) end
+function M.update(_dt) end
 
-function M.draw()
-end
+function M.draw() end
 
 return M
 
@@ -7583,8 +9290,6 @@ M.FEATURE_ORDER = {
     "features.visuals.player_esp",
     "features.visuals.target_overlay",
     "features.visuals.crosshair",
-    "features.visuals.feedback",
-    "features.visuals.bullet_tracers",
     "features.world.world_esp",
     "features.world.loot_esp",
     "features.world.npc_esp",
@@ -7631,10 +9336,13 @@ end
 
 function M.setup_scans()
     local settings = April.require("core.settings")
+    local iscan = April.require("core.incremental_scan")
     local world_esp = April.require("features.world.world_esp")
     local loot_esp = April.require("features.world.loot_esp")
     local base_esp = April.require("features.world.base_esp")
     local npc_esp = April.require("features.world.npc_esp")
+
+    iscan.configure({ budget_ms = 5, items_per_step = 14 })
 
     local function map_on(layer)
         return function()
@@ -7645,42 +9353,34 @@ function M.setup_scans()
 
     local function need_npcs()
         if settings.enabled("april_npc_enabled") then return true end
-        if map_on("npcs")() then return true end
-    if settings.enabled("april_bullet_tracer_enabled")
-        or settings.enabled("april_hitmarker_enabled")
-        or settings.enabled("april_hit_notify_enabled") then
-            return true
-        end
-        return false
+        return map_on("npcs")()
     end
 
-    scheduler.register("world", 2000, function() world_esp.scan_static() end, function()
+    iscan.register("world", 3500, function()
         return settings.enabled("april_world_enabled") or map_on("world")()
-    end)
+    end, world_esp.begin_static_scan, world_esp.step_static_scan, world_esp.complete_static_scan, 0)
 
-    scheduler.register("world_dynamic", 500, function() world_esp.scan_dynamic() end, function()
+    iscan.register("world_dynamic", 900, function()
         if not settings.enabled("april_world_enabled") then return false end
         return settings.enabled("april_deer")
             or settings.enabled("april_boar")
             or settings.enabled("april_wolf")
-    end)
+    end, world_esp.begin_dynamic_scan, world_esp.step_dynamic_scan, world_esp.complete_dynamic_scan, 450)
 
-    scheduler.register("loot", 2000, function() loot_esp.scan_static() end, function()
+    iscan.register("loot", 4000, function()
         return settings.enabled("april_loot_enabled") or map_on("loot")()
-    end)
+    end, loot_esp.begin_static_scan, loot_esp.step_static_scan, loot_esp.complete_static_scan, 900)
 
-    scheduler.register("loot_drops", 450, function() loot_esp.scan_drops() end, function()
+    iscan.register("loot_drops", 700, function()
         if not settings.enabled("april_loot_enabled") then return false end
         return settings.enabled("april_dropped_item")
-    end)
+    end, loot_esp.begin_drops_scan, loot_esp.step_drops_scan, loot_esp.complete_drops_scan, 1350)
 
-    scheduler.register("base", 1500, function() base_esp.scan() end, function()
+    iscan.register("base", 4500, function()
         return settings.enabled("april_base_enabled") or map_on("base")()
-    end)
+    end, base_esp.begin_scan, base_esp.step_scan, base_esp.complete_scan, 1800)
 
-    scheduler.register("npcs", 600, function() npc_esp.scan() end, need_npcs)
-
-    scheduler.start_all()
+    iscan.register("npcs", 1400, need_npcs, npc_esp.begin_scan, npc_esp.step_scan, npc_esp.complete_scan, 2250)
 end
 
 function M.update(dt)
@@ -7690,6 +9390,7 @@ function M.update(dt)
     weapons.tick()
 
     scheduler.tick()
+    April.require("core.incremental_scan").tick()
     for i, feat in ipairs(M.features) do
         if feat.update then
             debug.guard("update:" .. i, feat.update, dt)

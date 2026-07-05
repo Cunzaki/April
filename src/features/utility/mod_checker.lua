@@ -7,20 +7,47 @@ local env = April.require("core.env")
 local esp_util = April.require("core.esp_util")
 local image_cache = April.require("core.image_cache")
 local asset_urls = April.require("game.asset_urls")
+local theme = April.require("core.ui_theme")
 
 local M = {}
 local P = "april_mod_checker_enabled"
 local MOD_ICON_KEY = "mod_warning"
-local ICON_SIZE = 28
 local HEAD_OFFSET = 3.5
 
 local seen = {}
 local active = {}
 local last_scan = 0
 local SCAN_MS = 2500
+M._session = nil
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function session_id()
+    if not game then return "none" end
+    local pid = game.place_id or 0
+    local ws = game.workspace
+    local ws_addr = (ws and (ws.Address or ws.address)) or 0
+    return pid .. ":" .. ws_addr
+end
+
+function M.reset_state()
+    seen = {}
+    active = {}
+    last_scan = 0
+end
+
+function M.tick_session()
+    local sid = session_id()
+    if M._session == nil then
+        M._session = sid
+        return
+    end
+    if sid ~= M._session then
+        M._session = sid
+        M.reset_state()
+    end
 end
 
 local function player_label(p)
@@ -39,18 +66,6 @@ local function format_duration(ms)
     local hr = math.floor(min / 60)
     min = min % 60
     return string.format("%dh %02dm", hr, min)
-end
-
-local function role_accent(role)
-    if not role then return { 1, 0.75, 0.2, 1 } end
-    local r = role:lower()
-    if r:find("founder") or r:find("developer") then
-        return { 0.95, 0.45, 1, 1 }
-    end
-    if r:find("moderator") then
-        return { 1, 0.35, 0.35, 1 }
-    end
-    return { 0.35, 0.75, 1, 1 }
 end
 
 local function head_world_pos(p)
@@ -74,6 +89,7 @@ function M.register_menu()
     menu_util.section(T, G.MISC, "Mod Checker")
     menu.add_checkbox(T, G.MISC, P, "Mod Checker", false, { key = 0 })
     menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Mod Scan Interval (ms)", 1000, 10000, 2500, { parent = P })
+    menu_util.bind_master(P, { "april_mod_checker_interval" })
 end
 
 function M.init()
@@ -119,11 +135,46 @@ function M.check_player(p)
     notify.warning(string.format("MOD: %s (%s) — %s", label, p.name or "?", role), 6000)
 end
 
+function M.reconcile_active()
+    if not entity or not entity.get_players then
+        M.reset_state()
+        return
+    end
+
+    local players = entity.get_players()
+    if #players == 0 then
+        M.reset_state()
+        return
+    end
+
+    local present = {}
+    for _, p in ipairs(players) do
+        if p.is_local then goto continue end
+        local uid = p.user_id
+        if not uid or uid == 0 then goto continue end
+
+        local role = mod_ids.role_for(uid)
+        if role then
+            present[uid] = true
+            M.track_player(p, role)
+        end
+
+        ::continue::
+    end
+
+    for uid in pairs(active) do
+        if not present[uid] then
+            active[uid] = nil
+            seen[uid] = nil
+        end
+    end
+end
+
 function M.scan_all()
     if not settings.enabled(P) then return end
-    if not entity or not entity.get_players then return end
+    M.reconcile_active()
 
-    for _, p in ipairs(entity.get_players()) do
+    for _, p in ipairs(entity and entity.get_players and entity.get_players() or {}) do
         M.check_player(p)
     end
 end
@@ -142,9 +193,10 @@ function M.on_player_removed(p)
 end
 
 function M.update(_dt)
+    M.tick_session()
+
     if not settings.enabled(P) then
-        seen = {}
-        active = {}
+        M.reset_state()
         return
     end
 
@@ -159,9 +211,6 @@ end
 function M.draw_mod_markers()
     if not settings.enabled(P) then return end
     if not entity or not entity.get_players then return end
-    if not draw or not draw.text then return end
-
-    image_cache.begin_load(MOD_ICON_KEY)
 
     for _, p in ipairs(entity.get_players()) do
         if p.is_local then goto continue end
@@ -176,15 +225,7 @@ function M.draw_mod_markers()
         local sx, sy, vis = esp_util.w2s(wx, wy, wz)
         if not vis then goto continue end
 
-        local label = "[MOD]"
-        local text_w = #label * 7
-        local gap = 4
-        local total_w = ICON_SIZE + gap + text_w
-        local x = math.floor(sx - total_w * 0.5)
-        local y = math.floor(sy - ICON_SIZE - 6)
-
-        image_cache.draw_fit(MOD_ICON_KEY, x, y, ICON_SIZE, ICON_SIZE)
-        draw.text(x + ICON_SIZE + gap, y + 7, label, { 1, 0.72, 0.18, 1 }, 12)
+        theme.draw_mod_marker(sx, sy, image_cache, MOD_ICON_KEY)
 
         ::continue::
     end
@@ -201,9 +242,12 @@ function M.draw()
     local now = tick_ms()
 
     for uid, entry in pairs(active) do
+        local still_here = false
         local dist = nil
+
         for _, p in ipairs(entity and entity.get_players and entity.get_players() or {}) do
             if p.user_id == uid then
+                still_here = true
                 if me and me.position and p.position then
                     local dx = p.position.x - me.position.x
                     local dy = p.position.y - me.position.y
@@ -213,11 +257,20 @@ function M.draw()
                 break
             end
         end
+
+        if not still_here then
+            active[uid] = nil
+            seen[uid] = nil
+            goto continue
+        end
+
         rows[#rows + 1] = {
             entry = entry,
             dist = dist,
             duration = format_duration(now - (entry.first_seen or now)),
         }
+
+        ::continue::
     end
 
     if #rows == 0 then return end
@@ -226,57 +279,34 @@ function M.draw()
         return (a.entry.first_seen or 0) < (b.entry.first_seen or 0)
     end)
 
-    local sw, sh = draw_util.screen_size()
-    local pad = 12
-    local row_h = 54
-    local title_h = 28
-    local width = 250
-    local x = sw - width - 18
-    local count = math.min(#rows, 4)
-    local height = title_h + count * row_h + pad
+    if not draw.window then return end
 
-    if draw.rect_filled then
-        draw.rect_filled(x, 72, width, height, { 0.04, 0.05, 0.08, 0.88 })
-    end
-    if draw.rect then
-        draw.rect(x, 72, width, height, { 1, 1, 1, 0.08 }, 0, 1)
-    end
-    if draw.line then
-        draw.line(x, 72, x, 72 + height, { 1, 0.45, 0.35, 0.95 }, 3)
-    end
+    local sw, _ = draw_util.screen_size()
+    local panel_w = 260
+    local x = sw - panel_w - 16
+    local items = {}
 
-    draw.text(x + pad, 78, "Staff In Lobby", { 0.92, 0.94, 0.98, 1 }, 13)
-
-    local y = 72 + title_h
-    for i = 1, count do
+    for i = 1, #rows do
         local row = rows[i]
         local entry = row.entry
-        local accent = role_accent(entry.role)
-
-        if draw.line then
-            draw.line(x + pad, y, x + width - pad, y, { 1, 1, 1, 0.06 }, 1)
-        end
-
-        if draw.circle_filled then
-            draw.circle_filled(x + pad + 4, y + 16, 4, accent, 12)
-        end
-
-        local name = entry.label
-        if #name > 18 then name = name:sub(1, 16) .. ".." end
-        draw.text(x + pad + 14, y + 4, name, { 1, 1, 1, 0.96 }, 13)
-
-        local role_text = entry.role or "Staff"
-        if #role_text > 22 then role_text = role_text:sub(1, 20) .. ".." end
-        draw.text(x + pad + 14, y + 20, role_text, { accent[1], accent[2], accent[3], 0.85 }, 11)
-
         local meta = row.duration
         if row.dist then
             meta = meta .. "  ·  " .. row.dist .. "m"
         end
-        draw.text(x + pad + 14, y + 34, meta, { 0.65, 0.68, 0.74, 0.9 }, 11)
 
-        y = y + row_h
+        local name = entry.label or entry.username or "Unknown"
+        if #name > 18 then name = name:sub(1, 16) .. ".." end
+
+        local role = entry.role or "Staff"
+        items[#items + 1] = { name .. "  ·  " .. role, meta }
     end
+
+    local title = "Staff In Lobby"
+    if #items > 1 then
+        title = title .. " (" .. #items .. ")"
+    end
+
+    draw.window(x, 72, "april_staff_lobby", title, items)
 end
 
 return M

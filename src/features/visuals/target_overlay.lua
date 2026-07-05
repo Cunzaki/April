@@ -14,11 +14,9 @@ local P = "april_target_overlay"
 local GEAR_SLOTS = 7
 
 local gear_cache = {}
-local GEAR_TTL = 1000
-local TARGET_TTL = 150
+local GEAR_TTL = 150
 
 M._target = nil
-M._target_at = 0
 M._layout = nil
 
 local SLOT_BG = { 0.14, 0.14, 0.16, 0.72 }
@@ -35,13 +33,55 @@ local function img_key(prefix, id)
     return prefix .. tostring(id)
 end
 
-local function ensure_item_image(name, variant)
-    if not name then return nil end
-    local asset_id = items.get_image_asset_id(name, variant)
-    if not asset_id then return nil end
-    local key = img_key("item_", asset_id)
-    image_cache.ensure(key, asset_id)
-    return key
+local function resolve_image_key(piece)
+    if not piece then return nil end
+
+    if type(piece) == "table" and piece.asset_id then
+        local key = img_key("item_", piece.asset_id)
+        image_cache.ensure(key, piece.asset_id)
+        return key
+    end
+
+    if type(piece) == "table" and piece.name then
+        local resolved = items.resolve_item_label(
+            piece.variant and (piece.name .. "/" .. piece.variant) or piece.name
+        )
+        if resolved and resolved.asset_id then
+            local key = img_key("item_", resolved.asset_id)
+            image_cache.ensure(key, resolved.asset_id)
+            return key
+        end
+        local asset_id = items.get_image_asset_id(piece.name, piece.variant)
+        if asset_id then
+            local key = img_key("item_", asset_id)
+            image_cache.ensure(key, asset_id)
+            return key
+        end
+    end
+
+    if type(piece) == "string" then
+        local resolved = items.resolve_item_label(piece)
+        if resolved and resolved.asset_id then
+            local key = img_key("item_", resolved.asset_id)
+            image_cache.ensure(key, resolved.asset_id)
+            return key
+        end
+    end
+
+    return nil
+end
+
+local function preload_layout_images(layout)
+    if not layout then return end
+    if layout.held then
+        local key = resolve_image_key(layout.held)
+        if key then image_cache.begin_load(key) end
+    end
+    for i = 1, layout.filled or 0 do
+        local piece = layout.packed[i]
+        local key = resolve_image_key(piece)
+        if key then image_cache.begin_load(key) end
+    end
 end
 
 local function get_gear(player)
@@ -57,28 +97,15 @@ local function get_gear(player)
     return data
 end
 
-local function get_mouse()
-    if not utility or not utility.get_mouse_pos then return nil, nil end
-    local ok, a, b = pcall(utility.get_mouse_pos)
-    if not ok then return nil, nil end
-    if type(a) == "table" then
-        return a.x or a.X, a.y or a.Y
-    end
-    if type(a) == "number" then
-        return a, b
-    end
-    return nil, nil
+local function crosshair_center()
+    local sw, sh = draw_util.screen_size()
+    return sw * 0.5, sh * 0.5
 end
 
-local function find_mouse_target(fov_px)
+local function find_crosshair_target(fov_px)
     if not entity or not entity.get_players then return nil end
 
-    local mx, my = get_mouse()
-    if not mx then
-        local sw, sh = draw_util.screen_size()
-        mx, my = sw * 0.5, sh * 0.5
-    end
-
+    local cx, cy = crosshair_center()
     local best, best_dist = nil, fov_px
 
     for _, p in ipairs(entity.get_players()) do
@@ -87,10 +114,15 @@ local function find_mouse_target(fov_px)
         local pos = p.head_position or p.position
         if not pos then goto continue end
 
-        local sx, sy, vis = esp_util.w2s(pos.x, pos.y, pos.z)
+        local px = pos.x or pos[1]
+        local py = pos.y or pos[2]
+        local pz = pos.z or pos[3]
+        if not px then goto continue end
+
+        local sx, sy, vis = esp_util.w2s(px, py, pz)
         if not vis then goto continue end
 
-        local dist = math_util.screen_fov_dist(sx, sy, mx, my)
+        local dist = math_util.screen_fov_dist(sx, sy, cx, cy)
         if dist <= fov_px and dist < best_dist then
             best_dist = dist
             best = p
@@ -192,14 +224,23 @@ local function draw_slot(x, y, size, key, piece, style)
         if image_cache.draw_fit(key, x + pad, y + pad, size - pad * 2, size - pad * 2) then
             return
         end
+        local st = image_cache.state(key)
+        if st == "loading" or st == "none" then
+            return
+        end
+    end
+
+    local label = "?"
+    if type(piece) == "table" and piece.name and piece.name ~= "" then
+        label = piece.name:sub(1, 1):upper()
     end
 
     local fs = math.max(10, math.floor(size * 0.34))
-    local tw = select(1, draw.get_text_size("?", fs))
+    local tw = select(1, draw.get_text_size(label, fs))
     draw.text(
         x + size * 0.5 - tw * 0.5,
         y + size * 0.5 - fs * 0.45,
-        "?",
+        label,
         { 0.55, 0.55, 0.58, 0.85 },
         fs
     )
@@ -214,67 +255,72 @@ function M.register_menu()
     menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Target FOV", 40, 400, 150, menu_util.parent(P))
     menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, menu_util.parent(P))
     menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, menu_util.parent(P))
+
+    menu_util.bind_master(P, { P .. "_fov", P .. "_gear_size", P .. "_top" })
 end
 
-function M.update(_dt)
-    if not settings.bool(P, false) then
+function M.refresh_target()
+    if not settings.enabled(P) then
         M._target = nil
         M._layout = nil
         return
     end
 
-    local now = tick_ms()
-    if now - M._target_at < TARGET_TTL then return end
-    M._target_at = now
-
     local fov = settings.num(P .. "_fov", 150)
-    local target = find_mouse_target(fov)
+    local gear_sz = settings.num(P .. "_gear_size", 48)
+    local target = find_crosshair_target(fov)
+
     if target and player_state.is_combat_target(target) then
         M._target = target
-        M._layout = build_layout(get_gear(target), settings.num(P .. "_gear_size", 48))
+        M._layout = build_layout(get_gear(target), gear_sz)
+        preload_layout_images(M._layout)
     else
         M._target = nil
         M._layout = nil
     end
 end
 
+function M.update(_dt)
+    M.refresh_target()
+end
+
 function M.draw()
-    if not settings.bool(P, false) then return end
+    if not settings.enabled(P) then return end
     if not draw or not draw.text or not draw.rect_filled then return end
+
+    M.refresh_target()
 
     local target = M._target
     local layout = M._layout
     if not target or not layout then return end
 
-    if layout.held then ensure_item_image(layout.held) end
-    for i = 1, layout.filled do
-        local piece = layout.packed[i]
-        if piece then
-            ensure_item_image(piece.name, piece.variant)
-        end
-    end
-
     local sw, _ = draw_util.screen_size()
     local top = settings.num(P .. "_top", 88)
     local cx = sw * 0.5
 
-    local name = target.name or "Unknown"
+    local name = target.display_name or target.name or "Unknown"
     local nw = select(1, draw.get_text_size(name, layout.name_fs))
     draw.text(cx - nw * 0.5, top, name, { 1, 1, 1, 1 }, layout.name_fs)
 
     local y = top + layout.name_fs + 6
 
     local held = held_piece(layout.held)
-    local held_key = held and ensure_item_image(held.name, held.variant) or nil
+    local held_key = held and resolve_image_key(held) or nil
     draw_slot(cx - layout.held_sz * 0.5, y, layout.held_sz, held_key, held, held and "held" or "empty")
     y = y + layout.held_sz + layout.row_gap
 
     local start_x = cx - layout.row_w * 0.5
     for i = 1, GEAR_SLOTS do
         local piece = i <= layout.filled and layout.packed[i] or nil
-        local key = piece and ensure_item_image(piece.name, piece.variant) or nil
+        local key = piece and resolve_image_key(piece) or nil
         local sx = start_x + (i - 1) * (layout.gear_sz + layout.gap)
         draw_slot(sx, y, layout.gear_sz, key, piece, piece and "gear" or "empty")
+    end
+
+    if not held and layout.filled == 0 then
+        local hint = "No gear detected"
+        local hw = select(1, draw.get_text_size(hint, 10))
+        draw.text(cx - hw * 0.5, y + layout.gear_sz + 6, hint, { 0.55, 0.55, 0.58, 0.85 }, 10)
     end
 end
 

@@ -4,6 +4,7 @@ local player_state = April.require("game.player_state")
 local draw_util = April.require("core.draw_util")
 local menu_util = April.require("core.menu_util")
 local combat_menu = April.require("features.combat.combat_menu")
+local theme = April.require("core.ui_theme")
 
 local M = {}
 local locked_target = nil
@@ -39,9 +40,14 @@ function M.register_menu()
     combat_menu.register_targeting(T, G.AIMBOT, PREFIX, P, {
         fov_default = 150,
         smooth = true,
-        fov_color = { 0.4, 0.9, 1, 1 },
-        fill_color = { 0.4, 0.9, 1, 0.12 },
-        line_color = { 1, 0.25, 0.25, 1 },
+        fov_color = theme.CYAN,
+        fill_color = theme.alpha(theme.CYAN, 0.12),
+        line_color = theme.RED,
+    })
+
+    menu_util.bind_master(P, {
+        PREFIX .. "fov", PREFIX .. "bone", PREFIX .. "priority", PREFIX .. "sticky", PREFIX .. "visible",
+        PREFIX .. "smooth", PREFIX .. "draw_fov", PREFIX .. "fov_fill", PREFIX .. "target_line",
     })
 end
 

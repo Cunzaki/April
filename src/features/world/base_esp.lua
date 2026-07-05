@@ -60,46 +60,103 @@ function M.register_menu()
     menu.add_checkbox(T, G.WORLD, "april_base_show_name", "Base Show Name", true, { parent = P })
     menu.add_checkbox(T, G.WORLD, "april_base_show_distance", "Base Show Distance", false, { parent = P })
     menu.add_slider_int(T, G.WORLD, "april_base_range", "Base Range", 50, 500, 150, { parent = P })
+
+    local child_ids = { "april_base_boxes", "april_base_show_name", "april_base_show_distance", "april_base_range" }
+    for _, t in ipairs(maps.BASE_TOGGLES) do
+        child_ids[#child_ids + 1] = t.id
+    end
+    menu_util.bind_master(P, child_ids)
+end
+
+function M.begin_scan()
+    return {
+        areas = nil,
+        ai = 1,
+        items = nil,
+        ii = 1,
+        out = {},
+    }
+end
+
+function M.step_scan(state, batch)
+    if not state.areas then
+        state.areas = env.safe_call(function()
+            local bases = folders.from_key("bases")
+            if not env.is_valid(bases) then return {} end
+            return bases:get_children()
+        end) or {}
+        state.ai = 1
+        state.items = nil
+        state.ii = 1
+    end
+
+    local processed = 0
+
+    while processed < batch do
+        if state.ai > #state.areas then
+            return true
+        end
+
+        if not state.items then
+            local area = state.areas[state.ai]
+            if not env.is_valid(area) then
+                state.ai = state.ai + 1
+                processed = processed + 1
+                goto continue
+            end
+
+            local area_name = area.Name or area.name or ""
+            if maps.BASE_SKIP_AREAS[area_name] then
+                state.ai = state.ai + 1
+                processed = processed + 1
+                goto continue
+            end
+
+            if maps.BASE_MAP[area_name] then
+                state.items = { area }
+            else
+                state.items = env.safe_call(function() return area:get_children() end) or {}
+            end
+            state.ii = 1
+        end
+
+        if state.ii > #state.items then
+            state.ai = state.ai + 1
+            state.items = nil
+            goto continue
+        end
+
+        local type_folder = state.items[state.ii]
+        state.ii = state.ii + 1
+        processed = processed + 1
+
+        if not env.is_valid(type_folder) then goto continue end
+
+        local type_name = type_folder.Name or type_folder.name or ""
+        local toggle_id = maps.BASE_MAP[type_name]
+        if not toggle_id then goto continue end
+
+        local model = resolve_model(type_folder, type_name)
+        if not model or not env.is_valid(model) then goto continue end
+        if not esp_scan.find_main_part(model) and not esp_scan.is_part(model) then goto continue end
+
+        table.insert(state.out, esp_scan.make_entry(model, type_name, toggle_id))
+
+        ::continue::
+    end
+
+    return false
+end
+
+function M.complete_scan(state)
+    cache.base = state.out or {}
+    cache.stats.last_base_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
 function M.scan()
-    cache.base = {}
-    local bases = folders.from_key("bases")
-    if not env.is_valid(bases) then return end
-
-    local areas = env.safe_call(function() return bases:get_children() end) or {}
-    for _, area in ipairs(areas) do
-        if not env.is_valid(area) then goto continue_area end
-
-        local area_name = area.Name or area.name or ""
-        if maps.BASE_SKIP_AREAS[area_name] then goto continue_area end
-
-        local items = {}
-        if maps.BASE_MAP[area_name] then
-            items[1] = area
-        else
-            items = env.safe_call(function() return area:get_children() end) or {}
-        end
-
-        for _, type_folder in ipairs(items) do
-            if not env.is_valid(type_folder) then goto continue_item end
-
-            local type_name = type_folder.Name or type_folder.name or ""
-            local toggle_id = maps.BASE_MAP[type_name]
-            if not toggle_id then goto continue_item end
-
-            local model = resolve_model(type_folder, type_name)
-            if not model or not env.is_valid(model) then goto continue_item end
-            if not esp_scan.find_main_part(model) and not esp_scan.is_part(model) then goto continue_item end
-
-            table.insert(cache.base, esp_scan.make_entry(model, type_name, toggle_id))
-            ::continue_item::
-        end
-
-        ::continue_area::
-    end
-
-    cache.stats.last_base_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
+    local state = M.begin_scan()
+    while not M.step_scan(state, 9999) do end
+    M.complete_scan(state)
 end
 
 function M.update(_dt) end
@@ -108,26 +165,28 @@ function M.draw()
     if not settings.enabled(P) then return end
 
     local range = settings.num("april_base_range", 150)
+    local range_sq = range * range
     local draw_boxes = settings.enabled("april_base_boxes")
     local show_name = settings.bool("april_base_show_name", true)
     local show_dist = settings.bool("april_base_show_distance", false)
     local me = env.get_local_player()
+    local me_pos = me and me.position
     local text_size = esp_util.text_size()
 
     for _, entry in ipairs(cache.base) do
         if not settings.enabled(entry.toggle_id) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
 
-        local lx, ly, lz = esp_scan.label_position(entry)
+        local lx, ly, lz = esp_scan.entry_coords(entry)
         if not lx then goto continue end
 
-        local dist = 0
-        if me and me.position then
-            local dx = lx - me.position.x
-            local dy = ly - me.position.y
-            local dz = lz - me.position.z
-            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-            if dist > range then goto continue end
+        local dist_sq = 0
+        if me_pos then
+            local dx = lx - me_pos.x
+            local dy = ly - me_pos.y
+            local dz = lz - me_pos.z
+            dist_sq = dx * dx + dy * dy + dz * dz
+            if dist_sq > range_sq then goto continue end
         end
 
         local col = settings.color(entry.toggle_id, maps.toggle_color(maps.BASE_TOGGLES, entry.toggle_id))
@@ -139,8 +198,8 @@ function M.draw()
             local sx, sy, vis = esp_util.w2s(lx, ly, lz)
             if vis then
                 local label = show_name and (entry.name or "Base") or ""
-                if show_dist and me and me.position then
-                    local dist_text = string.format("%dm", math.floor(dist))
+                if show_dist and me_pos then
+                    local dist_text = string.format("%dm", math.floor(math.sqrt(dist_sq)))
                     if label ~= "" then
                         label = label .. " [" .. dist_text .. "]"
                     else

@@ -98,6 +98,16 @@ function M.register_menu()
     menu.add_checkbox(T, G.COMBAT, "april_gm_range", "Gun Range Mod", false, root)
     menu.add_slider_int(T, G.COMBAT, "april_gm_range_mult", "RangeMult", 1, 20, 10, root)
 
+    menu_util.bind_master(P, {
+        "april_combat_skip_downed",
+        "april_gm_recoil", "april_gm_recoil_pct",
+        "april_gm_spread", "april_gm_spread_pct",
+        "april_gm_sway",
+        "april_gm_fire_rate", "april_gm_fire_rate_mult",
+        "april_gm_speed", "april_gm_speed_mult",
+        "april_gm_range", "april_gm_range_mult",
+    })
+
     settings.on_change(P, function()
         if settings.bool(P, false) then
             schedule_apply(500)
