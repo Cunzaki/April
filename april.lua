@@ -1,7 +1,7 @@
 --[[
     April — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-06T05:23:29.138Z
+    Built: 2026-07-06T07:44:56.096Z
 ]]
 
 April = {
@@ -419,6 +419,7 @@ end)()
 April._mods["core.draw_util"] = (function()
 local math_util = April.require("core.math_util")
 local text_util = April.require("core.text_util")
+local settings = April.require("core.settings")
 
 local M = {}
 
@@ -443,6 +444,9 @@ function M.text(x, y, text, col, size)
 end
 
 function M.box_esp(x, y, w, h, col, style)
+    if settings and settings.enabled and settings.enabled("april_brainrot_enabled") then
+        return
+    end
     if not draw then return end
     if style == 1 and draw.corner_box then
         draw.corner_box(x, y, w, h, col)
@@ -891,6 +895,11 @@ end
 
 function M.tung_png()
     return M.CDN_BASE .. "/tung.png"
+end
+
+function M.brainrot_png(file)
+    if not file or file == "" then return nil end
+    return M.CDN_BASE .. "/brainrot/" .. file .. ".png"
 end
 
 function M.mod_warning_png()
@@ -1372,6 +1381,7 @@ function M.draw_oriented_box(box, col, thick)
 end
 
 function M.draw_entry_boxes(entry, col, thick)
+    if settings.enabled("april_brainrot_enabled") then return end
     if not entry or not entry.inst then return end
     if entry.box then
         M.draw_oriented_box(entry.box, col, thick)
@@ -1384,6 +1394,82 @@ function M.draw_entry_boxes(entry, col, thick)
         entry.box = box
         M.draw_oriented_box(box, col, thick)
     end
+end
+
+function M.oriented_box_screen_bounds(box)
+    if not box then return nil end
+
+    local min_x, min_y, max_x, max_y
+    local any = false
+
+    for i = 1, 8 do
+        local sx, sy, sz = BOX_SIGNS[i][1], BOX_SIGNS[i][2], BOX_SIGNS[i][3]
+        local lx, ly, lz = sx * box.hx, sy * box.hy, sz * box.hz
+        local wx = box.x + box.rx * lx + box.ux * ly - box.lx * lz
+        local wy = box.y + box.ry * lx + box.uy * ly - box.ly * lz
+        local wz = box.z + box.rz * lx + box.uz * ly - box.lz * lz
+        local px, py, vis = M.w2s(wx, wy, wz)
+        if vis then
+            any = true
+            min_x = min_x and math.min(min_x, px) or px
+            min_y = min_y and math.min(min_y, py) or py
+            max_x = max_x and math.max(max_x, px) or px
+            max_y = max_y and math.max(max_y, py) or py
+        end
+    end
+
+    if not any then return nil end
+
+    return {
+        x = min_x,
+        y = min_y,
+        w = math.max(12, max_x - min_x),
+        h = math.max(12, max_y - min_y),
+        valid = true,
+    }
+end
+
+function M.point_screen_bounds(wx, wy, wz, size)
+    local sx, sy, vis = M.w2s(wx, wy, wz)
+    if not vis then return nil end
+    size = size or 48
+    return {
+        x = sx - size * 0.5,
+        y = sy - size * 0.5,
+        w = size,
+        h = size,
+        valid = true,
+    }
+end
+
+function M.entry_screen_bounds(entry)
+    if not entry then return nil end
+
+    if entry.box then
+        local bounds = M.oriented_box_screen_bounds(entry.box)
+        if bounds then return bounds end
+    end
+
+    if entry.inst then
+        local scan = April.require("game.esp_scan")
+        local main = entry.main_part or scan.find_main_part(entry.inst)
+        if main then
+            local box = scan.read_part_box(main)
+            if box then
+                entry.box = box
+                local bounds = M.oriented_box_screen_bounds(box)
+                if bounds then return bounds end
+            end
+        end
+    end
+
+    local esp_scan = April.require("game.esp_scan")
+    local lx, ly, lz = esp_scan.entry_coords(entry)
+    if lx then
+        return M.point_screen_bounds(lx, ly, lz, 52)
+    end
+
+    return nil
 end
 
 return M
@@ -1574,6 +1660,7 @@ M.G_SIDE = {
 
 M._tab_ready = false
 M._groups = {}
+M._groups_ready = false
 M._master_children = {}
 M._master_hooked = {}
 M._when_rules = {}
@@ -1588,6 +1675,27 @@ function M.ensure_tab()
         menu.add_tab(M.TAB, "A", "full")
     end
     M._tab_ready = true
+end
+
+--[[ Full-mode grid rows must be created left then right before any controls register. ]]
+function M.ensure_groups()
+    if M._groups_ready then return end
+    M.ensure_tab()
+
+    local rows = {
+        { M.G.COMBAT, M.G.VISUALS },
+        { M.G.WORLD, M.G.RADAR },
+        { M.G.MISC, M.G.CONFIG },
+    }
+
+    for _, row in ipairs(rows) do
+        M.group(row[1], "left")
+        if row[2] then
+            M.group(row[2], "right")
+        end
+    end
+
+    M._groups_ready = true
 end
 
 function M.group(name, side)
@@ -1608,6 +1716,10 @@ function M.group(name, side)
     end
 
     return M.TAB, name
+end
+
+function M.gap(T, G)
+    menu.add_separator(T, G)
 end
 
 function M.section(T, G, title)
@@ -2134,7 +2246,7 @@ end)()
 
 -- ── core/cframe_move.lua ──
 April._mods["core.cframe_move"] = (function()
---[[ Vector fly helpers — position-only writes (API: BasePart.CFrame is position only). ]]
+--[[ CFrame movement — position writes, zero velocity (no velocity exploits). ]]
 
 local env = April.require("core.env")
 
@@ -2181,9 +2293,8 @@ end
 function M.iter_parts(char)
     local out = {}
     if not char then return out end
-    local list = env.safe_call(function() return char:get_descendants() end)
-        or env.safe_call(function() return char:GetDescendants() end)
-        or env.safe_call(function() return char:get_children() end)
+    local list = env.safe_call(function() return char:get_children() end)
+        or env.safe_call(function() return char:GetChildren() end)
         or {}
     for _, inst in ipairs(list) do
         if M.is_base_part(inst) then
@@ -2193,29 +2304,18 @@ function M.iter_parts(char)
     return out
 end
 
-function M.read_velocity(inst)
-    if not inst then return 0, 0, 0 end
-    local vel = inst.Velocity or inst.velocity
-    if not vel then return 0, 0, 0 end
-    return vel.x or vel.X or 0, vel.y or vel.Y or 0, vel.z or vel.Z or 0
-end
-
 function M.set_velocity(inst, x, y, z)
     if not inst then return end
     if part and part.set_velocity then
         pcall(part.set_velocity, inst, x, y, z)
     else
-        pcall(function()
-            inst.Velocity = Vector3.new(x, y, z)
-        end)
+        pcall(function() inst.Velocity = Vector3.new(x, y, z) end)
     end
 end
 
 function M.zero_part(inst)
     if not inst then return end
-    if part and part.set_velocity then
-        pcall(part.set_velocity, inst, 0, 0, 0)
-    end
+    M.set_velocity(inst, 0, 0, 0)
     if part and part.set_angular_velocity then
         pcall(part.set_angular_velocity, inst, 0, 0, 0)
     end
@@ -2226,195 +2326,73 @@ function M.set_position(inst, x, y, z)
     if part and part.set_position then
         pcall(part.set_position, inst, x, y, z)
     else
-        pcall(function()
-            inst.Position = Vector3.new(x, y, z)
-        end)
+        pcall(function() inst.Position = Vector3.new(x, y, z) end)
     end
     M.zero_part(inst)
 end
 
-function M.set_noclip(char, enabled)
-    if not char then return end
+function M.zero_character(char, root)
+    if root then M.zero_part(root) end
     for _, inst in ipairs(M.iter_parts(char)) do
-        if part and part.set_can_collide then
-            pcall(part.set_can_collide, inst, enabled)
-        else
-            pcall(function() inst.CanCollide = enabled end)
+        if inst ~= root then
+            M.zero_part(inst)
         end
     end
 end
 
-function M.zero_character(char)
-    if not char then return end
-    for _, inst in ipairs(M.iter_parts(char)) do
-        M.zero_part(inst)
-    end
-end
-
-function M.apply_fly_humanoid(hum, state_id)
+function M.humanoid_suspend(hum)
     if not hum then return end
-    state_id = state_id or 6
-    pcall(function() hum.state = state_id end)
-    pcall(function() hum.platform_stand = true end)
+    pcall(function() hum.platform_stand = false end)
     pcall(function() hum.auto_rotate = false end)
     pcall(function() hum.evaluate_state_machine = false end)
     pcall(function() hum.sit = false end)
 end
 
-function M.restore_humanoid(hum)
+function M.humanoid_release(hum)
     if not hum then return end
     pcall(function() hum.platform_stand = false end)
     pcall(function() hum.auto_rotate = true end)
     pcall(function() hum.evaluate_state_machine = true end)
-    pcall(function() hum.state = 8 end)
 end
 
-function M.camera_vectors()
+function M.camera_flat_axes()
     if not camera or not camera.get_look_vector then return nil end
     local ok, look = pcall(camera.get_look_vector)
     if not ok or not look then return nil end
 
-    local fx = look.x or look.X or 0
-    local fy = look.y or look.Y or 0
-    local fz = look.z or look.Z or 0
-    local mag = math.sqrt(fx * fx + fy * fy + fz * fz)
-    if mag < 0.001 then return nil end
-    fx, fy, fz = fx / mag, fy / mag, fz / mag
+    local lx = look.x or look.X or 0
+    local lz = look.z or look.Z or 0
+    local lm = math.sqrt(lx * lx + lz * lz)
+    if lm < 0.001 then return nil end
+    lx, lz = lx / lm, lz / lm
 
-    local hx, hz = fx, fz
-    local hm = math.sqrt(hx * hx + hz * hz)
+    local rx, rz = -lz, lx
+    return lx, lz, rx, rz
+end
+
+--[[ WASD = flat XZ only. Space / Ctrl = vertical. ]]
+function M.read_fly_input()
+    local lx, lz, rx, rz = M.camera_flat_axes()
+    local mx, mz, my = 0, 0, 0
+
+    if lx then
+        if M.key_down(0x57) then mx, mz = mx + lx, mz + lz end
+        if M.key_down(0x53) then mx, mz = mx - lx, mz - lz end
+        if M.key_down(0x41) then mx, mz = mx - rx, mz - rz end
+        if M.key_down(0x44) then mx, mz = mx + rx, mz + rz end
+    end
+
+    if M.key_down(0x20) then my = 1 end
+    if M.key_down(0x11) then my = -1 end
+
+    local hm = math.sqrt(mx * mx + mz * mz)
     if hm > 0.001 then
-        hx, hz = hx / hm, hz / hm
+        mx, mz = mx / hm, mz / hm
     else
-        hx, hz = 0, 1
+        mx, mz = 0, 0
     end
 
-    local rx, rz = -hz, hx
-    return fx, fy, fz, hx, hz, rx, rz
-end
-
-function M.move_input_flat(hx, hz, rx, rz)
-    local dx, dz = 0, 0
-
-    if M.key_down(0x57) then dx, dz = dx + hx, dz + hz end
-    if M.key_down(0x53) then dx, dz = dx - hx, dz - hz end
-    if M.key_down(0x41) then dx, dz = dx - rx, dz - rz end
-    if M.key_down(0x44) then dx, dz = dx + rx, dz + rz end
-
-    local mag = math.sqrt(dx * dx + dz * dz)
-    if mag < 0.001 then return 0, 0, 0 end
-    return dx / mag, dz / mag, mag
-end
-
-function M.apply_flat_delta(root, px, py, pz, dx, dz, speed, dt, lock_y)
-    local step = speed * dt
-    local nx = px + dx * step
-    local ny = lock_y or py
-    local nz = pz + dz * step
-    M.set_position(root, nx, ny, nz)
-    return nx, ny, nz
-end
-
-function M.suspend(char, hum, root, lock_y)
-    M.apply_fly_humanoid(hum, 6)
-    M.zero_character(char)
-    if root and lock_y then
-        local pos = M.read_pos(root)
-        if pos then
-            M.set_position(root, pos.x, lock_y, pos.z)
-        end
-    end
-end
-
-function M.run_cframe_fly(root, hum, speed)
-    if not root or not hum then return end
-
-    local fx, fy, fz, hx, hz, rx, rz = M.camera_vectors()
-    if not fx then return end
-
-    local dx, dy, dz, mag = M.move_input(fx, fy, fz, hx, hz, rx, rz)
-    local pos = M.read_pos(root)
-    if not pos then return end
-
-    if mag > 0.001 then
-        M.apply_delta(root, pos.x, pos.y, pos.z, dx, dy, dz, speed * 3, M.delta_time())
-    else
-        M.zero_part(root)
-    end
-
-    pcall(function() hum.platform_stand = false end)
-end
-
-function M.run_flat_fly(root, char, hum, lock_y, speed)
-    if not root or not char or not hum or not lock_y then return end
-
-    M.suspend(char, hum, root, lock_y)
-
-    local _, _, _, hx, hz, rx, rz = M.camera_vectors()
-    if not hx then return end
-
-    local pos = M.read_pos(root)
-    if not pos then return end
-
-    local dx, dz, mag = M.move_input_flat(hx, hz, rx, rz)
-    if mag > 0.001 then
-        M.apply_flat_delta(root, pos.x, pos.y, pos.z, dx, dz, speed, M.delta_time(), lock_y)
-    else
-        M.set_position(root, pos.x, lock_y, pos.z)
-    end
-end
-
-function M.move_input(fx, fy, fz, hx, hz, rx, rz)
-    local dx, dy, dz = 0, 0, 0
-
-    if M.key_down(0x57) then dx, dy, dz = dx + fx, dy + fy, dz + fz end
-    if M.key_down(0x53) then dx, dy, dz = dx - fx, dy - fy, dz - fz end
-    if M.key_down(0x41) then dx, dz = dx - rx, dz - rz end
-    if M.key_down(0x44) then dx, dz = dx + rx, dz + rz end
-    if M.key_down(0x20) then dy = dy + 1 end
-    if M.key_down(0x11) then dy = dy - 1 end
-
-    local mag = math.sqrt(dx * dx + dy * dy + dz * dz)
-    if mag < 0.001 then return 0, 0, 0, 0 end
-    return dx / mag, dy / mag, dz / mag, mag
-end
-
-function M.apply_delta(root, px, py, pz, dx, dy, dz, speed, dt)
-    local step = speed * dt
-    local nx = px + dx * step
-    local ny = py + dy * step
-    local nz = pz + dz * step
-    M.set_position(root, nx, ny, nz)
-    return nx, ny, nz
-end
-
-function M.read_camera_pos()
-    if not camera or not camera.get_position then return nil end
-    local ok, pos = pcall(camera.get_position)
-    if not ok or not pos then return nil end
-    return {
-        x = pos.x or pos.X or 0,
-        y = pos.y or pos.Y or 0,
-        z = pos.z or pos.Z or 0,
-    }
-end
-
-function M.set_camera_offset(hum, ox, oy, oz)
-    if not hum then return end
-    pcall(function()
-        hum.camera_offset = { x = ox, y = oy, z = oz }
-    end)
-end
-
-function M.read_camera_offset(hum)
-    if not hum then return { x = 0, y = 0, z = 0 } end
-    local off = hum.camera_offset or hum.CameraOffset
-    if not off then return { x = 0, y = 0, z = 0 } end
-    return {
-        x = off.x or off.X or 0,
-        y = off.y or off.Y or 0,
-        z = off.z or off.Z or 0,
-    }
+    return mx, my, mz
 end
 
 return M
@@ -2508,6 +2486,172 @@ return M
 
 end)()
 
+-- ── core/movement_ctrl.lua ──
+April._mods["core.movement_ctrl"] = (function()
+--[[ Movement sim — Inf Fly + Spider (CFrame position, one tick). ]]
+
+local settings = April.require("core.settings")
+local env = April.require("core.env")
+local move = April.require("core.cframe_move")
+
+local M = {}
+
+local _installed = false
+
+local MODE_NONE = "none"
+local MODE_FLY = "fly"
+local MODE_SPIDER = "spider"
+
+local active_mode = MODE_NONE
+local tracked_char_id = nil
+local anchor_y = nil
+
+local function char_id(char)
+    if not char then return nil end
+    return char.Address or char.address or tostring(char)
+end
+
+local function get_character(lp)
+    if lp and lp.character then return lp.character end
+    if game and game.local_player and game.local_player.character then
+        return game.local_player.character
+    end
+    return nil
+end
+
+local function get_root(lp)
+    local char = get_character(lp)
+    if not char then return nil end
+    return env.safe_call(function()
+        if char.find_first_child then return char:find_first_child("HumanoidRootPart") end
+        return char:FindFirstChild("HumanoidRootPart")
+    end)
+end
+
+local function get_humanoid(lp)
+    if lp and lp.humanoid and env.is_valid(lp.humanoid) then
+        return lp.humanoid
+    end
+    local char = get_character(lp)
+    if not char then return nil end
+    return env.safe_call(function()
+        if char.find_first_child_of_class then return char:find_first_child_of_class("Humanoid") end
+        return char:FindFirstChildOfClass("Humanoid")
+    end)
+end
+
+local function resolve_mode()
+    if settings.enabled("april_noclip_enabled") then return MODE_FLY end
+    if settings.enabled("april_spider_enabled") then return MODE_SPIDER end
+    return MODE_NONE
+end
+
+local function sync_anchor(root)
+    local pos = move.read_pos(root)
+    if pos then anchor_y = pos.y end
+end
+
+local function leave_mode(root, hum, char)
+    move.humanoid_release(hum)
+    move.zero_character(char, root)
+    anchor_y = nil
+end
+
+local function enter_mode(root, hum, char)
+    move.humanoid_suspend(hum)
+    move.zero_character(char, root)
+    sync_anchor(root)
+    return anchor_y ~= nil
+end
+
+local function tick_fly(char, root, speed)
+    local pos = move.read_pos(root)
+    if not pos then return end
+    if not anchor_y then anchor_y = pos.y end
+
+    local mx, my, mz = move.read_fly_input()
+    local step = speed * move.delta_time()
+
+    if my ~= 0 then
+        anchor_y = anchor_y + my * step
+    end
+
+    local nx, nz = pos.x, pos.z
+    if mx ~= 0 or mz ~= 0 then
+        nx = pos.x + mx * step
+        nz = pos.z + mz * step
+    end
+
+    move.set_position(root, nx, anchor_y, nz)
+    move.zero_character(char, root)
+end
+
+local function tick_spider(char, root, speed)
+    local pos = move.read_pos(root)
+    if not pos then return end
+    if not anchor_y then anchor_y = pos.y end
+
+    anchor_y = anchor_y + speed * move.delta_time()
+    move.set_position(root, pos.x, anchor_y, pos.z)
+    move.zero_character(char, root)
+end
+
+function M.tick(_dt)
+    local misc_gate = April.require("core.misc_gate")
+    if not misc_gate.movement_allowed() then return end
+
+    local lp = env.get_local_player()
+    if not lp then return end
+
+    local char = get_character(lp)
+    if not char or not env.is_valid(char) then return end
+
+    local root = get_root(lp)
+    local hum = get_humanoid(lp)
+    if not root or not hum then return end
+
+    local cid = char_id(char)
+    if cid ~= tracked_char_id then
+        active_mode = MODE_NONE
+        anchor_y = nil
+        tracked_char_id = cid
+    end
+
+    local mode = resolve_mode()
+
+    if active_mode ~= mode then
+        if active_mode ~= MODE_NONE then
+            leave_mode(root, hum, char)
+        end
+        active_mode = mode
+        if mode ~= MODE_NONE and not enter_mode(root, hum, char) then
+            active_mode = MODE_NONE
+            return
+        end
+    end
+
+    if mode == MODE_NONE then return end
+
+    if mode == MODE_FLY then
+        tick_fly(char, root, settings.num("april_noclip_speed", 72))
+    elseif mode == MODE_SPIDER then
+        tick_spider(char, root, settings.num("april_spider_speed", 20))
+    end
+end
+
+function M.install()
+    if _installed then return end
+    _installed = true
+    local runservice = April.require("core.runservice")
+    runservice.on_sim(function(dt)
+        M.tick(dt)
+    end)
+end
+
+return M
+
+end)()
+
 -- ── core/config_store.lua ──
 April._mods["core.config_store"] = (function()
 --[[
@@ -2531,6 +2675,7 @@ local EXCLUDE = {
     april_cfg_autoload_slot = true,
     april_cfg_autoload_profile = true,
     april_debug_overlay = true,
+    april_gm_held_weapon = true,
 }
 
 local MENU_KEYS = {
@@ -2540,10 +2685,11 @@ local MENU_KEYS = {
     "april_crosshair_enabled", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
     "april_crosshair_thickness", "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
     "april_crosshair_rainbow", "april_crosshair_rainbow_speed",
+    "april_brainrot_enabled", "april_brainrot_style", "april_brainrot_size",
     "april_aimbot_fov", "april_aimbot_bone", "april_aimbot_priority",
     "april_aimbot_sticky", "april_aimbot_visible", "april_aimbot_prediction", "april_aimbot_vis_ray",
     "april_aimbot_draw_fov", "april_aimbot_fov_fill", "april_aimbot_target_line",
-    "april_gunmods_enabled", "april_gm_recoil", "april_gm_recoil_pct", "april_gm_spread", "april_gm_spread_pct",
+    "april_gunmods_enabled", "april_gm_weapon_select", "april_gm_recoil", "april_gm_recoil_pct", "april_gm_spread", "april_gm_spread_pct",
     "april_gm_sway", "april_gm_fire_rate", "april_gm_fire_rate_mult",
     "april_gm_speed", "april_gm_speed_mult", "april_gm_range", "april_gm_range_mult",
     "april_farm_helper", "april_farm_radius", "april_farm_smooth",
@@ -2581,14 +2727,11 @@ local MENU_KEYS = {
     "april_desync_visualizer", "april_desync_vis_style", "april_desync_vis_size",
     "april_desync_vis_show_local", "april_desync_vis_link", "april_desync_vis_labels",
     "april_desync_vis_custom_color", "april_desync_vis_color",
-    "april_freecam_enabled", "april_freecam_speed",
-    "april_freecam_vis", "april_freecam_vis_style", "april_freecam_vis_size",
     "april_bullet_manip_enabled", "april_bullet_manip_range", "april_bullet_manip_speed",
     "april_bullet_manip_debug", "april_bullet_manip_console", "april_bullet_manip_vis",
     "april_bullet_manip_vis_style", "april_bullet_manip_vis_size",
     "april_bullet_manip_vis_link", "april_bullet_manip_vis_labels", "april_bullet_manip_vis_peek",
     "april_mod_checker_enabled", "april_mod_checker_interval",
-    "april_hide_local_name",
 }
 
 local COLOR_KEYS = {
@@ -2611,14 +2754,13 @@ local COLOR_KEYS = {
     "april_wp_draw", "april_map_bg", "april_map_grid", "april_map_player_col", "april_map_npc_col", "april_map_loot_col",
     "april_map_world_col", "april_map_base_col", "april_map_wp_col", "april_map_local",
     "april_desync_visualizer", "april_desync_vis_color", "april_desync_vis_local_col",
-    "april_freecam_vis_server", "april_freecam_vis_local",
     "april_bullet_manip_vis_server", "april_bullet_manip_vis_local", "april_bullet_manip_vis_peek", "april_bullet_manip_vis_link",
 }
 
 local HOTKEY_KEYS = {
     "april_tung_esp_enabled", "april_crosshair_enabled", "april_aimbot_prediction", "april_map_enabled",
     "april_waypoints_enabled", "april_noclip_enabled", "april_spider_enabled",
-    "april_desync_enabled", "april_freecam_enabled", "april_bullet_manip_enabled",
+    "april_desync_enabled", "april_bullet_manip_enabled",
     "april_world_enabled", "april_loot_enabled", "april_npc_enabled", "april_base_enabled",
 }
 
@@ -5237,6 +5379,29 @@ function M.recoil_weapon_names()
     return recoil_weapons
 end
 
+function M.profile_weapon_names()
+    if not loaded then M.load() end
+
+    local seen = {}
+    local list = {}
+
+    local function add(name)
+        if not name or name == "" or seen[name] then return end
+        seen[name] = true
+        list[#list + 1] = name
+    end
+
+    for name in pairs(FALLBACK_STATS) do
+        add(name)
+    end
+    for _, name in ipairs(recoil_weapons) do
+        add(name)
+    end
+
+    table.sort(list)
+    return list
+end
+
 local function read_tool_attributes(inst)
     if not inst then return nil end
     local speed, gravity
@@ -5405,6 +5570,12 @@ function M.tick()
     if held and held ~= M._last_held then
         M._last_held = held
         M._weapon_changed_at = utility and utility.get_tick_count and utility.get_tick_count() or 0
+        pcall(function()
+            local gun_mods = April.require("features.combat.gun_mods")
+            if gun_mods.on_weapon_changed then
+                gun_mods.on_weapon_changed(held)
+            end
+        end)
     elseif not held then
         M._last_held = nil
     end
@@ -6089,11 +6260,220 @@ return M
 
 end)()
 
--- ── game/gun_mod_profiles.lua ──
-April._mods["game.gun_mod_profiles"] = (function()
---[[ Global gun mod values — map menu sliders to applygc keys. ]]
+-- ── game/weapon_profile_store.lua ──
+April._mods["game.weapon_profile_store"] = (function()
+--[[ Per-weapon gun mod profiles — persisted separately from config slots. ]]
 
 local settings = April.require("core.settings")
+local config_store = April.require("core.config_store")
+
+local M = {}
+
+local FILE = "April_gun_profiles.txt"
+local VERSION = 1
+
+local DEFAULT = {
+    recoil = false,
+    recoil_pct = 100,
+    spread = false,
+    spread_pct = 100,
+    sway = false,
+    fire_rate = false,
+    fire_rate_mult = 1.5,
+    speed = false,
+    speed_mult = 100,
+    range = false,
+    range_mult = 10,
+}
+
+local EDITOR_KEYS = {
+    recoil = "april_gm_recoil",
+    recoil_pct = "april_gm_recoil_pct",
+    spread = "april_gm_spread",
+    spread_pct = "april_gm_spread_pct",
+    sway = "april_gm_sway",
+    fire_rate = "april_gm_fire_rate",
+    fire_rate_mult = "april_gm_fire_rate_mult",
+    speed = "april_gm_speed",
+    speed_mult = "april_gm_speed_mult",
+    range = "april_gm_range",
+    range_mult = "april_gm_range_mult",
+}
+
+M._profiles = {}
+M._loaded = false
+
+local function file_path()
+    return config_store.get_config_path(FILE)
+end
+
+function M.default_profile()
+    local out = {}
+    for k, v in pairs(DEFAULT) do
+        out[k] = v
+    end
+    return out
+end
+
+function M.normalize_profile(profile)
+    local out = M.default_profile()
+    if type(profile) ~= "table" then return out end
+    for k in pairs(DEFAULT) do
+        if profile[k] ~= nil then
+            out[k] = profile[k]
+        end
+    end
+    return out
+end
+
+function M.get(weapon_name)
+    if not weapon_name or weapon_name == "" then return nil end
+    local profile = M._profiles[weapon_name]
+    if not profile then return nil end
+    return M.normalize_profile(profile)
+end
+
+function M.set(weapon_name, profile)
+    if not weapon_name or weapon_name == "" then return false end
+    M._profiles[weapon_name] = M.normalize_profile(profile)
+    M.save()
+    return true
+end
+
+function M.remove(weapon_name)
+    if not weapon_name or weapon_name == "" then return false end
+    if not M._profiles[weapon_name] then return false end
+    M._profiles[weapon_name] = nil
+    M.save()
+    return true
+end
+
+function M.has_saved(weapon_name)
+    return weapon_name and M._profiles[weapon_name] ~= nil
+end
+
+function M.has_active_mods(weapon_name)
+    local profile = M.get(weapon_name)
+    if not profile then return false end
+    return profile.recoil or profile.spread or profile.sway
+        or profile.fire_rate or profile.speed or profile.range
+end
+
+function M.read_editor()
+    local profile = M.default_profile()
+    for field, id in pairs(EDITOR_KEYS) do
+        local default = DEFAULT[field]
+        if type(default) == "boolean" then
+            profile[field] = settings.bool(id, default)
+        elseif type(default) == "number" and math.floor(default) == default then
+            profile[field] = settings.num(id, default)
+        else
+            profile[field] = tonumber(settings.get(id, default)) or default
+        end
+    end
+    return profile
+end
+
+function M.write_editor(profile)
+    if not menu or not menu.set then return end
+    profile = M.normalize_profile(profile)
+    for field, id in pairs(EDITOR_KEYS) do
+        pcall(menu.set, id, profile[field])
+    end
+end
+
+function M.save_editor_weapon(weapon_name)
+    return M.set(weapon_name, M.read_editor())
+end
+
+function M.load_editor_weapon(weapon_name)
+    M.write_editor(M.get(weapon_name) or M.default_profile())
+end
+
+local function serialize_profile(profile)
+    local parts = {}
+    for field in pairs(DEFAULT) do
+        local val = profile[field]
+        if type(val) == "boolean" then
+            parts[#parts + 1] = field .. "=" .. (val and "1" or "0")
+        else
+            parts[#parts + 1] = field .. "=" .. tostring(val)
+        end
+    end
+    table.sort(parts)
+    return table.concat(parts, "|")
+end
+
+local function parse_profile_line(raw)
+    local profile = M.default_profile()
+    for token in (raw or ""):gmatch("[^|]+") do
+        local field, val = token:match("^([^=]+)=(.+)$")
+        if field and DEFAULT[field] ~= nil then
+            local default = DEFAULT[field]
+            if type(default) == "boolean" then
+                profile[field] = val == "1" or val == "true"
+            elseif type(default) == "number" and math.floor(default) == default then
+                profile[field] = tonumber(val) or default
+            else
+                profile[field] = tonumber(val) or default
+            end
+        end
+    end
+    return profile
+end
+
+function M.save()
+    local lines = { "version=" .. VERSION }
+    local names = {}
+    for name in pairs(M._profiles) do
+        names[#names + 1] = name
+    end
+    table.sort(names)
+    for _, name in ipairs(names) do
+        table.insert(lines, "weapon=" .. name:gsub("\r", " "):gsub("\n", " "))
+        table.insert(lines, "data=" .. serialize_profile(M._profiles[name]))
+    end
+
+    local f = io.open(file_path(), "w")
+    if not f then return false end
+    f:write(table.concat(lines, "\n"))
+    f:close()
+    return true
+end
+
+function M.load()
+    if M._loaded then return true end
+    M._loaded = true
+    M._profiles = {}
+
+    local f = io.open(file_path(), "r")
+    if not f then return false end
+
+    local current_weapon
+    for line in f:lines() do
+        local key, val = line:match("^([^=]+)=(.*)$")
+        if key == "weapon" then
+            current_weapon = val
+        elseif key == "data" and current_weapon and current_weapon ~= "" then
+            M._profiles[current_weapon] = parse_profile_line(val)
+            current_weapon = nil
+        end
+    end
+    f:close()
+    return true
+end
+
+return M
+
+end)()
+
+-- ── game/gun_mod_profiles.lua ──
+April._mods["game.gun_mod_profiles"] = (function()
+--[[ Map saved per-weapon profiles to applygc keys. ]]
+
+local settings = April.require("core.settings")
+local store = April.require("game.weapon_profile_store")
+local weapons = April.require("game.weapons")
 
 local M = {}
 
@@ -6103,37 +6483,29 @@ local function pct_to_neg_mult(pct)
     return -(pct / 100)
 end
 
-function M.has_gc_mods()
-    return settings.bool("april_gm_recoil", false)
-        or settings.bool("april_gm_spread", false)
-        or settings.bool("april_gm_sway", false)
-        or settings.bool("april_gm_fire_rate", false)
-        or settings.bool("april_gm_speed", false)
-        or settings.bool("april_gm_range", false)
-end
-
-function M.build_mods()
+function M.build_mods_from_profile(profile)
     local mods = {}
+    if not profile then return mods end
 
-    if settings.bool("april_gm_recoil", false) then
-        mods.RecoilMult = pct_to_neg_mult(settings.num("april_gm_recoil_pct", 100))
+    if profile.recoil then
+        mods.RecoilMult = pct_to_neg_mult(profile.recoil_pct)
     end
-    if settings.bool("april_gm_spread", false) then
-        local m = pct_to_neg_mult(settings.num("april_gm_spread_pct", 100))
+    if profile.spread then
+        local m = pct_to_neg_mult(profile.spread_pct)
         mods.AimSpreadMult = m
         mods.HipSpreadMult = m
     end
-    if settings.bool("april_gm_sway", false) then
+    if profile.sway then
         mods.SwayMult = -1
     end
-    if settings.bool("april_gm_fire_rate", false) then
-        mods.FireRateMult = settings.num("april_gm_fire_rate_mult", 1.5)
+    if profile.fire_rate then
+        mods.FireRateMult = profile.fire_rate_mult or 1.5
     end
-    if settings.bool("april_gm_speed", false) then
-        mods.SpeedMult = settings.num("april_gm_speed_mult", 100)
+    if profile.speed then
+        mods.SpeedMult = profile.speed_mult or 100
     end
-    if settings.bool("april_gm_range", false) then
-        mods.RangeMult = settings.num("april_gm_range_mult", 10)
+    if profile.range then
+        mods.RangeMult = profile.range_mult or 10
     end
 
     return mods
@@ -6149,6 +6521,91 @@ function M.build_reset_mods()
         SpeedMult = 1,
         RangeMult = 1,
     }
+end
+
+function M.held_weapon_name()
+    return weapons.get_held_ranged_weapon_name()
+end
+
+function M.has_gc_mods_for_weapon(name)
+    return store.has_active_mods(name)
+end
+
+function M.has_gc_mods()
+    local held = M.held_weapon_name()
+    return held and M.has_gc_mods_for_weapon(held)
+end
+
+function M.build_mods_for_weapon(name)
+    return M.build_mods_from_profile(store.get(name))
+end
+
+function M.build_mods()
+    local held = M.held_weapon_name()
+    if not held then return {} end
+    return M.build_mods_for_weapon(held)
+end
+
+function M.weapon_combo_names()
+    return weapons.profile_weapon_names()
+end
+
+function M.selected_editor_weapon()
+    local names = M.weapon_combo_names()
+    if #names == 0 then return nil end
+    local idx = settings.combo_index("april_gm_weapon_select", names, 0)
+    return names[idx + 1]
+end
+
+return M
+
+end)()
+
+-- ── game/brainrot_catalog.lua ──
+April._mods["game.brainrot_catalog"] = (function()
+--[[ Brainrot character catalog — PNGs hosted on GitHub CDN. ]]
+
+local asset_urls = April.require("game.asset_urls")
+
+local M = {}
+
+M.ENTRIES = {
+    { file = "tung_tung_sahur", name = "Tung Tung Sahur" },
+    { file = "tralalero_tralala", name = "Tralalero Tralala" },
+    { file = "brr_brr_patapim", name = "Brr Brr Patapim" },
+    { file = "orangutini", name = "Orangutini Ananasini" },
+    { file = "cappuccino_assassino", name = "Cappuccino Assassino" },
+    { file = "lirili_larila", name = "Lirili Larila" },
+    { file = "boneca_ambalabu", name = "Boneca Ambalabu" },
+    { file = "bombardiro_crocodilo", name = "Bombardiro Crocodilo" },
+    { file = "chimpanzini", name = "Chimpanzini Bananini" },
+    { file = "ta_ta_sahur", name = "Ta Ta Ta Sahur" },
+    { file = "tung_head", name = "Tung Tung Head" },
+    { file = "tung_clipart", name = "Tung Clipart" },
+    { file = "trippi_troppi", name = "Trippi Troppi" },
+    { file = "frigo_camelo", name = "Frigo Camelo" },
+    { file = "ballerina_cappuccina", name = "Ballerina Cappuccina" },
+    { file = "udin_din_din", name = "Udin Din Din Dun" },
+}
+
+function M.image_key(file)
+    return "brainrot_" .. (file or "")
+end
+
+function M.url(file)
+    return asset_urls.brainrot_png(file)
+end
+
+function M.combo_labels()
+    local out = {}
+    for _, entry in ipairs(M.ENTRIES) do
+        out[#out + 1] = entry.name
+    end
+    return out
+end
+
+function M.entry_at_index(idx)
+    return M.ENTRIES[(idx or 0) + 1]
 end
 
 return M
@@ -6950,7 +7407,6 @@ function M.register_targeting(T, G, prefix, parent_id, opts)
         menu.add_slider_int(T, G, p .. "smooth", "Smoothing (frames)", 1, 100, 5, root)
     end
 
-    menu.add_separator(T, G)
     menu.add_checkbox(T, G, p .. "draw_fov", "Draw FOV Circle", false, menu_util.parent(parent_id, { colorpicker = opts.fov_color or { 1, 1, 1, 1 } }))
     menu.add_checkbox(T, G, p .. "fov_fill", "Fill FOV", false, root)
     menu.add_checkbox(T, G, p .. "target_line", "Target Line", false, menu_util.parent(parent_id, { colorpicker = opts.line_color or { 1, 0.2, 0.2, 1 } }))
@@ -7086,12 +7542,12 @@ end
 
 function M.register_menu()
     local G = menu_util.G
-    local T, _ = menu_util.group(G.COMBAT)
+    local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
-    menu.add_checkbox(T, G.COMBAT, P, "Farm Helper", false)
-    menu.add_slider_int(T, G.COMBAT, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
-    menu.add_slider_int(T, G.COMBAT, P_SMOOTH, "Aim Smoothness", 1, 30, 8, root)
+    menu.add_checkbox(T, G.MISC, P, "Farm Helper", false)
+    menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
+    menu.add_slider_int(T, G.MISC, P_SMOOTH, "Aim Smoothness", 1, 30, 8, root)
     menu_util.bind_master(P, { P_RADIUS, P_SMOOTH })
 end
 
@@ -7130,12 +7586,14 @@ April._mods["features.combat.gun_mods"] = (function()
 local settings = April.require("core.settings")
 local menu_util = April.require("core.menu_util")
 local profiles = April.require("game.gun_mod_profiles")
+local store = April.require("game.weapon_profile_store")
 local gc = April.require("game.gc_weapon_mods")
 local env = April.require("core.env")
 local notify = April.require("core.notify")
 
 local M = {}
 local P = "april_gunmods_enabled"
+local HELD_ID = "april_gm_held_weapon"
 local REJOIN_GC_DELAY_MS = 20000
 local RETRY_MS = 750
 local RETRY_MAX_MS = 30000
@@ -7149,6 +7607,8 @@ M._was_in_match = false
 M._gc_redo_at = 0
 M._persist_id = nil
 M._notify_next = false
+M._last_held_apply = nil
+M._held_display = "—"
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -7194,6 +7654,7 @@ local function clear_apply_state()
     M._defer_until = 0
     M._retry_until = 0
     M._gc_redo_at = 0
+    M._last_held_apply = nil
 end
 
 local function stop_persist()
@@ -7207,7 +7668,8 @@ local function start_persist()
     if M._persist_id or not thread or not thread.create then return end
     M._persist_id = thread.create(function()
         if not settings.enabled(P) then return end
-        if not profiles.has_gc_mods() then return end
+        local held = profiles.held_weapon_name()
+        if not held or not profiles.has_gc_mods_for_weapon(held) then return end
         gc.apply_weapon(profiles.build_mods())
     end, 150)
 end
@@ -7220,6 +7682,37 @@ local function schedule_session_gc_refresh()
     M._retry_until = tick_ms() + RETRY_MAX_MS
 end
 
+local function weapon_names()
+    return profiles.weapon_combo_names()
+end
+
+local function selected_weapon()
+    return profiles.selected_editor_weapon()
+end
+
+local function sync_held_display(held)
+    held = held or profiles.held_weapon_name()
+    local text = held or "—"
+    if held and store.has_saved(held) then
+        text = held .. " (saved)"
+    elseif held then
+        text = held .. " (no profile)"
+    end
+    if text ~= M._held_display then
+        M._held_display = text
+        if menu and menu.set then
+            pcall(menu.set, HELD_ID, text)
+        end
+    end
+end
+
+local function load_selected_editor()
+    local name = selected_weapon()
+    if name then
+        store.load_editor_weapon(name)
+    end
+end
+
 function M.on_session_changed()
     schedule_session_gc_refresh()
 end
@@ -7229,34 +7722,81 @@ function M.register_menu()
     local T, _ = menu_util.group(G.COMBAT)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G.COMBAT, "Gun Mods")
+    store.load()
+
     menu.add_checkbox(T, G.COMBAT, P, "Enable Gun Mods", false, { key = 0 })
 
-    menu.add_checkbox(T, G.COMBAT, "april_gm_recoil", "Gun Recoil Mod", false, root)
+    menu_util.gap(T, G.COMBAT)
+    menu_util.input(T, G.COMBAT, HELD_ID, "Held Weapon", "—")
+    menu.add_combo(T, G.COMBAT, "april_gm_weapon_select", "Edit Weapon", weapon_names(), 0, root)
+
+    menu_util.gap(T, G.COMBAT)
+    menu.add_checkbox(T, G.COMBAT, "april_gm_recoil", "No Recoil", false, root)
     menu.add_slider_int(T, G.COMBAT, "april_gm_recoil_pct", "Recoil Reduction %", 0, 100, 100, root)
 
-    menu.add_checkbox(T, G.COMBAT, "april_gm_spread", "Gun Spread Mod", false, root)
+    menu.add_checkbox(T, G.COMBAT, "april_gm_spread", "No Spread", false, root)
     menu.add_slider_int(T, G.COMBAT, "april_gm_spread_pct", "Spread Reduction %", 0, 100, 100, root)
 
-    menu.add_checkbox(T, G.COMBAT, "april_gm_sway", "Gun No Sway", false, root)
+    menu.add_checkbox(T, G.COMBAT, "april_gm_sway", "No Sway", false, root)
 
-    menu.add_checkbox(T, G.COMBAT, "april_gm_fire_rate", "Gun Fire Rate Mod", false, root)
+    menu.add_checkbox(T, G.COMBAT, "april_gm_fire_rate", "Fire Rate", false, root)
     menu.add_slider_float(T, G.COMBAT, "april_gm_fire_rate_mult", "Fire Rate Multiplier", 1.0, 3.0, 1.5, "%.2f", root)
 
-    menu.add_checkbox(T, G.COMBAT, "april_gm_speed", "Gun Bullet Speed Mod", false, root)
-    menu.add_slider_int(T, G.COMBAT, "april_gm_speed_mult", "SpeedMult (100 = instant)", 0, 100, 100, root)
+    menu.add_checkbox(T, G.COMBAT, "april_gm_speed", "Bullet Speed", false, root)
+    menu.add_slider_int(T, G.COMBAT, "april_gm_speed_mult", "Speed Mult (100 = instant)", 0, 100, 100, root)
 
-    menu.add_checkbox(T, G.COMBAT, "april_gm_range", "Gun Range Mod", false, root)
-    menu.add_slider_int(T, G.COMBAT, "april_gm_range_mult", "RangeMult", 1, 20, 10, root)
+    menu.add_checkbox(T, G.COMBAT, "april_gm_range", "Range", false, root)
+    menu.add_slider_int(T, G.COMBAT, "april_gm_range_mult", "Range Mult", 1, 20, 10, root)
+
+    menu_util.gap(T, G.COMBAT)
+    menu_util.button(T, G.COMBAT, "april_gm_save", "Save Weapon Profile", function()
+        local name = selected_weapon()
+        if not name then
+            notify.warning("Select a weapon to save", 3500)
+            return
+        end
+        store.save_editor_weapon(name)
+        sync_held_display()
+        notify.success("Saved profile: " .. name, 3500)
+        if profiles.held_weapon_name() == name then
+            M._last_hash = ""
+            schedule_apply(150)
+        end
+    end, P)
+
+    menu_util.button(T, G.COMBAT, "april_gm_clear", "Clear Saved Profile", function()
+        local name = selected_weapon()
+        if not name then
+            notify.warning("Select a weapon to clear", 3500)
+            return
+        end
+        if not store.remove(name) then
+            notify.info("No saved profile for " .. name, 3000)
+            return
+        end
+        store.load_editor_weapon(name)
+        sync_held_display()
+        notify.info("Cleared profile: " .. name, 3500)
+        if profiles.held_weapon_name() == name then
+            M._last_hash = ""
+            schedule_apply(150)
+        end
+    end, P)
 
     menu_util.bind_master(P, {
+        HELD_ID, "april_gm_weapon_select",
         "april_gm_recoil", "april_gm_recoil_pct",
         "april_gm_spread", "april_gm_spread_pct",
         "april_gm_sway",
         "april_gm_fire_rate", "april_gm_fire_rate_mult",
         "april_gm_speed", "april_gm_speed_mult",
         "april_gm_range", "april_gm_range_mult",
+        "april_gm_save", "april_gm_clear",
     })
+
+    settings.on_change("april_gm_weapon_select", function()
+        load_selected_editor()
+    end)
 
     settings.on_change(P, function()
         if settings.enabled(P) then
@@ -7269,6 +7809,9 @@ function M.register_menu()
             M.reset_mods()
         end
     end)
+
+    load_selected_editor()
+    sync_held_display()
 end
 
 function M.reset_mods()
@@ -7293,21 +7836,25 @@ function M.try_apply(silent)
         return false
     end
 
-    if not profiles.has_gc_mods() then
+    local held = profiles.held_weapon_name()
+    if not held then
         M._apply_dirty = false
-        if not silent then
-            notify.warning("Gun mods: enable at least one mod option below master toggle", 4500)
-        end
         return false
     end
 
-    local mods = profiles.build_mods()
+    local mods
+    if profiles.has_gc_mods_for_weapon(held) then
+        mods = profiles.build_mods_for_weapon(held)
+    else
+        mods = profiles.build_reset_mods()
+    end
+
     if not next(mods) then
         M._apply_dirty = false
         return false
     end
 
-    local hash = mods_hash(mods)
+    local hash = held .. ":" .. mods_hash(mods)
     if not M._apply_dirty and hash == M._last_hash then
         return true
     end
@@ -7319,7 +7866,8 @@ function M.try_apply(silent)
         M._retry_until = 0
         if M._notify_next or not silent then
             M._notify_next = false
-            notify.success("Gun mods applied: " .. tostring(msg or (count .. " nodes")), 3500)
+            local suffix = profiles.has_gc_mods_for_weapon(held) and (" (" .. held .. ")") or ""
+            notify.success("Gun mods applied" .. suffix .. ": " .. tostring(msg or (count .. " nodes")), 3500)
         end
     else
         M._apply_dirty = true
@@ -7352,6 +7900,16 @@ end
 function M.update(_dt)
     M.tick_session()
 
+    local held = profiles.held_weapon_name()
+    if held ~= M._last_held_apply then
+        M._last_held_apply = held
+        M._last_hash = ""
+        sync_held_display(held)
+        if settings.enabled(P) then
+            schedule_apply(200)
+        end
+    end
+
     if not settings.enabled(P) then return end
 
     local now = tick_ms()
@@ -7378,9 +7936,19 @@ function M.update(_dt)
     M.try_apply(true)
 end
 
-function M.on_weapon_changed(_name) end
+function M.on_weapon_changed(name)
+    M._last_held_apply = name
+    M._last_hash = ""
+    sync_held_display(name)
+    if settings.enabled(P) then
+        schedule_apply(150)
+    end
+end
 
 function M.on_modules_ready()
+    store.load()
+    load_selected_editor()
+    sync_held_display()
     if settings.enabled(P) then
         schedule_apply(500)
         start_persist()
@@ -7655,161 +8223,6 @@ return M
 
 end)()
 
--- ── features/combat/aimbot.lua ──
-April._mods["features.combat.aimbot"] = (function()
-local settings = April.require("core.settings")
-local targeting = April.require("features.combat.targeting")
-local player_state = April.require("game.player_state")
-local weapons = April.require("game.weapons")
-local draw_util = April.require("core.draw_util")
-local esp_util = April.require("core.esp_util")
-local menu_util = April.require("core.menu_util")
-local combat_menu = April.require("features.combat.combat_menu")
-local silent_ray = April.require("core.silent_ray")
-local theme = April.require("core.ui_theme")
-
-local M = {}
-local locked_target = nil
-local PREFIX = "april_aimbot_"
-local P_PRED = PREFIX .. "prediction"
-local P_VIS = PREFIX .. "vis_ray"
-local SHOOT_VK = 0x01
-
-local function w2s(x, y, z)
-    if draw and draw.world_to_screen then
-        return draw.world_to_screen(x, y, z)
-    end
-    if utility and utility.world_to_screen then
-        return utility.world_to_screen(x, y, z)
-    end
-    return 0, 0, false
-end
-
-function M.register_menu()
-    local G = menu_util.G
-    local T, _ = menu_util.group(G.COMBAT)
-
-    menu_util.section(T, G.COMBAT, "Silent Aim")
-    menu.add_checkbox(T, G.COMBAT, P_PRED, "Bullet Prediction", false)
-    menu.add_checkbox(T, G.COMBAT, P_VIS, "Visualize Silent Ray", false, menu_util.parent(P_PRED))
-
-    combat_menu.register_targeting(T, G.COMBAT, PREFIX, P_PRED, {
-        fov_default = 150,
-        smooth = false,
-        fov_color = theme.CYAN,
-        fill_color = theme.alpha(theme.CYAN, 0.12),
-        line_color = theme.RED,
-    })
-
-    menu_util.bind_master(P_PRED, {
-        P_VIS,
-        PREFIX .. "fov", PREFIX .. "bone", PREFIX .. "priority", PREFIX .. "sticky", PREFIX .. "visible",
-        PREFIX .. "draw_fov", PREFIX .. "fov_fill", PREFIX .. "target_line",
-    })
-end
-
-local function prediction_active()
-    return settings.enabled(P_PRED)
-end
-
-local function update_target(cx, cy, fov)
-    local sticky = settings.bool(PREFIX .. "sticky", false)
-
-    if sticky and locked_target then
-        local ok = targeting.is_target_valid(locked_target, PREFIX, cx, cy, fov)
-        if not ok then locked_target = nil end
-    end
-
-    if not locked_target or not sticky then
-        locked_target = targeting.find_target(cx, cy, fov, PREFIX)
-    end
-end
-
-function M.update(_dt)
-    if not prediction_active() then
-        locked_target = nil
-        silent_ray.stop()
-        return
-    end
-
-    if not weapons.holding_ranged_weapon() then
-        silent_ray.stop()
-        return
-    end
-
-    local sw, sh = targeting.screen_center()
-    local cx, cy = sw * 0.5, sh * 0.5
-    local fov = settings.num(PREFIX .. "fov", 150)
-
-    update_target(cx, cy, fov)
-
-    if not locked_target or not player_state.is_combat_target(locked_target) then
-        silent_ray.stop()
-        return
-    end
-
-    local cam = camera and camera.get_position and camera.get_position()
-    if not cam then
-        silent_ray.stop()
-        return
-    end
-
-    local aim = targeting.get_aim_point(locked_target, PREFIX, nil, cam, cx, cy, true)
-    if not aim then
-        silent_ray.stop()
-        return
-    end
-
-    silent_ray.track(cam, aim, SHOOT_VK)
-end
-
-function M.get_target()
-    return locked_target
-end
-
-function M.draw()
-    local sw, sh = targeting.screen_center()
-    local cx, cy = sw * 0.5, sh * 0.5
-
-    if prediction_active() and settings.bool(PREFIX .. "draw_fov", false) then
-        local fov = settings.num(PREFIX .. "fov", 150)
-        local col = settings.color(PREFIX .. "draw_fov", { 0.4, 0.9, 1, 1 })
-        if settings.bool(PREFIX .. "fov_fill", false) and draw and draw.circle_filled then
-            local fill = settings.color(PREFIX .. "fov_fill", { 0.4, 0.9, 1, 0.12 })
-            draw.circle_filled(cx, cy, fov, fill, 64)
-        end
-        if draw and draw.circle then
-            draw.circle(cx, cy, fov, col, 64, 1)
-        else
-            draw_util.circle(cx, cy, fov, col, false)
-        end
-    end
-
-    if prediction_active() and locked_target and settings.bool(PREFIX .. "target_line", false) then
-        local cam = camera and camera.get_position and camera.get_position()
-        local aim = targeting.get_aim_point(locked_target, PREFIX, nil, cam, cx, cy, true)
-        if aim then
-            local tx, ty, vis = w2s(aim.x, aim.y, aim.z)
-            if vis then
-                local col = settings.color(PREFIX .. "target_line", { 1, 0.25, 0.25, 1 })
-                draw_util.line(cx, cy, tx, ty, col, 1.5)
-            end
-        end
-    end
-
-    if not prediction_active() or not settings.bool(P_VIS, false) then return end
-
-    local origin, target = silent_ray.last_segment()
-    if not origin or not target then return end
-
-    local col = settings.color(P_VIS, { 0.2, 1, 0.85, 0.95 })
-    esp_util.draw_world_line(origin.x, origin.y, origin.z, target.x, target.y, target.z, col, 2)
-end
-
-return M
-
-end)()
-
 -- ── features/visuals/player_esp.lua ──
 April._mods["features.visuals.player_esp"] = (function()
 local settings = April.require("core.settings")
@@ -7832,13 +8245,6 @@ local function draw_tung_box(x, y, w, h)
 end
 
 function M.register_menu()
-    local G = menu_util.G
-    local T, _ = menu_util.group(G.VISUALS)
-    local root = menu_util.parent(P)
-
-    menu.add_checkbox(T, G.VISUALS, P, "Tung ESP", false, { key = 0 })
-    menu.add_slider_int(T, G.VISUALS, "april_tung_esp_max_dist", "Tung ESP Max Distance", 50, 5000, 1000, root)
-    menu_util.bind_master(P, { "april_tung_esp_max_dist" })
 end
 
 function M.scan()
@@ -8145,7 +8551,6 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.VISUALS)
 
-    menu_util.section(T, G.VISUALS, "Target Gear")
     menu.add_checkbox(T, G.VISUALS, P, "Target Gear", false)
     menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Target FOV", 40, 400, 150, menu_util.parent(P))
     menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, menu_util.parent(P))
@@ -8249,8 +8654,7 @@ local P = "april_crosshair_enabled"
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.VISUALS)
-    menu_util.section(T, G.VISUALS, "Crosshair")
-    menu.add_checkbox(T, G.VISUALS, "april_crosshair_enabled", "Enable Custom Crosshair", false, { key = 0 })
+    menu.add_checkbox(T, G.VISUALS, "april_crosshair_enabled", "Custom Crosshair", false, { key = 0 })
     menu.add_combo(T, G.VISUALS, "april_crosshair_type", "Crosshair Type", { "Cross", "Circle", "Dot", "T-Shape" }, 0, { parent = P })
     menu.add_slider_int(T, G.VISUALS, "april_crosshair_size", "Size", 1, 50, 10, { parent = P })
     menu.add_slider_int(T, G.VISUALS, "april_crosshair_gap", "Gap", 0, 20, 5, { parent = P })
@@ -8313,6 +8717,182 @@ return M
 
 end)()
 
+-- ── features/visuals/brainrot_esp.lua ──
+April._mods["features.visuals.brainrot_esp"] = (function()
+local settings = April.require("core.settings")
+local cache = April.require("core.cache")
+local env = April.require("core.env")
+local esp_util = April.require("core.esp_util")
+local esp_scan = April.require("game.esp_scan")
+local menu_util = April.require("core.menu_util")
+local image_cache = April.require("core.image_cache")
+local catalog = April.require("game.brainrot_catalog")
+
+local M = {}
+
+local P = "april_brainrot_enabled"
+local P_STYLE = "april_brainrot_style"
+local P_SIZE = "april_brainrot_size"
+
+local _active_key = nil
+
+local function labels()
+    return catalog.combo_labels()
+end
+
+local function selected_entry()
+    local idx = settings.combo_index(P_STYLE, labels(), 0)
+    return catalog.entry_at_index(idx)
+end
+
+local function active_key()
+    local entry = selected_entry()
+    if not entry then return nil end
+    return catalog.image_key(entry.file)
+end
+
+local function ensure_image(key, file)
+    if not key or not file then return end
+    image_cache.ensure(key, catalog.url(file))
+end
+
+local function draw_bounds(bounds)
+    if not bounds or not bounds.valid then return false end
+
+    local key = active_key()
+    if not key then return false end
+
+    local min_sz = settings.num(P_SIZE, 48)
+    local w = math.max(min_sz, math.floor(bounds.w or min_sz))
+    local h = math.max(min_sz, math.floor(bounds.h or min_sz))
+
+    image_cache.begin_load(key)
+    return image_cache.draw_fit(key, bounds.x, bounds.y, w, h)
+end
+
+local function draw_entry(entry)
+    if not entry then return end
+    if entry.inst and not env.is_valid(entry.inst) then return end
+    if entry.entity and entry.entity.is_alive == false then return end
+
+    local bounds = esp_util.entry_screen_bounds(entry)
+    if bounds then
+        draw_bounds(bounds)
+        return
+    end
+
+    local lx, ly, lz
+    if entry.lx then
+        lx, ly, lz = entry.lx, entry.ly, entry.lz
+    elseif entry.entity and entry.entity.position then
+        lx, ly, lz = entry.entity.position.x, entry.entity.position.y, entry.entity.position.z
+    else
+        lx, ly, lz = esp_scan.entry_coords(entry)
+    end
+
+    if lx then
+        draw_bounds(esp_util.point_screen_bounds(lx, ly, lz, settings.num(P_SIZE, 48)))
+    end
+end
+
+local function draw_cache_list(list)
+    for _, entry in ipairs(list or {}) do
+        draw_entry(entry)
+    end
+end
+
+local function draw_players()
+    if not entity or not entity.get_players then return end
+
+    for _, p in ipairs(entity.get_players()) do
+        if p.is_local then goto continue end
+
+        local bounds
+        if p.get_bounds then
+            bounds = p:get_bounds()
+        end
+
+        if bounds and bounds.valid and bounds.w > 0 and bounds.h > 0 then
+            draw_bounds(bounds)
+        elseif p.position then
+            draw_bounds(esp_util.point_screen_bounds(
+                p.position.x, p.position.y, p.position.z,
+                settings.num(P_SIZE, 64)
+            ))
+        end
+
+        ::continue::
+    end
+end
+
+local function draw_npcs()
+    for _, entry in ipairs(cache.npcs or {}) do
+        if entry.entity then
+            if entry.entity.is_alive == false then goto continue end
+            local bounds = entry.entity.get_bounds and entry.entity:get_bounds()
+            if bounds and bounds.valid then
+                draw_bounds(bounds)
+                goto continue
+            end
+        end
+        draw_entry(entry)
+        ::continue::
+    end
+end
+
+function M.register_menu()
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.VISUALS)
+    local root = menu_util.parent(P)
+
+    menu.add_checkbox(T, G.VISUALS, P, "Brainrot ESP", false)
+    menu.add_combo(T, G.VISUALS, P_STYLE, "Character", labels(), 0, root)
+    menu.add_slider_int(T, G.VISUALS, P_SIZE, "Min Box Size", 24, 160, 48, root)
+
+    menu_util.bind_master(P, { P_STYLE, P_SIZE })
+end
+
+function M.init()
+    for _, entry in ipairs(catalog.ENTRIES) do
+        ensure_image(catalog.image_key(entry.file), entry.file)
+    end
+end
+
+function M.update(_dt)
+    if not settings.enabled(P) then
+        _active_key = nil
+        return
+    end
+
+    local key = active_key()
+    if key ~= _active_key then
+        _active_key = key
+        local entry = selected_entry()
+        if entry then
+            ensure_image(key, entry.file)
+        end
+    end
+end
+
+function M.draw()
+    if not settings.enabled(P) then return end
+
+    local entry = selected_entry()
+    if entry then
+        ensure_image(active_key(), entry.file)
+    end
+
+    draw_cache_list(cache.world)
+    draw_cache_list(cache.loot)
+    draw_cache_list(cache.base)
+    draw_npcs()
+    draw_players()
+end
+
+return M
+
+end)()
+
 -- ── features/world/world_esp.lua ──
 April._mods["features.world.world_esp"] = (function()
 local settings = April.require("core.settings")
@@ -8352,14 +8932,14 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.WORLD)
-    menu.add_checkbox(T, G.WORLD, P, "Enable World ESP", false, { key = 0 })
+    menu.add_checkbox(T, G.WORLD, P, "Resource ESP", false, { key = 0 })
     for _, t in ipairs(maps.WORLD_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
     end
-    menu.add_checkbox(T, G.WORLD, "april_world_boxes", "World 3D Boxes", false, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_world_show_name", "World Show Name", true, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_world_show_distance", "World Show Distance", true, { parent = P })
-    menu.add_slider_int(T, G.WORLD, "april_world_range", "World Range", 50, 2000, 500, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_world_boxes", "3D Boxes", false, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_world_show_name", "Show Name", true, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_world_show_distance", "Show Distance", true, { parent = P })
+    menu.add_slider_int(T, G.WORLD, "april_world_range", "Range", 50, 2000, 500, { parent = P })
 
     local child_ids = { "april_world_boxes", "april_world_show_name", "april_world_show_distance", "april_world_range" }
     for _, t in ipairs(maps.WORLD_TOGGLES) do
@@ -8741,15 +9321,14 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.WORLD)
-    menu_util.section(T, G.WORLD, "Loot ESP")
-    menu.add_checkbox(T, G.WORLD, P, "Enable Loot ESP", false, { key = 0 })
+    menu.add_checkbox(T, G.WORLD, P, "Loot ESP", false, { key = 0 })
     for _, t in ipairs(maps.LOOT_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
     end
-    menu.add_checkbox(T, G.WORLD, "april_loot_boxes", "Loot 3D Boxes", false, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_loot_show_name", "Loot Show Name", true, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_loot_show_distance", "Loot Show Distance", true, { parent = P })
-    menu.add_slider_int(T, G.WORLD, "april_loot_range", "Loot Range", 50, 2000, 300, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_loot_boxes", "3D Boxes", false, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_loot_show_name", "Show Name", true, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_loot_show_distance", "Show Distance", true, { parent = P })
+    menu.add_slider_int(T, G.WORLD, "april_loot_range", "Range", 50, 2000, 300, { parent = P })
 
     local child_ids = { "april_loot_boxes", "april_loot_show_name", "april_loot_show_distance", "april_loot_range" }
     for _, t in ipairs(maps.LOOT_TOGGLES) do
@@ -8897,15 +9476,14 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.WORLD)
-    menu_util.section(T, G.WORLD, "Base ESP")
-    menu.add_checkbox(T, G.WORLD, P, "Enable Base ESP", false, { key = 0 })
+    menu.add_checkbox(T, G.WORLD, P, "Base ESP", false, { key = 0 })
     for _, t in ipairs(maps.BASE_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
     end
-    menu.add_checkbox(T, G.WORLD, "april_base_boxes", "Base 3D Boxes", false, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_base_show_name", "Base Show Name", true, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_base_show_distance", "Base Show Distance", false, { parent = P })
-    menu.add_slider_int(T, G.WORLD, "april_base_range", "Base Range", 50, 500, 150, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_base_boxes", "3D Boxes", false, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_base_show_name", "Show Name", true, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_base_show_distance", "Show Distance", false, { parent = P })
+    menu.add_slider_int(T, G.WORLD, "april_base_range", "Range", 50, 500, 150, { parent = P })
 
     local child_ids = { "april_base_boxes", "april_base_show_name", "april_base_show_distance", "april_base_range" }
     for _, t in ipairs(maps.BASE_TOGGLES) do
@@ -9087,17 +9665,16 @@ function M.register_menu()
     local T, _ = menu_util.group(G.WORLD)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G.WORLD, "NPC ESP")
-    menu.add_checkbox(T, G.WORLD, P, "Enable NPC ESP", false, { key = 0, colorpicker = { 1, 0.3, 0.3, 1 } })
+    menu.add_checkbox(T, G.WORLD, P, "NPC ESP", false, { key = 0, colorpicker = { 1, 0.3, 0.3, 1 } })
     menu.add_checkbox(T, G.WORLD, "april_npc_soldiers", "Soldiers", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, menu_util.parent(P, { colorpicker = { 1, 0.5, 0.1, 1 } }))
-    menu.add_combo(T, G.WORLD, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 0, root)
-    menu.add_checkbox(T, G.WORLD, "april_npc_health", "NPC Health Bar", false, root)
-    menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "NPC Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_offscreen", "NPC Offscreen Arrows", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "NPC Show Name", true, root)
-    menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "NPC Show Distance", true, root)
-    menu.add_slider_int(T, G.WORLD, "april_npc_range", "NPC Range", 50, 2000, 500, root)
+    menu.add_combo(T, G.WORLD, "april_npc_box_mode", "Box Mode", { "None", "2D", "Corner" }, 0, root)
+    menu.add_checkbox(T, G.WORLD, "april_npc_health", "Health Bar", false, root)
+    menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_offscreen", "Offscreen Arrows", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "Show Name", true, root)
+    menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "Show Distance", true, root)
+    menu.add_slider_int(T, G.WORLD, "april_npc_range", "Range", 50, 2000, 500, root)
 
     menu_util.bind_master(P, {
         "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode", "april_npc_health",
@@ -9403,175 +9980,19 @@ end)()
 
 -- ── features/movement/exploits.lua ──
 April._mods["features.movement.exploits"] = (function()
-local settings = April.require("core.settings")
-local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
-local fly = April.require("core.cframe_move")
-local runservice = April.require("core.runservice")
 
 local M = {}
-
-local fly_was_active = false
-local inf_restore_pending = nil
-
-local FLY_STATE = 6
-local INF_RAY_LEN = 1000
-local INF_MIN_DIST = 4
-
-local function get_character(lp)
-    if lp and lp.character then return lp.character end
-    if game and game.local_player and game.local_player.character then
-        return game.local_player.character
-    end
-    return nil
-end
-
-local function get_root(lp)
-    local char = get_character(lp)
-    if not char then return nil end
-    return env.safe_call(function()
-        if char.find_first_child then return char:find_first_child("HumanoidRootPart") end
-        return char:FindFirstChild("HumanoidRootPart")
-    end)
-end
-
-local function get_humanoid(lp)
-    if lp and lp.humanoid and env.is_valid(lp.humanoid) then
-        return lp.humanoid
-    end
-    local char = get_character(lp)
-    if not char then return nil end
-    return env.safe_call(function()
-        if char.find_first_child_of_class then return char:find_first_child_of_class("Humanoid") end
-        return char:FindFirstChildOfClass("Humanoid")
-    end)
-end
-
-local function is_flying(hum)
-    if not hum then return false end
-    local state = hum.state or hum.State
-    if state == FLY_STATE or state == 5 then return true end
-    local name = hum.state_name or hum.StateName
-    return name == "Flying" or name == "Freefall"
-end
-
-local function ground_distance(pos)
-    if not pos then return nil end
-
-    if raycast and raycast.is_ready and raycast.cast then
-        if raycast.is_ready() then
-            local hit, _, dist = raycast.cast(
-                pos.x, pos.y, pos.z,
-                pos.x, pos.y - INF_RAY_LEN, pos.z
-            )
-            if hit then return dist end
-        end
-    end
-
-    return nil
-end
-
-local function restore_inf_pulse(snapshot)
-    if not snapshot then return end
-    for inst, vel in pairs(snapshot) do
-        if env.is_valid(inst) then
-            fly.set_velocity(inst, vel.x, vel.y, vel.z)
-        end
-    end
-end
-
-local function iter_pulse_parts(char)
-    local out = {}
-    if not char then return out end
-    local list = env.safe_call(function() return char:get_children() end)
-        or env.safe_call(function() return char:GetChildren() end)
-        or {}
-    for _, inst in ipairs(list) do
-        if fly.is_base_part(inst) then
-            out[#out + 1] = inst
-        end
-    end
-    return out
-end
-
-local function run_inf_fly_pulse(char, root)
-    if inf_restore_pending then
-        restore_inf_pulse(inf_restore_pending)
-        inf_restore_pending = nil
-    end
-
-    local pos = fly.read_pos(root)
-    if not pos then return end
-
-    local dist = ground_distance(pos)
-    if not dist or dist <= INF_MIN_DIST then return end
-
-    local snapshot = {}
-    for _, inst in ipairs(iter_pulse_parts(char)) do
-        local vx, vy, vz = fly.read_velocity(inst)
-        snapshot[inst] = { x = vx, y = vy, z = vz }
-        fly.set_velocity(inst, 0, -9999, 0)
-    end
-    inf_restore_pending = snapshot
-end
-
-local function sustain_inf_fly(root, hum)
-    if not root or not hum then return end
-    local vx, _, vz = fly.read_velocity(root)
-    fly.set_velocity(root, vx, 0, vz)
-    pcall(function() hum.state = 5 end)
-    pcall(function() hum.platform_stand = true end)
-end
-
-local function run_fly(char, root, hum)
-    local active = settings.enabled("april_noclip_enabled")
-
-    if fly_was_active and not active then
-        inf_restore_pending = nil
-        fly.restore_humanoid(hum)
-    end
-
-    fly_was_active = active
-    if not active or not root or not char or not hum then return end
-
-    local speed = settings.num("april_noclip_speed", 72)
-    fly.run_cframe_fly(root, hum, speed)
-
-    if is_flying(hum) then
-        sustain_inf_fly(root, hum)
-    end
-
-    run_inf_fly_pulse(char, root)
-end
-
-local function run_spider(root, hum)
-    if settings.enabled("april_noclip_enabled") then return end
-    if not settings.enabled("april_spider_enabled") then return end
-    if not root or not hum then return end
-
-    fly.apply_fly_humanoid(hum, 12)
-    fly.zero_part(root)
-
-    local speed = math.min(settings.num("april_spider_speed", 20), 18)
-    local pos = fly.read_pos(root)
-    if not pos then return end
-
-    fly.set_position(root, pos.x, pos.y + speed * fly.delta_time(), pos.z)
-end
 
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.MISC)
 
-    menu_util.label(T, G.MISC, "Inf Fly uses CFrame movement + raycast fall bypass.")
-    menu.add_separator(T, G.MISC)
-
-    menu_util.section(T, G.MISC, "Movement")
     menu.add_checkbox(T, G.MISC, "april_noclip_enabled", "Inf Fly", false, { key = 0 })
     menu.add_slider_int(T, G.MISC, "april_noclip_speed", "Fly Speed", 16, 200, 72, menu_util.parent("april_noclip_enabled"))
 
-    menu.add_checkbox(T, G.MISC, "april_spider_enabled", "Spider Climb", false, { key = 0 })
-    menu.add_slider_int(T, G.MISC, "april_spider_speed", "Wall Speed", 1, 50, 20, menu_util.parent("april_spider_enabled"))
+    menu.add_checkbox(T, G.MISC, "april_spider_enabled", "Spider", false, { key = 0 })
+    menu.add_slider_int(T, G.MISC, "april_spider_speed", "Climb Speed", 1, 50, 20, menu_util.parent("april_spider_enabled"))
 
     menu_util.bind_master("april_noclip_enabled", { "april_noclip_speed" })
     menu_util.bind_master("april_spider_enabled", { "april_spider_speed" })
@@ -9580,20 +10001,6 @@ end
 function M.update(_dt) end
 
 function M.draw() end
-
-runservice.on_sim(function(_dt)
-    local lp = env.get_local_player()
-    if not lp then return end
-
-    local char = get_character(lp)
-    if not char or not env.is_valid(char) then return end
-
-    local root = get_root(lp)
-    local hum = get_humanoid(lp)
-
-    run_fly(char, root, hum)
-    run_spider(root, hum)
-end)
 
 return M
 
@@ -9745,7 +10152,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G.MISC, "Desync")
+    menu_util.gap(T, G.MISC)
     menu.add_checkbox(T, G.MISC, P, "Desync", false, { key = 0 })
     menu.add_checkbox(T, G.MISC, "april_desync_autosend", "Auto Send", false, root)
     menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Send Threshold", 0, 1, 0.3, root)
@@ -9833,158 +10240,6 @@ return M
 
 end)()
 
--- ── features/movement/freecam.lua ──
-April._mods["features.movement.freecam"] = (function()
-local settings = April.require("core.settings")
-local env = April.require("core.env")
-local menu_util = April.require("core.menu_util")
-local fly = April.require("core.cframe_move")
-local packet_desync = April.require("core.packet_desync")
-local desync_vis = April.require("core.desync_vis")
-local misc_gate = April.require("core.misc_gate")
-
-local M = {}
-
-local P = "april_freecam_enabled"
-
-local was_active = false
-local server_pos = nil
-local desync_on = false
-
-local function active()
-    return settings.enabled(P)
-end
-
-local function get_character()
-    local lp = env.get_local_player()
-    if not lp then return lp, nil, nil, nil end
-    local char = lp.character or (game and game.local_player and game.local_player.character)
-    if not char or not env.is_valid(char) then return lp, nil, nil, nil end
-
-    local hum = env.safe_call(function()
-        if char.find_first_child_of_class then return char:find_first_child_of_class("Humanoid") end
-        return char:FindFirstChildOfClass("Humanoid")
-    end)
-    local root = env.safe_call(function()
-        if char.find_first_child then return char:find_first_child("HumanoidRootPart") end
-        return char:FindFirstChild("HumanoidRootPart")
-    end)
-    return lp, char, hum, root
-end
-
-local function set_root_anchored(root, anchored)
-    if not root then return end
-    if part and part.set_anchored then
-        pcall(part.set_anchored, root, anchored)
-    else
-        pcall(function() root.Anchored = anchored end)
-    end
-end
-
-local function enable_debug_cam(char, root, hum)
-    local pos = fly.read_pos(root)
-    if not pos then return false end
-
-    server_pos = { x = pos.x, y = pos.y, z = pos.z }
-    fly.apply_fly_humanoid(hum, 6)
-    fly.zero_character(char)
-    set_root_anchored(root, true)
-    fly.set_position(root, pos.x, pos.y, pos.z)
-    packet_desync.apply_movement_only()
-    desync_on = true
-    return true
-end
-
-local function disable_debug_cam(root, hum)
-    if desync_on then
-        packet_desync.release()
-        desync_on = false
-    end
-
-    if server_pos and root and env.is_valid(root) then
-        fly.set_position(root, server_pos.x, server_pos.y, server_pos.z)
-    end
-
-    set_root_anchored(root, false)
-    fly.restore_humanoid(hum)
-    server_pos = nil
-end
-
-function M.register_menu()
-    local G = menu_util.G
-    local T, _ = menu_util.group(G.MISC)
-    local root = menu_util.parent(P)
-
-    menu_util.section(T, G.MISC, "Debug Camera")
-    menu.add_checkbox(T, G.MISC, P, "Debug Camera", false, { key = 0 })
-    menu.add_slider_int(T, G.MISC, "april_freecam_speed", "Fly Speed", 16, 250, 120, root)
-    menu.add_checkbox(T, G.MISC, "april_freecam_vis", "Visualizer", true, root)
-    menu.add_combo(T, G.MISC, "april_freecam_vis_style", "Vis Style", { "Box", "Cross", "Ring" }, 0, root)
-    menu.add_slider_float(T, G.MISC, "april_freecam_vis_size", "Vis Size", 0.5, 4, 1.2, root)
-
-    menu_util.bind_master(P, {
-        "april_freecam_speed",
-        "april_freecam_vis", "april_freecam_vis_style", "april_freecam_vis_size",
-    })
-
-    menu_util.bind_when(function()
-        return settings.enabled(P) and settings.enabled("april_freecam_vis")
-    end, { "april_freecam_vis_style", "april_freecam_vis_size" }, { P, "april_freecam_vis" })
-end
-
-function M.update(_dt)
-    if not misc_gate.movement_allowed() then return end
-    local on = active()
-    local _, char, hum, root = get_character()
-
-    if was_active and not on then
-        if root then
-            disable_debug_cam(root, hum)
-        elseif desync_on then
-            packet_desync.release()
-            desync_on = false
-            server_pos = nil
-        end
-    end
-
-    if on and not was_active then
-        if char and root and hum then
-            enable_debug_cam(char, root, hum)
-        end
-    end
-
-    was_active = on
-    if not on or not char or not root or not hum or not server_pos then return end
-
-    fly.run_cframe_fly(root, hum, settings.num("april_freecam_speed", 120))
-end
-
-function M.draw()
-    if not misc_gate.movement_allowed() then return end
-    if not active() or not settings.enabled("april_freecam_vis") then return end
-    if not server_pos then return end
-
-    local _, _, _, root = get_character()
-    local local_pos = root and fly.read_pos(root)
-    if not local_pos then return end
-
-    desync_vis.draw_server_local(server_pos, local_pos, {
-        mode = settings.num("april_freecam_vis_style", 0),
-        size = settings.num("april_freecam_vis_size", 1.2),
-        col_server = settings.color("april_freecam_vis_server", { 0.2, 0.85, 1, 0.9 }),
-        col_local = settings.color("april_freecam_vis_local", { 1, 0.35, 0.35, 0.9 }),
-        col_link = { 1, 1, 1, 0.4 },
-        link = true,
-        labels = true,
-        server_label = "SERVER",
-        local_label = "LOCAL",
-    })
-end
-
-return M
-
-end)()
-
 -- ── features/radar/waypoints.lua ──
 April._mods["features.radar.waypoints"] = (function()
 local settings = April.require("core.settings")
@@ -10003,11 +10258,11 @@ function M.register_menu()
     local root = menu_util.parent(P)
 
     menu.add_checkbox(T, G.RADAR, P, "Enable Waypoints", false, { key = 0 })
-    menu.add_checkbox(T, G.RADAR, "april_wp_dist", "Waypoint Show Distance", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_wp_dist", "Show Distance", false, root)
     menu.add_checkbox(T, G.RADAR, "april_wp_beacon", "Beacon Pillar", false, root)
     menu.add_slider_int(T, G.RADAR, "april_wp_beacon_h", "Beacon Height", 20, 200, 90, menu_util.parent("april_wp_beacon"))
     menu.add_checkbox(T, G.RADAR, "april_wp_draw", "Draw Markers", false, menu_util.parent(P, { colorpicker = { 0.2, 1, 0.8, 1 } }))
-    menu.add_slider_int(T, G.RADAR, "april_wp_slot", "Waypoint Active Slot", 1, 5, 1, root)
+    menu.add_slider_int(T, G.RADAR, "april_wp_slot", "Active Slot", 1, 5, 1, root)
 
     menu_util.button(T, G.RADAR, "april_wp_set", "Set Active Waypoint", function()
         local slot = settings.num("april_wp_slot", 1)
@@ -10276,13 +10531,11 @@ function M.register_menu()
     local T, _ = menu_util.group(G.RADAR)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G.RADAR, "Tactical Radar")
     menu.add_checkbox(T, G.RADAR, P, "Enable Radar", false, { key = 0x28 })
     menu.add_slider_float(T, G.RADAR, "april_map_zoom", "Zoom Level", 0.05, 5.0, 1.0, "%.2f", root)
     menu.add_slider_int(T, G.RADAR, "april_map_size", "Radar Size", 140, 420, 240, root)
     menu.add_slider_int(T, G.RADAR, "april_map_icon_scale", "Blip Size", 2, 6, 3, root)
 
-    menu.add_separator(T, G.RADAR)
     menu.add_checkbox(T, G.RADAR, "april_map_show_players", "Players", true, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_npcs", "NPCs", false, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_loot", "Loot", true, root)
@@ -10290,15 +10543,14 @@ function M.register_menu()
     menu.add_checkbox(T, G.RADAR, "april_map_show_base", "Base Parts", false, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_waypoints", "Waypoints", true, root)
 
-    menu.add_separator(T, G.RADAR)
     menu.add_colorpicker(T, G.RADAR, "april_map_bg", "Background", theme.MAP_BG, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_grid", "Grid / Rings", theme.MAP_GRID, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_player_col", "Player Color", theme.RED, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_npc_col", "NPC Color", theme.ORANGE, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_loot_col", "Loot Color", { 1, 0.85, 0.35, 1 }, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_world_col", "Resource Color", theme.GREEN, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_base_col", "Base Color", { 0.55, 0.55, 1, 1 }, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_wp_col", "Waypoint Color", theme.CYAN, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_grid", "Grid", theme.MAP_GRID, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_player_col", "Players", theme.RED, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_npc_col", "NPCs", theme.ORANGE, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_loot_col", "Loot", { 1, 0.85, 0.35, 1 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_world_col", "Resources", theme.GREEN, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_base_col", "Base", { 0.55, 0.55, 1, 1 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_wp_col", "Waypoints", theme.CYAN, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_local", "You", theme.CYAN, root)
     menu.add_checkbox(T, G.RADAR, "april_map_labels", "Show Labels", false, root)
 
@@ -10504,7 +10756,6 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.MISC)
-    menu_util.section(T, G.MISC, "Mod Checker")
     menu.add_checkbox(T, G.MISC, P, "Mod Checker", false, { key = 0 })
     menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Mod Scan Interval (ms)", 1000, 10000, 2500, { parent = P })
     menu_util.bind_master(P, { "april_mod_checker_interval" })
@@ -10731,311 +10982,6 @@ return M
 
 end)()
 
--- ── features/utility/name_hider.lua ──
-April._mods["features.utility.name_hider"] = (function()
-local settings = April.require("core.settings")
-local menu_util = April.require("core.menu_util")
-local env = April.require("core.env")
-local mem = April.require("core.memory_string")
-
-local M = {}
-local P = "april_hide_local_name"
-local APPLY_DELAY_MS = 2500
-local REPATCH_MS = 200
-
-M._alias = nil
-M._apply_after = 0
-M._last_patch = 0
-M._mem_done = false
-M._session = ""
-
-local function tick_ms()
-    return utility and utility.get_tick_count and utility.get_tick_count() or 0
-end
-
-local function session_id()
-    if not game then return "none" end
-    local pid = game.place_id or 0
-    local ws = game.workspace
-    local ws_addr = (ws and (ws.Address or ws.address)) or 0
-    return pid .. ":" .. ws_addr
-end
-
-local function random_alias(len)
-    len = math.max(4, math.min(len or 10, 20))
-    local chars = "abcdefghijklmnopqrstuvwxyz0123456789"
-    local n = #chars
-    math.randomseed(tick_ms() + len * 7919)
-    local out = {}
-    for i = 1, len do
-        out[i] = chars:sub(math.random(1, n), math.random(1, n))
-    end
-    return table.concat(out)
-end
-
-local function get_primary_name()
-    local lp = env.get_local_player()
-    if not lp then return nil end
-    local username = lp.name
-    if username and #username >= 2 then return username, lp.display_name end
-    if game and game.local_player and env.is_valid(game.local_player) then
-        username = game.local_player.Name or game.local_player.name
-        local display = game.local_player.DisplayName or game.local_player.display_name
-        if username and #username >= 2 then return username, display end
-    end
-    return nil
-end
-
-local function set_text(inst, text)
-    if not inst or not text then return false end
-    return env.safe_call(function()
-        if inst.Text ~= nil then
-            inst.Text = text
-            return true
-        end
-        if inst.text ~= nil then
-            inst.text = text
-            return true
-        end
-    end) == true
-end
-
-local function set_instance_name(inst, alias)
-    if not inst or not alias then return false end
-    local ok = env.safe_call(function()
-        if inst.DisplayName ~= nil then
-            inst.DisplayName = alias
-            return true
-        end
-        if inst.display_name ~= nil then
-            inst.display_name = alias
-            return true
-        end
-        if inst.Name ~= nil then
-            inst.Name = alias
-            return true
-        end
-        if inst.name ~= nil then
-            inst.name = alias
-            return true
-        end
-    end)
-    return ok == true
-end
-
-local function patch_player_instances(alias)
-    if game and game.local_player and env.is_valid(game.local_player) then
-        set_instance_name(game.local_player, alias)
-    end
-    local lp = env.get_local_player()
-    if lp and lp.player and env.is_valid(lp.player) then
-        set_instance_name(lp.player, alias)
-    end
-end
-
-local function find_child(parent, name)
-    if not parent then return nil end
-    return env.safe_call(function()
-        if parent.find_first_child then return parent:find_first_child(name) end
-        if parent.FindFirstChild then return parent:FindFirstChild(name) end
-    end)
-end
-
-local function patch_humanoid(hum, alias)
-    if not hum then return end
-    env.safe_call(function()
-        if hum.name_display_distance ~= nil then hum.name_display_distance = 0 end
-        if hum.NameDisplayDistance ~= nil then hum.NameDisplayDistance = 0 end
-        if hum.display_distance_type ~= nil then hum.display_distance_type = 2 end
-        if hum.DisplayDistanceType ~= nil then hum.DisplayDistanceType = 2 end
-    end)
-end
-
-local function patch_name_tag(char, alias, real)
-    if not char or not env.is_valid(char) then return end
-    local name_tag = find_child(char, "NameTag")
-    if not name_tag or not env.is_valid(name_tag) then return end
-
-    env.safe_call(function()
-        if name_tag.Enabled ~= nil then name_tag.Enabled = false end
-        if name_tag.enabled ~= nil then name_tag.enabled = false end
-        if name_tag.MaxDistance ~= nil then name_tag.MaxDistance = 0 end
-        if name_tag.max_distance ~= nil then name_tag.max_distance = 0 end
-    end)
-
-    local label = find_child(name_tag, "Label")
-    if label then
-        local txt = env.safe_call(function() return label.Text or label.text end)
-        if not txt or txt == "" or (real and txt:find(real, 1, true)) then
-            set_text(label, alias)
-        end
-    end
-end
-
-local function patch_gui(alias, real)
-    if not game or not game.local_player then return end
-    local pg = find_child(game.local_player, "PlayerGui")
-    if not pg or not env.is_valid(pg) then return end
-
-    local main = find_child(pg, "Main")
-    if main and env.is_valid(main) then
-        local map = find_child(main, "Map")
-        if map and env.is_valid(map) then
-            local outer = find_child(map, "Frame")
-            local inner = outer and find_child(outer, "Map")
-            if inner and env.is_valid(inner) then
-                local cursor = find_child(inner, "PlayerCursor")
-                if cursor then
-                    local player_name = find_child(cursor, "PlayerName")
-                    if player_name then
-                        local txt = env.safe_call(function() return player_name.Text or player_name.text end)
-                        if not txt or txt == "" or (real and txt:find(real, 1, true)) then
-                            set_text(player_name, alias)
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    local custom_chat = find_child(pg, "CustomChat")
-    if custom_chat and env.is_valid(custom_chat) then
-        local chat_frame = find_child(custom_chat, "ChatFrame")
-        local messages = chat_frame and find_child(chat_frame, "MessagesFrame")
-        if messages and env.is_valid(messages) then
-            local children = env.safe_call(function()
-                if messages.get_children then return messages:get_children() end
-            end) or {}
-            for _, msg in ipairs(children) do
-                if not env.is_valid(msg) then goto continue_msg end
-                local txt = env.safe_call(function()
-                    return msg.Text or msg.text
-                end)
-                if txt and real and txt:find(real, 1, true) then
-                    set_text(msg, txt:gsub(real, alias))
-                end
-                ::continue_msg::
-            end
-        end
-    end
-end
-
-local function patch_engine_strings_once(real, alias)
-    if M._mem_done or not mem.available() or not real or real == alias then return end
-
-    local variants = {
-        { needle = real, enc = "ascii" },
-        { needle = mem.utf16_bytes(real), enc = "utf16" },
-        { needle = "@" .. real, enc = "ascii" },
-    }
-
-    local at_alias = "@" .. alias
-
-    for _, v in ipairs(variants) do
-        local hits = mem.try_engine_scan(v.needle, 24)
-        for i = 1, #hits do
-            local hit = hits[i]
-            local addr = hit.addr
-            if addr and addr > 0 then
-                local current = mem.read_at(addr, #real + 4, v.enc)
-                local replacement = v.enc == "utf16" and mem.pad_alias(alias, #real) or alias
-                if current:sub(1, 1) == "@" then
-                    replacement = v.enc == "utf16" and mem.pad_alias(at_alias, #real + 1) or at_alias
-                end
-                if #replacement <= #current + 2 then
-                    mem.write_at(addr, replacement, #replacement + 1, v.enc)
-                end
-            end
-        end
-    end
-
-    M._mem_done = true
-end
-
-function M.register_menu()
-    local G = menu_util.G
-    local T, _ = menu_util.group(G.MISC)
-    menu.add_checkbox(T, G.MISC, P, "Hide Local Name", false, menu_util.parent("april_mod_checker_enabled"))
-
-    settings.on_change(P, function()
-        M.reset()
-        if settings.enabled(P) then
-            M._apply_after = tick_ms() + APPLY_DELAY_MS
-        end
-    end)
-
-    menu_util.bind_master("april_mod_checker_enabled", { P })
-end
-
-function M.patch_now()
-    if not settings.enabled(P) then return end
-
-    local real = get_primary_name()
-    if not real then return end
-
-    if not M._alias then
-        M._alias = random_alias(#real)
-    end
-    local alias = M._alias
-
-    patch_player_instances(alias)
-
-    local lp = env.get_local_player()
-    if lp and lp.character and env.is_valid(lp.character) then
-        patch_name_tag(lp.character, alias, real)
-    end
-    if lp and lp.humanoid and env.is_valid(lp.humanoid) then
-        patch_humanoid(lp.humanoid, alias)
-    end
-
-    patch_gui(alias, real)
-    patch_engine_strings_once(real, alias)
-end
-
-function M.reset()
-    M._alias = nil
-    M._apply_after = 0
-    M._last_patch = 0
-    M._mem_done = false
-    M._session = ""
-end
-
-function M.update(_dt)
-    if not settings.enabled(P) then
-        if M._alias or M._apply_after > 0 or M._mem_done then
-            M.reset()
-        end
-        return
-    end
-
-    local sid = session_id()
-    if sid ~= M._session then
-        M._session = sid
-        M._alias = nil
-        M._mem_done = false
-        M._apply_after = tick_ms() + APPLY_DELAY_MS
-        M._last_patch = 0
-    end
-
-    if not get_primary_name() then return end
-
-    if M._apply_after == 0 then
-        M._apply_after = tick_ms() + APPLY_DELAY_MS
-    end
-
-    if tick_ms() < M._apply_after then return end
-
-    if M._last_patch > 0 and tick_ms() - M._last_patch < REPATCH_MS then return end
-    M._last_patch = tick_ms()
-    M.patch_now()
-end
-
-function M.draw() end
-
-return M
-
-end)()
-
 -- ── features/utility/config.lua ──
 April._mods["features.utility.config"] = (function()
 local settings = April.require("core.settings")
@@ -11101,8 +11047,6 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.CONFIG)
 
-    menu_util.section(T, G.CONFIG, "Config Profiles")
-
     menu_util.input(T, G.CONFIG, "april_cfg_profile_name", "Profile Name", "Default")
 
     menu.add_slider_int(T, G.CONFIG, "april_cfg_slot", "Active Slot (1-5)", store.SLOT_MIN, store.SLOT_MAX, 1)
@@ -11117,10 +11061,8 @@ function M.register_menu()
         M.delete_slot(active_slot())
     end)
 
-    menu.add_separator(T, G.CONFIG)
-    menu_util.label(T, G.CONFIG, "Autoload on script start")
-
-    menu.add_checkbox(T, G.CONFIG, "april_cfg_autoload", "Enable Autoload", false)
+    menu_util.gap(T, G.CONFIG)
+    menu.add_checkbox(T, G.CONFIG, "april_cfg_autoload", "Autoload on Start", false)
     menu_util.input(T, G.CONFIG, "april_cfg_autoload_profile", "Autoload Profile Name", "")
     menu.add_slider_int(
         T, G.CONFIG, "april_cfg_autoload_slot", "Autoload Slot (fallback)",
@@ -11128,9 +11070,7 @@ function M.register_menu()
         menu_util.parent("april_cfg_autoload")
     )
 
-    menu.add_separator(T, G.CONFIG)
-    menu_util.label(T, G.CONFIG, "Display & modules")
-
+    menu_util.gap(T, G.CONFIG)
     menu.add_slider_int(T, G.CONFIG, "april_esp_text_size", "ESP Text Size", 8, 24, 13)
     menu.add_button(T, G.CONFIG, "april_reload_modules", "Reload Game Modules", function()
         April.require("game.bootstrap").force_reload()
@@ -11169,28 +11109,27 @@ M.features = {}
 M._menu_registered = false
 
 M.FEATURE_ORDER = {
-    "features.combat.perfect_farm",
     "features.combat.gun_mods",
-    "features.combat.aimbot",
-    "features.visuals.player_esp",
     "features.visuals.target_overlay",
     "features.visuals.crosshair",
+    "features.visuals.brainrot_esp",
     "features.world.world_esp",
     "features.world.loot_esp",
     "features.world.npc_esp",
     "features.world.base_esp",
-    "features.radar.waypoints",
     "features.radar.tactical_map",
+    "features.radar.waypoints",
+    "features.utility.mod_checker",
+    "features.combat.perfect_farm",
     "features.movement.exploits",
     "features.movement.desync",
-    "features.movement.freecam",
-    "features.utility.mod_checker",
-    "features.utility.name_hider",
     "features.utility.config",
 }
 
 function M.register_all()
     if M._menu_registered then return end
+
+    menu_util.ensure_groups()
 
     M.features = {}
     local registered = 0
@@ -11214,9 +11153,12 @@ function M.register_all()
     end
 
     pcall(function()
-        local esp = April.require("features.visuals.player_esp")
-        if esp.init then esp.init() end
         local mod = April.require("features.utility.mod_checker")
+        if mod.init then mod.init() end
+    end)
+
+    pcall(function()
+        local mod = April.require("features.visuals.brainrot_esp")
         if mod.init then mod.init() end
     end)
 end
@@ -11383,6 +11325,8 @@ local ok, err = pcall(function()
         debug.error_once("init", "app.init() returned false — features disabled")
         return
     end
+
+    April.require("core.movement_ctrl").install()
 
     April._init_ok = true
 

@@ -31,6 +31,11 @@ function M.tung_png()
     return M.CDN_BASE .. "/tung.png"
 end
 
+function M.brainrot_png(file)
+    if not file or file == "" then return nil end
+    return M.CDN_BASE .. "/brainrot/" .. file .. ".png"
+end
+
 function M.mod_warning_png()
     return M.CDN_BASE .. "/mod_warning.png"
 end

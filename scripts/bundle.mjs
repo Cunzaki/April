@@ -36,6 +36,7 @@ const ORDER = [
   "core/cframe_move.lua",
   "core/runservice.lua",
   "core/misc_gate.lua",
+  "core/movement_ctrl.lua",
   "core/config_store.lua",
   "core/memory_string.lua",
   "game/module_scan.lua",
@@ -51,7 +52,9 @@ const ORDER = [
   "game/player_gear.lua",
   "game/player_state.lua",
   "game/gc_weapon_mods.lua",
+  "game/weapon_profile_store.lua",
   "game/gun_mod_profiles.lua",
+  "game/brainrot_catalog.lua",
   "game/npcs.lua",
   "game/mod_ids.lua",
   "game/esp_maps.lua",
@@ -60,21 +63,19 @@ const ORDER = [
   "features/combat/perfect_farm.lua",
   "features/combat/gun_mods.lua",
   "features/combat/targeting.lua",
-  "features/combat/aimbot.lua",
   "features/visuals/player_esp.lua",
   "features/visuals/target_overlay.lua",
   "features/visuals/crosshair.lua",
+  "features/visuals/brainrot_esp.lua",
   "features/world/world_esp.lua",
   "features/world/loot_esp.lua",
   "features/world/base_esp.lua",
   "features/world/npc_esp.lua",
   "features/movement/exploits.lua",
   "features/movement/desync.lua",
-  "features/movement/freecam.lua",
   "features/radar/waypoints.lua",
   "features/radar/tactical_map.lua",
   "features/utility/mod_checker.lua",
-  "features/utility/name_hider.lua",
   "features/utility/config.lua",
   "menu/tabs.lua",
   "app.lua",
@@ -126,6 +127,8 @@ local ok, err = pcall(function()
         debug.error_once("init", "app.init() returned false — features disabled")
         return
     end
+
+    April.require("core.movement_ctrl").install()
 
     April._init_ok = true
 

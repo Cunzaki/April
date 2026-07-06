@@ -19,6 +19,7 @@ local EXCLUDE = {
     april_cfg_autoload_slot = true,
     april_cfg_autoload_profile = true,
     april_debug_overlay = true,
+    april_gm_held_weapon = true,
 }
 
 local MENU_KEYS = {
@@ -28,10 +29,11 @@ local MENU_KEYS = {
     "april_crosshair_enabled", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
     "april_crosshair_thickness", "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
     "april_crosshair_rainbow", "april_crosshair_rainbow_speed",
+    "april_brainrot_enabled", "april_brainrot_style", "april_brainrot_size",
     "april_aimbot_fov", "april_aimbot_bone", "april_aimbot_priority",
     "april_aimbot_sticky", "april_aimbot_visible", "april_aimbot_prediction", "april_aimbot_vis_ray",
     "april_aimbot_draw_fov", "april_aimbot_fov_fill", "april_aimbot_target_line",
-    "april_gunmods_enabled", "april_gm_recoil", "april_gm_recoil_pct", "april_gm_spread", "april_gm_spread_pct",
+    "april_gunmods_enabled", "april_gm_weapon_select", "april_gm_recoil", "april_gm_recoil_pct", "april_gm_spread", "april_gm_spread_pct",
     "april_gm_sway", "april_gm_fire_rate", "april_gm_fire_rate_mult",
     "april_gm_speed", "april_gm_speed_mult", "april_gm_range", "april_gm_range_mult",
     "april_farm_helper", "april_farm_radius", "april_farm_smooth",
@@ -69,14 +71,11 @@ local MENU_KEYS = {
     "april_desync_visualizer", "april_desync_vis_style", "april_desync_vis_size",
     "april_desync_vis_show_local", "april_desync_vis_link", "april_desync_vis_labels",
     "april_desync_vis_custom_color", "april_desync_vis_color",
-    "april_freecam_enabled", "april_freecam_speed",
-    "april_freecam_vis", "april_freecam_vis_style", "april_freecam_vis_size",
     "april_bullet_manip_enabled", "april_bullet_manip_range", "april_bullet_manip_speed",
     "april_bullet_manip_debug", "april_bullet_manip_console", "april_bullet_manip_vis",
     "april_bullet_manip_vis_style", "april_bullet_manip_vis_size",
     "april_bullet_manip_vis_link", "april_bullet_manip_vis_labels", "april_bullet_manip_vis_peek",
     "april_mod_checker_enabled", "april_mod_checker_interval",
-    "april_hide_local_name",
 }
 
 local COLOR_KEYS = {
@@ -99,14 +98,13 @@ local COLOR_KEYS = {
     "april_wp_draw", "april_map_bg", "april_map_grid", "april_map_player_col", "april_map_npc_col", "april_map_loot_col",
     "april_map_world_col", "april_map_base_col", "april_map_wp_col", "april_map_local",
     "april_desync_visualizer", "april_desync_vis_color", "april_desync_vis_local_col",
-    "april_freecam_vis_server", "april_freecam_vis_local",
     "april_bullet_manip_vis_server", "april_bullet_manip_vis_local", "april_bullet_manip_vis_peek", "april_bullet_manip_vis_link",
 }
 
 local HOTKEY_KEYS = {
     "april_tung_esp_enabled", "april_crosshair_enabled", "april_aimbot_prediction", "april_map_enabled",
     "april_waypoints_enabled", "april_noclip_enabled", "april_spider_enabled",
-    "april_desync_enabled", "april_freecam_enabled", "april_bullet_manip_enabled",
+    "april_desync_enabled", "april_bullet_manip_enabled",
     "april_world_enabled", "april_loot_enabled", "april_npc_enabled", "april_base_enabled",
 }
 

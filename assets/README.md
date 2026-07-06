@@ -27,6 +27,16 @@ Runtime URLs: `https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/a
 
 Do **not** use `github.com/.../blob/main/...` — that is the web viewer, not a direct image URL.
 
+## Brainrot ESP
+
+Transparent brainrot character PNGs → `assets/brainrot/{name}.png`
+
+```bash
+node scripts/download-brainrot.mjs
+```
+
+Runtime URL: `https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/assets/brainrot/tung_tung_sahur.png`
+
 ## Tung ESP
 
 Decal asset [139818999438291](https://create.roblox.com/store/asset/139818999438291/tung-tung-tung-sahur) → `assets/tung.png`

@@ -9,28 +9,27 @@ M.features = {}
 M._menu_registered = false
 
 M.FEATURE_ORDER = {
-    "features.combat.perfect_farm",
     "features.combat.gun_mods",
-    "features.combat.aimbot",
-    "features.visuals.player_esp",
     "features.visuals.target_overlay",
     "features.visuals.crosshair",
+    "features.visuals.brainrot_esp",
     "features.world.world_esp",
     "features.world.loot_esp",
     "features.world.npc_esp",
     "features.world.base_esp",
-    "features.radar.waypoints",
     "features.radar.tactical_map",
+    "features.radar.waypoints",
+    "features.utility.mod_checker",
+    "features.combat.perfect_farm",
     "features.movement.exploits",
     "features.movement.desync",
-    "features.movement.freecam",
-    "features.utility.mod_checker",
-    "features.utility.name_hider",
     "features.utility.config",
 }
 
 function M.register_all()
     if M._menu_registered then return end
+
+    menu_util.ensure_groups()
 
     M.features = {}
     local registered = 0
@@ -54,9 +53,12 @@ function M.register_all()
     end
 
     pcall(function()
-        local esp = April.require("features.visuals.player_esp")
-        if esp.init then esp.init() end
         local mod = April.require("features.utility.mod_checker")
+        if mod.init then mod.init() end
+    end)
+
+    pcall(function()
+        local mod = April.require("features.visuals.brainrot_esp")
         if mod.init then mod.init() end
     end)
 end

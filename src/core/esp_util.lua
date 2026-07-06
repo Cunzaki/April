@@ -313,6 +313,7 @@ function M.draw_oriented_box(box, col, thick)
 end
 
 function M.draw_entry_boxes(entry, col, thick)
+    if settings.enabled("april_brainrot_enabled") then return end
     if not entry or not entry.inst then return end
     if entry.box then
         M.draw_oriented_box(entry.box, col, thick)
@@ -325,6 +326,82 @@ function M.draw_entry_boxes(entry, col, thick)
         entry.box = box
         M.draw_oriented_box(box, col, thick)
     end
+end
+
+function M.oriented_box_screen_bounds(box)
+    if not box then return nil end
+
+    local min_x, min_y, max_x, max_y
+    local any = false
+
+    for i = 1, 8 do
+        local sx, sy, sz = BOX_SIGNS[i][1], BOX_SIGNS[i][2], BOX_SIGNS[i][3]
+        local lx, ly, lz = sx * box.hx, sy * box.hy, sz * box.hz
+        local wx = box.x + box.rx * lx + box.ux * ly - box.lx * lz
+        local wy = box.y + box.ry * lx + box.uy * ly - box.ly * lz
+        local wz = box.z + box.rz * lx + box.uz * ly - box.lz * lz
+        local px, py, vis = M.w2s(wx, wy, wz)
+        if vis then
+            any = true
+            min_x = min_x and math.min(min_x, px) or px
+            min_y = min_y and math.min(min_y, py) or py
+            max_x = max_x and math.max(max_x, px) or px
+            max_y = max_y and math.max(max_y, py) or py
+        end
+    end
+
+    if not any then return nil end
+
+    return {
+        x = min_x,
+        y = min_y,
+        w = math.max(12, max_x - min_x),
+        h = math.max(12, max_y - min_y),
+        valid = true,
+    }
+end
+
+function M.point_screen_bounds(wx, wy, wz, size)
+    local sx, sy, vis = M.w2s(wx, wy, wz)
+    if not vis then return nil end
+    size = size or 48
+    return {
+        x = sx - size * 0.5,
+        y = sy - size * 0.5,
+        w = size,
+        h = size,
+        valid = true,
+    }
+end
+
+function M.entry_screen_bounds(entry)
+    if not entry then return nil end
+
+    if entry.box then
+        local bounds = M.oriented_box_screen_bounds(entry.box)
+        if bounds then return bounds end
+    end
+
+    if entry.inst then
+        local scan = April.require("game.esp_scan")
+        local main = entry.main_part or scan.find_main_part(entry.inst)
+        if main then
+            local box = scan.read_part_box(main)
+            if box then
+                entry.box = box
+                local bounds = M.oriented_box_screen_bounds(box)
+                if bounds then return bounds end
+            end
+        end
+    end
+
+    local esp_scan = April.require("game.esp_scan")
+    local lx, ly, lz = esp_scan.entry_coords(entry)
+    if lx then
+        return M.point_screen_bounds(lx, ly, lz, 52)
+    end
+
+    return nil
 end
 
 return M
