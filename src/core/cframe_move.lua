@@ -92,6 +92,48 @@ function M.zero_character(char, root)
     end
 end
 
+function M.set_part_collide(inst, collide)
+    if not inst then return end
+    if part and part.set_can_collide then
+        pcall(part.set_can_collide, inst, collide)
+    else
+        pcall(function() inst.CanCollide = collide end)
+    end
+end
+
+function M.set_character_noclip(char, root, enabled)
+    if not char then return end
+    local collide = not enabled
+
+    if root then
+        M.set_part_collide(root, collide)
+    end
+
+    for _, inst in ipairs(M.iter_parts(char)) do
+        M.set_part_collide(inst, collide)
+    end
+
+    local desc = env.safe_call(function() return char:get_descendants() end)
+        or env.safe_call(function() return char:GetDescendants() end)
+    if desc then
+        for _, inst in ipairs(desc) do
+            if M.is_base_part(inst) then
+                M.set_part_collide(inst, collide)
+            end
+        end
+    end
+end
+
+function M.humanoid_flying(hum)
+    if not hum then return end
+    pcall(function() hum.state = 6 end)
+end
+
+function M.humanoid_running(hum)
+    if not hum then return end
+    pcall(function() hum.state = 8 end)
+end
+
 function M.humanoid_suspend(hum)
     if not hum then return end
     pcall(function() hum.platform_stand = false end)

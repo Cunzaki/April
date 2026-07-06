@@ -67,7 +67,7 @@ local MENU_KEYS = {
     "april_map_labels",
     "april_noclip_enabled", "april_noclip_enabled_mode", "april_noclip_speed",
     "april_spider_enabled", "april_spider_enabled_mode", "april_spider_speed",
-    "april_shark_enabled", "april_shark_enabled_mode", "april_shark_visualize",
+    "april_shark_enabled", "april_shark_enabled_mode", "april_shark_depth", "april_shark_visualize",
     "april_desync_enabled", "april_desync_enabled_mode", "april_desync_autosend", "april_desync_autosend_len",
     "april_desync_visualizer", "april_desync_vis_style", "april_desync_vis_size",
     "april_desync_vis_show_local", "april_desync_vis_link", "april_desync_vis_labels",

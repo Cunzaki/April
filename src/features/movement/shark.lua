@@ -1,6 +1,5 @@
 --[[
-    Shark — blink desync underground, return to origin, freeze until disabled.
-    No noclip: one-shot TP down 6 studs, packet desync, TP back, then position lock.
+    Shark — noclip underground blink + packet desync, return to origin, freeze.
 ]]
 
 local settings = April.require("core.settings")
@@ -14,12 +13,19 @@ local desync_vis = April.require("core.desync_vis")
 local M = {}
 
 local P = "april_shark_enabled"
+local P_DEPTH = "april_shark_depth"
 local P_VIS = "april_shark_visualize"
-local BLINK_DEPTH = 6
 local RING_RADIUS = 2.5
+local UNDER_HOLD_TICKS = 3
+
+local PHASE_IDLE = 0
+local PHASE_UNDER = 1
+local PHASE_FROZEN = 2
 
 local _installed = false
 local was_active = false
+local phase = PHASE_IDLE
+local under_ticks = 0
 local desync_on = false
 local saved_pos = nil
 local desync_pos = nil
@@ -53,40 +59,72 @@ local function get_humanoid(lp)
     end)
 end
 
-local function release()
+local function blink_depth()
+    return settings.num(P_DEPTH, 6)
+end
+
+local function underground_pos(pos)
+    local depth = blink_depth()
+    return {
+        x = pos.x,
+        y = pos.y - depth,
+        z = pos.z,
+    }
+end
+
+local function apply_desync()
+    if desync_on then return end
+    packet_desync.apply_movement_only()
+    desync_on = true
+end
+
+local function release(char, root, hum)
+    move.set_character_noclip(char, root, false)
+    if hum then
+        move.humanoid_running(hum)
+        move.humanoid_thaw(hum)
+    end
     if desync_on then
         packet_desync.release()
         desync_on = false
     end
+    phase = PHASE_IDLE
+    under_ticks = 0
     saved_pos = nil
     desync_pos = nil
 end
 
-local function blink_underground(root, char, pos)
-    move.set_position(root, pos.x, pos.y - BLINK_DEPTH, pos.z)
-    move.zero_character(char, root)
-
-    if not desync_on then
-        packet_desync.apply_movement_only()
-        desync_on = true
-    end
-
-    move.set_position(root, pos.x, pos.y, pos.z)
-    move.zero_character(char, root)
-end
-
-local function activate(root, char, hum)
+local function begin_blink(root, char)
     local pos = move.read_pos(root)
     if not pos then return false end
 
     saved_pos = { x = pos.x, y = pos.y, z = pos.z }
-    desync_pos = { x = pos.x, y = pos.y - BLINK_DEPTH, z = pos.z }
-    blink_underground(root, char, saved_pos)
-    move.humanoid_freeze(hum)
+    desync_pos = underground_pos(saved_pos)
+    phase = PHASE_UNDER
+    under_ticks = 0
     return true
 end
 
-local function maintain(root, char, hum)
+local function tick_underground(root, char, hum)
+    if not saved_pos or not desync_pos then return end
+
+    move.set_character_noclip(char, root, true)
+    move.humanoid_flying(hum)
+    move.set_position(root, desync_pos.x, desync_pos.y, desync_pos.z)
+    move.zero_character(char, root)
+    apply_desync()
+
+    under_ticks = under_ticks + 1
+    if under_ticks < UNDER_HOLD_TICKS then return end
+
+    move.set_position(root, saved_pos.x, saved_pos.y, saved_pos.z)
+    move.zero_character(char, root)
+    move.set_character_noclip(char, root, false)
+    move.humanoid_freeze(hum)
+    phase = PHASE_FROZEN
+end
+
+local function tick_frozen(root, char, hum)
     if not saved_pos then return end
     move.set_position(root, saved_pos.x, saved_pos.y, saved_pos.z)
     move.zero_character(char, root)
@@ -100,9 +138,10 @@ local function tick(_dt)
     local lp = env.get_local_player()
 
     if was_active and not on then
+        local char = lp and get_character(lp)
+        local root = lp and get_root(lp)
         local hum = lp and get_humanoid(lp)
-        if hum then move.humanoid_thaw(hum) end
-        release()
+        release(char, root, hum)
         was_active = false
         return
     end
@@ -119,11 +158,15 @@ local function tick(_dt)
     if not char or not root or not hum then return end
 
     if not was_active then
-        if not activate(root, char, hum) then return end
+        if not begin_blink(root, char) then return end
         was_active = true
     end
 
-    maintain(root, char, hum)
+    if phase == PHASE_UNDER then
+        tick_underground(root, char, hum)
+    elseif phase == PHASE_FROZEN then
+        tick_frozen(root, char, hum)
+    end
 end
 
 function M.register_menu()
@@ -132,10 +175,11 @@ function M.register_menu()
     local root = menu_util.parent(P)
 
     menu_util.register_keybind(T, G.MISC, P, "Shark", false)
+    menu.add_slider_int(T, G.MISC, P_DEPTH, "Shark Underground Depth", 1, 15, 6, root)
     menu.add_checkbox(T, G.MISC, P_VIS, "Shark Desync Visualize", false, menu_util.parent(P, {
         colorpicker = { 0.2, 0.85, 1, 0.9 },
     }))
-    menu_util.bind_children(P, { P_VIS })
+    menu_util.bind_children(P, { P_DEPTH, P_VIS })
 end
 
 function M.install()
