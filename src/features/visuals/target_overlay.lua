@@ -7,14 +7,17 @@ local items = April.require("game.items")
 local player_gear = April.require("game.player_gear")
 local player_state = April.require("game.player_state")
 local math_util = April.require("core.math_util")
+local text_util = April.require("core.text_util")
 
 local M = {}
 
 local P = "april_target_overlay"
 local GEAR_SLOTS = 7
+local GEAR_TTL = 500
+local TARGET_POLL_MS = 120
 
 local gear_cache = {}
-local GEAR_TTL = 150
+local last_poll_ms = 0
 
 M._target = nil
 M._layout = nil
@@ -59,29 +62,7 @@ local function resolve_image_key(piece)
         end
     end
 
-    if type(piece) == "string" then
-        local resolved = items.resolve_item_label(piece)
-        if resolved and resolved.asset_id then
-            local key = img_key("item_", resolved.asset_id)
-            image_cache.ensure(key, resolved.asset_id)
-            return key
-        end
-    end
-
     return nil
-end
-
-local function preload_layout_images(layout)
-    if not layout then return end
-    if layout.held then
-        local key = resolve_image_key(layout.held)
-        if key then image_cache.begin_load(key) end
-    end
-    for i = 1, layout.filled or 0 do
-        local piece = layout.packed[i]
-        local key = resolve_image_key(piece)
-        if key then image_cache.begin_load(key) end
-    end
 end
 
 local function get_gear(player)
@@ -184,7 +165,7 @@ local function build_layout(gear, gear_sz)
     local gap = 5
     local row_w = GEAR_SLOTS * gear_sz + (GEAR_SLOTS - 1) * gap
 
-    return {
+    local layout = {
         held = held,
         packed = packed,
         filled = #packed,
@@ -194,7 +175,21 @@ local function build_layout(gear, gear_sz)
         row_w = row_w,
         row_gap = 8,
         name_fs = 11,
+        held_key = nil,
+        gear_keys = {},
     }
+
+    layout.held_key = held and resolve_image_key(held) or nil
+    for i = 1, layout.filled do
+        layout.gear_keys[i] = resolve_image_key(packed[i])
+        local key = layout.gear_keys[i]
+        if key then image_cache.begin_load(key) end
+    end
+    if layout.held_key then
+        image_cache.begin_load(layout.held_key)
+    end
+
+    return layout
 end
 
 local function held_piece(held)
@@ -219,15 +214,8 @@ local function draw_slot(x, y, size, key, piece, style)
 
     if not piece then return end
 
-    if key then
-        image_cache.begin_load(key)
-        if image_cache.draw_fit(key, x + pad, y + pad, size - pad * 2, size - pad * 2) then
-            return
-        end
-        local st = image_cache.state(key)
-        if st == "loading" or st == "none" then
-            return
-        end
+    if key and image_cache.draw_fit(key, x + pad, y + pad, size - pad * 2, size - pad * 2) then
+        return
     end
 
     local label = "?"
@@ -244,6 +232,14 @@ local function draw_slot(x, y, size, key, piece, style)
         { 0.55, 0.55, 0.58, 0.85 },
         fs
     )
+end
+
+local function same_target(a, b)
+    if a == b then return true end
+    if not a or not b then return false end
+    local aid = a.user_id or a.name
+    local bid = b.user_id or b.name
+    return aid and bid and aid == bid
 end
 
 function M.register_menu()
@@ -270,25 +266,41 @@ function M.refresh_target()
     local gear_sz = settings.num(P .. "_gear_size", 48)
     local target = find_crosshair_target(fov)
 
-    if target and player_state.is_combat_target(target) then
-        M._target = target
-        M._layout = build_layout(get_gear(target), gear_sz)
-        preload_layout_images(M._layout)
-    else
+    if not target or not player_state.is_combat_target(target) then
         M._target = nil
         M._layout = nil
+        return
+    end
+
+    local target_changed = not same_target(M._target, target)
+    local uid = target.user_id or target.name or "?"
+    local cached = gear_cache[uid]
+    local gear_stale = not cached or (tick_ms() - cached.t) >= GEAR_TTL
+
+    M._target = target
+
+    if target_changed or not M._layout or gear_stale then
+        M._layout = build_layout(get_gear(target), gear_sz)
     end
 end
 
 function M.update(_dt)
+    if not settings.enabled(P) then
+        M._target = nil
+        M._layout = nil
+        return
+    end
+
+    local now = tick_ms()
+    if now - last_poll_ms < TARGET_POLL_MS then return end
+    last_poll_ms = now
+
     M.refresh_target()
 end
 
 function M.draw()
     if not settings.enabled(P) then return end
     if not draw or not draw.text or not draw.rect_filled then return end
-
-    M.refresh_target()
 
     local target = M._target
     local layout = M._layout
@@ -298,23 +310,21 @@ function M.draw()
     local top = settings.num(P .. "_top", 88)
     local cx = sw * 0.5
 
-    local name = target.display_name or target.name or "Unknown"
+    local name = text_util.sanitize(target.display_name or target.name or "Unknown")
     local nw = select(1, draw.get_text_size(name, layout.name_fs))
     draw.text(cx - nw * 0.5, top, name, { 1, 1, 1, 1 }, layout.name_fs)
 
     local y = top + layout.name_fs + 6
 
     local held = held_piece(layout.held)
-    local held_key = held and resolve_image_key(held) or nil
-    draw_slot(cx - layout.held_sz * 0.5, y, layout.held_sz, held_key, held, held and "held" or "empty")
+    draw_slot(cx - layout.held_sz * 0.5, y, layout.held_sz, layout.held_key, held, held and "held" or "empty")
     y = y + layout.held_sz + layout.row_gap
 
     local start_x = cx - layout.row_w * 0.5
     for i = 1, GEAR_SLOTS do
         local piece = i <= layout.filled and layout.packed[i] or nil
-        local key = piece and resolve_image_key(piece) or nil
         local sx = start_x + (i - 1) * (layout.gear_sz + layout.gap)
-        draw_slot(sx, y, layout.gear_sz, key, piece, piece and "gear" or "empty")
+        draw_slot(sx, y, layout.gear_sz, layout.gear_keys[i], piece, piece and "gear" or "empty")
     end
 
     if not held and layout.filled == 0 then

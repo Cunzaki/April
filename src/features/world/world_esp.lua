@@ -9,11 +9,9 @@ local esp_scan = April.require("game.esp_scan")
 
 local M = {}
 local P = "april_world_enabled"
-local POS_REFRESH_BATCH = 10
 
 M._static = {}
 M._dynamic = {}
-M._pos_idx = 0
 
 local function rebuild_cache()
     cache.world = {}
@@ -25,13 +23,9 @@ local function rebuild_cache()
     end
 end
 
-local function refresh_dynamic_positions()
-    local n = #M._dynamic
-    if n == 0 then return end
-
-    for _ = 1, POS_REFRESH_BATCH do
-        M._pos_idx = (M._pos_idx % n) + 1
-        local entry = M._dynamic[M._pos_idx]
+local function refresh_dynamic_positions(list)
+    if not list or #list == 0 then return end
+    for _, entry in ipairs(list) do
         if entry and env.is_valid(entry.inst) then
             esp_scan.refresh_entry_position(entry)
         end
@@ -126,8 +120,8 @@ end
 
 function M.update(_dt)
     if not settings.enabled(P) then return end
-    if #M._dynamic > 0 then
-        refresh_dynamic_positions()
+    if #M._dynamic > 0 and cache.should_refresh_positions() then
+        refresh_dynamic_positions(M._dynamic)
     end
 end
 
@@ -161,9 +155,6 @@ function M.draw()
 
         local col = settings.color(entry.toggle_id, maps.toggle_color(maps.WORLD_TOGGLES, entry.toggle_id))
         if draw_boxes then
-            if entry.dynamic then
-                esp_scan.refresh_entry_position(entry)
-            end
             esp_util.draw_entry_boxes(entry, col, 1)
         end
 

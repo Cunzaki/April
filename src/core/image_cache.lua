@@ -66,7 +66,7 @@ local function get_handle(key)
         if try_fallback(entry) then
             return nil
         end
-        debug.warn_once("img:" .. key, "load failed — " .. entry.url)
+        debug.warn_once("img:" .. key, "load failed - " .. entry.url)
         entry.failed = true
         entry.handle = nil
         return nil

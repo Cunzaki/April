@@ -1,6 +1,7 @@
 --[[ Project Vector — shared overlay / HUD theme (matches main cheat menu). ]]
 
 local draw_util = April.require("core.draw_util")
+local text_util = April.require("core.text_util")
 
 local M = {}
 
@@ -193,16 +194,16 @@ function M.draw_staff_list(x, y, width, rows, max_rows)
             draw.circle_filled(x + pad + 3, ry + 7, 3, accent, 8)
         end
 
-        local name = row.name or "?"
+        local name = text_util.sanitize(row.name or "?")
         if #name > 20 then name = name:sub(1, 18) .. ".." end
         draw.text(x + pad + 12, ry, name, M.TEXT, 13)
 
-        local role = row.role or "Staff"
+        local role = text_util.sanitize(row.role or "Staff")
         if #role > 24 then role = role:sub(1, 22) .. ".." end
         draw.text(x + pad + 12, ry + 15, role, accent, 11)
 
         if row.meta and row.meta ~= "" then
-            draw.text(x + pad + 12, ry + 28, row.meta, M.TEXT_MUTED, 10)
+            draw.text(x + pad + 12, ry + 28, text_util.sanitize(row.meta), M.TEXT_MUTED, 10)
         end
 
         ry = ry + row_h

@@ -3,26 +3,23 @@ local menu_util = April.require("core.menu_util")
 local profiles = April.require("game.gun_mod_profiles")
 local gc = April.require("game.gc_weapon_mods")
 local env = April.require("core.env")
+local notify = April.require("core.notify")
 
 local M = {}
 local P = "april_gunmods_enabled"
 local REJOIN_GC_DELAY_MS = 20000
+local RETRY_MS = 750
+local RETRY_MAX_MS = 30000
 
 M._apply_dirty = false
 M._last_hash = ""
 M._defer_until = 0
+M._retry_until = 0
 M._session_id = nil
 M._was_in_match = false
 M._gc_redo_at = 0
-
-local GM_KEYS = {
-    "april_gm_recoil", "april_gm_recoil_pct",
-    "april_gm_spread", "april_gm_spread_pct",
-    "april_gm_sway",
-    "april_gm_fire_rate", "april_gm_fire_rate_mult",
-    "april_gm_speed", "april_gm_speed_mult",
-    "april_gm_range", "april_gm_range_mult",
-}
+M._persist_id = nil
+M._notify_next = false
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -57,13 +54,41 @@ local function schedule_apply(delay_ms)
     if until_ms > M._defer_until then
         M._defer_until = until_ms
     end
+    if M._retry_until <= now then
+        M._retry_until = now + RETRY_MAX_MS
+    end
+end
+
+local function clear_apply_state()
+    M._apply_dirty = false
+    M._last_hash = ""
+    M._defer_until = 0
+    M._retry_until = 0
+    M._gc_redo_at = 0
+end
+
+local function stop_persist()
+    if M._persist_id and thread and thread.stop then
+        pcall(thread.stop, M._persist_id)
+    end
+    M._persist_id = nil
+end
+
+local function start_persist()
+    if M._persist_id or not thread or not thread.create then return end
+    M._persist_id = thread.create(function()
+        if not settings.enabled(P) then return end
+        if not profiles.has_gc_mods() then return end
+        gc.apply_weapon(profiles.build_mods())
+    end, 150)
 end
 
 local function schedule_session_gc_refresh()
-    if not settings.bool(P, false) then return end
+    if not settings.enabled(P) then return end
     M._last_hash = ""
     M._apply_dirty = true
     M._gc_redo_at = tick_ms() + REJOIN_GC_DELAY_MS
+    M._retry_until = tick_ms() + RETRY_MAX_MS
 end
 
 function M.on_session_changed()
@@ -77,9 +102,6 @@ function M.register_menu()
 
     menu_util.section(T, G.COMBAT, "Gun Mods")
     menu.add_checkbox(T, G.COMBAT, P, "Enable Gun Mods", false, { key = 0 })
-
-    menu_util.section(T, G.COMBAT, "Target Filters")
-    menu.add_checkbox(T, G.COMBAT, "april_combat_skip_downed", "Ignore Downed Players", true, root)
 
     menu.add_checkbox(T, G.COMBAT, "april_gm_recoil", "Gun Recoil Mod", false, root)
     menu.add_slider_int(T, G.COMBAT, "april_gm_recoil_pct", "Recoil Reduction %", 0, 100, 100, root)
@@ -99,7 +121,6 @@ function M.register_menu()
     menu.add_slider_int(T, G.COMBAT, "april_gm_range_mult", "RangeMult", 1, 20, 10, root)
 
     menu_util.bind_master(P, {
-        "april_combat_skip_downed",
         "april_gm_recoil", "april_gm_recoil_pct",
         "april_gm_spread", "april_gm_spread_pct",
         "april_gm_sway",
@@ -109,32 +130,45 @@ function M.register_menu()
     })
 
     settings.on_change(P, function()
-        if settings.bool(P, false) then
+        if settings.enabled(P) then
+            M._notify_next = true
             schedule_apply(500)
+            start_persist()
         else
-            M._apply_dirty = false
-            M._last_hash = ""
-            M._defer_until = 0
-            M._gc_redo_at = 0
+            stop_persist()
+            clear_apply_state()
+            M.reset_mods()
         end
     end)
-
-    for _, id in ipairs(GM_KEYS) do
-        settings.on_change(id, function()
-            if settings.bool(P, false) then
-                schedule_apply(250)
-            end
-        end)
-    end
 end
 
-function M.try_apply()
-    if not settings.bool(P, false) then
+function M.reset_mods()
+    if not gc.available() then
+        notify.info("Gun mods disabled", 3000)
+        return true
+    end
+
+    local mods = profiles.build_reset_mods()
+    local ok, count, msg = gc.apply_weapon(mods)
+    if ok then
+        M._last_hash = mods_hash(mods)
+        notify.info("Gun mods reset (" .. tostring(count) .. " nodes)", 3500)
+    else
+        notify.warning("Gun mods reset: " .. tostring(msg or "failed"), 4000)
+    end
+    return ok
+end
+
+function M.try_apply(silent)
+    if not settings.enabled(P) then
         return false
     end
 
     if not profiles.has_gc_mods() then
         M._apply_dirty = false
+        if not silent then
+            notify.warning("Gun mods: enable at least one mod option below master toggle", 4500)
+        end
         return false
     end
 
@@ -149,10 +183,18 @@ function M.try_apply()
         return true
     end
 
-    local ok = gc.apply_weapon(mods)
+    local ok, count, msg = gc.apply_weapon(mods)
     if ok then
         M._last_hash = hash
         M._apply_dirty = false
+        M._retry_until = 0
+        if M._notify_next or not silent then
+            M._notify_next = false
+            notify.success("Gun mods applied: " .. tostring(msg or (count .. " nodes")), 3500)
+        end
+    else
+        M._apply_dirty = true
+        M._defer_until = tick_ms() + RETRY_MS
     end
 
     return ok
@@ -181,7 +223,7 @@ end
 function M.update(_dt)
     M.tick_session()
 
-    if not settings.bool(P, false) then return end
+    if not settings.enabled(P) then return end
 
     local now = tick_ms()
 
@@ -191,20 +233,28 @@ function M.update(_dt)
             gc.refresh_cache()
             M._apply_dirty = true
             M._defer_until = now
+            M._retry_until = now + RETRY_MAX_MS
+            notify.info("Re-applying gun mods after session change…", 2500)
         end
     end
 
     if not M._apply_dirty then return end
     if now < M._defer_until then return end
+    if M._retry_until > 0 and now > M._retry_until then
+        M._apply_dirty = false
+        notify.warning("Gun mods: could not patch — equip gun in match and toggle again", 5000)
+        return
+    end
 
-    M.try_apply()
+    M.try_apply(true)
 end
 
 function M.on_weapon_changed(_name) end
 
 function M.on_modules_ready()
-    if settings.bool(P, false) then
+    if settings.enabled(P) then
         schedule_apply(500)
+        start_persist()
     end
 end
 

@@ -46,4 +46,16 @@ function M.build_mods()
     return mods
 end
 
+function M.build_reset_mods()
+    return {
+        RecoilMult = 0,
+        AimSpreadMult = 0,
+        HipSpreadMult = 0,
+        SwayMult = 0,
+        FireRateMult = 1,
+        SpeedMult = 1,
+        RangeMult = 1,
+    }
+end
+
 return M

@@ -81,8 +81,11 @@ function M.is_weapon_name(name)
 end
 
 local MELEE_NAME_HINTS = {
-    "hatchet", "pickaxe", "spear", "machete", "knife", "sword",
+    "hatchet", "pickaxe", "pick axe", " axe", "axe ",
+    "spear", "machete", "knife", "sword",
     "bone tool", "hammer", "crowbar",
+    "chainsaw", "mining drill", "shovel", "scythe",
+    "candy cane", "carrot blade", "boulder", "saw bat",
 }
 
 local function name_looks_melee(name)
@@ -381,6 +384,11 @@ end
 
 function M.on_modules_ready()
     M.load()
+    pcall(function()
+        farm_tools = April.require("game.farm_tools")
+        if farm_tools.invalidate then farm_tools.invalidate() end
+        if farm_tools.load then farm_tools.load() end
+    end)
     pcall(function()
         local gun_mods = April.require("features.combat.gun_mods")
         if gun_mods.on_modules_ready then

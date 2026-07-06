@@ -1,4 +1,5 @@
 local math_util = April.require("core.math_util")
+local text_util = April.require("core.text_util")
 
 local M = {}
 
@@ -8,13 +9,14 @@ end
 
 function M.text_centered(x, y, text, col, size)
     if not draw or not draw.text or not draw.get_text_size then return end
+    text = text_util.sanitize(text)
     local tw, th = draw.get_text_size(text, size or 14)
     draw.text(x - tw * 0.5, y, text, col, size or 14)
 end
 
 function M.text_outlined(x, y, text, col, size)
     if not draw or not draw.text then return end
-    draw.text(x, y, text, col, size or 14)
+    draw.text(x, y, text_util.sanitize(text), col, size or 14)
 end
 
 function M.text(x, y, text, col, size)

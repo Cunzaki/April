@@ -7,6 +7,7 @@
 local settings = April.require("core.settings")
 local env = April.require("core.env")
 local folders = April.require("game.folders")
+local farm_tools = April.require("game.farm_tools")
 local math_util = April.require("core.math_util")
 local menu_util = April.require("core.menu_util")
 
@@ -124,7 +125,6 @@ function M.register_menu()
     local T, _ = menu_util.group(G.COMBAT)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G.COMBAT, "Farming")
     menu.add_checkbox(T, G.COMBAT, P, "Farm Helper", false)
     menu.add_slider_int(T, G.COMBAT, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
     menu.add_slider_int(T, G.COMBAT, P_SMOOTH, "Aim Smoothness", 1, 30, 8, root)
@@ -134,6 +134,9 @@ end
 function M.update(_dt)
     if not settings.bool(P, false) then return end
     if not camera or not camera.look_at then return end
+
+    farm_tools.load()
+    if not farm_tools.holding_farm_tool() then return end
 
     local lp = env.get_local_player()
     local pos = player_position(lp)

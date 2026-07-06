@@ -49,7 +49,7 @@ end
 function M.update(dt) end
 
 function M.draw()
-    if not settings.bool(P, false) then return end
+    if not settings.enabled(P) then return end
     if not settings.bool("april_wp_draw", false) and not settings.bool("april_wp_beacon", false) then return end
 
     local col = settings.color("april_wp_draw", { 0.2, 1, 0.8, 1 })

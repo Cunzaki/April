@@ -1,19 +1,8 @@
 --[[ Fallen player state — Humanoid:GetAttribute("Downed") from game scripts. ]]
 
-local settings = April.require("core.settings")
 local env = April.require("core.env")
 
 local M = {}
-
-local SETTING = "april_combat_skip_downed"
-
-function M.skip_downed_enabled()
-    return settings.bool(SETTING, true)
-end
-
-function M.setting_key()
-    return SETTING
-end
 
 function M.is_downed(player)
     if not player then return false end
@@ -45,7 +34,6 @@ end
 function M.is_combat_target(player)
     if not player or player.is_local then return false end
     if not player.is_alive then return false end
-    if M.skip_downed_enabled() and M.is_downed(player) then return false end
     return true
 end
 

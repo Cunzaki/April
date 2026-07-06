@@ -2,6 +2,7 @@
 
 local draw_util = April.require("core.draw_util")
 local theme = April.require("core.ui_theme")
+local text_util = April.require("core.text_util")
 
 local M = {}
 local queue = {}
@@ -20,7 +21,7 @@ end
 
 function M.toast(msg, ntype, duration_ms, skip_dedupe)
     if not msg or msg == "" then return end
-    msg = tostring(msg)
+    msg = text_util.sanitize(msg)
     ntype = ntype or "warning"
     duration_ms = duration_ms or 5000
 

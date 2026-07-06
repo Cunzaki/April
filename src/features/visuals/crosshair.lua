@@ -39,7 +39,7 @@ end
 function M.update(dt) end
 
 function M.draw()
-    if not settings.bool("april_crosshair_enabled", false) then return end
+    if not settings.enabled(P) then return end
     local sw, sh = draw_util.screen_size()
     local cx, cy = sw * 0.5, sh * 0.5
     local size = settings.num("april_crosshair_size", 10)

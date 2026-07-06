@@ -79,16 +79,29 @@ local function warm_nodes(keys)
     return count
 end
 
-local function write_payload(keys, payload)
-    -- API.md: applygc(keys, values) — two-arg form (required on current Vector)
-    local ok, err = pcall(applygc, keys, payload)
-    if ok then return true end
+local function patch_count(keys, payload)
+    local patched = 0
 
-    ok, err = pcall(applygc, M.WEAPON_FIND_KEYS, payload)
-    if ok then return true end
+    local ok, result = pcall(applygc, keys, payload)
+    if ok and type(result) == "number" then
+        patched = result
+    end
 
-    debug.error_once("gun_mods:applygc", err)
-    return false
+    if patched <= 0 then
+        ok, result = pcall(applygc, M.WEAPON_FIND_KEYS, payload)
+        if ok and type(result) == "number" then
+            patched = result
+        end
+    end
+
+    if patched <= 0 then
+        ok, result = pcall(applygc, payload)
+        if ok and type(result) == "number" then
+            patched = result
+        end
+    end
+
+    return patched
 end
 
 function M.apply_weapon(mods)
@@ -105,26 +118,21 @@ function M.apply_weapon(mods)
         return false, 0, "Enter a match first"
     end
 
-    local ok_refresh, err_refresh = pcall(refreshgc)
-    if not ok_refresh then
-        debug.error_once("gun_mods:refreshgc", err_refresh)
-        return false, 0, "refreshgc failed"
-    end
+    pcall(refreshgc)
 
     local patch_keys = keys_for_payload(payload)
-    local count = warm_nodes(patch_keys)
-    M._last_node_count = count
+    warm_nodes(M.WEAPON_FIND_KEYS)
+    warm_nodes(patch_keys)
 
-    if count <= 0 then
-        debug.warn_once("gun_mods:nodes", "No GC nodes — equip a gun in-game, then toggle Gun Mods")
-        return false, 0, "No nodes — equip a gun first"
+    local patched = patch_count(patch_keys, payload)
+    M._last_node_count = math.max(M._last_node_count, patched, warm_nodes(patch_keys))
+
+    if patched > 0 then
+        return true, patched, string.format("%d node(s) patched", patched)
     end
 
-    if not write_payload(patch_keys, payload) then
-        return false, count, "applygc failed"
-    end
-
-    return true, count, string.format("%d node(s) — mods active", count)
+    debug.warn_once("gun_mods:nodes", "GC still warming — equip a gun, enable a mod option, keep master on")
+    return false, 0, "GC warming — equip gun and wait a moment"
 end
 
 function M.apply(mods)
@@ -146,6 +154,7 @@ function M.refresh_cache()
     end
 
     pcall(refreshgc)
+    warm_nodes(M.WEAPON_FIND_KEYS)
     local count = warm_nodes(M.WEAPON_FIND_KEYS)
     M._last_node_count = count
     return count

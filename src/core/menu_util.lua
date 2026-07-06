@@ -134,8 +134,13 @@ function M.bind_master(master_id, child_ids)
     if M._master_hooked[master_id] then return end
     M._master_hooked[master_id] = true
 
-    local function sync()
-        local show = settings_mod().enabled(master_id)
+    local function sync(new_val)
+        local show
+        if new_val == nil then
+            show = settings_mod().enabled(master_id)
+        else
+            show = new_val == true or new_val == 1
+        end
         for _, id in ipairs(M._master_children[master_id] or {}) do
             set_visible(id, show)
         end

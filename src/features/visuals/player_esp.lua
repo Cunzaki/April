@@ -52,7 +52,7 @@ end
 function M.update(_dt) end
 
 function M.draw()
-    if not settings.bool(P, false) then return end
+    if not settings.enabled(P) then return end
 
     local max_dist = settings.num("april_tung_esp_max_dist", 1000)
     local me = entity and entity.get_local_player and entity.get_local_player()

@@ -132,7 +132,7 @@ function M.check_player(p)
     if seen[uid] then return end
     seen[uid] = true
     local label = player_label(p)
-    notify.warning(string.format("MOD: %s (%s) — %s", label, p.name or "?", role), 6000)
+    notify.warning(string.format("MOD: %s (%s) - %s", label, p.name or "?", role), 6000)
 end
 
 function M.reconcile_active()
@@ -291,14 +291,14 @@ function M.draw()
         local entry = row.entry
         local meta = row.duration
         if row.dist then
-            meta = meta .. "  ·  " .. row.dist .. "m"
+            meta = meta .. "  |  " .. row.dist .. "m"
         end
 
         local name = entry.label or entry.username or "Unknown"
         if #name > 18 then name = name:sub(1, 16) .. ".." end
 
         local role = entry.role or "Staff"
-        items[#items + 1] = { name .. "  ·  " .. role, meta }
+        items[#items + 1] = { name .. "  |  " .. role, meta }
     end
 
     local title = "Staff In Lobby"

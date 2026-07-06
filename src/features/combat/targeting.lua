@@ -12,6 +12,22 @@ local function w2s(x, y, z)
     return esp_util.w2s(x, y, z)
 end
 
+local function passes_visibility(target, aim, cam)
+    if not raycast then return true end
+    if not cam then return true end
+
+    local char = target and target.character
+    if char and utility and utility.is_valid(char) and raycast.is_player_visible then
+        return raycast.is_player_visible(char.address)
+    end
+
+    if aim and raycast.is_visible then
+        return raycast.is_visible(cam.x, cam.y, cam.z, aim.x, aim.y, aim.z)
+    end
+
+    return true
+end
+
 function M.bone_name(prefix)
     local idx = settings.num(prefix .. "bone", 0)
     return M.BONES[(idx or 0) + 1] or "Head"
@@ -150,7 +166,7 @@ function M.predict_point(origin, point, target)
     return { x = ax, y = ay, z = az }
 end
 
-function M.get_aim_point(target, prefix, bone, origin, cx, cy)
+function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
     bone = bone or M.bone_name(prefix)
     local base
     if bone == "Closest" then
@@ -159,6 +175,10 @@ function M.get_aim_point(target, prefix, bone, origin, cx, cy)
         base = M.bone_world(target, bone)
     end
     if not base then return nil end
+
+    if use_prediction == false then
+        return base
+    end
 
     if not origin and camera and camera.get_position then
         origin = camera.get_position()
@@ -175,10 +195,8 @@ function M.is_target_valid(target, prefix, cx, cy, fov_px)
     local aim = M.get_aim_point(target, prefix, nil, cam, cx, cy)
     if not aim then return false, nil end
 
-    if settings.bool(prefix .. "visible", false) and raycast and raycast.is_visible and cam then
-        if not raycast.is_visible(cam.x, cam.y, cam.z, aim.x, aim.y, aim.z) then
-            return false, nil
-        end
+    if settings.bool(prefix .. "visible", false) and not passes_visibility(target, aim, cam) then
+        return false, nil
     end
 
     local sx, sy, on_screen = w2s(aim.x, aim.y, aim.z)
@@ -209,10 +227,8 @@ function M.find_target(cx, cy, fov_px, prefix)
         end
         if not aim then goto continue end
 
-        if settings.bool(prefix .. "visible", false) and raycast and raycast.is_visible and cam then
-            if not raycast.is_visible(cam.x, cam.y, cam.z, aim.x, aim.y, aim.z) then
-                goto continue
-            end
+        if settings.bool(prefix .. "visible", false) and not passes_visibility(p, aim, cam) then
+            goto continue
         end
 
         local sx, sy, on_screen = w2s(aim.x, aim.y, aim.z)

@@ -203,7 +203,7 @@ local function draw_npc_health(bounds, entry)
 end
 
 function M.update(_dt)
-    if not settings.bool(P, false) then return end
+    if not settings.enabled(P) then return end
 
     local list = collect_draw_targets()
     local n = #list
@@ -216,7 +216,7 @@ function M.update(_dt)
 end
 
 function M.draw()
-    if not settings.bool(P, false) then return end
+    if not settings.enabled(P) then return end
 
     local range = settings.num("april_npc_range", 500)
     local range_sq = range * range

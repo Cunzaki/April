@@ -11,6 +11,7 @@ M._menu_registered = false
 M.FEATURE_ORDER = {
     "features.combat.perfect_farm",
     "features.combat.gun_mods",
+    "features.combat.aimbot",
     "features.visuals.player_esp",
     "features.visuals.target_overlay",
     "features.visuals.crosshair",
@@ -21,6 +22,8 @@ M.FEATURE_ORDER = {
     "features.radar.waypoints",
     "features.radar.tactical_map",
     "features.movement.exploits",
+    "features.movement.desync",
+    "features.movement.freecam",
     "features.utility.mod_checker",
     "features.utility.name_hider",
     "features.utility.config",
@@ -60,13 +63,16 @@ end
 
 function M.setup_scans()
     local settings = April.require("core.settings")
+    local cache = April.require("core.cache")
     local iscan = April.require("core.incremental_scan")
     local world_esp = April.require("features.world.world_esp")
     local loot_esp = April.require("features.world.loot_esp")
     local base_esp = April.require("features.world.base_esp")
     local npc_esp = April.require("features.world.npc_esp")
 
-    iscan.configure({ budget_ms = 5, items_per_step = 14 })
+    iscan.configure({ budget_ms = 6, items_per_step = 18 })
+
+    local SCAN_MS = cache.WORKSPACE_SCAN_MS or 1000
 
     local function map_on(layer)
         return function()
@@ -75,36 +81,36 @@ function M.setup_scans()
         end
     end
 
-    local function need_npcs()
-        if settings.enabled("april_npc_enabled") then return true end
-        return map_on("npcs")()
-    end
-
-    iscan.register("world", 3500, function()
+    iscan.register("world", SCAN_MS, function()
         return settings.enabled("april_world_enabled") or map_on("world")()
     end, world_esp.begin_static_scan, world_esp.step_static_scan, world_esp.complete_static_scan, 0)
 
-    iscan.register("world_dynamic", 900, function()
+    iscan.register("world_dynamic", SCAN_MS, function()
         if not settings.enabled("april_world_enabled") then return false end
         return settings.enabled("april_deer")
             or settings.enabled("april_boar")
             or settings.enabled("april_wolf")
-    end, world_esp.begin_dynamic_scan, world_esp.step_dynamic_scan, world_esp.complete_dynamic_scan, 450)
+    end, world_esp.begin_dynamic_scan, world_esp.step_dynamic_scan, world_esp.complete_dynamic_scan, 120)
 
-    iscan.register("loot", 4000, function()
+    iscan.register("loot", SCAN_MS, function()
         return settings.enabled("april_loot_enabled") or map_on("loot")()
-    end, loot_esp.begin_static_scan, loot_esp.step_static_scan, loot_esp.complete_static_scan, 900)
+    end, loot_esp.begin_static_scan, loot_esp.step_static_scan, loot_esp.complete_static_scan, 240)
 
-    iscan.register("loot_drops", 700, function()
-        if not settings.enabled("april_loot_enabled") then return false end
-        return settings.enabled("april_dropped_item")
-    end, loot_esp.begin_drops_scan, loot_esp.step_drops_scan, loot_esp.complete_drops_scan, 1350)
+    iscan.register("loot_drops", SCAN_MS, function()
+        if settings.enabled("april_loot_enabled") then
+            return settings.enabled("april_dropped_item")
+        end
+        return map_on("loot")()
+    end, loot_esp.begin_drops_scan, loot_esp.step_drops_scan, loot_esp.complete_drops_scan, 360)
 
-    iscan.register("base", 4500, function()
+    iscan.register("base", SCAN_MS, function()
         return settings.enabled("april_base_enabled") or map_on("base")()
-    end, base_esp.begin_scan, base_esp.step_scan, base_esp.complete_scan, 1800)
+    end, base_esp.begin_scan, base_esp.step_scan, base_esp.complete_scan, 480)
 
-    iscan.register("npcs", 1400, need_npcs, npc_esp.begin_scan, npc_esp.step_scan, npc_esp.complete_scan, 2250)
+    iscan.register("npcs", SCAN_MS, function()
+        if settings.enabled("april_npc_enabled") then return true end
+        return map_on("npcs")()
+    end, npc_esp.begin_scan, npc_esp.step_scan, npc_esp.complete_scan, 600)
 end
 
 function M.update(dt)
@@ -112,6 +118,9 @@ function M.update(dt)
 
     local weapons = April.require("game.weapons")
     weapons.tick()
+
+    local runservice = April.require("core.runservice")
+    runservice.dispatch(dt)
 
     scheduler.tick()
     April.require("core.incremental_scan").tick()

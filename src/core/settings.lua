@@ -5,6 +5,8 @@
 
 local M = {}
 
+local _callbacks = {}
+
 function M.invalidate() end
 
 function M.get(id, default)
@@ -64,9 +66,16 @@ function M.color(id, default)
 end
 
 function M.on_change(id, fn)
+    if not id or not fn then return end
+
+    _callbacks[id] = _callbacks[id] or {}
+    _callbacks[id][#_callbacks[id] + 1] = fn
+
     if menu and menu.set_callback then
         menu.set_callback(id, function(new_val)
-            if fn then fn(new_val) end
+            for _, cb in ipairs(_callbacks[id] or {}) do
+                pcall(cb, new_val)
+            end
         end)
     end
 end

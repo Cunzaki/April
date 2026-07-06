@@ -24,7 +24,7 @@ function M.save_slot(slot)
     slot = slot or active_slot()
     if store.save_slot(slot) then
         store.save_meta()
-        notify.success(string.format('Saved "%s" → Slot %d', profile_label(), slot), 3500)
+        notify.success(string.format('Saved "%s" -> Slot %d', profile_label(), slot), 3500)
         return true
     end
     notify.error("Failed to save config", 3500)
@@ -65,7 +65,7 @@ function M.register_menu()
 
     menu_util.input(T, G.CONFIG, "april_cfg_profile_name", "Profile Name", "Default")
 
-    menu.add_slider_int(T, G.CONFIG, "april_cfg_slot", "Active Slot (1–5)", store.SLOT_MIN, store.SLOT_MAX, 1)
+    menu.add_slider_int(T, G.CONFIG, "april_cfg_slot", "Active Slot (1-5)", store.SLOT_MIN, store.SLOT_MAX, 1)
 
     menu_util.button(T, G.CONFIG, "april_cfg_save", "Save to Active Slot", function()
         M.save_slot(active_slot())
@@ -94,7 +94,7 @@ function M.register_menu()
     menu.add_slider_int(T, G.CONFIG, "april_esp_text_size", "ESP Text Size", 8, 24, 13)
     menu.add_button(T, G.CONFIG, "april_reload_modules", "Reload Game Modules", function()
         April.require("game.bootstrap").force_reload()
-        notify.info("Reloading game modules…", 2500)
+        notify.info("Reloading game modules...", 2500)
     end)
 
     settings.on_change("april_cfg_autoload", function()
