@@ -51,6 +51,7 @@ local function get_humanoid(lp)
 end
 
 local function resolve_mode()
+    if settings.enabled("april_walk_noclip_enabled") then return MODE_NONE end
     if settings.enabled("april_noclip_enabled") then return MODE_FLY end
     if settings.enabled("april_spider_enabled") then return MODE_SPIDER end
     return MODE_NONE
@@ -110,8 +111,25 @@ function M.tick(_dt)
     local misc_gate = April.require("core.misc_gate")
     if not misc_gate.movement_allowed() then return end
 
-    local settings = April.require("core.settings")
-    if settings.enabled("april_shark_enabled") then
+    local fling = April.require("features.movement.fling")
+    if fling.is_active and fling.is_active() then
+        if active_mode ~= MODE_NONE then
+            local lp = env.get_local_player()
+            if lp then
+                local char = get_character(lp)
+                local root = get_root(lp)
+                local hum = get_humanoid(lp)
+                if char and root and hum then
+                    leave_mode(root, hum, char)
+                end
+            end
+            active_mode = MODE_NONE
+            anchor_y = nil
+        end
+        return
+    end
+
+    if settings.enabled("april_walk_noclip_enabled") then
         if active_mode ~= MODE_NONE then
             local lp = env.get_local_player()
             if lp then

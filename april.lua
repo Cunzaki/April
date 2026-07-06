@@ -1,7 +1,7 @@
 --[[
     April — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-06T08:59:42.161Z
+    Built: 2026-07-06T11:04:52.424Z
 ]]
 
 April = {
@@ -504,6 +504,9 @@ function M.tick()
             if menu and menu.set then
                 pcall(menu.set, id, not cur)
             end
+            pcall(function()
+                April.require("core.menu_util").sync_master(id)
+            end)
         end
         last_down[id] = down
 
@@ -1872,9 +1875,19 @@ local function set_visible(id, show)
     end
 end
 
+local function master_visible(master_id)
+    local ok, fb = pcall(function()
+        return April.require("core.feature_bind")
+    end)
+    if ok and fb and fb.is_registered(master_id) then
+        return fb.armed(master_id)
+    end
+    return settings_mod().bool(master_id, false)
+end
+
 function M.sync_masters()
     for master_id in pairs(M._master_hooked) do
-        local show = settings_mod().enabled(master_id)
+        local show = master_visible(master_id)
         for _, id in ipairs(M._master_children[master_id] or {}) do
             set_visible(id, show)
         end
@@ -1882,6 +1895,14 @@ function M.sync_masters()
     for i = 1, #M._when_rules do
         local rule = M._when_rules[i]
         if rule.sync then rule.sync() end
+    end
+end
+
+function M.sync_master(master_id)
+    if not master_id or not M._master_hooked[master_id] then return end
+    local show = master_visible(master_id)
+    for _, id in ipairs(M._master_children[master_id] or {}) do
+        set_visible(id, show)
     end
 end
 
@@ -1895,7 +1916,7 @@ function M.bind_master(master_id, child_ids)
     local function sync(new_val)
         local show
         if new_val == nil then
-            show = settings_mod().bool(master_id, false)
+            show = master_visible(master_id)
         else
             show = new_val == true or new_val == 1
         end
@@ -2479,6 +2500,15 @@ function M.set_part_collide(inst, collide)
     end
 end
 
+function M.set_part_anchored(inst, anchored)
+    if not inst then return end
+    if part and part.set_anchored then
+        pcall(part.set_anchored, inst, anchored)
+    else
+        pcall(function() inst.Anchored = anchored end)
+    end
+end
+
 function M.set_character_noclip(char, root, enabled)
     if not char then return end
     local collide = not enabled
@@ -2724,6 +2754,7 @@ local function get_humanoid(lp)
 end
 
 local function resolve_mode()
+    if settings.enabled("april_walk_noclip_enabled") then return MODE_NONE end
     if settings.enabled("april_noclip_enabled") then return MODE_FLY end
     if settings.enabled("april_spider_enabled") then return MODE_SPIDER end
     return MODE_NONE
@@ -2783,8 +2814,25 @@ function M.tick(_dt)
     local misc_gate = April.require("core.misc_gate")
     if not misc_gate.movement_allowed() then return end
 
-    local settings = April.require("core.settings")
-    if settings.enabled("april_shark_enabled") then
+    local fling = April.require("features.movement.fling")
+    if fling.is_active and fling.is_active() then
+        if active_mode ~= MODE_NONE then
+            local lp = env.get_local_player()
+            if lp then
+                local char = get_character(lp)
+                local root = get_root(lp)
+                local hum = get_humanoid(lp)
+                if char and root and hum then
+                    leave_mode(root, hum, char)
+                end
+            end
+            active_mode = MODE_NONE
+            anchor_y = nil
+        end
+        return
+    end
+
+    if settings.enabled("april_walk_noclip_enabled") then
         if active_mode ~= MODE_NONE then
             local lp = env.get_local_player()
             if lp then
@@ -2924,11 +2972,10 @@ local MENU_KEYS = {
     "april_map_labels",
     "april_noclip_enabled", "april_noclip_enabled_mode", "april_noclip_speed",
     "april_spider_enabled", "april_spider_enabled_mode", "april_spider_speed",
-    "april_shark_enabled", "april_shark_enabled_mode", "april_shark_depth", "april_shark_visualize",
+    "april_walk_noclip_enabled", "april_walk_noclip_enabled_mode", "april_walk_noclip_speed",
+    "april_fling_enabled", "april_fling_fov", "april_fling_key", "april_fling_key_mode", "april_fling_duration",
     "april_desync_enabled", "april_desync_enabled_mode", "april_desync_autosend", "april_desync_autosend_len",
-    "april_desync_visualizer", "april_desync_vis_style", "april_desync_vis_size",
-    "april_desync_vis_show_local", "april_desync_vis_link", "april_desync_vis_labels",
-    "april_desync_vis_custom_color", "april_desync_vis_color",
+    "april_desync_visualizer",
     "april_bullet_manip_enabled", "april_bullet_manip_enabled_mode", "april_bullet_manip_range", "april_bullet_manip_speed",
     "april_bullet_manip_debug", "april_bullet_manip_console", "april_bullet_manip_vis",
     "april_bullet_manip_vis_style", "april_bullet_manip_vis_size",
@@ -2955,9 +3002,8 @@ local COLOR_KEYS = {
     "april_solar_panel", "april_windmill",
     "april_wp_draw", "april_map_bg", "april_map_grid", "april_map_player_col", "april_map_npc_col", "april_map_loot_col",
     "april_map_world_col", "april_map_base_col", "april_map_wp_col", "april_map_local",
-    "april_desync_visualizer", "april_desync_vis_color", "april_desync_vis_local_col",
+    "april_desync_visualizer",
     "april_bullet_manip_vis_server", "april_bullet_manip_vis_local", "april_bullet_manip_vis_peek", "april_bullet_manip_vis_link",
-    "april_shark_visualize",
 }
 
 local LEGACY_HOTKEY_TO_CHECKBOX = {
@@ -2990,7 +3036,7 @@ local HOTKEY_KEYS = {
     "april_map_enabled",
     "april_noclip_enabled",
     "april_spider_enabled",
-    "april_shark_enabled",
+    "april_walk_noclip_enabled",
     "april_desync_enabled",
     "april_bullet_manip_enabled",
     "april_tung_esp_enabled",
@@ -9780,8 +9826,20 @@ local esp_scan = April.require("game.esp_scan")
 local M = {}
 local P = "april_base_enabled"
 
-local function resolve_model(container, type_name)
-    if not env.is_valid(container) then return nil end
+local function append_base_entry(state, model, type_name, toggle_id)
+    if not model or not env.is_valid(model) then return end
+    if not esp_scan.find_main_part(model) and not esp_scan.is_part(model) then return end
+
+    state.seen = state.seen or {}
+    local key = tostring(model.Address or model) .. ":" .. toggle_id
+    if state.seen[key] then return end
+    state.seen[key] = true
+
+    table.insert(state.out, esp_scan.make_entry(model, type_name, toggle_id))
+end
+
+local function collect_base_container(state, container, type_name, toggle_id)
+    if not env.is_valid(container) then return end
 
     if type_name == "Sleeping Bag" then
         local bag = env.safe_call(function()
@@ -9790,31 +9848,33 @@ local function resolve_model(container, type_name)
                 or container:find_first_child("Sleeping_Bag")
                 or container:FindFirstChild("Sleeping_Bag")
         end)
-        if bag and env.is_valid(bag) then return bag end
-
-        local children = env.safe_call(function() return container:get_children() end) or {}
-        for _, child in ipairs(children) do
-            local cn = child.ClassName or child.class_name
-            if cn == "Model" and env.is_valid(child) then
-                return child
-            end
+        if bag and env.is_valid(bag) then
+            append_base_entry(state, bag, type_name, toggle_id)
+            return
         end
     end
 
     local cn = container.ClassName or container.class_name
-    if cn == "Model" then return container end
-
-    if esp_scan.find_main_part(container) then return container end
-
-    local children = env.safe_call(function() return container:get_children() end) or {}
-    for _, child in ipairs(children) do
-        if env.is_valid(child) then
-            local cc = child.ClassName or child.class_name
-            if cc == "Model" then return child end
-        end
+    if cn == "Model" then
+        append_base_entry(state, container, type_name, toggle_id)
+        return
     end
 
-    return container
+    if esp_scan.find_main_part(container) or esp_scan.is_part(container) then
+        append_base_entry(state, container, type_name, toggle_id)
+    end
+
+    local subs = env.safe_call(function() return container:get_children() end) or {}
+    for _, child in ipairs(subs) do
+        if not env.is_valid(child) then goto child_continue end
+        local cc = child.ClassName or child.class_name
+        if cc == "Model" then
+            append_base_entry(state, child, type_name, toggle_id)
+        elseif esp_scan.find_main_part(child) or esp_scan.is_part(child) then
+            append_base_entry(state, child, type_name, toggle_id)
+        end
+        ::child_continue::
+    end
 end
 
 function M.register_menu()
@@ -9849,6 +9909,7 @@ function M.begin_scan()
         items = nil,
         ii = 1,
         out = {},
+        seen = {},
     }
 end
 
@@ -9888,6 +9949,10 @@ function M.step_scan(state, batch)
 
             if maps.BASE_MAP[area_name] then
                 state.items = { area }
+                local children = env.safe_call(function() return area:get_children() end) or {}
+                for _, child in ipairs(children) do
+                    state.items[#state.items + 1] = child
+                end
             else
                 state.items = env.safe_call(function() return area:get_children() end) or {}
             end
@@ -9910,11 +9975,7 @@ function M.step_scan(state, batch)
         local toggle_id = maps.BASE_MAP[type_name]
         if not toggle_id then goto continue end
 
-        local model = resolve_model(type_folder, type_name)
-        if not model or not env.is_valid(model) then goto continue end
-        if not esp_scan.find_main_part(model) and not esp_scan.is_part(model) then goto continue end
-
-        table.insert(state.out, esp_scan.make_entry(model, type_name, toggle_id))
+        collect_base_container(state, type_folder, type_name, toggle_id)
 
         ::continue::
     end
@@ -9946,6 +10007,7 @@ function M.draw()
     local me = env.get_local_player()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
+    local label_groups = {}
 
     for _, entry in ipairs(cache.base) do
         if not settings.enabled(entry.toggle_id) then goto continue end
@@ -9990,12 +10052,26 @@ function M.draw()
                     end
                 end
                 if label ~= "" then
-                    draw_util.text_centered(sx, sy, label, col, text_size)
+                    local gk = string.format("%d:%d:%d",
+                        math.floor(lx * 2), math.floor(ly * 2), math.floor(lz * 2))
+                    local group = label_groups[gk]
+                    if not group then
+                        group = { sx = sx, sy = sy, lines = {} }
+                        label_groups[gk] = group
+                    end
+                    group.lines[#group.lines + 1] = { label = label, col = col }
                 end
             end
         end
 
         ::continue::
+    end
+
+    for _, group in pairs(label_groups) do
+        for i, line in ipairs(group.lines) do
+            local offset = (i - 1) * (text_size + 2)
+            draw_util.text_centered(group.sx, group.sy - offset, line.label, line.col, text_size)
+        end
     end
 end
 
@@ -10365,39 +10441,27 @@ return M
 
 end)()
 
--- ── features/movement/shark.lua ──
-April._mods["features.movement.shark"] = (function()
---[[
-    Shark — noclip underground blink + packet desync, return to origin, freeze.
-]]
+-- ── features/movement/noclip.lua ──
+April._mods["features.movement.noclip"] = (function()
+--[[ Regular noclip — walk through walls, stay on the ground (raycast floor clamp). ]]
 
 local settings = April.require("core.settings")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
 local move = April.require("core.cframe_move")
-local packet_desync = April.require("core.packet_desync")
 local misc_gate = April.require("core.misc_gate")
-local desync_vis = April.require("core.desync_vis")
 
 local M = {}
 
-local P = "april_shark_enabled"
-local P_DEPTH = "april_shark_depth"
-local P_VIS = "april_shark_visualize"
-local RING_RADIUS = 2.5
-local UNDER_HOLD_TICKS = 3
+local P = "april_walk_noclip_enabled"
+local P_SPEED = "april_walk_noclip_speed"
 
-local PHASE_IDLE = 0
-local PHASE_UNDER = 1
-local PHASE_FROZEN = 2
+local HIP_OFFSET = 3.0
+local RAY_UP = 6.0
+local RAY_DOWN = 512.0
 
 local _installed = false
 local was_active = false
-local phase = PHASE_IDLE
-local under_ticks = 0
-local desync_on = false
-local saved_pos = nil
-local desync_pos = nil
 
 local function get_character(lp)
     if lp and lp.character then return lp.character end
@@ -10428,80 +10492,83 @@ local function get_humanoid(lp)
     end)
 end
 
-local function blink_depth()
-    return settings.num(P_DEPTH, 6)
-end
+local function ground_y_at(x, y, z)
+    if not raycast or not raycast.cast then return nil end
+    if raycast.is_ready and not raycast.is_ready() then return nil end
 
-local function underground_pos(pos)
-    local depth = blink_depth()
-    return {
-        x = pos.x,
-        y = pos.y - depth,
-        z = pos.z,
-    }
-end
+    local start_y = y + RAY_UP
+    local hit, hit_pos, dist = raycast.cast(x, start_y, z, x, start_y - RAY_DOWN, z)
+    if not hit then return nil end
 
-local function apply_desync()
-    if desync_on then return end
-    packet_desync.apply_movement_only()
-    desync_on = true
-end
-
-local function release(char, root, hum)
-    move.set_character_noclip(char, root, false)
-    if hum then
-        move.humanoid_running(hum)
-        move.humanoid_thaw(hum)
+    if hit_pos then
+        local hy = hit_pos.y or hit_pos.Y
+        if hy then return hy + HIP_OFFSET end
     end
-    if desync_on then
-        packet_desync.release()
-        desync_on = false
+    if dist then
+        return start_y - dist + HIP_OFFSET
     end
-    phase = PHASE_IDLE
-    under_ticks = 0
-    saved_pos = nil
-    desync_pos = nil
+    return nil
 end
 
-local function begin_blink(root, char)
-    local pos = move.read_pos(root)
-    if not pos then return false end
+local function read_walk_input()
+    local lx, lz, rx, rz = move.camera_flat_axes()
+    if not lx then return 0, 0 end
 
-    saved_pos = { x = pos.x, y = pos.y, z = pos.z }
-    desync_pos = underground_pos(saved_pos)
-    phase = PHASE_UNDER
-    under_ticks = 0
-    return true
+    local mx, mz = 0, 0
+    if move.key_down(0x57) then mx, mz = mx + lx, mz + lz end
+    if move.key_down(0x53) then mx, mz = mx - lx, mz - lz end
+    if move.key_down(0x41) then mx, mz = mx - rx, mz - rz end
+    if move.key_down(0x44) then mx, mz = mx + rx, mz + rz end
+
+    local mag = math.sqrt(mx * mx + mz * mz)
+    if mag < 0.001 then return 0, 0 end
+    return mx / mag, mz / mag
 end
 
-local function tick_underground(root, char, hum)
-    if not saved_pos or not desync_pos then return end
-
+local function enter(char, root, hum)
     move.set_character_noclip(char, root, true)
-    move.humanoid_flying(hum)
-    move.set_position(root, desync_pos.x, desync_pos.y, desync_pos.z)
+    move.humanoid_suspend(hum)
+    pcall(function() hum.state = 8 end)
     move.zero_character(char, root)
-    apply_desync()
-
-    under_ticks = under_ticks + 1
-    if under_ticks < UNDER_HOLD_TICKS then return end
-
-    move.set_position(root, saved_pos.x, saved_pos.y, saved_pos.z)
-    move.zero_character(char, root)
-    move.set_character_noclip(char, root, false)
-    move.humanoid_freeze(hum)
-    phase = PHASE_FROZEN
 end
 
-local function tick_frozen(root, char, hum)
-    if not saved_pos then return end
-    move.set_position(root, saved_pos.x, saved_pos.y, saved_pos.z)
+local function leave(char, root, hum)
+    move.set_character_noclip(char, root, false)
+    move.humanoid_release(hum)
+    move.humanoid_running(hum)
     move.zero_character(char, root)
-    move.humanoid_freeze(hum)
+end
+
+local function tick_move(char, root, hum, speed)
+    move.set_character_noclip(char, root, true)
+    pcall(function() hum.state = 8 end)
+
+    local pos = move.read_pos(root)
+    if not pos then return end
+
+    local mx, mz = read_walk_input()
+    local step = speed * move.delta_time()
+    local nx, nz = pos.x, pos.z
+
+    if mx ~= 0 or mz ~= 0 then
+        nx = pos.x + mx * step
+        nz = pos.z + mz * step
+    end
+
+    local ny = ground_y_at(nx, pos.y, nz) or ground_y_at(pos.x, pos.y, pos.z) or pos.y
+    if ny < pos.y - 0.25 then
+        ny = ground_y_at(pos.x, pos.y, pos.z) or pos.y
+    end
+
+    move.set_position(root, nx, ny, nz)
+    move.zero_character(char, root)
 end
 
 local function tick(_dt)
     if not misc_gate.movement_allowed() then return end
+
+    local fling = April.require("features.movement.fling")
+    if fling.is_active and fling.is_active() then return end
 
     local on = settings.enabled(P)
     local lp = env.get_local_player()
@@ -10510,7 +10577,9 @@ local function tick(_dt)
         local char = lp and get_character(lp)
         local root = lp and get_root(lp)
         local hum = lp and get_humanoid(lp)
-        release(char, root, hum)
+        if char and root and hum then
+            leave(char, root, hum)
+        end
         was_active = false
         return
     end
@@ -10527,15 +10596,11 @@ local function tick(_dt)
     if not char or not root or not hum then return end
 
     if not was_active then
-        if not begin_blink(root, char) then return end
+        enter(char, root, hum)
         was_active = true
     end
 
-    if phase == PHASE_UNDER then
-        tick_underground(root, char, hum)
-    elseif phase == PHASE_FROZEN then
-        tick_frozen(root, char, hum)
-    end
+    tick_move(char, root, hum, settings.num(P_SPEED, 32))
 end
 
 function M.register_menu()
@@ -10543,12 +10608,9 @@ function M.register_menu()
     local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
-    menu_util.register_keybind(T, G.MISC, P, "Shark", false)
-    menu.add_slider_int(T, G.MISC, P_DEPTH, "Shark Underground Depth", 1, 15, 6, root)
-    menu.add_checkbox(T, G.MISC, P_VIS, "Shark Desync Visualize", false, menu_util.parent(P, {
-        colorpicker = { 0.2, 0.85, 1, 0.9 },
-    }))
-    menu_util.bind_children(P, { P_DEPTH, P_VIS })
+    menu_util.register_keybind(T, G.MISC, P, "Noclip", false)
+    menu.add_slider_int(T, G.MISC, P_SPEED, "Noclip Speed", 8, 80, 32, root)
+    menu_util.bind_children(P, { P_SPEED })
 end
 
 function M.install()
@@ -10562,14 +10624,613 @@ end
 
 function M.update(_dt) end
 
-function M.draw()
-    if not settings.enabled(P) then return end
-    if not settings.bool(P_VIS, false) then return end
-    if not desync_pos then return end
+function M.draw() end
 
-    local col = settings.color(P_VIS, { 0.2, 0.85, 1, 0.9 })
-    desync_vis.draw_sphere_ring(desync_pos.x, desync_pos.y, desync_pos.z, RING_RADIUS, col, 2)
+return M
+
+end)()
+
+-- ── features/movement/fling.lua ──
+April._mods["features.movement.fling"] = (function()
+--[[ Fling — noclip TP spin: far-range entity lock, approach warmup, return to origin. ]]
+
+local settings = April.require("core.settings")
+local env = April.require("core.env")
+local menu_util = April.require("core.menu_util")
+local move = April.require("core.cframe_move")
+local math_util = April.require("core.math_util")
+local esp_util = April.require("core.esp_util")
+local player_state = April.require("game.player_state")
+local misc_gate = April.require("core.misc_gate")
+
+local M = {}
+
+local P = "april_fling_enabled"
+local P_FOV = "april_fling_fov"
+local P_KEY = "april_fling_key"
+local P_KEY_MODE = "april_fling_key_mode"
+local P_DURATION = "april_fling_duration"
+local KEY_MODES = { "Toggle", "Hold" }
+
+local MAX_DIST = 300.0
+local FAR_RANGE = 40.0
+local SPIN_Y_START = 48000.0
+local SPIN_Y_MAX = 70000.0
+local SPIN_RAMP_SEC = 0.35
+local BASE_PREDICT = 0.05
+
+local function fling_duration()
+    return settings.num(P_DURATION, 2)
 end
+
+local function key_is_hold()
+    return settings.combo_index(P_KEY_MODE, KEY_MODES, 0) == 1
+end
+
+local STATE_IDLE = 0
+local STATE_APPROACH = 1
+local STATE_FLING = 2
+
+local _installed = false
+local state = STATE_IDLE
+local fling_t0 = 0
+local approach_left = 0
+local start_range = 0
+local saved_pos = nil
+local target_root = nil
+local target_player = nil
+local last_attach = nil
+local key_was_down = false
+
+local function now()
+    if utility and utility.get_time then return utility.get_time() end
+    return os.clock()
+end
+
+local function screen_center()
+    if input and input.get_screen_center then
+        local cx, cy = input.get_screen_center()
+        if cx and cy then return cx, cy end
+    end
+    if draw and draw.get_screen_size then
+        local w, h = draw.get_screen_size()
+        return w * 0.5, h * 0.5
+    end
+    return 960, 540
+end
+
+local function get_character(lp)
+    if lp and lp.character then return lp.character end
+    if game and game.local_player and game.local_player.character then
+        return game.local_player.character
+    end
+    return nil
+end
+
+local function get_root(lp)
+    local char = get_character(lp)
+    if not char then return nil end
+    return env.safe_call(function()
+        if char.find_first_child then return char:find_first_child("HumanoidRootPart") end
+        return char:FindFirstChild("HumanoidRootPart")
+    end)
+end
+
+local function get_humanoid(lp)
+    if lp and lp.humanoid and env.is_valid(lp.humanoid) then
+        return lp.humanoid
+    end
+    local char = get_character(lp)
+    if not char then return nil end
+    return env.safe_call(function()
+        if char.find_first_child_of_class then return char:find_first_child_of_class("Humanoid") end
+        return char:FindFirstChildOfClass("Humanoid")
+    end)
+end
+
+local function player_root(p)
+    if not p or not p.character then return nil end
+    local char = p.character
+    return env.safe_call(function()
+        if char.find_first_child then return char:find_first_child("HumanoidRootPart") end
+        return char:FindFirstChild("HumanoidRootPart")
+    end)
+end
+
+local function refresh_target_root()
+    if not target_player then return false end
+    local root = player_root(target_player)
+    if root and env.is_valid(root) then
+        target_root = root
+        return true
+    end
+    return target_root ~= nil and env.is_valid(target_root)
+end
+
+local function target_still_valid()
+    if not target_player then return false end
+    if target_player.character and env.is_valid(target_player.character) then
+        return true
+    end
+    if target_player.position then
+        return true
+    end
+    return refresh_target_root()
+end
+
+local function player_aim_pos(p)
+    if p.position then
+        return p.position.x, p.position.y, p.position.z
+    end
+    if p.head_position then
+        local h = p.head_position
+        return h.x, h.y, h.z
+    end
+    local root = player_root(p)
+    if root then
+        local pos = move.read_pos(root)
+        if pos then
+            return pos.x, pos.y, pos.z
+        end
+    end
+    return nil
+end
+
+local function world_dist_to_player(p, from)
+    if not p or not from then return math.huge end
+    if p.distance_to then
+        return p:distance_to(from)
+    end
+    local ax, ay, az = player_aim_pos(p)
+    if not ax or not from.x then return math.huge end
+    return math_util.distance3(ax - from.x, ay - from.y, az - from.z)
+end
+
+local function find_target(fov_px)
+    if not entity or not entity.get_players then return nil, nil end
+
+    local cx, cy = screen_center()
+    local cam = camera and camera.get_position and camera.get_position()
+    local best, best_dist = nil, fov_px
+
+    for _, p in ipairs(entity.get_players()) do
+        if not player_state.is_combat_target(p) then goto continue end
+        if cam and world_dist_to_player(p, cam) > MAX_DIST then goto continue end
+
+        local ax, ay, az = player_aim_pos(p)
+        if not ax then goto continue end
+
+        local sx, sy, on_screen = esp_util.w2s(ax, ay, az)
+        if not on_screen then goto continue end
+
+        local fov_dist = math_util.screen_fov_dist(sx, sy, cx, cy)
+        if fov_dist > fov_px or fov_dist >= best_dist then goto continue end
+
+        local root = player_root(p)
+        if not root or not env.is_valid(root) then goto continue end
+
+        best_dist = fov_dist
+        best = p
+        ::continue::
+    end
+
+    if not best then return nil, nil end
+    return best, player_root(best)
+end
+
+local function read_part_velocity(inst)
+    if not inst then return 0, 0, 0 end
+    local vel = inst.Velocity or inst.velocity
+    if vel then
+        return vel.x or vel.X or 0, vel.y or vel.Y or 0, vel.z or vel.Z or 0
+    end
+    local assembly = inst.AssemblyLinearVelocity
+    if assembly then
+        return assembly.x or assembly.X or 0, assembly.y or assembly.Y or 0, assembly.z or assembly.Z or 0
+    end
+    return 0, 0, 0
+end
+
+local function read_target_velocity(tgt_root, far_lock)
+    local ex, ey, ez = 0, 0, 0
+    local px, py, pz = 0, 0, 0
+    local has_entity = false
+    local has_part = false
+
+    if target_player and target_player.velocity then
+        local v = target_player.velocity
+        ex, ey, ez = v.x or 0, v.y or 0, v.z or 0
+        has_entity = true
+    end
+
+    if tgt_root and env.is_valid(tgt_root) then
+        px, py, pz = read_part_velocity(tgt_root)
+        has_part = true
+    end
+
+    if far_lock and has_entity then
+        return ex, ey, ez
+    end
+    if has_entity and has_part then
+        local entity_speed = math_util.distance3(ex, ey, ez)
+        local part_speed = math_util.distance3(px, py, pz)
+        if part_speed > entity_speed then
+            return px, py, pz
+        end
+        return ex, ey, ez
+    end
+    if has_entity then return ex, ey, ez end
+    if has_part then return px, py, pz end
+    return 0, 0, 0
+end
+
+local function read_attach_pos_raw(tgt_root)
+    local entity_x, entity_y, entity_z
+    local has_entity = false
+
+    if target_player and target_player.position then
+        local p = target_player.position
+        entity_x, entity_y, entity_z = p.x, p.y, p.z
+        has_entity = true
+    end
+
+    local part_x, part_y, part_z
+    local has_part = false
+    if tgt_root and env.is_valid(tgt_root) then
+        local tpos = move.read_pos(tgt_root)
+        if tpos then
+            part_x, part_y, part_z = tpos.x, tpos.y, tpos.z
+            has_part = true
+        end
+    end
+
+    if has_entity and has_part then
+        local spread = math_util.distance3(part_x - entity_x, part_y - entity_y, part_z - entity_z)
+        if spread > FAR_RANGE or start_range > FAR_RANGE or spread > 8 then
+            return entity_x, entity_y, entity_z
+        end
+        return part_x, part_y, part_z
+    end
+    if has_entity then return entity_x, entity_y, entity_z end
+    if has_part then return part_x, part_y, part_z end
+    if last_attach then
+        return last_attach.x, last_attach.y, last_attach.z
+    end
+    return nil
+end
+
+local function read_attach_pos(tgt_root, lpos)
+    local tx, ty, tz = read_attach_pos_raw(tgt_root)
+    if not tx then return nil end
+
+    local far_lock = start_range > FAR_RANGE
+    if lpos then
+        local live_range = math_util.distance3(tx - lpos.x, ty - lpos.y, tz - lpos.z)
+        if live_range > FAR_RANGE then
+            far_lock = true
+        end
+    end
+
+    local vx, vy, vz = read_target_velocity(tgt_root, far_lock)
+    local horiz_speed = math_util.distance3(vx, 0, vz)
+    local predict = BASE_PREDICT + horiz_speed * 0.003
+    if far_lock then
+        predict = predict + 0.02
+    end
+
+    tx = tx + vx * predict
+    ty = ty + vy * predict * 0.12
+    tz = tz + vz * predict
+
+    last_attach = { x = tx, y = ty, z = tz }
+    return tx, ty, tz
+end
+
+local function snap_passes(range, drift)
+    local base = 5
+    if range > 220 then base = 22
+    elseif range > 150 then base = 18
+    elseif range > 100 then base = 14
+    elseif range > 60 then base = 10
+    elseif range > 30 then base = 7
+    end
+
+    if drift > 12 then base = base + 8
+    elseif drift > 6 then base = base + 5
+    elseif drift > 2 then base = base + 3
+    end
+
+    return base
+end
+
+local function approach_ticks_for(dist)
+    if dist <= FAR_RANGE then return 0 end
+    return math.min(12, math.floor(dist / 22) + 3)
+end
+
+local function prep_fling(char, root, hum)
+    move.set_character_noclip(char, root, true)
+    move.humanoid_suspend(hum)
+    pcall(function() hum.platform_stand = true end)
+    pcall(function() hum.auto_rotate = false end)
+    pcall(function() hum.evaluate_state_machine = false end)
+    pcall(function() hum.sit = false end)
+    pcall(function() hum.state = 14 end)
+end
+
+local function release_fling(char, root, hum)
+    if root then
+        move.set_velocity(root, 0, 0, 0)
+        if part and part.set_angular_velocity then
+            pcall(part.set_angular_velocity, root, 0, 0, 0)
+        end
+    end
+    move.zero_character(char, root)
+    move.set_character_noclip(char, root, false)
+    pcall(function() hum.platform_stand = false end)
+    move.humanoid_running(hum)
+    move.humanoid_thaw(hum)
+end
+
+local function write_pos(inst, x, y, z)
+    if not inst then return end
+    if part and part.set_position then
+        pcall(part.set_position, inst, x, y, z)
+    else
+        pcall(function() inst.Position = Vector3.new(x, y, z) end)
+    end
+end
+
+local function freeze_body(char, root)
+    if root then
+        move.set_velocity(root, 0, 0, 0)
+    end
+    for _, inst in ipairs(move.iter_parts(char)) do
+        move.set_velocity(inst, 0, 0, 0)
+        if inst ~= root and part and part.set_angular_velocity then
+            pcall(part.set_angular_velocity, inst, 0, 0, 0)
+        end
+    end
+end
+
+local function pin_to_target(char, root, tgt_root, from_pos)
+    local lpos = move.read_pos(root)
+    local tx, ty, tz = read_attach_pos(tgt_root, lpos)
+    if not tx then return false end
+
+    local drift = 0
+    local range = start_range
+    if lpos then
+        drift = math_util.distance3(tx - lpos.x, ty - lpos.y, tz - lpos.z)
+        range = math.max(range, drift)
+    elseif from_pos then
+        drift = math_util.distance3(tx - from_pos.x, ty - from_pos.y, tz - from_pos.z)
+        range = math.max(range, drift)
+    end
+
+    local passes = snap_passes(range, drift)
+    for _ = 1, passes do
+        write_pos(root, tx, ty, tz)
+    end
+
+    freeze_body(char, root)
+    return true, tx, ty, tz
+end
+
+local function spin_strength(elapsed)
+    local t = math.min(1, elapsed / SPIN_RAMP_SEC)
+    return SPIN_Y_START + (SPIN_Y_MAX - SPIN_Y_START) * t
+end
+
+local function apply_spin(root, elapsed)
+    move.set_velocity(root, 0, 0, 0)
+    if part and part.set_angular_velocity then
+        pcall(part.set_angular_velocity, root, 0, spin_strength(elapsed), 0)
+    end
+end
+
+local function stop_fling(root, char, hum)
+    if saved_pos and root then
+        write_pos(root, saved_pos.x, saved_pos.y, saved_pos.z)
+        move.set_velocity(root, 0, 0, 0)
+    end
+    release_fling(char, root, hum)
+    state = STATE_IDLE
+    fling_t0 = 0
+    approach_left = 0
+    start_range = 0
+    saved_pos = nil
+    target_root = nil
+    target_player = nil
+    last_attach = nil
+end
+
+local function begin_fling(root, char, hum, tgt_player, tgt_root)
+    local pos = move.read_pos(root)
+    if not pos then return false end
+
+    target_player = tgt_player
+    target_root = tgt_root
+    last_attach = nil
+
+    local raw_x, raw_y, raw_z = read_attach_pos_raw(tgt_root)
+    if not raw_x then return false end
+
+    start_range = math_util.distance3(raw_x - pos.x, raw_y - pos.y, raw_z - pos.z)
+
+    local tx, ty, tz = read_attach_pos(tgt_root, pos)
+    if not tx then return false end
+    saved_pos = { x = pos.x, y = pos.y, z = pos.z }
+    fling_t0 = now()
+    approach_left = approach_ticks_for(start_range)
+
+    if approach_left > 0 then
+        state = STATE_APPROACH
+    else
+        state = STATE_FLING
+    end
+
+    prep_fling(char, root, hum)
+    pin_to_target(char, root, tgt_root, pos)
+
+    if state == STATE_FLING then
+        apply_spin(root, 0)
+    end
+
+    return true
+end
+
+local function tick_approach(root, char, hum)
+    prep_fling(char, root, hum)
+
+    if not pin_to_target(char, root, target_root, nil) then
+        return
+    end
+
+    approach_left = approach_left - 1
+    if approach_left <= 0 then
+        state = STATE_FLING
+        apply_spin(root, now() - fling_t0)
+    end
+end
+
+local function tick_fling(root, char, hum)
+    local elapsed = now() - fling_t0
+    if elapsed >= fling_duration() then
+        stop_fling(root, char, hum)
+        return
+    end
+
+    if not target_still_valid() then
+        stop_fling(root, char, hum)
+        return
+    end
+
+    refresh_target_root()
+    prep_fling(char, root, hum)
+
+    local ok, tx, ty, tz = pin_to_target(char, root, target_root, nil)
+    if not ok then
+        return
+    end
+
+    apply_spin(root, elapsed)
+    write_pos(root, tx, ty, tz)
+end
+
+local function tick_active(root, char, hum)
+    if state == STATE_APPROACH then
+        tick_approach(root, char, hum)
+        return
+    end
+    tick_fling(root, char, hum)
+end
+
+local function try_trigger()
+    if state ~= STATE_IDLE then return end
+    if not settings.enabled(P) then return end
+
+    local lp = env.get_local_player()
+    if not lp then return end
+
+    local char = get_character(lp)
+    local root = get_root(lp)
+    local hum = get_humanoid(lp)
+    if not char or not root or not hum then return end
+
+    local fov = settings.num(P_FOV, 150)
+    local tgt_player, tgt_root = find_target(fov)
+    if not tgt_root then return end
+
+    begin_fling(root, char, hum, tgt_player, tgt_root)
+end
+
+local function poll_key()
+    if not settings.enabled(P) then
+        key_was_down = false
+        return
+    end
+    if state ~= STATE_IDLE then return end
+    if not menu or not menu.get_key then return end
+
+    local key = menu.get_key(P_KEY) or 0
+    if key <= 0 then
+        key_was_down = false
+        return
+    end
+    if not input or not input.is_key_down then return end
+
+    local down = input.is_key_down(key)
+    if key_is_hold() then
+        if down then
+            try_trigger()
+        end
+    elseif down and not key_was_down then
+        try_trigger()
+    end
+    key_was_down = down
+end
+
+local function tick(_dt)
+    if not misc_gate.movement_allowed() then return end
+
+    poll_key()
+    if state == STATE_IDLE then return end
+
+    local lp = env.get_local_player()
+    if not lp then
+        state = STATE_IDLE
+        approach_left = 0
+        start_range = 0
+        target_root = nil
+        target_player = nil
+        saved_pos = nil
+        last_attach = nil
+        return
+    end
+
+    local char = get_character(lp)
+    local root = get_root(lp)
+    local hum = get_humanoid(lp)
+    if not char or not root or not hum then
+        stop_fling(root, char, hum)
+        return
+    end
+
+    tick_active(root, char, hum)
+end
+
+function M.is_active()
+    return state == STATE_APPROACH or state == STATE_FLING
+end
+
+function M.register_menu()
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.MISC)
+    local root = menu_util.parent(P)
+
+    menu.add_checkbox(T, G.MISC, P, "Fling", false)
+    menu.add_slider_int(T, G.MISC, P_FOV, "Fling FOV", 20, 600, 150, root)
+    menu.add_slider_int(T, G.MISC, P_DURATION, "Fling Duration", 2, 10, 2, root)
+    menu.add_combo(T, G.MISC, P_KEY_MODE, "Fling Key Mode", KEY_MODES, 0, root)
+    if menu.add_hotkey then
+        menu.add_hotkey(T, G.MISC, P_KEY, "Fling Key", 0, root)
+    end
+    menu_util.bind_children(P, { P_FOV, P_DURATION, P_KEY_MODE, P_KEY })
+end
+
+function M.install()
+    if _installed then return end
+    _installed = true
+    local runservice = April.require("core.runservice")
+    runservice.on_sim(function(dt)
+        tick(dt)
+    end)
+end
+
+function M.update(_dt) end
+
+function M.draw() end
 
 return M
 
@@ -10582,12 +11243,17 @@ local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
 local fflag_mem = April.require("core.fflag_mem")
 local desync_vis = April.require("core.desync_vis")
+local esp_util = April.require("core.esp_util")
+local draw_util = April.require("core.draw_util")
 local misc_gate = April.require("core.misc_gate")
 
 local M = {}
 
 local P = "april_desync_enabled"
-local VIS_MODES = { "Box", "Cross", "Ring" }
+local P_VIS = "april_desync_visualizer"
+
+local RANGE_RADIUS = 7.5
+local DESYNC_RING_RADIUS = 2.5
 
 local LOOP_MS = 30
 local last_tick = 0
@@ -10595,7 +11261,8 @@ local last_flag_apply = 0
 local old_phys, old_send = nil, nil
 local was_active = false
 local was_sending = false
-local visual_pos = nil
+local anchor_pos = nil
+local server_pos = nil
 
 local function now()
     if utility and utility.get_time then return utility.get_time() end
@@ -10624,6 +11291,14 @@ local function capture_pos(root)
     }
 end
 
+local function dist_from_anchor(pos)
+    if not anchor_pos or not pos then return 0 end
+    local dx = pos.x - anchor_pos.x
+    local dy = pos.y - anchor_pos.y
+    local dz = pos.z - anchor_pos.z
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+
 local function apply_rates(physics_rate, sender_rate)
     local phys = tonumber(physics_rate) or 0
     local send = tonumber(sender_rate) or 60
@@ -10644,6 +11319,12 @@ local function active()
     return settings.enabled(P)
 end
 
+local function disable_desync()
+    if menu and menu.set then
+        pcall(menu.set, P, false)
+    end
+end
+
 local function compute_rates(t)
     local phys, send = 0, 60
 
@@ -10658,61 +11339,44 @@ local function compute_rates(t)
     return phys, send
 end
 
-local function visual_color()
-    if settings.enabled("april_desync_vis_custom_color") then
-        return settings.color("april_desync_vis_color", { 0.2, 0.85, 1, 0.9 })
-    end
-    return settings.color("april_desync_visualizer", { 0.2, 0.85, 1, 0.9 })
-end
-
-local function update_visual_pos(root, sending_now)
-    if not root or not settings.enabled("april_desync_visualizer") then return end
-
+local function update_server_pos(root, sending_now)
+    if not root then return end
     local pos = capture_pos(root)
     if not pos then return end
 
     if not settings.enabled("april_desync_autosend") then
-        visual_pos = visual_pos or pos
+        server_pos = server_pos or pos
     elseif sending_now and not was_sending then
-        visual_pos = pos
+        server_pos = pos
     elseif sending_now then
-        visual_pos = pos
+        server_pos = pos
     elseif was_sending and not sending_now then
-        visual_pos = visual_pos or pos
+        server_pos = server_pos or pos
+    end
+end
+
+local function draw_center_dot(wx, wy, wz, col)
+    local sx, sy, vis = esp_util.w2s(wx, wy, wz)
+    if vis then
+        draw_util.circle(sx, sy, 5, col, true)
+        draw_util.circle(sx, sy, 5, { 0, 0, 0, col[4] or 1 }, false)
     end
 end
 
 local function draw_visualizer()
-    if not settings.enabled("april_desync_visualizer") then return end
-    if not visual_pos then return end
+    if not anchor_pos then return end
 
-    local col = visual_color()
-    local mode = settings.num("april_desync_vis_style", 0)
-    local size = settings.num("april_desync_vis_size", 1.2)
-    local x, y, z = visual_pos.x, visual_pos.y, visual_pos.z
+    local range_col = { 0.2, 0.85, 1, 0.55 }
+    desync_vis.draw_sphere_ring(anchor_pos.x, anchor_pos.y, anchor_pos.z, RANGE_RADIUS, range_col, 2)
 
-    desync_vis.draw_mode(mode, x, y, z, size, col, 2)
+    if not settings.bool(P_VIS, false) then return end
 
-    if settings.enabled("april_desync_vis_show_local") then
-        local root = get_root()
-        local pos = root and (root.Position or root.position)
-        if pos then
-            local lx = pos.X or pos.x or 0
-            local ly = pos.Y or pos.y or 0
-            local lz = pos.Z or pos.z or 0
-            local lcol = settings.color("april_desync_vis_local_col", { 1, 0.35, 0.35, 0.9 })
-            desync_vis.draw_mode(mode, lx, ly, lz, size * 0.85, lcol, 2)
-            if settings.enabled("april_desync_vis_link") then
-                desync_vis.draw_link(visual_pos, { x = lx, y = ly, z = lz }, { 1, 1, 1, 0.4 }, 2)
-            end
-            if settings.enabled("april_desync_vis_labels") then
-                desync_vis.draw_labeled(lx, ly, lz, "LOCAL", lcol, 12)
-            end
-        end
-    end
+    local col = settings.color(P_VIS, { 0.2, 0.85, 1, 0.9 })
+    draw_center_dot(anchor_pos.x, anchor_pos.y, anchor_pos.z, col)
 
-    if settings.enabled("april_desync_vis_labels") then
-        desync_vis.draw_labeled(x, y, z, "SERVER", col, 12)
+    if server_pos then
+        desync_vis.draw_sphere_ring(server_pos.x, server_pos.y, server_pos.z, DESYNC_RING_RADIUS, col, 2)
+        desync_vis.draw_link(server_pos, anchor_pos, { col[1], col[2], col[3], (col[4] or 1) * 0.35 }, 1)
     end
 end
 
@@ -10725,59 +11389,36 @@ function M.register_menu()
     menu_util.register_keybind(T, G.MISC, P, "Desync", false)
     menu.add_checkbox(T, G.MISC, "april_desync_autosend", "Desync Auto Send", false, root)
     menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Desync Send Threshold", 0, 1, 0.3, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_visualizer", "Desync Visualizer", false, root)
-    menu.add_combo(T, G.MISC, "april_desync_vis_style", "Desync Vis Style", VIS_MODES, 0, root)
-    menu.add_slider_float(T, G.MISC, "april_desync_vis_size", "Desync Vis Size", 0.5, 4, 1.2, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_show_local", "Desync Show Local Pos", true, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_link", "Desync Show Link Line", true, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_labels", "Desync Show Labels", false, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_custom_color", "Desync Custom Color", false, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_color", "Desync Vis Color", false, menu_util.parent(P, {
-        parent = "april_desync_vis_custom_color",
+    menu.add_checkbox(T, G.MISC, P_VIS, "Desync Visualize", false, menu_util.parent(P, {
         colorpicker = { 0.2, 0.85, 1, 0.9 },
     }))
 
     menu_util.bind_children(P, {
-        "april_desync_autosend", "april_desync_autosend_len",
-        "april_desync_visualizer", "april_desync_vis_style", "april_desync_vis_size",
-        "april_desync_vis_show_local", "april_desync_vis_link", "april_desync_vis_labels",
-        "april_desync_vis_custom_color", "april_desync_vis_color",
+        "april_desync_autosend", "april_desync_autosend_len", P_VIS,
     })
 
     menu_util.bind_when(function()
         return settings.enabled(P) and settings.enabled("april_desync_autosend")
     end, { "april_desync_autosend_len" }, { P, "april_desync_autosend" })
-
-    menu_util.bind_when(function()
-        return settings.enabled(P) and settings.enabled("april_desync_visualizer")
-    end, {
-        "april_desync_vis_style", "april_desync_vis_size",
-        "april_desync_vis_show_local", "april_desync_vis_link", "april_desync_vis_labels",
-        "april_desync_vis_custom_color",
-    }, { P, "april_desync_visualizer" })
-
-    menu_util.bind_when(function()
-        return settings.enabled(P)
-            and settings.enabled("april_desync_visualizer")
-            and settings.enabled("april_desync_vis_custom_color")
-    end, { "april_desync_vis_color" }, { P, "april_desync_visualizer", "april_desync_vis_custom_color" })
 end
 
 function M.update(_dt)
     if not misc_gate.movement_allowed() then return end
-    if settings.enabled("april_shark_enabled") then return end
     local on = active()
     local t = now()
 
     if was_active and not on then
         restore_rates()
-        visual_pos = nil
+        anchor_pos = nil
+        server_pos = nil
         was_sending = false
     end
 
     if on and not was_active then
         pcall(fflag_mem.refresh)
-        visual_pos = nil
+        local root = get_root()
+        anchor_pos = capture_pos(root)
+        server_pos = anchor_pos and { x = anchor_pos.x, y = anchor_pos.y, z = anchor_pos.z } or nil
     end
 
     was_active = on
@@ -10790,7 +11431,20 @@ function M.update(_dt)
     local sending_now = phys ~= 0
     local root = get_root()
 
-    update_visual_pos(root, sending_now)
+    if root and anchor_pos then
+        local pos = capture_pos(root)
+        if pos and dist_from_anchor(pos) > RANGE_RADIUS then
+            restore_rates()
+            anchor_pos = nil
+            server_pos = nil
+            was_sending = false
+            was_active = false
+            disable_desync()
+            return
+        end
+    end
+
+    update_server_pos(root, sending_now)
     was_sending = sending_now
 
     if phys ~= old_phys or send ~= old_send or (t - last_flag_apply) > 0.35 then
@@ -11692,7 +12346,8 @@ M.FEATURE_ORDER = {
     "features.utility.mod_checker",
     "features.combat.perfect_farm",
     "features.movement.exploits",
-    "features.movement.shark",
+    "features.movement.noclip",
+    "features.movement.fling",
     "features.movement.desync",
     "features.utility.config",
 }
@@ -11902,7 +12557,8 @@ local ok, err = pcall(function()
     end
 
     April.require("core.movement_ctrl").install()
-    April.require("features.movement.shark").install()
+    April.require("features.movement.noclip").install()
+    April.require("features.movement.fling").install()
 
     April._init_ok = true
 

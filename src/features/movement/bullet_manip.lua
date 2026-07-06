@@ -172,14 +172,6 @@ end
 
 function M.update(_dt)
     if not misc_gate.movement_allowed() then return end
-    if settings.enabled("april_shark_enabled") then
-        if state ~= STATE_IDLE then
-            local _, root = get_local_root()
-            if origin and root then set_root_pos(root, origin) end
-            clear_session("shark active")
-        end
-        return
-    end
     if not settings.enabled(P) then
         if state ~= STATE_IDLE then
             local _, root = get_local_root()

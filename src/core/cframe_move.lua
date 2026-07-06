@@ -101,6 +101,15 @@ function M.set_part_collide(inst, collide)
     end
 end
 
+function M.set_part_anchored(inst, anchored)
+    if not inst then return end
+    if part and part.set_anchored then
+        pcall(part.set_anchored, inst, anchored)
+    else
+        pcall(function() inst.Anchored = anchored end)
+    end
+end
+
 function M.set_character_noclip(char, root, enabled)
     if not char then return end
     local collide = not enabled

@@ -140,9 +140,19 @@ local function set_visible(id, show)
     end
 end
 
+local function master_visible(master_id)
+    local ok, fb = pcall(function()
+        return April.require("core.feature_bind")
+    end)
+    if ok and fb and fb.is_registered(master_id) then
+        return fb.armed(master_id)
+    end
+    return settings_mod().bool(master_id, false)
+end
+
 function M.sync_masters()
     for master_id in pairs(M._master_hooked) do
-        local show = settings_mod().enabled(master_id)
+        local show = master_visible(master_id)
         for _, id in ipairs(M._master_children[master_id] or {}) do
             set_visible(id, show)
         end
@@ -150,6 +160,14 @@ function M.sync_masters()
     for i = 1, #M._when_rules do
         local rule = M._when_rules[i]
         if rule.sync then rule.sync() end
+    end
+end
+
+function M.sync_master(master_id)
+    if not master_id or not M._master_hooked[master_id] then return end
+    local show = master_visible(master_id)
+    for _, id in ipairs(M._master_children[master_id] or {}) do
+        set_visible(id, show)
     end
 end
 
@@ -163,7 +181,7 @@ function M.bind_master(master_id, child_ids)
     local function sync(new_val)
         local show
         if new_val == nil then
-            show = settings_mod().bool(master_id, false)
+            show = master_visible(master_id)
         else
             show = new_val == true or new_val == 1
         end

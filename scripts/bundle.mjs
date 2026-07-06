@@ -74,7 +74,8 @@ const ORDER = [
   "features/world/base_esp.lua",
   "features/world/npc_esp.lua",
   "features/movement/exploits.lua",
-  "features/movement/shark.lua",
+  "features/movement/noclip.lua",
+  "features/movement/fling.lua",
   "features/movement/desync.lua",
   "features/radar/waypoints.lua",
   "features/radar/tactical_map.lua",
@@ -132,7 +133,8 @@ local ok, err = pcall(function()
     end
 
     April.require("core.movement_ctrl").install()
-    April.require("features.movement.shark").install()
+    April.require("features.movement.noclip").install()
+    April.require("features.movement.fling").install()
 
     April._init_ok = true
 

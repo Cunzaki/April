@@ -3,12 +3,17 @@ local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
 local fflag_mem = April.require("core.fflag_mem")
 local desync_vis = April.require("core.desync_vis")
+local esp_util = April.require("core.esp_util")
+local draw_util = April.require("core.draw_util")
 local misc_gate = April.require("core.misc_gate")
 
 local M = {}
 
 local P = "april_desync_enabled"
-local VIS_MODES = { "Box", "Cross", "Ring" }
+local P_VIS = "april_desync_visualizer"
+
+local RANGE_RADIUS = 7.5
+local DESYNC_RING_RADIUS = 2.5
 
 local LOOP_MS = 30
 local last_tick = 0
@@ -16,7 +21,8 @@ local last_flag_apply = 0
 local old_phys, old_send = nil, nil
 local was_active = false
 local was_sending = false
-local visual_pos = nil
+local anchor_pos = nil
+local server_pos = nil
 
 local function now()
     if utility and utility.get_time then return utility.get_time() end
@@ -45,6 +51,14 @@ local function capture_pos(root)
     }
 end
 
+local function dist_from_anchor(pos)
+    if not anchor_pos or not pos then return 0 end
+    local dx = pos.x - anchor_pos.x
+    local dy = pos.y - anchor_pos.y
+    local dz = pos.z - anchor_pos.z
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+
 local function apply_rates(physics_rate, sender_rate)
     local phys = tonumber(physics_rate) or 0
     local send = tonumber(sender_rate) or 60
@@ -65,6 +79,12 @@ local function active()
     return settings.enabled(P)
 end
 
+local function disable_desync()
+    if menu and menu.set then
+        pcall(menu.set, P, false)
+    end
+end
+
 local function compute_rates(t)
     local phys, send = 0, 60
 
@@ -79,61 +99,44 @@ local function compute_rates(t)
     return phys, send
 end
 
-local function visual_color()
-    if settings.enabled("april_desync_vis_custom_color") then
-        return settings.color("april_desync_vis_color", { 0.2, 0.85, 1, 0.9 })
-    end
-    return settings.color("april_desync_visualizer", { 0.2, 0.85, 1, 0.9 })
-end
-
-local function update_visual_pos(root, sending_now)
-    if not root or not settings.enabled("april_desync_visualizer") then return end
-
+local function update_server_pos(root, sending_now)
+    if not root then return end
     local pos = capture_pos(root)
     if not pos then return end
 
     if not settings.enabled("april_desync_autosend") then
-        visual_pos = visual_pos or pos
+        server_pos = server_pos or pos
     elseif sending_now and not was_sending then
-        visual_pos = pos
+        server_pos = pos
     elseif sending_now then
-        visual_pos = pos
+        server_pos = pos
     elseif was_sending and not sending_now then
-        visual_pos = visual_pos or pos
+        server_pos = server_pos or pos
+    end
+end
+
+local function draw_center_dot(wx, wy, wz, col)
+    local sx, sy, vis = esp_util.w2s(wx, wy, wz)
+    if vis then
+        draw_util.circle(sx, sy, 5, col, true)
+        draw_util.circle(sx, sy, 5, { 0, 0, 0, col[4] or 1 }, false)
     end
 end
 
 local function draw_visualizer()
-    if not settings.enabled("april_desync_visualizer") then return end
-    if not visual_pos then return end
+    if not anchor_pos then return end
 
-    local col = visual_color()
-    local mode = settings.num("april_desync_vis_style", 0)
-    local size = settings.num("april_desync_vis_size", 1.2)
-    local x, y, z = visual_pos.x, visual_pos.y, visual_pos.z
+    local range_col = { 0.2, 0.85, 1, 0.55 }
+    desync_vis.draw_sphere_ring(anchor_pos.x, anchor_pos.y, anchor_pos.z, RANGE_RADIUS, range_col, 2)
 
-    desync_vis.draw_mode(mode, x, y, z, size, col, 2)
+    if not settings.bool(P_VIS, false) then return end
 
-    if settings.enabled("april_desync_vis_show_local") then
-        local root = get_root()
-        local pos = root and (root.Position or root.position)
-        if pos then
-            local lx = pos.X or pos.x or 0
-            local ly = pos.Y or pos.y or 0
-            local lz = pos.Z or pos.z or 0
-            local lcol = settings.color("april_desync_vis_local_col", { 1, 0.35, 0.35, 0.9 })
-            desync_vis.draw_mode(mode, lx, ly, lz, size * 0.85, lcol, 2)
-            if settings.enabled("april_desync_vis_link") then
-                desync_vis.draw_link(visual_pos, { x = lx, y = ly, z = lz }, { 1, 1, 1, 0.4 }, 2)
-            end
-            if settings.enabled("april_desync_vis_labels") then
-                desync_vis.draw_labeled(lx, ly, lz, "LOCAL", lcol, 12)
-            end
-        end
-    end
+    local col = settings.color(P_VIS, { 0.2, 0.85, 1, 0.9 })
+    draw_center_dot(anchor_pos.x, anchor_pos.y, anchor_pos.z, col)
 
-    if settings.enabled("april_desync_vis_labels") then
-        desync_vis.draw_labeled(x, y, z, "SERVER", col, 12)
+    if server_pos then
+        desync_vis.draw_sphere_ring(server_pos.x, server_pos.y, server_pos.z, DESYNC_RING_RADIUS, col, 2)
+        desync_vis.draw_link(server_pos, anchor_pos, { col[1], col[2], col[3], (col[4] or 1) * 0.35 }, 1)
     end
 end
 
@@ -146,59 +149,36 @@ function M.register_menu()
     menu_util.register_keybind(T, G.MISC, P, "Desync", false)
     menu.add_checkbox(T, G.MISC, "april_desync_autosend", "Desync Auto Send", false, root)
     menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Desync Send Threshold", 0, 1, 0.3, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_visualizer", "Desync Visualizer", false, root)
-    menu.add_combo(T, G.MISC, "april_desync_vis_style", "Desync Vis Style", VIS_MODES, 0, root)
-    menu.add_slider_float(T, G.MISC, "april_desync_vis_size", "Desync Vis Size", 0.5, 4, 1.2, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_show_local", "Desync Show Local Pos", true, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_link", "Desync Show Link Line", true, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_labels", "Desync Show Labels", false, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_custom_color", "Desync Custom Color", false, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_color", "Desync Vis Color", false, menu_util.parent(P, {
-        parent = "april_desync_vis_custom_color",
+    menu.add_checkbox(T, G.MISC, P_VIS, "Desync Visualize", false, menu_util.parent(P, {
         colorpicker = { 0.2, 0.85, 1, 0.9 },
     }))
 
     menu_util.bind_children(P, {
-        "april_desync_autosend", "april_desync_autosend_len",
-        "april_desync_visualizer", "april_desync_vis_style", "april_desync_vis_size",
-        "april_desync_vis_show_local", "april_desync_vis_link", "april_desync_vis_labels",
-        "april_desync_vis_custom_color", "april_desync_vis_color",
+        "april_desync_autosend", "april_desync_autosend_len", P_VIS,
     })
 
     menu_util.bind_when(function()
         return settings.enabled(P) and settings.enabled("april_desync_autosend")
     end, { "april_desync_autosend_len" }, { P, "april_desync_autosend" })
-
-    menu_util.bind_when(function()
-        return settings.enabled(P) and settings.enabled("april_desync_visualizer")
-    end, {
-        "april_desync_vis_style", "april_desync_vis_size",
-        "april_desync_vis_show_local", "april_desync_vis_link", "april_desync_vis_labels",
-        "april_desync_vis_custom_color",
-    }, { P, "april_desync_visualizer" })
-
-    menu_util.bind_when(function()
-        return settings.enabled(P)
-            and settings.enabled("april_desync_visualizer")
-            and settings.enabled("april_desync_vis_custom_color")
-    end, { "april_desync_vis_color" }, { P, "april_desync_visualizer", "april_desync_vis_custom_color" })
 end
 
 function M.update(_dt)
     if not misc_gate.movement_allowed() then return end
-    if settings.enabled("april_shark_enabled") then return end
     local on = active()
     local t = now()
 
     if was_active and not on then
         restore_rates()
-        visual_pos = nil
+        anchor_pos = nil
+        server_pos = nil
         was_sending = false
     end
 
     if on and not was_active then
         pcall(fflag_mem.refresh)
-        visual_pos = nil
+        local root = get_root()
+        anchor_pos = capture_pos(root)
+        server_pos = anchor_pos and { x = anchor_pos.x, y = anchor_pos.y, z = anchor_pos.z } or nil
     end
 
     was_active = on
@@ -211,7 +191,20 @@ function M.update(_dt)
     local sending_now = phys ~= 0
     local root = get_root()
 
-    update_visual_pos(root, sending_now)
+    if root and anchor_pos then
+        local pos = capture_pos(root)
+        if pos and dist_from_anchor(pos) > RANGE_RADIUS then
+            restore_rates()
+            anchor_pos = nil
+            server_pos = nil
+            was_sending = false
+            was_active = false
+            disable_desync()
+            return
+        end
+    end
+
+    update_server_pos(root, sending_now)
     was_sending = sending_now
 
     if phys ~= old_phys or send ~= old_send or (t - last_flag_apply) > 0.35 then

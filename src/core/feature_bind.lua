@@ -78,6 +78,9 @@ function M.tick()
             if menu and menu.set then
                 pcall(menu.set, id, not cur)
             end
+            pcall(function()
+                April.require("core.menu_util").sync_master(id)
+            end)
         end
         last_down[id] = down
 

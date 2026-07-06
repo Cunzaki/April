@@ -13,8 +13,20 @@ local esp_scan = April.require("game.esp_scan")
 local M = {}
 local P = "april_base_enabled"
 
-local function resolve_model(container, type_name)
-    if not env.is_valid(container) then return nil end
+local function append_base_entry(state, model, type_name, toggle_id)
+    if not model or not env.is_valid(model) then return end
+    if not esp_scan.find_main_part(model) and not esp_scan.is_part(model) then return end
+
+    state.seen = state.seen or {}
+    local key = tostring(model.Address or model) .. ":" .. toggle_id
+    if state.seen[key] then return end
+    state.seen[key] = true
+
+    table.insert(state.out, esp_scan.make_entry(model, type_name, toggle_id))
+end
+
+local function collect_base_container(state, container, type_name, toggle_id)
+    if not env.is_valid(container) then return end
 
     if type_name == "Sleeping Bag" then
         local bag = env.safe_call(function()
@@ -23,31 +35,33 @@ local function resolve_model(container, type_name)
                 or container:find_first_child("Sleeping_Bag")
                 or container:FindFirstChild("Sleeping_Bag")
         end)
-        if bag and env.is_valid(bag) then return bag end
-
-        local children = env.safe_call(function() return container:get_children() end) or {}
-        for _, child in ipairs(children) do
-            local cn = child.ClassName or child.class_name
-            if cn == "Model" and env.is_valid(child) then
-                return child
-            end
+        if bag and env.is_valid(bag) then
+            append_base_entry(state, bag, type_name, toggle_id)
+            return
         end
     end
 
     local cn = container.ClassName or container.class_name
-    if cn == "Model" then return container end
-
-    if esp_scan.find_main_part(container) then return container end
-
-    local children = env.safe_call(function() return container:get_children() end) or {}
-    for _, child in ipairs(children) do
-        if env.is_valid(child) then
-            local cc = child.ClassName or child.class_name
-            if cc == "Model" then return child end
-        end
+    if cn == "Model" then
+        append_base_entry(state, container, type_name, toggle_id)
+        return
     end
 
-    return container
+    if esp_scan.find_main_part(container) or esp_scan.is_part(container) then
+        append_base_entry(state, container, type_name, toggle_id)
+    end
+
+    local subs = env.safe_call(function() return container:get_children() end) or {}
+    for _, child in ipairs(subs) do
+        if not env.is_valid(child) then goto child_continue end
+        local cc = child.ClassName or child.class_name
+        if cc == "Model" then
+            append_base_entry(state, child, type_name, toggle_id)
+        elseif esp_scan.find_main_part(child) or esp_scan.is_part(child) then
+            append_base_entry(state, child, type_name, toggle_id)
+        end
+        ::child_continue::
+    end
 end
 
 function M.register_menu()
@@ -82,6 +96,7 @@ function M.begin_scan()
         items = nil,
         ii = 1,
         out = {},
+        seen = {},
     }
 end
 
@@ -121,6 +136,10 @@ function M.step_scan(state, batch)
 
             if maps.BASE_MAP[area_name] then
                 state.items = { area }
+                local children = env.safe_call(function() return area:get_children() end) or {}
+                for _, child in ipairs(children) do
+                    state.items[#state.items + 1] = child
+                end
             else
                 state.items = env.safe_call(function() return area:get_children() end) or {}
             end
@@ -143,11 +162,7 @@ function M.step_scan(state, batch)
         local toggle_id = maps.BASE_MAP[type_name]
         if not toggle_id then goto continue end
 
-        local model = resolve_model(type_folder, type_name)
-        if not model or not env.is_valid(model) then goto continue end
-        if not esp_scan.find_main_part(model) and not esp_scan.is_part(model) then goto continue end
-
-        table.insert(state.out, esp_scan.make_entry(model, type_name, toggle_id))
+        collect_base_container(state, type_folder, type_name, toggle_id)
 
         ::continue::
     end
@@ -179,6 +194,7 @@ function M.draw()
     local me = env.get_local_player()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
+    local label_groups = {}
 
     for _, entry in ipairs(cache.base) do
         if not settings.enabled(entry.toggle_id) then goto continue end
@@ -223,12 +239,26 @@ function M.draw()
                     end
                 end
                 if label ~= "" then
-                    draw_util.text_centered(sx, sy, label, col, text_size)
+                    local gk = string.format("%d:%d:%d",
+                        math.floor(lx * 2), math.floor(ly * 2), math.floor(lz * 2))
+                    local group = label_groups[gk]
+                    if not group then
+                        group = { sx = sx, sy = sy, lines = {} }
+                        label_groups[gk] = group
+                    end
+                    group.lines[#group.lines + 1] = { label = label, col = col }
                 end
             end
         end
 
         ::continue::
+    end
+
+    for _, group in pairs(label_groups) do
+        for i, line in ipairs(group.lines) do
+            local offset = (i - 1) * (text_size + 2)
+            draw_util.text_centered(group.sx, group.sy - offset, line.label, line.col, text_size)
+        end
     end
 end
 
