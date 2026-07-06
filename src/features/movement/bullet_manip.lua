@@ -144,16 +144,16 @@ function M.register_menu()
 
     menu_util.section(T, G.MISC, "Bullet Manip (TEST)")
     menu_util.register_keybind(T, G.MISC, P, "Bullet Manipulation", false)
-    menu.add_slider_int(T, G.MISC, "april_bullet_manip_range", "Target Range", 50, 500, 250, root)
-    menu.add_slider_int(T, G.MISC, "april_bullet_manip_speed", "Peek Move Speed", 4, 40, 18, root)
-    menu.add_checkbox(T, G.MISC, "april_bullet_manip_debug", "Debug Overlay", true, root)
-    menu.add_checkbox(T, G.MISC, "april_bullet_manip_console", "Debug Console Log", true, root)
-    menu.add_checkbox(T, G.MISC, "april_bullet_manip_vis", "Visualizer", true, root)
-    menu.add_combo(T, G.MISC, "april_bullet_manip_vis_style", "Vis Style", VIS_MODES, 0, root)
-    menu.add_slider_float(T, G.MISC, "april_bullet_manip_vis_size", "Vis Size", 0.5, 4, 1.2, root)
-    menu.add_checkbox(T, G.MISC, "april_bullet_manip_vis_link", "Show Link Line", true, root)
-    menu.add_checkbox(T, G.MISC, "april_bullet_manip_vis_labels", "Show Labels", true, root)
-    menu.add_checkbox(T, G.MISC, "april_bullet_manip_vis_peek", "Show Peek Point", true, root)
+    menu.add_slider_int(T, G.MISC, "april_bullet_manip_range", "Bullet Target Range", 50, 500, 250, root)
+    menu.add_slider_int(T, G.MISC, "april_bullet_manip_speed", "Bullet Peek Speed", 4, 40, 18, root)
+    menu.add_checkbox(T, G.MISC, "april_bullet_manip_debug", "Bullet Debug Overlay", true, root)
+    menu.add_checkbox(T, G.MISC, "april_bullet_manip_console", "Bullet Debug Console", true, root)
+    menu.add_checkbox(T, G.MISC, "april_bullet_manip_vis", "Bullet Visualizer", true, root)
+    menu.add_combo(T, G.MISC, "april_bullet_manip_vis_style", "Bullet Vis Style", VIS_MODES, 0, root)
+    menu.add_slider_float(T, G.MISC, "april_bullet_manip_vis_size", "Bullet Vis Size", 0.5, 4, 1.2, root)
+    menu.add_checkbox(T, G.MISC, "april_bullet_manip_vis_link", "Bullet Show Link Line", true, root)
+    menu.add_checkbox(T, G.MISC, "april_bullet_manip_vis_labels", "Bullet Show Labels", true, root)
+    menu.add_checkbox(T, G.MISC, "april_bullet_manip_vis_peek", "Bullet Show Peek Point", true, root)
 
     menu_util.bind_children(P, {
         "april_bullet_manip_range", "april_bullet_manip_speed",
@@ -172,6 +172,14 @@ end
 
 function M.update(_dt)
     if not misc_gate.movement_allowed() then return end
+    if settings.enabled("april_shark_enabled") then
+        if state ~= STATE_IDLE then
+            local _, root = get_local_root()
+            if origin and root then set_root_pos(root, origin) end
+            clear_session("shark active")
+        end
+        return
+    end
     if not settings.enabled(P) then
         if state ~= STATE_IDLE then
             local _, root = get_local_root()

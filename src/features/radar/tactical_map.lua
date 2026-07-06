@@ -216,7 +216,7 @@ function M.register_menu()
     menu.add_colorpicker(T, G.RADAR, "april_map_base_col", "Base", { 0.55, 0.55, 1, 1 }, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_wp_col", "Waypoints", theme.CYAN, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_local", "You", theme.CYAN, root)
-    menu.add_checkbox(T, G.RADAR, "april_map_labels", "Show Labels", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_labels", "Radar Show Labels", false, root)
 
     menu_util.bind_children(P, {
         "april_map_zoom", "april_map_size", "april_map_icon_scale",

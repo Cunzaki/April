@@ -22,6 +22,7 @@ M.FEATURE_ORDER = {
     "features.utility.mod_checker",
     "features.combat.perfect_farm",
     "features.movement.exploits",
+    "features.movement.shark",
     "features.movement.desync",
     "features.utility.config",
 }

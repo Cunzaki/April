@@ -14,7 +14,7 @@ function M.register_menu()
     local root = menu_util.parent(P)
 
     menu_util.register_keybind(T, G.RADAR, P, "Enable Waypoints", false)
-    menu.add_checkbox(T, G.RADAR, "april_wp_dist", "Show Distance", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_wp_dist", "Waypoint Show Distance", false, root)
     menu.add_checkbox(T, G.RADAR, "april_wp_beacon", "Beacon Pillar", false, root)
     menu.add_slider_int(T, G.RADAR, "april_wp_beacon_h", "Beacon Height", 20, 200, 90, menu_util.parent("april_wp_beacon"))
     menu.add_checkbox(T, G.RADAR, "april_wp_draw", "Draw Markers", false, menu_util.parent(P, { colorpicker = { 0.2, 1, 0.8, 1 } }))

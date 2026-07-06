@@ -20,13 +20,13 @@ function M.register_menu()
     menu_util.register_keybind(T, G.WORLD, P, "NPC ESP", false, { colorpicker = { 1, 0.3, 0.3, 1 } })
     menu.add_checkbox(T, G.WORLD, "april_npc_soldiers", "Soldiers", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, menu_util.parent(P, { colorpicker = { 1, 0.5, 0.1, 1 } }))
-    menu.add_combo(T, G.WORLD, "april_npc_box_mode", "Box Mode", { "None", "2D", "Corner" }, 0, root)
+    menu.add_combo(T, G.WORLD, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 0, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_health", "Health Bar", false, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_offscreen", "Offscreen Arrows", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "Show Name", true, root)
-    menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "Show Distance", true, root)
-    menu.add_slider_int(T, G.WORLD, "april_npc_range", "Range", 50, 2000, 500, root)
+    menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "NPC Show Name", true, root)
+    menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "NPC Show Distance", true, root)
+    menu.add_slider_int(T, G.WORLD, "april_npc_range", "NPC Range", 50, 2000, 500, root)
 
     menu_util.bind_children(P, {
         "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode", "april_npc_health",

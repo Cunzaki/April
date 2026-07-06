@@ -144,16 +144,16 @@ function M.register_menu()
 
     menu_util.gap(T, G.MISC)
     menu_util.register_keybind(T, G.MISC, P, "Desync", false)
-    menu.add_checkbox(T, G.MISC, "april_desync_autosend", "Auto Send", false, root)
-    menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Send Threshold", 0, 1, 0.3, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_visualizer", "Visualizer", false, root)
-    menu.add_combo(T, G.MISC, "april_desync_vis_style", "Vis Style", VIS_MODES, 0, root)
-    menu.add_slider_float(T, G.MISC, "april_desync_vis_size", "Vis Size", 0.5, 4, 1.2, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_show_local", "Show Local Position", true, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_link", "Show Link Line", true, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_labels", "Show Labels", false, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_custom_color", "Custom Color", false, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_color", "Visualizer Color", false, menu_util.parent(P, {
+    menu.add_checkbox(T, G.MISC, "april_desync_autosend", "Desync Auto Send", false, root)
+    menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Desync Send Threshold", 0, 1, 0.3, root)
+    menu.add_checkbox(T, G.MISC, "april_desync_visualizer", "Desync Visualizer", false, root)
+    menu.add_combo(T, G.MISC, "april_desync_vis_style", "Desync Vis Style", VIS_MODES, 0, root)
+    menu.add_slider_float(T, G.MISC, "april_desync_vis_size", "Desync Vis Size", 0.5, 4, 1.2, root)
+    menu.add_checkbox(T, G.MISC, "april_desync_vis_show_local", "Desync Show Local Pos", true, root)
+    menu.add_checkbox(T, G.MISC, "april_desync_vis_link", "Desync Show Link Line", true, root)
+    menu.add_checkbox(T, G.MISC, "april_desync_vis_labels", "Desync Show Labels", false, root)
+    menu.add_checkbox(T, G.MISC, "april_desync_vis_custom_color", "Desync Custom Color", false, root)
+    menu.add_checkbox(T, G.MISC, "april_desync_vis_color", "Desync Vis Color", false, menu_util.parent(P, {
         parent = "april_desync_vis_custom_color",
         colorpicker = { 0.2, 0.85, 1, 0.9 },
     }))
@@ -186,6 +186,7 @@ end
 
 function M.update(_dt)
     if not misc_gate.movement_allowed() then return end
+    if settings.enabled("april_shark_enabled") then return end
     local on = active()
     local t = now()
 

@@ -125,8 +125,8 @@ function M.register_menu()
     local root = menu_util.parent(P)
 
     menu_util.register_keybind(T, G.VISUALS, P, "Brainrot ESP", false)
-    menu.add_combo(T, G.VISUALS, P_STYLE, "Character", labels(), 0, root)
-    menu.add_slider_int(T, G.VISUALS, P_SIZE, "Min Box Size", 24, 160, 48, root)
+    menu.add_combo(T, G.VISUALS, P_STYLE, "Brainrot Character", labels(), 0, root)
+    menu.add_slider_int(T, G.VISUALS, P_SIZE, "Brainrot Min Box Size", 24, 160, 48, root)
 
     menu_util.bind_children(P, { P_STYLE, P_SIZE })
 end

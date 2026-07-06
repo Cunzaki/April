@@ -110,6 +110,24 @@ function M.tick(_dt)
     local misc_gate = April.require("core.misc_gate")
     if not misc_gate.movement_allowed() then return end
 
+    local settings = April.require("core.settings")
+    if settings.enabled("april_shark_enabled") then
+        if active_mode ~= MODE_NONE then
+            local lp = env.get_local_player()
+            if lp then
+                local char = get_character(lp)
+                local root = get_root(lp)
+                local hum = get_humanoid(lp)
+                if char and root and hum then
+                    leave_mode(root, hum, char)
+                end
+            end
+            active_mode = MODE_NONE
+            anchor_y = nil
+        end
+        return
+    end
+
     local lp = env.get_local_player()
     if not lp then return end
 

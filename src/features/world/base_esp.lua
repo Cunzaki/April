@@ -57,13 +57,13 @@ function M.register_menu()
     for _, t in ipairs(maps.BASE_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
         if t.ring_id then
-            menu.add_checkbox(T, G.WORLD, t.ring_id, "Show Range Ring", false, { parent = t.id })
+            menu.add_checkbox(T, G.WORLD, t.ring_id, t.label .. " Range Ring", false, { parent = t.id })
         end
     end
-    menu.add_checkbox(T, G.WORLD, "april_base_boxes", "3D Boxes", false, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_base_show_name", "Show Name", true, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_base_show_distance", "Show Distance", false, { parent = P })
-    menu.add_slider_int(T, G.WORLD, "april_base_range", "Range", 50, 500, 150, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_base_boxes", "Base 3D Boxes", false, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_base_show_name", "Base Show Name", true, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_base_show_distance", "Base Show Distance", false, { parent = P })
+    menu.add_slider_int(T, G.WORLD, "april_base_range", "Base Range", 50, 500, 150, { parent = P })
 
     local child_ids = { "april_base_boxes", "april_base_show_name", "april_base_show_distance", "april_base_range" }
     for _, t in ipairs(maps.BASE_TOGGLES) do

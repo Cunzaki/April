@@ -100,6 +100,17 @@ function M.humanoid_suspend(hum)
     pcall(function() hum.sit = false end)
 end
 
+function M.humanoid_freeze(hum)
+    if not hum then return end
+    pcall(function() hum.auto_rotate = false end)
+    pcall(function() hum.evaluate_state_machine = false end)
+    pcall(function() hum.sit = false end)
+end
+
+function M.humanoid_thaw(hum)
+    M.humanoid_release(hum)
+end
+
 function M.humanoid_release(hum)
     if not hum then return end
     pcall(function() hum.platform_stand = false end)

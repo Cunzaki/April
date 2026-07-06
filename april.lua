@@ -1,7 +1,7 @@
 --[[
     April — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-06T08:38:35.356Z
+    Built: 2026-07-06T08:54:21.476Z
 ]]
 
 April = {
@@ -1949,43 +1949,34 @@ function M.button(T, G, id, label, callback, master_id)
     end
 end
 
---[[ Master toggle with legacy Toggle/Hold key mode + dedicated hotkey picker. ]]
-function M.keybind_children(id)
-    return { id .. "_key", id .. "_mode" }
+--[[ Master toggle — key on checkbox row; Key Mode uses native parent only (no bind_master). ]]
+function M.keybind_children(_id)
+    return {}
 end
 
 function M.bind_children(master_id, extra_ids)
-    local ids = M.keybind_children(master_id)
-    if extra_ids then
-        for _, child_id in ipairs(extra_ids) do
-            ids[#ids + 1] = child_id
-        end
-    end
-    M.bind_master(master_id, ids)
+    M.bind_master(master_id, extra_ids or {})
 end
 
 function M.register_keybind(T, G, id, label, default, extra)
     extra = extra or {}
-    local cb_opts = { show_mode = false }
+    local cb_opts = { show_mode = false, key = extra.key or 0 }
     if extra.parent then cb_opts.parent = extra.parent end
     if extra.colorpicker then cb_opts.colorpicker = extra.colorpicker end
 
     menu.add_checkbox(T, G, id, label, default or false, cb_opts)
 
-    local key_id = id .. "_key"
     local mode_id = id .. "_mode"
-    local child_parent = M.parent(id)
-
-    menu.add_hotkey(T, G, key_id, "Bind Key", extra.key or 0, child_parent)
-    menu.add_combo(T, G, mode_id, "Key Mode", { "Toggle", "Hold" }, 0, child_parent)
+    local mode_label = label .. " Bind Mode"
+    menu.add_combo(T, G, mode_id, mode_label, { "Toggle", "Hold" }, 0, M.parent(id))
 
     April.require("core.feature_bind").register({
         id = id,
         mode_id = mode_id,
-        key_id = key_id,
+        key_id = id,
     })
 
-    return mode_id, key_id
+    return mode_id
 end
 
 return M
@@ -2487,6 +2478,17 @@ function M.humanoid_suspend(hum)
     pcall(function() hum.sit = false end)
 end
 
+function M.humanoid_freeze(hum)
+    if not hum then return end
+    pcall(function() hum.auto_rotate = false end)
+    pcall(function() hum.evaluate_state_machine = false end)
+    pcall(function() hum.sit = false end)
+end
+
+function M.humanoid_thaw(hum)
+    M.humanoid_release(hum)
+end
+
 function M.humanoid_release(hum)
     if not hum then return end
     pcall(function() hum.platform_stand = false end)
@@ -2739,6 +2741,24 @@ function M.tick(_dt)
     local misc_gate = April.require("core.misc_gate")
     if not misc_gate.movement_allowed() then return end
 
+    local settings = April.require("core.settings")
+    if settings.enabled("april_shark_enabled") then
+        if active_mode ~= MODE_NONE then
+            local lp = env.get_local_player()
+            if lp then
+                local char = get_character(lp)
+                local root = get_root(lp)
+                local hum = get_humanoid(lp)
+                if char and root and hum then
+                    leave_mode(root, hum, char)
+                end
+            end
+            active_mode = MODE_NONE
+            anchor_y = nil
+        end
+        return
+    end
+
     local lp = env.get_local_player()
     if not lp then return end
 
@@ -2821,32 +2841,32 @@ local MENU_KEYS = {
     "april_esp_text_size",
     "april_tung_esp_enabled", "april_tung_esp_max_dist",
         "april_target_overlay", "april_target_overlay_fov", "april_target_overlay_gear_size", "april_target_overlay_top",
-    "april_crosshair_enabled", "april_crosshair_enabled_key", "april_crosshair_enabled_mode", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
+    "april_crosshair_enabled", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
     "april_crosshair_thickness", "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
     "april_crosshair_rainbow", "april_crosshair_rainbow_speed",
-    "april_brainrot_enabled", "april_brainrot_enabled_key", "april_brainrot_enabled_mode", "april_brainrot_style", "april_brainrot_size",
+    "april_brainrot_enabled", "april_brainrot_enabled_mode", "april_brainrot_style", "april_brainrot_size",
     "april_aimbot_fov", "april_aimbot_bone", "april_aimbot_priority",
     "april_aimbot_sticky", "april_aimbot_visible", "april_aimbot_prediction", "april_aimbot_vis_ray",
     "april_aimbot_draw_fov", "april_aimbot_fov_fill", "april_aimbot_target_line",
-    "april_gunmods_enabled", "april_gunmods_enabled_key", "april_gunmods_enabled_mode", "april_gm_mode", "april_gm_weapon_select", "april_gm_recoil", "april_gm_recoil_pct", "april_gm_spread", "april_gm_spread_pct",
+    "april_gunmods_enabled", "april_gunmods_enabled_mode", "april_gm_mode", "april_gm_weapon_select", "april_gm_recoil", "april_gm_recoil_pct", "april_gm_spread", "april_gm_spread_pct",
     "april_gm_sway", "april_gm_fire_rate", "april_gm_fire_rate_mult",
     "april_gm_speed", "april_gm_speed_mult", "april_gm_range", "april_gm_range_mult",
-    "april_farm_helper", "april_farm_helper_key", "april_farm_helper_mode", "april_farm_radius", "april_farm_smooth",
-    "april_world_enabled", "april_world_enabled_key", "april_world_enabled_mode", "april_stone_node", "april_metal_node", "april_phosphate_node",
+    "april_farm_helper", "april_farm_helper_mode", "april_farm_radius", "april_farm_smooth",
+    "april_world_enabled", "april_world_enabled_mode", "april_stone_node", "april_metal_node", "april_phosphate_node",
     "april_corn_plant", "april_tomato_plant", "april_pumpkin_plant", "april_lemon_plant",
     "april_raspberry_plant", "april_blueberry_plant", "april_wool_plant", "april_hemp_plant",
     "april_deer", "april_boar", "april_wolf",
     "april_world_boxes", "april_world_show_name", "april_world_show_distance", "april_world_range",
-    "april_loot_enabled", "april_loot_enabled_key", "april_loot_enabled_mode", "april_dropped_item", "april_wooden_crate", "april_metal_crate",
+    "april_loot_enabled", "april_loot_enabled_mode", "april_dropped_item", "april_wooden_crate", "april_metal_crate",
     "april_steel_crate", "april_food_crate", "april_timed_crate", "april_care_package", "april_btr_crate",
     "april_body_bag", "april_sleeper", "april_trash_can", "april_oil_barrel",
     "april_small_egg", "april_medium_egg", "april_large_egg",
     "april_wooden_boat", "april_military_boat", "april_flycopter",
     "april_loot_boxes", "april_loot_show_name", "april_loot_show_distance", "april_loot_range",
-    "april_npc_enabled", "april_npc_enabled_key", "april_npc_enabled_mode", "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode",
+    "april_npc_enabled", "april_npc_enabled_mode", "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode",
     "april_npc_health", "april_npc_skeleton",
     "april_npc_offscreen", "april_npc_show_name", "april_npc_show_distance", "april_npc_range",
-    "april_base_enabled", "april_base_enabled_key", "april_base_enabled_mode", "april_base_cabinet", "april_storage_cabinet", "april_small_box", "april_large_box",
+    "april_base_enabled", "april_base_enabled_mode", "april_base_cabinet", "april_storage_cabinet", "april_small_box", "april_large_box",
     "april_sleeping_bag", "april_auto_turret", "april_auto_turret_ring", "april_shotgun_turret", "april_shotgun_turret_ring",
     "april_wooden_door", "april_wooden_double_door", "april_salvaged_door", "april_metal_door",
     "april_metal_double_door", "april_steel_door", "april_steel_double_door",
@@ -2854,23 +2874,24 @@ local MENU_KEYS = {
     "april_small_battery", "april_medium_battery", "april_large_battery",
     "april_solar_panel", "april_windmill",
     "april_base_boxes", "april_base_show_name", "april_base_show_distance", "april_base_range",
-    "april_waypoints_enabled", "april_waypoints_enabled_key", "april_waypoints_enabled_mode", "april_wp_dist", "april_wp_beacon", "april_wp_beacon_h",
+    "april_waypoints_enabled", "april_waypoints_enabled_mode", "april_wp_dist", "april_wp_beacon", "april_wp_beacon_h",
     "april_wp_draw", "april_wp_slot",
-    "april_map_enabled", "april_map_enabled_key", "april_map_enabled_mode", "april_map_zoom", "april_map_size", "april_map_icon_scale",
+    "april_map_enabled", "april_map_enabled_mode", "april_map_zoom", "april_map_size", "april_map_icon_scale",
     "april_map_show_players", "april_map_show_npcs", "april_map_show_loot", "april_map_show_world",
     "april_map_show_base", "april_map_show_waypoints",
     "april_map_labels",
-    "april_noclip_enabled", "april_noclip_enabled_key", "april_noclip_enabled_mode", "april_noclip_speed",
-    "april_spider_enabled", "april_spider_enabled_key", "april_spider_enabled_mode", "april_spider_speed",
-    "april_desync_enabled", "april_desync_enabled_key", "april_desync_enabled_mode", "april_desync_autosend", "april_desync_autosend_len",
+    "april_noclip_enabled", "april_noclip_enabled_mode", "april_noclip_speed",
+    "april_spider_enabled", "april_spider_enabled_mode", "april_spider_speed",
+    "april_shark_enabled", "april_shark_enabled_mode", "april_shark_visualize",
+    "april_desync_enabled", "april_desync_enabled_mode", "april_desync_autosend", "april_desync_autosend_len",
     "april_desync_visualizer", "april_desync_vis_style", "april_desync_vis_size",
     "april_desync_vis_show_local", "april_desync_vis_link", "april_desync_vis_labels",
     "april_desync_vis_custom_color", "april_desync_vis_color",
-    "april_bullet_manip_enabled", "april_bullet_manip_enabled_key", "april_bullet_manip_enabled_mode", "april_bullet_manip_range", "april_bullet_manip_speed",
+    "april_bullet_manip_enabled", "april_bullet_manip_enabled_mode", "april_bullet_manip_range", "april_bullet_manip_speed",
     "april_bullet_manip_debug", "april_bullet_manip_console", "april_bullet_manip_vis",
     "april_bullet_manip_vis_style", "april_bullet_manip_vis_size",
     "april_bullet_manip_vis_link", "april_bullet_manip_vis_labels", "april_bullet_manip_vis_peek",
-    "april_mod_checker_enabled", "april_mod_checker_enabled_key", "april_mod_checker_enabled_mode", "april_mod_checker_interval",
+    "april_mod_checker_enabled", "april_mod_checker_interval",
 }
 
 local COLOR_KEYS = {
@@ -2894,42 +2915,42 @@ local COLOR_KEYS = {
     "april_map_world_col", "april_map_base_col", "april_map_wp_col", "april_map_local",
     "april_desync_visualizer", "april_desync_vis_color", "april_desync_vis_local_col",
     "april_bullet_manip_vis_server", "april_bullet_manip_vis_local", "april_bullet_manip_vis_peek", "april_bullet_manip_vis_link",
+    "april_shark_visualize",
 }
 
-local LEGACY_HOTKEY_IDS = {
-    april_crosshair_enabled = "april_crosshair_enabled_key",
-    april_brainrot_enabled = "april_brainrot_enabled_key",
-    april_gunmods_enabled = "april_gunmods_enabled_key",
-    april_farm_helper = "april_farm_helper_key",
-    april_world_enabled = "april_world_enabled_key",
-    april_loot_enabled = "april_loot_enabled_key",
-    april_npc_enabled = "april_npc_enabled_key",
-    april_base_enabled = "april_base_enabled_key",
-    april_waypoints_enabled = "april_waypoints_enabled_key",
-    april_map_enabled = "april_map_enabled_key",
-    april_noclip_enabled = "april_noclip_enabled_key",
-    april_spider_enabled = "april_spider_enabled_key",
-    april_desync_enabled = "april_desync_enabled_key",
-    april_bullet_manip_enabled = "april_bullet_manip_enabled_key",
-    april_mod_checker_enabled = "april_mod_checker_enabled_key",
+local LEGACY_HOTKEY_TO_CHECKBOX = {
+    april_crosshair_enabled_key = "april_crosshair_enabled",
+    april_brainrot_enabled_key = "april_brainrot_enabled",
+    april_gunmods_enabled_key = "april_gunmods_enabled",
+    april_farm_helper_key = "april_farm_helper",
+    april_world_enabled_key = "april_world_enabled",
+    april_loot_enabled_key = "april_loot_enabled",
+    april_npc_enabled_key = "april_npc_enabled",
+    april_base_enabled_key = "april_base_enabled",
+    april_waypoints_enabled_key = "april_waypoints_enabled",
+    april_map_enabled_key = "april_map_enabled",
+    april_noclip_enabled_key = "april_noclip_enabled",
+    april_spider_enabled_key = "april_spider_enabled",
+    april_desync_enabled_key = "april_desync_enabled",
+    april_bullet_manip_enabled_key = "april_bullet_manip_enabled",
+    april_mod_checker_enabled_key = "april_mod_checker_enabled",
 }
 
 local HOTKEY_KEYS = {
-    "april_crosshair_enabled_key",
-    "april_brainrot_enabled_key",
-    "april_gunmods_enabled_key",
-    "april_farm_helper_key",
-    "april_world_enabled_key",
-    "april_loot_enabled_key",
-    "april_npc_enabled_key",
-    "april_base_enabled_key",
-    "april_waypoints_enabled_key",
-    "april_map_enabled_key",
-    "april_noclip_enabled_key",
-    "april_spider_enabled_key",
-    "april_desync_enabled_key",
-    "april_bullet_manip_enabled_key",
-    "april_mod_checker_enabled_key",
+    "april_brainrot_enabled",
+    "april_gunmods_enabled",
+    "april_farm_helper",
+    "april_world_enabled",
+    "april_loot_enabled",
+    "april_npc_enabled",
+    "april_base_enabled",
+    "april_waypoints_enabled",
+    "april_map_enabled",
+    "april_noclip_enabled",
+    "april_spider_enabled",
+    "april_shark_enabled",
+    "april_desync_enabled",
+    "april_bullet_manip_enabled",
     "april_tung_esp_enabled",
     "april_aimbot_prediction",
 }
@@ -3156,9 +3177,8 @@ function M.load_slot(slot, opts)
                     local id = key:sub(6)
                     local vk = tonumber(val)
                     if id and vk and menu.set_key then
-                        menu.set_key(id, vk)
-                        local migrated = LEGACY_HOTKEY_IDS[id]
-                        if migrated then menu.set_key(migrated, vk) end
+                        local target = LEGACY_HOTKEY_TO_CHECKBOX[id] or id
+                        menu.set_key(target, vk)
                     end
                 elseif key:sub(1, 3) == "wp:" then
                     local slot_id, field = key:match("^wp:(%d+):(%w+)$")
@@ -8934,11 +8954,11 @@ local P = "april_crosshair_enabled"
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.VISUALS)
-    menu_util.register_keybind(T, G.VISUALS, P, "Custom Crosshair", false)
+    menu.add_checkbox(T, G.VISUALS, P, "Custom Crosshair", false)
     menu.add_combo(T, G.VISUALS, "april_crosshair_type", "Crosshair Type", { "Cross", "Circle", "Dot", "T-Shape" }, 0, { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_crosshair_size", "Size", 1, 50, 10, { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_crosshair_gap", "Gap", 0, 20, 5, { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_crosshair_thickness", "Thickness", 1, 10, 2, { parent = P })
+    menu.add_slider_int(T, G.VISUALS, "april_crosshair_size", "Crosshair Size", 1, 50, 10, { parent = P })
+    menu.add_slider_int(T, G.VISUALS, "april_crosshair_gap", "Crosshair Gap", 0, 20, 5, { parent = P })
+    menu.add_slider_int(T, G.VISUALS, "april_crosshair_thickness", "Crosshair Thickness", 1, 10, 2, { parent = P })
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_color", "Crosshair Color", true, { parent = P, colorpicker = { 0, 1, 0, 1 } })
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_dot", "Center Dot", false, { parent = P, colorpicker = { 1, 1, 1, 1 } })
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_outline", "Outline", true, { parent = P, colorpicker = { 0, 0, 0, 1 } })
@@ -9126,8 +9146,8 @@ function M.register_menu()
     local root = menu_util.parent(P)
 
     menu_util.register_keybind(T, G.VISUALS, P, "Brainrot ESP", false)
-    menu.add_combo(T, G.VISUALS, P_STYLE, "Character", labels(), 0, root)
-    menu.add_slider_int(T, G.VISUALS, P_SIZE, "Min Box Size", 24, 160, 48, root)
+    menu.add_combo(T, G.VISUALS, P_STYLE, "Brainrot Character", labels(), 0, root)
+    menu.add_slider_int(T, G.VISUALS, P_SIZE, "Brainrot Min Box Size", 24, 160, 48, root)
 
     menu_util.bind_children(P, { P_STYLE, P_SIZE })
 end
@@ -9216,10 +9236,10 @@ function M.register_menu()
     for _, t in ipairs(maps.WORLD_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
     end
-    menu.add_checkbox(T, G.WORLD, "april_world_boxes", "3D Boxes", false, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_world_show_name", "Show Name", true, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_world_show_distance", "Show Distance", true, { parent = P })
-    menu.add_slider_int(T, G.WORLD, "april_world_range", "Range", 50, 2000, 500, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_world_boxes", "Resource 3D Boxes", false, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_world_show_name", "Resource Show Name", true, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_world_show_distance", "Resource Show Distance", true, { parent = P })
+    menu.add_slider_int(T, G.WORLD, "april_world_range", "Resource Range", 50, 2000, 500, { parent = P })
 
     local child_ids = { "april_world_boxes", "april_world_show_name", "april_world_show_distance", "april_world_range" }
     for _, t in ipairs(maps.WORLD_TOGGLES) do
@@ -9605,10 +9625,10 @@ function M.register_menu()
     for _, t in ipairs(maps.LOOT_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
     end
-    menu.add_checkbox(T, G.WORLD, "april_loot_boxes", "3D Boxes", false, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_loot_show_name", "Show Name", true, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_loot_show_distance", "Show Distance", true, { parent = P })
-    menu.add_slider_int(T, G.WORLD, "april_loot_range", "Range", 50, 2000, 300, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_loot_boxes", "Loot 3D Boxes", false, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_loot_show_name", "Loot Show Name", true, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_loot_show_distance", "Loot Show Distance", true, { parent = P })
+    menu.add_slider_int(T, G.WORLD, "april_loot_range", "Loot Range", 50, 2000, 300, { parent = P })
 
     local child_ids = { "april_loot_boxes", "april_loot_show_name", "april_loot_show_distance", "april_loot_range" }
     for _, t in ipairs(maps.LOOT_TOGGLES) do
@@ -9762,13 +9782,13 @@ function M.register_menu()
     for _, t in ipairs(maps.BASE_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
         if t.ring_id then
-            menu.add_checkbox(T, G.WORLD, t.ring_id, "Show Range Ring", false, { parent = t.id })
+            menu.add_checkbox(T, G.WORLD, t.ring_id, t.label .. " Range Ring", false, { parent = t.id })
         end
     end
-    menu.add_checkbox(T, G.WORLD, "april_base_boxes", "3D Boxes", false, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_base_show_name", "Show Name", true, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_base_show_distance", "Show Distance", false, { parent = P })
-    menu.add_slider_int(T, G.WORLD, "april_base_range", "Range", 50, 500, 150, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_base_boxes", "Base 3D Boxes", false, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_base_show_name", "Base Show Name", true, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_base_show_distance", "Base Show Distance", false, { parent = P })
+    menu.add_slider_int(T, G.WORLD, "april_base_range", "Base Range", 50, 500, 150, { parent = P })
 
     local child_ids = { "april_base_boxes", "april_base_show_name", "april_base_show_distance", "april_base_range" }
     for _, t in ipairs(maps.BASE_TOGGLES) do
@@ -9965,13 +9985,13 @@ function M.register_menu()
     menu_util.register_keybind(T, G.WORLD, P, "NPC ESP", false, { colorpicker = { 1, 0.3, 0.3, 1 } })
     menu.add_checkbox(T, G.WORLD, "april_npc_soldiers", "Soldiers", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, menu_util.parent(P, { colorpicker = { 1, 0.5, 0.1, 1 } }))
-    menu.add_combo(T, G.WORLD, "april_npc_box_mode", "Box Mode", { "None", "2D", "Corner" }, 0, root)
+    menu.add_combo(T, G.WORLD, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 0, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_health", "Health Bar", false, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_offscreen", "Offscreen Arrows", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "Show Name", true, root)
-    menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "Show Distance", true, root)
-    menu.add_slider_int(T, G.WORLD, "april_npc_range", "Range", 50, 2000, 500, root)
+    menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "NPC Show Name", true, root)
+    menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "NPC Show Distance", true, root)
+    menu.add_slider_int(T, G.WORLD, "april_npc_range", "NPC Range", 50, 2000, 500, root)
 
     menu_util.bind_children(P, {
         "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode", "april_npc_health",
@@ -10286,10 +10306,10 @@ function M.register_menu()
     local T, _ = menu_util.group(G.MISC)
 
     menu_util.register_keybind(T, G.MISC, "april_noclip_enabled", "Inf Fly", false)
-    menu.add_slider_int(T, G.MISC, "april_noclip_speed", "Fly Speed", 16, 200, 72, menu_util.parent("april_noclip_enabled"))
+    menu.add_slider_int(T, G.MISC, "april_noclip_speed", "Inf Fly Speed", 16, 200, 72, menu_util.parent("april_noclip_enabled"))
 
     menu_util.register_keybind(T, G.MISC, "april_spider_enabled", "Spider", false)
-    menu.add_slider_int(T, G.MISC, "april_spider_speed", "Climb Speed", 1, 50, 20, menu_util.parent("april_spider_enabled"))
+    menu.add_slider_int(T, G.MISC, "april_spider_speed", "Spider Climb Speed", 1, 50, 20, menu_util.parent("april_spider_enabled"))
 
     menu_util.bind_children("april_noclip_enabled", { "april_noclip_speed" })
     menu_util.bind_children("april_spider_enabled", { "april_spider_speed" })
@@ -10298,6 +10318,172 @@ end
 function M.update(_dt) end
 
 function M.draw() end
+
+return M
+
+end)()
+
+-- ── features/movement/shark.lua ──
+April._mods["features.movement.shark"] = (function()
+--[[
+    Shark — blink desync underground, return to origin, freeze until disabled.
+    No noclip: one-shot TP down 6 studs, packet desync, TP back, then position lock.
+]]
+
+local settings = April.require("core.settings")
+local env = April.require("core.env")
+local menu_util = April.require("core.menu_util")
+local move = April.require("core.cframe_move")
+local packet_desync = April.require("core.packet_desync")
+local misc_gate = April.require("core.misc_gate")
+local desync_vis = April.require("core.desync_vis")
+
+local M = {}
+
+local P = "april_shark_enabled"
+local P_VIS = "april_shark_visualize"
+local BLINK_DEPTH = 6
+local RING_RADIUS = 2.5
+
+local _installed = false
+local was_active = false
+local desync_on = false
+local saved_pos = nil
+local desync_pos = nil
+
+local function get_character(lp)
+    if lp and lp.character then return lp.character end
+    if game and game.local_player and game.local_player.character then
+        return game.local_player.character
+    end
+    return nil
+end
+
+local function get_root(lp)
+    local char = get_character(lp)
+    if not char then return nil end
+    return env.safe_call(function()
+        if char.find_first_child then return char:find_first_child("HumanoidRootPart") end
+        return char:FindFirstChild("HumanoidRootPart")
+    end)
+end
+
+local function get_humanoid(lp)
+    if lp and lp.humanoid and env.is_valid(lp.humanoid) then
+        return lp.humanoid
+    end
+    local char = get_character(lp)
+    if not char then return nil end
+    return env.safe_call(function()
+        if char.find_first_child_of_class then return char:find_first_child_of_class("Humanoid") end
+        return char:FindFirstChildOfClass("Humanoid")
+    end)
+end
+
+local function release()
+    if desync_on then
+        packet_desync.release()
+        desync_on = false
+    end
+    saved_pos = nil
+    desync_pos = nil
+end
+
+local function blink_underground(root, char, pos)
+    move.set_position(root, pos.x, pos.y - BLINK_DEPTH, pos.z)
+    move.zero_character(char, root)
+
+    if not desync_on then
+        packet_desync.apply_movement_only()
+        desync_on = true
+    end
+
+    move.set_position(root, pos.x, pos.y, pos.z)
+    move.zero_character(char, root)
+end
+
+local function activate(root, char, hum)
+    local pos = move.read_pos(root)
+    if not pos then return false end
+
+    saved_pos = { x = pos.x, y = pos.y, z = pos.z }
+    desync_pos = { x = pos.x, y = pos.y - BLINK_DEPTH, z = pos.z }
+    blink_underground(root, char, saved_pos)
+    move.humanoid_freeze(hum)
+    return true
+end
+
+local function maintain(root, char, hum)
+    if not saved_pos then return end
+    move.set_position(root, saved_pos.x, saved_pos.y, saved_pos.z)
+    move.zero_character(char, root)
+    move.humanoid_freeze(hum)
+end
+
+local function tick(_dt)
+    if not misc_gate.movement_allowed() then return end
+
+    local on = settings.enabled(P)
+    local lp = env.get_local_player()
+
+    if was_active and not on then
+        local hum = lp and get_humanoid(lp)
+        if hum then move.humanoid_thaw(hum) end
+        release()
+        was_active = false
+        return
+    end
+
+    if not on then
+        was_active = false
+        return
+    end
+
+    if not lp then return end
+    local char = get_character(lp)
+    local root = get_root(lp)
+    local hum = get_humanoid(lp)
+    if not char or not root or not hum then return end
+
+    if not was_active then
+        if not activate(root, char, hum) then return end
+        was_active = true
+    end
+
+    maintain(root, char, hum)
+end
+
+function M.register_menu()
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.MISC)
+    local root = menu_util.parent(P)
+
+    menu_util.register_keybind(T, G.MISC, P, "Shark", false)
+    menu.add_checkbox(T, G.MISC, P_VIS, "Shark Desync Visualize", false, menu_util.parent(P, {
+        colorpicker = { 0.2, 0.85, 1, 0.9 },
+    }))
+    menu_util.bind_children(P, { P_VIS })
+end
+
+function M.install()
+    if _installed then return end
+    _installed = true
+    local runservice = April.require("core.runservice")
+    runservice.on_sim(function(dt)
+        tick(dt)
+    end)
+end
+
+function M.update(_dt) end
+
+function M.draw()
+    if not settings.enabled(P) then return end
+    if not settings.bool(P_VIS, false) then return end
+    if not desync_pos then return end
+
+    local col = settings.color(P_VIS, { 0.2, 0.85, 1, 0.9 })
+    desync_vis.draw_sphere_ring(desync_pos.x, desync_pos.y, desync_pos.z, RING_RADIUS, col, 2)
+end
 
 return M
 
@@ -10451,16 +10637,16 @@ function M.register_menu()
 
     menu_util.gap(T, G.MISC)
     menu_util.register_keybind(T, G.MISC, P, "Desync", false)
-    menu.add_checkbox(T, G.MISC, "april_desync_autosend", "Auto Send", false, root)
-    menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Send Threshold", 0, 1, 0.3, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_visualizer", "Visualizer", false, root)
-    menu.add_combo(T, G.MISC, "april_desync_vis_style", "Vis Style", VIS_MODES, 0, root)
-    menu.add_slider_float(T, G.MISC, "april_desync_vis_size", "Vis Size", 0.5, 4, 1.2, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_show_local", "Show Local Position", true, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_link", "Show Link Line", true, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_labels", "Show Labels", false, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_custom_color", "Custom Color", false, root)
-    menu.add_checkbox(T, G.MISC, "april_desync_vis_color", "Visualizer Color", false, menu_util.parent(P, {
+    menu.add_checkbox(T, G.MISC, "april_desync_autosend", "Desync Auto Send", false, root)
+    menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Desync Send Threshold", 0, 1, 0.3, root)
+    menu.add_checkbox(T, G.MISC, "april_desync_visualizer", "Desync Visualizer", false, root)
+    menu.add_combo(T, G.MISC, "april_desync_vis_style", "Desync Vis Style", VIS_MODES, 0, root)
+    menu.add_slider_float(T, G.MISC, "april_desync_vis_size", "Desync Vis Size", 0.5, 4, 1.2, root)
+    menu.add_checkbox(T, G.MISC, "april_desync_vis_show_local", "Desync Show Local Pos", true, root)
+    menu.add_checkbox(T, G.MISC, "april_desync_vis_link", "Desync Show Link Line", true, root)
+    menu.add_checkbox(T, G.MISC, "april_desync_vis_labels", "Desync Show Labels", false, root)
+    menu.add_checkbox(T, G.MISC, "april_desync_vis_custom_color", "Desync Custom Color", false, root)
+    menu.add_checkbox(T, G.MISC, "april_desync_vis_color", "Desync Vis Color", false, menu_util.parent(P, {
         parent = "april_desync_vis_custom_color",
         colorpicker = { 0.2, 0.85, 1, 0.9 },
     }))
@@ -10493,6 +10679,7 @@ end
 
 function M.update(_dt)
     if not misc_gate.movement_allowed() then return end
+    if settings.enabled("april_shark_enabled") then return end
     local on = active()
     local t = now()
 
@@ -10555,7 +10742,7 @@ function M.register_menu()
     local root = menu_util.parent(P)
 
     menu_util.register_keybind(T, G.RADAR, P, "Enable Waypoints", false)
-    menu.add_checkbox(T, G.RADAR, "april_wp_dist", "Show Distance", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_wp_dist", "Waypoint Show Distance", false, root)
     menu.add_checkbox(T, G.RADAR, "april_wp_beacon", "Beacon Pillar", false, root)
     menu.add_slider_int(T, G.RADAR, "april_wp_beacon_h", "Beacon Height", 20, 200, 90, menu_util.parent("april_wp_beacon"))
     menu.add_checkbox(T, G.RADAR, "april_wp_draw", "Draw Markers", false, menu_util.parent(P, { colorpicker = { 0.2, 1, 0.8, 1 } }))
@@ -10849,7 +11036,7 @@ function M.register_menu()
     menu.add_colorpicker(T, G.RADAR, "april_map_base_col", "Base", { 0.55, 0.55, 1, 1 }, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_wp_col", "Waypoints", theme.CYAN, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_local", "You", theme.CYAN, root)
-    menu.add_checkbox(T, G.RADAR, "april_map_labels", "Show Labels", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_labels", "Radar Show Labels", false, root)
 
     menu_util.bind_children(P, {
         "april_map_zoom", "april_map_size", "april_map_icon_scale",
@@ -11053,9 +11240,9 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.MISC)
-    menu_util.register_keybind(T, G.MISC, P, "Mod Checker", false)
+    menu.add_checkbox(T, G.MISC, P, "Mod Checker", false)
     menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Mod Scan Interval (ms)", 1000, 10000, 2500, { parent = P })
-    menu_util.bind_children(P, { "april_mod_checker_interval" })
+    menu_util.bind_master(P, { "april_mod_checker_interval" })
 end
 
 function M.init()
@@ -11419,6 +11606,7 @@ M.FEATURE_ORDER = {
     "features.utility.mod_checker",
     "features.combat.perfect_farm",
     "features.movement.exploits",
+    "features.movement.shark",
     "features.movement.desync",
     "features.utility.config",
 }
@@ -11628,6 +11816,7 @@ local ok, err = pcall(function()
     end
 
     April.require("core.movement_ctrl").install()
+    April.require("features.movement.shark").install()
 
     April._init_ok = true
 

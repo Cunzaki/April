@@ -217,43 +217,34 @@ function M.button(T, G, id, label, callback, master_id)
     end
 end
 
---[[ Master toggle with legacy Toggle/Hold key mode + dedicated hotkey picker. ]]
-function M.keybind_children(id)
-    return { id .. "_key", id .. "_mode" }
+--[[ Master toggle — key on checkbox row; Key Mode uses native parent only (no bind_master). ]]
+function M.keybind_children(_id)
+    return {}
 end
 
 function M.bind_children(master_id, extra_ids)
-    local ids = M.keybind_children(master_id)
-    if extra_ids then
-        for _, child_id in ipairs(extra_ids) do
-            ids[#ids + 1] = child_id
-        end
-    end
-    M.bind_master(master_id, ids)
+    M.bind_master(master_id, extra_ids or {})
 end
 
 function M.register_keybind(T, G, id, label, default, extra)
     extra = extra or {}
-    local cb_opts = { show_mode = false }
+    local cb_opts = { show_mode = false, key = extra.key or 0 }
     if extra.parent then cb_opts.parent = extra.parent end
     if extra.colorpicker then cb_opts.colorpicker = extra.colorpicker end
 
     menu.add_checkbox(T, G, id, label, default or false, cb_opts)
 
-    local key_id = id .. "_key"
     local mode_id = id .. "_mode"
-    local child_parent = M.parent(id)
-
-    menu.add_hotkey(T, G, key_id, "Bind Key", extra.key or 0, child_parent)
-    menu.add_combo(T, G, mode_id, "Key Mode", { "Toggle", "Hold" }, 0, child_parent)
+    local mode_label = label .. " Bind Mode"
+    menu.add_combo(T, G, mode_id, mode_label, { "Toggle", "Hold" }, 0, M.parent(id))
 
     April.require("core.feature_bind").register({
         id = id,
         mode_id = mode_id,
-        key_id = key_id,
+        key_id = id,
     })
 
-    return mode_id, key_id
+    return mode_id
 end
 
 return M

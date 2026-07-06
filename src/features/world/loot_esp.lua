@@ -240,10 +240,10 @@ function M.register_menu()
     for _, t in ipairs(maps.LOOT_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
     end
-    menu.add_checkbox(T, G.WORLD, "april_loot_boxes", "3D Boxes", false, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_loot_show_name", "Show Name", true, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_loot_show_distance", "Show Distance", true, { parent = P })
-    menu.add_slider_int(T, G.WORLD, "april_loot_range", "Range", 50, 2000, 300, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_loot_boxes", "Loot 3D Boxes", false, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_loot_show_name", "Loot Show Name", true, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_loot_show_distance", "Loot Show Distance", true, { parent = P })
+    menu.add_slider_int(T, G.WORLD, "april_loot_range", "Loot Range", 50, 2000, 300, { parent = P })
 
     local child_ids = { "april_loot_boxes", "april_loot_show_name", "april_loot_show_distance", "april_loot_range" }
     for _, t in ipairs(maps.LOOT_TOGGLES) do
