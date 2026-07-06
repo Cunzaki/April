@@ -15,6 +15,10 @@ function M.on_frame()
     if not initialized then return end
     debug.tick_frame()
 
+    pcall(function()
+        April.require("core.feature_bind").tick()
+    end)
+
     local dt = 0.016
     if utility and utility.get_delta_time then
         dt = utility.get_delta_time()

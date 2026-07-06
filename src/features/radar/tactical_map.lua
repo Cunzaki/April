@@ -195,13 +195,11 @@ function M.register_menu()
     local T, _ = menu_util.group(G.RADAR)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G.RADAR, "Tactical Radar")
-    menu.add_checkbox(T, G.RADAR, P, "Enable Radar", false, { key = 0x28 })
+    menu_util.register_keybind(T, G.RADAR, P, "Enable Radar", false, { key = 0x28 })
     menu.add_slider_float(T, G.RADAR, "april_map_zoom", "Zoom Level", 0.05, 5.0, 1.0, "%.2f", root)
     menu.add_slider_int(T, G.RADAR, "april_map_size", "Radar Size", 140, 420, 240, root)
     menu.add_slider_int(T, G.RADAR, "april_map_icon_scale", "Blip Size", 2, 6, 3, root)
 
-    menu.add_separator(T, G.RADAR)
     menu.add_checkbox(T, G.RADAR, "april_map_show_players", "Players", true, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_npcs", "NPCs", false, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_loot", "Loot", true, root)
@@ -209,19 +207,18 @@ function M.register_menu()
     menu.add_checkbox(T, G.RADAR, "april_map_show_base", "Base Parts", false, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_waypoints", "Waypoints", true, root)
 
-    menu.add_separator(T, G.RADAR)
     menu.add_colorpicker(T, G.RADAR, "april_map_bg", "Background", theme.MAP_BG, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_grid", "Grid / Rings", theme.MAP_GRID, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_player_col", "Player Color", theme.RED, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_npc_col", "NPC Color", theme.ORANGE, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_loot_col", "Loot Color", { 1, 0.85, 0.35, 1 }, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_world_col", "Resource Color", theme.GREEN, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_base_col", "Base Color", { 0.55, 0.55, 1, 1 }, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_wp_col", "Waypoint Color", theme.CYAN, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_grid", "Grid", theme.MAP_GRID, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_player_col", "Players", theme.RED, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_npc_col", "NPCs", theme.ORANGE, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_loot_col", "Loot", { 1, 0.85, 0.35, 1 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_world_col", "Resources", theme.GREEN, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_base_col", "Base", { 0.55, 0.55, 1, 1 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_wp_col", "Waypoints", theme.CYAN, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_local", "You", theme.CYAN, root)
     menu.add_checkbox(T, G.RADAR, "april_map_labels", "Show Labels", false, root)
 
-    menu_util.bind_master(P, {
+    menu_util.bind_children(P, {
         "april_map_zoom", "april_map_size", "april_map_icon_scale",
         "april_map_show_players", "april_map_show_npcs", "april_map_show_loot",
         "april_map_show_world", "april_map_show_base", "april_map_show_waypoints",

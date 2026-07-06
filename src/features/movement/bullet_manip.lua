@@ -143,7 +143,7 @@ function M.register_menu()
     local root = menu_util.parent(P)
 
     menu_util.section(T, G.MISC, "Bullet Manip (TEST)")
-    menu.add_checkbox(T, G.MISC, P, "Bullet Manipulation", false, { key = 0 })
+    menu_util.register_keybind(T, G.MISC, P, "Bullet Manipulation", false)
     menu.add_slider_int(T, G.MISC, "april_bullet_manip_range", "Target Range", 50, 500, 250, root)
     menu.add_slider_int(T, G.MISC, "april_bullet_manip_speed", "Peek Move Speed", 4, 40, 18, root)
     menu.add_checkbox(T, G.MISC, "april_bullet_manip_debug", "Debug Overlay", true, root)
@@ -155,7 +155,7 @@ function M.register_menu()
     menu.add_checkbox(T, G.MISC, "april_bullet_manip_vis_labels", "Show Labels", true, root)
     menu.add_checkbox(T, G.MISC, "april_bullet_manip_vis_peek", "Show Peek Point", true, root)
 
-    menu_util.bind_master(P, {
+    menu_util.bind_children(P, {
         "april_bullet_manip_range", "april_bullet_manip_speed",
         "april_bullet_manip_debug", "april_bullet_manip_console",
         "april_bullet_manip_vis", "april_bullet_manip_vis_style", "april_bullet_manip_vis_size",

@@ -61,8 +61,6 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.CONFIG)
 
-    menu_util.section(T, G.CONFIG, "Config Profiles")
-
     menu_util.input(T, G.CONFIG, "april_cfg_profile_name", "Profile Name", "Default")
 
     menu.add_slider_int(T, G.CONFIG, "april_cfg_slot", "Active Slot (1-5)", store.SLOT_MIN, store.SLOT_MAX, 1)
@@ -77,10 +75,8 @@ function M.register_menu()
         M.delete_slot(active_slot())
     end)
 
-    menu.add_separator(T, G.CONFIG)
-    menu_util.label(T, G.CONFIG, "Autoload on script start")
-
-    menu.add_checkbox(T, G.CONFIG, "april_cfg_autoload", "Enable Autoload", false)
+    menu_util.gap(T, G.CONFIG)
+    menu.add_checkbox(T, G.CONFIG, "april_cfg_autoload", "Autoload on Start", false)
     menu_util.input(T, G.CONFIG, "april_cfg_autoload_profile", "Autoload Profile Name", "")
     menu.add_slider_int(
         T, G.CONFIG, "april_cfg_autoload_slot", "Autoload Slot (fallback)",
@@ -88,9 +84,7 @@ function M.register_menu()
         menu_util.parent("april_cfg_autoload")
     )
 
-    menu.add_separator(T, G.CONFIG)
-    menu_util.label(T, G.CONFIG, "Display & modules")
-
+    menu_util.gap(T, G.CONFIG)
     menu.add_slider_int(T, G.CONFIG, "april_esp_text_size", "ESP Text Size", 8, 24, 13)
     menu.add_button(T, G.CONFIG, "april_reload_modules", "Reload Game Modules", function()
         April.require("game.bootstrap").force_reload()

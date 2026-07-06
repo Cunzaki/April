@@ -25,6 +25,13 @@ end
 
 --[[ Strict checkbox read — never treats missing menu value as enabled. ]]
 function M.enabled(id)
+    local ok, fb = pcall(function()
+        return April.require("core.feature_bind")
+    end)
+    if ok and fb and fb.is_registered(id) then
+        return fb.active(id)
+    end
+
     if not menu or not menu.get then return false end
     local v = menu.get(id)
     if v == nil or v == false or v == 0 or v == "false" then return false end

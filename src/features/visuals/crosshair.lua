@@ -8,8 +8,7 @@ local P = "april_crosshair_enabled"
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.VISUALS)
-    menu_util.section(T, G.VISUALS, "Crosshair")
-    menu.add_checkbox(T, G.VISUALS, "april_crosshair_enabled", "Enable Custom Crosshair", false, { key = 0 })
+    menu_util.register_keybind(T, G.VISUALS, P, "Custom Crosshair", false)
     menu.add_combo(T, G.VISUALS, "april_crosshair_type", "Crosshair Type", { "Cross", "Circle", "Dot", "T-Shape" }, 0, { parent = P })
     menu.add_slider_int(T, G.VISUALS, "april_crosshair_size", "Size", 1, 50, 10, { parent = P })
     menu.add_slider_int(T, G.VISUALS, "april_crosshair_gap", "Gap", 0, 20, 5, { parent = P })
@@ -20,7 +19,7 @@ function M.register_menu()
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_rainbow", "Rainbow Crosshair", false, { parent = P })
     menu.add_slider_int(T, G.VISUALS, "april_crosshair_rainbow_speed", "Rainbow Speed", 1, 100, 10, { parent = P })
 
-    menu_util.bind_master(P, {
+    menu_util.bind_children(P, {
         "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap", "april_crosshair_thickness",
         "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
         "april_crosshair_rainbow", "april_crosshair_rainbow_speed",

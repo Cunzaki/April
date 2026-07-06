@@ -185,8 +185,8 @@ M.BASE_TOGGLES = {
     { id = "april_small_box", label = "Small Storage Box", color = { 0.55, 0.35, 0.15, 1 } },
     { id = "april_large_box", label = "Large Storage Box", color = { 0.45, 0.3, 0.12, 1 } },
     { id = "april_sleeping_bag", label = "Sleeping Bag", color = { 0.8, 0.2, 0.2, 1 } },
-    { id = "april_auto_turret", label = "Auto Turret", color = { 1, 0.2, 0.2, 1 } },
-    { id = "april_shotgun_turret", label = "Shotgun Turret", color = { 1, 0.35, 0.2, 1 } },
+    { id = "april_auto_turret", label = "Auto Turret", color = { 1, 0.2, 0.2, 1 }, ring_id = "april_auto_turret_ring" },
+    { id = "april_shotgun_turret", label = "Shotgun Turret", color = { 1, 0.35, 0.2, 1 }, ring_id = "april_shotgun_turret_ring" },
     { id = "april_wooden_door", label = "Wooden Door", color = { 0.5, 0.3, 0.1, 1 } },
     { id = "april_wooden_double_door", label = "Wooden Double Door", color = { 0.55, 0.32, 0.12, 1 } },
     { id = "april_metal_door", label = "Metal Door", color = { 0.5, 0.5, 0.6, 1 } },
@@ -211,6 +211,15 @@ function M.toggle_color(list, toggle_id, fallback)
         end
     end
     return fallback or { 1, 1, 1, 1 }
+end
+
+function M.turret_ring_toggle(toggle_id)
+    for _, t in ipairs(M.BASE_TOGGLES) do
+        if t.id == toggle_id then
+            return t.ring_id
+        end
+    end
+    return nil
 end
 
 return M

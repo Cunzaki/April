@@ -20,7 +20,6 @@ function M.register_targeting(T, G, prefix, parent_id, opts)
         menu.add_slider_int(T, G, p .. "smooth", "Smoothing (frames)", 1, 100, 5, root)
     end
 
-    menu.add_separator(T, G)
     menu.add_checkbox(T, G, p .. "draw_fov", "Draw FOV Circle", false, menu_util.parent(parent_id, { colorpicker = opts.fov_color or { 1, 1, 1, 1 } }))
     menu.add_checkbox(T, G, p .. "fov_fill", "Fill FOV", false, root)
     menu.add_checkbox(T, G, p .. "target_line", "Target Line", false, menu_util.parent(parent_id, { colorpicker = opts.line_color or { 1, 0.2, 0.2, 1 } }))

@@ -6,6 +6,8 @@ local esp_util = April.require("core.esp_util")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
 local maps = April.require("game.esp_maps")
+local turret_stats = April.require("game.turret_stats")
+local desync_vis = April.require("core.desync_vis")
 local esp_scan = April.require("game.esp_scan")
 
 local M = {}
@@ -51,21 +53,26 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.WORLD)
-    menu_util.section(T, G.WORLD, "Base ESP")
-    menu.add_checkbox(T, G.WORLD, P, "Enable Base ESP", false, { key = 0 })
+    menu_util.register_keybind(T, G.WORLD, P, "Base ESP", false)
     for _, t in ipairs(maps.BASE_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
+        if t.ring_id then
+            menu.add_checkbox(T, G.WORLD, t.ring_id, "Show Range Ring", false, { parent = t.id })
+        end
     end
-    menu.add_checkbox(T, G.WORLD, "april_base_boxes", "Base 3D Boxes", false, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_base_show_name", "Base Show Name", true, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_base_show_distance", "Base Show Distance", false, { parent = P })
-    menu.add_slider_int(T, G.WORLD, "april_base_range", "Base Range", 50, 500, 150, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_base_boxes", "3D Boxes", false, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_base_show_name", "Show Name", true, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_base_show_distance", "Show Distance", false, { parent = P })
+    menu.add_slider_int(T, G.WORLD, "april_base_range", "Range", 50, 500, 150, { parent = P })
 
     local child_ids = { "april_base_boxes", "april_base_show_name", "april_base_show_distance", "april_base_range" }
     for _, t in ipairs(maps.BASE_TOGGLES) do
         child_ids[#child_ids + 1] = t.id
+        if t.ring_id then
+            child_ids[#child_ids + 1] = t.ring_id
+        end
     end
-    menu_util.bind_master(P, child_ids)
+    menu_util.bind_children(P, child_ids)
 end
 
 function M.begin_scan()
@@ -192,6 +199,15 @@ function M.draw()
         local col = settings.color(entry.toggle_id, maps.toggle_color(maps.BASE_TOGGLES, entry.toggle_id))
         if draw_boxes then
             esp_util.draw_entry_boxes(entry, col, 1)
+        end
+
+        local ring_id = maps.turret_ring_toggle(entry.toggle_id)
+        if ring_id and settings.enabled(ring_id) then
+            local activation = turret_stats.activation_range(entry.name)
+            if activation then
+                local ring_col = { col[1], col[2], col[3], 0.35 }
+                desync_vis.draw_sphere_ring(lx, ly, lz, activation, ring_col, 1.5)
+            end
         end
 
         if show_name or show_dist then

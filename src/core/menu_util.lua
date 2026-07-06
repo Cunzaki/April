@@ -28,6 +28,7 @@ M.G_SIDE = {
 
 M._tab_ready = false
 M._groups = {}
+M._groups_ready = false
 M._master_children = {}
 M._master_hooked = {}
 M._when_rules = {}
@@ -42,6 +43,27 @@ function M.ensure_tab()
         menu.add_tab(M.TAB, "A", "full")
     end
     M._tab_ready = true
+end
+
+--[[ Full-mode grid rows must be created left then right before any controls register. ]]
+function M.ensure_groups()
+    if M._groups_ready then return end
+    M.ensure_tab()
+
+    local rows = {
+        { M.G.COMBAT, M.G.VISUALS },
+        { M.G.WORLD, M.G.RADAR },
+        { M.G.MISC, M.G.CONFIG },
+    }
+
+    for _, row in ipairs(rows) do
+        M.group(row[1], "left")
+        if row[2] then
+            M.group(row[2], "right")
+        end
+    end
+
+    M._groups_ready = true
 end
 
 function M.group(name, side)
@@ -62,6 +84,10 @@ function M.group(name, side)
     end
 
     return M.TAB, name
+end
+
+function M.gap(T, G)
+    menu.add_separator(T, G)
 end
 
 function M.section(T, G, title)
@@ -137,7 +163,7 @@ function M.bind_master(master_id, child_ids)
     local function sync(new_val)
         local show
         if new_val == nil then
-            show = settings_mod().enabled(master_id)
+            show = settings_mod().bool(master_id, false)
         else
             show = new_val == true or new_val == 1
         end
@@ -189,6 +215,45 @@ function M.button(T, G, id, label, callback, master_id)
     if master_id then
         M.bind_master(master_id, { id })
     end
+end
+
+--[[ Master toggle with legacy Toggle/Hold key mode + dedicated hotkey picker. ]]
+function M.keybind_children(id)
+    return { id .. "_key", id .. "_mode" }
+end
+
+function M.bind_children(master_id, extra_ids)
+    local ids = M.keybind_children(master_id)
+    if extra_ids then
+        for _, child_id in ipairs(extra_ids) do
+            ids[#ids + 1] = child_id
+        end
+    end
+    M.bind_master(master_id, ids)
+end
+
+function M.register_keybind(T, G, id, label, default, extra)
+    extra = extra or {}
+    local cb_opts = { show_mode = false }
+    if extra.parent then cb_opts.parent = extra.parent end
+    if extra.colorpicker then cb_opts.colorpicker = extra.colorpicker end
+
+    menu.add_checkbox(T, G, id, label, default or false, cb_opts)
+
+    local key_id = id .. "_key"
+    local mode_id = id .. "_mode"
+    local child_parent = M.parent(id)
+
+    menu.add_hotkey(T, G, key_id, "Bind Key", extra.key or 0, child_parent)
+    menu.add_combo(T, G, mode_id, "Key Mode", { "Toggle", "Hold" }, 0, child_parent)
+
+    April.require("core.feature_bind").register({
+        id = id,
+        mode_id = mode_id,
+        key_id = key_id,
+    })
+
+    return mode_id, key_id
 end
 
 return M

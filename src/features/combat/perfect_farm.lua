@@ -122,17 +122,17 @@ end
 
 function M.register_menu()
     local G = menu_util.G
-    local T, _ = menu_util.group(G.COMBAT)
+    local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
-    menu.add_checkbox(T, G.COMBAT, P, "Farm Helper", false)
-    menu.add_slider_int(T, G.COMBAT, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
-    menu.add_slider_int(T, G.COMBAT, P_SMOOTH, "Aim Smoothness", 1, 30, 8, root)
-    menu_util.bind_master(P, { P_RADIUS, P_SMOOTH })
+    menu_util.register_keybind(T, G.MISC, P, "Farm Helper", false)
+    menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
+    menu.add_slider_int(T, G.MISC, P_SMOOTH, "Aim Smoothness", 1, 30, 8, root)
+    menu_util.bind_children(P, { P_RADIUS, P_SMOOTH })
 end
 
 function M.update(_dt)
-    if not settings.bool(P, false) then return end
+    if not settings.enabled(P) then return end
     if not camera or not camera.look_at then return end
 
     farm_tools.load()

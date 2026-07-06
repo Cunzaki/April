@@ -142,8 +142,8 @@ function M.register_menu()
     local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G.MISC, "Desync")
-    menu.add_checkbox(T, G.MISC, P, "Desync", false, { key = 0 })
+    menu_util.gap(T, G.MISC)
+    menu_util.register_keybind(T, G.MISC, P, "Desync", false)
     menu.add_checkbox(T, G.MISC, "april_desync_autosend", "Auto Send", false, root)
     menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Send Threshold", 0, 1, 0.3, root)
     menu.add_checkbox(T, G.MISC, "april_desync_visualizer", "Visualizer", false, root)
@@ -158,7 +158,7 @@ function M.register_menu()
         colorpicker = { 0.2, 0.85, 1, 0.9 },
     }))
 
-    menu_util.bind_master(P, {
+    menu_util.bind_children(P, {
         "april_desync_autosend", "april_desync_autosend_len",
         "april_desync_visualizer", "april_desync_vis_style", "april_desync_vis_size",
         "april_desync_vis_show_local", "april_desync_vis_link", "april_desync_vis_labels",

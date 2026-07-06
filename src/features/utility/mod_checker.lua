@@ -86,10 +86,9 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.MISC)
-    menu_util.section(T, G.MISC, "Mod Checker")
-    menu.add_checkbox(T, G.MISC, P, "Mod Checker", false, { key = 0 })
+    menu_util.register_keybind(T, G.MISC, P, "Mod Checker", false)
     menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Mod Scan Interval (ms)", 1000, 10000, 2500, { parent = P })
-    menu_util.bind_master(P, { "april_mod_checker_interval" })
+    menu_util.bind_children(P, { "april_mod_checker_interval" })
 end
 
 function M.init()

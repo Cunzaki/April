@@ -13,12 +13,12 @@ function M.register_menu()
     local T, _ = menu_util.group(G.RADAR)
     local root = menu_util.parent(P)
 
-    menu.add_checkbox(T, G.RADAR, P, "Enable Waypoints", false, { key = 0 })
-    menu.add_checkbox(T, G.RADAR, "april_wp_dist", "Waypoint Show Distance", false, root)
+    menu_util.register_keybind(T, G.RADAR, P, "Enable Waypoints", false)
+    menu.add_checkbox(T, G.RADAR, "april_wp_dist", "Show Distance", false, root)
     menu.add_checkbox(T, G.RADAR, "april_wp_beacon", "Beacon Pillar", false, root)
     menu.add_slider_int(T, G.RADAR, "april_wp_beacon_h", "Beacon Height", 20, 200, 90, menu_util.parent("april_wp_beacon"))
     menu.add_checkbox(T, G.RADAR, "april_wp_draw", "Draw Markers", false, menu_util.parent(P, { colorpicker = { 0.2, 1, 0.8, 1 } }))
-    menu.add_slider_int(T, G.RADAR, "april_wp_slot", "Waypoint Active Slot", 1, 5, 1, root)
+    menu.add_slider_int(T, G.RADAR, "april_wp_slot", "Active Slot", 1, 5, 1, root)
 
     menu_util.button(T, G.RADAR, "april_wp_set", "Set Active Waypoint", function()
         local slot = settings.num("april_wp_slot", 1)
@@ -40,7 +40,7 @@ function M.register_menu()
         cache.waypoints = {}
     end, P)
 
-    menu_util.bind_master(P, {
+    menu_util.bind_children(P, {
         "april_wp_dist", "april_wp_beacon", "april_wp_beacon_h", "april_wp_draw",
         "april_wp_slot", "april_wp_set", "april_wp_clear", "april_wp_clear_all",
     })

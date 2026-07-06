@@ -30,7 +30,6 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.COMBAT)
 
-    menu_util.section(T, G.COMBAT, "Silent Aim")
     menu.add_checkbox(T, G.COMBAT, P_PRED, "Bullet Prediction", false)
     menu.add_checkbox(T, G.COMBAT, P_VIS, "Visualize Silent Ray", false, menu_util.parent(P_PRED))
 

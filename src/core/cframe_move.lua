@@ -1,4 +1,4 @@
---[[ Vector fly helpers — position-only writes (API: BasePart.CFrame is position only). ]]
+--[[ CFrame movement — position writes, zero velocity (no velocity exploits). ]]
 
 local env = April.require("core.env")
 
@@ -45,9 +45,8 @@ end
 function M.iter_parts(char)
     local out = {}
     if not char then return out end
-    local list = env.safe_call(function() return char:get_descendants() end)
-        or env.safe_call(function() return char:GetDescendants() end)
-        or env.safe_call(function() return char:get_children() end)
+    local list = env.safe_call(function() return char:get_children() end)
+        or env.safe_call(function() return char:GetChildren() end)
         or {}
     for _, inst in ipairs(list) do
         if M.is_base_part(inst) then
@@ -57,29 +56,18 @@ function M.iter_parts(char)
     return out
 end
 
-function M.read_velocity(inst)
-    if not inst then return 0, 0, 0 end
-    local vel = inst.Velocity or inst.velocity
-    if not vel then return 0, 0, 0 end
-    return vel.x or vel.X or 0, vel.y or vel.Y or 0, vel.z or vel.Z or 0
-end
-
 function M.set_velocity(inst, x, y, z)
     if not inst then return end
     if part and part.set_velocity then
         pcall(part.set_velocity, inst, x, y, z)
     else
-        pcall(function()
-            inst.Velocity = Vector3.new(x, y, z)
-        end)
+        pcall(function() inst.Velocity = Vector3.new(x, y, z) end)
     end
 end
 
 function M.zero_part(inst)
     if not inst then return end
-    if part and part.set_velocity then
-        pcall(part.set_velocity, inst, 0, 0, 0)
-    end
+    M.set_velocity(inst, 0, 0, 0)
     if part and part.set_angular_velocity then
         pcall(part.set_angular_velocity, inst, 0, 0, 0)
     end
@@ -90,195 +78,73 @@ function M.set_position(inst, x, y, z)
     if part and part.set_position then
         pcall(part.set_position, inst, x, y, z)
     else
-        pcall(function()
-            inst.Position = Vector3.new(x, y, z)
-        end)
+        pcall(function() inst.Position = Vector3.new(x, y, z) end)
     end
     M.zero_part(inst)
 end
 
-function M.set_noclip(char, enabled)
-    if not char then return end
+function M.zero_character(char, root)
+    if root then M.zero_part(root) end
     for _, inst in ipairs(M.iter_parts(char)) do
-        if part and part.set_can_collide then
-            pcall(part.set_can_collide, inst, enabled)
-        else
-            pcall(function() inst.CanCollide = enabled end)
+        if inst ~= root then
+            M.zero_part(inst)
         end
     end
 end
 
-function M.zero_character(char)
-    if not char then return end
-    for _, inst in ipairs(M.iter_parts(char)) do
-        M.zero_part(inst)
-    end
-end
-
-function M.apply_fly_humanoid(hum, state_id)
+function M.humanoid_suspend(hum)
     if not hum then return end
-    state_id = state_id or 6
-    pcall(function() hum.state = state_id end)
-    pcall(function() hum.platform_stand = true end)
+    pcall(function() hum.platform_stand = false end)
     pcall(function() hum.auto_rotate = false end)
     pcall(function() hum.evaluate_state_machine = false end)
     pcall(function() hum.sit = false end)
 end
 
-function M.restore_humanoid(hum)
+function M.humanoid_release(hum)
     if not hum then return end
     pcall(function() hum.platform_stand = false end)
     pcall(function() hum.auto_rotate = true end)
     pcall(function() hum.evaluate_state_machine = true end)
-    pcall(function() hum.state = 8 end)
 end
 
-function M.camera_vectors()
+function M.camera_flat_axes()
     if not camera or not camera.get_look_vector then return nil end
     local ok, look = pcall(camera.get_look_vector)
     if not ok or not look then return nil end
 
-    local fx = look.x or look.X or 0
-    local fy = look.y or look.Y or 0
-    local fz = look.z or look.Z or 0
-    local mag = math.sqrt(fx * fx + fy * fy + fz * fz)
-    if mag < 0.001 then return nil end
-    fx, fy, fz = fx / mag, fy / mag, fz / mag
+    local lx = look.x or look.X or 0
+    local lz = look.z or look.Z or 0
+    local lm = math.sqrt(lx * lx + lz * lz)
+    if lm < 0.001 then return nil end
+    lx, lz = lx / lm, lz / lm
 
-    local hx, hz = fx, fz
-    local hm = math.sqrt(hx * hx + hz * hz)
+    local rx, rz = -lz, lx
+    return lx, lz, rx, rz
+end
+
+--[[ WASD = flat XZ only. Space / Ctrl = vertical. ]]
+function M.read_fly_input()
+    local lx, lz, rx, rz = M.camera_flat_axes()
+    local mx, mz, my = 0, 0, 0
+
+    if lx then
+        if M.key_down(0x57) then mx, mz = mx + lx, mz + lz end
+        if M.key_down(0x53) then mx, mz = mx - lx, mz - lz end
+        if M.key_down(0x41) then mx, mz = mx - rx, mz - rz end
+        if M.key_down(0x44) then mx, mz = mx + rx, mz + rz end
+    end
+
+    if M.key_down(0x20) then my = 1 end
+    if M.key_down(0x11) then my = -1 end
+
+    local hm = math.sqrt(mx * mx + mz * mz)
     if hm > 0.001 then
-        hx, hz = hx / hm, hz / hm
+        mx, mz = mx / hm, mz / hm
     else
-        hx, hz = 0, 1
+        mx, mz = 0, 0
     end
 
-    local rx, rz = -hz, hx
-    return fx, fy, fz, hx, hz, rx, rz
-end
-
-function M.move_input_flat(hx, hz, rx, rz)
-    local dx, dz = 0, 0
-
-    if M.key_down(0x57) then dx, dz = dx + hx, dz + hz end
-    if M.key_down(0x53) then dx, dz = dx - hx, dz - hz end
-    if M.key_down(0x41) then dx, dz = dx - rx, dz - rz end
-    if M.key_down(0x44) then dx, dz = dx + rx, dz + rz end
-
-    local mag = math.sqrt(dx * dx + dz * dz)
-    if mag < 0.001 then return 0, 0, 0 end
-    return dx / mag, dz / mag, mag
-end
-
-function M.apply_flat_delta(root, px, py, pz, dx, dz, speed, dt, lock_y)
-    local step = speed * dt
-    local nx = px + dx * step
-    local ny = lock_y or py
-    local nz = pz + dz * step
-    M.set_position(root, nx, ny, nz)
-    return nx, ny, nz
-end
-
-function M.suspend(char, hum, root, lock_y)
-    M.apply_fly_humanoid(hum, 6)
-    M.zero_character(char)
-    if root and lock_y then
-        local pos = M.read_pos(root)
-        if pos then
-            M.set_position(root, pos.x, lock_y, pos.z)
-        end
-    end
-end
-
-function M.run_cframe_fly(root, hum, speed)
-    if not root or not hum then return end
-
-    local fx, fy, fz, hx, hz, rx, rz = M.camera_vectors()
-    if not fx then return end
-
-    local dx, dy, dz, mag = M.move_input(fx, fy, fz, hx, hz, rx, rz)
-    local pos = M.read_pos(root)
-    if not pos then return end
-
-    if mag > 0.001 then
-        M.apply_delta(root, pos.x, pos.y, pos.z, dx, dy, dz, speed * 3, M.delta_time())
-    else
-        M.zero_part(root)
-    end
-
-    pcall(function() hum.platform_stand = false end)
-end
-
-function M.run_flat_fly(root, char, hum, lock_y, speed)
-    if not root or not char or not hum or not lock_y then return end
-
-    M.suspend(char, hum, root, lock_y)
-
-    local _, _, _, hx, hz, rx, rz = M.camera_vectors()
-    if not hx then return end
-
-    local pos = M.read_pos(root)
-    if not pos then return end
-
-    local dx, dz, mag = M.move_input_flat(hx, hz, rx, rz)
-    if mag > 0.001 then
-        M.apply_flat_delta(root, pos.x, pos.y, pos.z, dx, dz, speed, M.delta_time(), lock_y)
-    else
-        M.set_position(root, pos.x, lock_y, pos.z)
-    end
-end
-
-function M.move_input(fx, fy, fz, hx, hz, rx, rz)
-    local dx, dy, dz = 0, 0, 0
-
-    if M.key_down(0x57) then dx, dy, dz = dx + fx, dy + fy, dz + fz end
-    if M.key_down(0x53) then dx, dy, dz = dx - fx, dy - fy, dz - fz end
-    if M.key_down(0x41) then dx, dz = dx - rx, dz - rz end
-    if M.key_down(0x44) then dx, dz = dx + rx, dz + rz end
-    if M.key_down(0x20) then dy = dy + 1 end
-    if M.key_down(0x11) then dy = dy - 1 end
-
-    local mag = math.sqrt(dx * dx + dy * dy + dz * dz)
-    if mag < 0.001 then return 0, 0, 0, 0 end
-    return dx / mag, dy / mag, dz / mag, mag
-end
-
-function M.apply_delta(root, px, py, pz, dx, dy, dz, speed, dt)
-    local step = speed * dt
-    local nx = px + dx * step
-    local ny = py + dy * step
-    local nz = pz + dz * step
-    M.set_position(root, nx, ny, nz)
-    return nx, ny, nz
-end
-
-function M.read_camera_pos()
-    if not camera or not camera.get_position then return nil end
-    local ok, pos = pcall(camera.get_position)
-    if not ok or not pos then return nil end
-    return {
-        x = pos.x or pos.X or 0,
-        y = pos.y or pos.Y or 0,
-        z = pos.z or pos.Z or 0,
-    }
-end
-
-function M.set_camera_offset(hum, ox, oy, oz)
-    if not hum then return end
-    pcall(function()
-        hum.camera_offset = { x = ox, y = oy, z = oz }
-    end)
-end
-
-function M.read_camera_offset(hum)
-    if not hum then return { x = 0, y = 0, z = 0 } end
-    local off = hum.camera_offset or hum.CameraOffset
-    if not off then return { x = 0, y = 0, z = 0 } end
-    return {
-        x = off.x or off.X or 0,
-        y = off.y or off.Y or 0,
-        z = off.z or off.Z or 0,
-    }
+    return mx, my, mz
 end
 
 return M

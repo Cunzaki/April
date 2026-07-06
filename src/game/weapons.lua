@@ -46,6 +46,7 @@ local FALLBACK_STATS = {
 }
 
 M._last_held = nil
+M._last_held_ranged = nil
 M._was_in_game = false
 M._weapon_changed_at = 0
 
@@ -166,6 +167,7 @@ function M.invalidate()
     recoil_weapons = {}
     weapon_names = {}
     M._last_held = nil
+    M._last_held_ranged = nil
     M._weapon_changed_at = 0
 end
 
@@ -205,6 +207,37 @@ end
 function M.recoil_weapon_names()
     if not loaded then M.load() end
     return recoil_weapons
+end
+
+function M.profile_weapon_names()
+    if not loaded then M.load() end
+
+    local farm = nil
+    pcall(function()
+        farm = April.require("game.farm_tools")
+        if farm and farm.load then farm.load() end
+    end)
+
+    local seen = {}
+    local list = {}
+
+    local function add(name)
+        if not name or name == "" or seen[name] then return end
+        if not M.is_ranged_weapon_name(name) then return end
+        if farm and farm.is_farm_tool_name and farm.is_farm_tool_name(name) then return end
+        seen[name] = true
+        list[#list + 1] = name
+    end
+
+    for name in pairs(toolinfo) do
+        add(name)
+    end
+    for name in pairs(FALLBACK_STATS) do
+        add(name)
+    end
+
+    table.sort(list)
+    return list
 end
 
 local function read_tool_attributes(inst)
@@ -356,6 +389,7 @@ function M.tick()
     if not in_game then
         if M._was_in_game then
             M._last_held = nil
+            M._last_held_ranged = nil
             M._weapon_changed_at = 0
         end
         M._was_in_game = false
@@ -371,12 +405,17 @@ function M.tick()
         M.load()
     end
 
-    local held = M.get_held_weapon_name()
-    if held and held ~= M._last_held then
+    local held = M.get_held_ranged_weapon_name()
+    if held ~= M._last_held_ranged then
         M._last_held = held
+        M._last_held_ranged = held
         M._weapon_changed_at = utility and utility.get_tick_count and utility.get_tick_count() or 0
-    elseif not held then
-        M._last_held = nil
+        pcall(function()
+            local gun_mods = April.require("features.combat.gun_mods")
+            if gun_mods.on_weapon_changed then
+                gun_mods.on_weapon_changed(held)
+            end
+        end)
     end
 
     return held

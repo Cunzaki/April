@@ -18,13 +18,6 @@ local function draw_tung_box(x, y, w, h)
 end
 
 function M.register_menu()
-    local G = menu_util.G
-    local T, _ = menu_util.group(G.VISUALS)
-    local root = menu_util.parent(P)
-
-    menu.add_checkbox(T, G.VISUALS, P, "Tung ESP", false, { key = 0 })
-    menu.add_slider_int(T, G.VISUALS, "april_tung_esp_max_dist", "Tung ESP Max Distance", 50, 5000, 1000, root)
-    menu_util.bind_master(P, { "april_tung_esp_max_dist" })
 end
 
 function M.scan()

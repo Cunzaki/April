@@ -35,20 +35,20 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.WORLD)
-    menu.add_checkbox(T, G.WORLD, P, "Enable World ESP", false, { key = 0 })
+    menu_util.register_keybind(T, G.WORLD, P, "Resource ESP", false)
     for _, t in ipairs(maps.WORLD_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
     end
-    menu.add_checkbox(T, G.WORLD, "april_world_boxes", "World 3D Boxes", false, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_world_show_name", "World Show Name", true, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_world_show_distance", "World Show Distance", true, { parent = P })
-    menu.add_slider_int(T, G.WORLD, "april_world_range", "World Range", 50, 2000, 500, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_world_boxes", "3D Boxes", false, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_world_show_name", "Show Name", true, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_world_show_distance", "Show Distance", true, { parent = P })
+    menu.add_slider_int(T, G.WORLD, "april_world_range", "Range", 50, 2000, 500, { parent = P })
 
     local child_ids = { "april_world_boxes", "april_world_show_name", "april_world_show_distance", "april_world_range" }
     for _, t in ipairs(maps.WORLD_TOGGLES) do
         child_ids[#child_ids + 1] = t.id
     end
-    menu_util.bind_master(P, child_ids)
+    menu_util.bind_children(P, child_ids)
 end
 
 function M.begin_static_scan()

@@ -236,21 +236,20 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.WORLD)
-    menu_util.section(T, G.WORLD, "Loot ESP")
-    menu.add_checkbox(T, G.WORLD, P, "Enable Loot ESP", false, { key = 0 })
+    menu_util.register_keybind(T, G.WORLD, P, "Loot ESP", false)
     for _, t in ipairs(maps.LOOT_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
     end
-    menu.add_checkbox(T, G.WORLD, "april_loot_boxes", "Loot 3D Boxes", false, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_loot_show_name", "Loot Show Name", true, { parent = P })
-    menu.add_checkbox(T, G.WORLD, "april_loot_show_distance", "Loot Show Distance", true, { parent = P })
-    menu.add_slider_int(T, G.WORLD, "april_loot_range", "Loot Range", 50, 2000, 300, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_loot_boxes", "3D Boxes", false, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_loot_show_name", "Show Name", true, { parent = P })
+    menu.add_checkbox(T, G.WORLD, "april_loot_show_distance", "Show Distance", true, { parent = P })
+    menu.add_slider_int(T, G.WORLD, "april_loot_range", "Range", 50, 2000, 300, { parent = P })
 
     local child_ids = { "april_loot_boxes", "april_loot_show_name", "april_loot_show_distance", "april_loot_range" }
     for _, t in ipairs(maps.LOOT_TOGGLES) do
         child_ids[#child_ids + 1] = t.id
     end
-    menu_util.bind_master(P, child_ids)
+    menu_util.bind_children(P, child_ids)
 end
 
 function M.scan_drops()
