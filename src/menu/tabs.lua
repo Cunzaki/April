@@ -9,6 +9,7 @@ M.features = {}
 M._menu_registered = false
 
 M.FEATURE_ORDER = {
+    "features.combat.aimbot",
     "features.combat.gun_mods",
     "features.visuals.target_overlay",
     "features.visuals.crosshair",

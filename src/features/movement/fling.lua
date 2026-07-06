@@ -335,7 +335,6 @@ local function release_fling(char, root, hum)
     move.set_character_noclip(char, root, false)
     pcall(function() hum.platform_stand = false end)
     move.humanoid_running(hum)
-    move.humanoid_thaw(hum)
 end
 
 local function write_pos(inst, x, y, z)

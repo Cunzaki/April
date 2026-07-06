@@ -9,7 +9,8 @@ local M = {}
 M.TAB = "April"
 
 M.G = {
-    COMBAT = "Combat",
+    SILENT_AIM = "Silent Aim",
+    GUN_MODS = "Gun Mods",
     VISUALS = "Visuals",
     WORLD = "World",
     RADAR = "Radar",
@@ -18,12 +19,13 @@ M.G = {
 }
 
 M.G_SIDE = {
-    [M.G.COMBAT] = "left",
-    [M.G.VISUALS] = "right",
-    [M.G.WORLD] = "left",
-    [M.G.RADAR] = "right",
-    [M.G.MISC] = "left",
-    [M.G.CONFIG] = "right",
+    [M.G.SILENT_AIM] = "left",
+    [M.G.GUN_MODS] = "right",
+    [M.G.VISUALS] = "left",
+    [M.G.WORLD] = "right",
+    [M.G.RADAR] = "left",
+    [M.G.MISC] = "right",
+    [M.G.CONFIG] = "left",
 }
 
 M._tab_ready = false
@@ -51,9 +53,10 @@ function M.ensure_groups()
     M.ensure_tab()
 
     local rows = {
-        { M.G.COMBAT, M.G.VISUALS },
-        { M.G.WORLD, M.G.RADAR },
-        { M.G.MISC, M.G.CONFIG },
+        { M.G.SILENT_AIM, M.G.GUN_MODS },
+        { M.G.VISUALS, M.G.WORLD },
+        { M.G.RADAR, M.G.MISC },
+        { M.G.CONFIG },
     }
 
     for _, row in ipairs(rows) do

@@ -1,4 +1,4 @@
---[[ CFrame movement — position writes, zero velocity (no velocity exploits). ]]
+--[[ Movement helpers — position nudge + velocity (no WalkSpeed writes). ]]
 
 local env = April.require("core.env")
 
@@ -8,6 +8,12 @@ local BASE_PARTS = {
     Part = true, MeshPart = true, UnionOperation = true,
     WedgePart = true, CornerWedgePart = true, TrussPart = true,
 }
+
+local NOCLIP_PARTS = {
+    "HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso", "Head",
+}
+
+local HIP_OFFSET = 3.0
 
 function M.delta_time()
     if utility and utility.get_delta_time then
@@ -32,6 +38,13 @@ function M.read_pos(inst)
     }
 end
 
+function M.read_velocity(inst)
+    if not inst then return 0, 0, 0 end
+    local vel = inst.AssemblyLinearVelocity or inst.Velocity or inst.velocity
+    if not vel then return 0, 0, 0 end
+    return vel.X or vel.x or 0, vel.Y or vel.y or 0, vel.Z or vel.z or 0
+end
+
 function M.is_base_part(inst)
     if not inst then return false end
     if inst.is_a then
@@ -42,18 +55,36 @@ function M.is_base_part(inst)
     return BASE_PARTS[cn] == true
 end
 
+function M.find_part(char, name)
+    if not char then return nil end
+    return env.safe_call(function()
+        if char.find_first_child then return char:find_first_child(name) end
+        return char:FindFirstChild(name)
+    end)
+end
+
 function M.iter_parts(char)
     local out = {}
     if not char then return out end
-    local list = env.safe_call(function() return char:get_children() end)
-        or env.safe_call(function() return char:GetChildren() end)
-        or {}
-    for _, inst in ipairs(list) do
-        if M.is_base_part(inst) then
-            out[#out + 1] = inst
+
+    local desc = env.safe_call(function() return char:get_descendants() end)
+        or env.safe_call(function() return char:GetDescendants() end)
+    if desc then
+        for _, inst in ipairs(desc) do
+            if M.is_base_part(inst) then
+                out[#out + 1] = inst
+            end
         end
     end
+
     return out
+end
+
+function M.set_character_noclip(char, _root, enabled)
+    local collide = not enabled
+    for _, inst in ipairs(M.iter_parts(char)) do
+        M.set_part_collide(inst, collide)
+    end
 end
 
 function M.set_velocity(inst, x, y, z)
@@ -65,31 +96,17 @@ function M.set_velocity(inst, x, y, z)
     end
 end
 
-function M.zero_part(inst)
-    if not inst then return end
-    M.set_velocity(inst, 0, 0, 0)
-    if part and part.set_angular_velocity then
-        pcall(part.set_angular_velocity, inst, 0, 0, 0)
-    end
-end
-
-function M.set_position(inst, x, y, z)
+function M.set_position_only(inst, x, y, z)
     if not inst then return end
     if part and part.set_position then
         pcall(part.set_position, inst, x, y, z)
     else
         pcall(function() inst.Position = Vector3.new(x, y, z) end)
     end
-    M.zero_part(inst)
 end
 
-function M.zero_character(char, root)
-    if root then M.zero_part(root) end
-    for _, inst in ipairs(M.iter_parts(char)) do
-        if inst ~= root then
-            M.zero_part(inst)
-        end
-    end
+function M.set_position(inst, x, y, z)
+    M.set_position_only(inst, x, y, z)
 end
 
 function M.set_part_collide(inst, collide)
@@ -101,46 +118,20 @@ function M.set_part_collide(inst, collide)
     end
 end
 
-function M.set_part_anchored(inst, anchored)
-    if not inst then return end
-    if part and part.set_anchored then
-        pcall(part.set_anchored, inst, anchored)
-    else
-        pcall(function() inst.Anchored = anchored end)
-    end
-end
-
-function M.set_character_noclip(char, root, enabled)
+function M.set_noclip_parts(char, enabled)
     if not char then return end
     local collide = not enabled
-
-    if root then
-        M.set_part_collide(root, collide)
-    end
-
-    for _, inst in ipairs(M.iter_parts(char)) do
-        M.set_part_collide(inst, collide)
-    end
-
-    local desc = env.safe_call(function() return char:get_descendants() end)
-        or env.safe_call(function() return char:GetDescendants() end)
-    if desc then
-        for _, inst in ipairs(desc) do
-            if M.is_base_part(inst) then
-                M.set_part_collide(inst, collide)
-            end
+    for i = 1, #NOCLIP_PARTS do
+        local p = M.find_part(char, NOCLIP_PARTS[i])
+        if p and M.is_base_part(p) then
+            M.set_part_collide(p, collide)
         end
     end
 end
 
-function M.humanoid_flying(hum)
-    if not hum then return end
-    pcall(function() hum.state = 6 end)
-end
-
-function M.humanoid_running(hum)
-    if not hum then return end
-    pcall(function() hum.state = 8 end)
+function M.humanoid_state(hum, state)
+    if not hum or state == nil then return end
+    pcall(function() hum.state = state end)
 end
 
 function M.humanoid_suspend(hum)
@@ -151,22 +142,26 @@ function M.humanoid_suspend(hum)
     pcall(function() hum.sit = false end)
 end
 
-function M.humanoid_freeze(hum)
-    if not hum then return end
-    pcall(function() hum.auto_rotate = false end)
-    pcall(function() hum.evaluate_state_machine = false end)
-    pcall(function() hum.sit = false end)
+function M.humanoid_running(hum)
+    M.humanoid_state(hum, 8)
 end
 
-function M.humanoid_thaw(hum)
-    M.humanoid_release(hum)
+function M.zero_part(inst)
+    if not inst then return end
+    M.set_velocity(inst, 0, 0, 0)
+    if part and part.set_angular_velocity then
+        pcall(part.set_angular_velocity, inst, 0, 0, 0)
+    end
 end
 
-function M.humanoid_release(hum)
-    if not hum then return end
-    pcall(function() hum.platform_stand = false end)
-    pcall(function() hum.auto_rotate = true end)
-    pcall(function() hum.evaluate_state_machine = true end)
+function M.zero_character(char, root)
+    if root then M.zero_part(root) end
+    for i = 1, #NOCLIP_PARTS do
+        local p = char and M.find_part(char, NOCLIP_PARTS[i])
+        if p and p ~= root then
+            M.zero_part(p)
+        end
+    end
 end
 
 function M.camera_flat_axes()
@@ -180,33 +175,75 @@ function M.camera_flat_axes()
     if lm < 0.001 then return nil end
     lx, lz = lx / lm, lz / lm
 
-    local rx, rz = -lz, lx
-    return lx, lz, rx, rz
+    return lx, lz, -lz, lx
 end
 
---[[ WASD = flat XZ only. Space / Ctrl = vertical. ]]
-function M.read_fly_input()
+function M.read_flat_input()
     local lx, lz, rx, rz = M.camera_flat_axes()
-    local mx, mz, my = 0, 0, 0
+    if not lx then return 0, 0 end
 
-    if lx then
-        if M.key_down(0x57) then mx, mz = mx + lx, mz + lz end
-        if M.key_down(0x53) then mx, mz = mx - lx, mz - lz end
-        if M.key_down(0x41) then mx, mz = mx - rx, mz - rz end
-        if M.key_down(0x44) then mx, mz = mx + rx, mz + rz end
-    end
+    local mx, mz = 0, 0
+    if M.key_down(0x57) then mx, mz = mx + lx, mz + lz end
+    if M.key_down(0x53) then mx, mz = mx - lx, mz - lz end
+    if M.key_down(0x41) then mx, mz = mx - rx, mz - rz end
+    if M.key_down(0x44) then mx, mz = mx + rx, mz + rz end
 
+    local mag = math.sqrt(mx * mx + mz * mz)
+    if mag < 0.001 then return 0, 0 end
+    return mx / mag, mz / mag
+end
+
+function M.read_fly_input()
+    local mx, mz = M.read_flat_input()
+    local my = 0
     if M.key_down(0x20) then my = 1 end
     if M.key_down(0x11) then my = -1 end
+    return mx, my, mz
+end
 
-    local hm = math.sqrt(mx * mx + mz * mz)
-    if hm > 0.001 then
-        mx, mz = mx / hm, mz / hm
-    else
-        mx, mz = 0, 0
+function M.ground_distance(x, y, z)
+    if not raycast or not raycast.cast then return nil end
+    if raycast.is_ready and not raycast.is_ready() then return nil end
+
+    local hit, _, dist = raycast.cast(x, y + 2, z, x, y - 512, z)
+    if not hit then return nil end
+    return dist
+end
+
+function M.floor_y_at(x, y, z)
+    local dist = M.ground_distance(x, y, z)
+    if not dist then return nil end
+    return y + 2 - dist + HIP_OFFSET
+end
+
+function M.clamp_above_floor(x, y, z)
+    local floor_y = M.floor_y_at(x, y, z)
+    if floor_y and y < floor_y then return floor_y end
+    return y
+end
+
+--[[ Position nudge + matching velocity — legacy Fallen pattern. ]]
+function M.drive_root(root, pos, dx, dy, dz, speed, dt)
+    if not root or not pos then return pos end
+
+    dt = dt or M.delta_time()
+    local mag = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+    if mag < 0.001 then
+        M.set_velocity(root, 0, -0.1, 0)
+        return pos
     end
 
-    return mx, my, mz
+    dx, dy, dz = dx / mag, dy / mag, dz / mag
+    local step = speed * dt
+    local nx = pos.x + dx * step
+    local ny = pos.y + dy * step
+    local nz = pos.z + dz * step
+
+    M.set_position_only(root, nx, ny, nz)
+    M.set_velocity(root, dx * speed, dy * speed, dz * speed)
+
+    return { x = nx, y = ny, z = nz }
 end
 
 return M

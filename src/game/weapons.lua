@@ -9,40 +9,38 @@ local weapon_names = {}
 
 local ROBLOX_GRAV = 196.2
 
--- Legacy effective drop constants (used when ToolInfo gravity is a multiplier < 5).
+-- ToolInfo-aligned fallbacks when live module is unavailable (gravity = Bullet.Gravity multiplier).
 local FALLBACK_STATS = {
-    ["Military Barret"] = { speed = 1500, gravity = 25 },
-    ["Military Barrett"] = { speed = 1500, gravity = 25 },
-    ["Military M4A1"] = { speed = 950, gravity = 18 },
-    ["Military M39"] = { speed = 900, gravity = 18 },
-    ["Military MP7"] = { speed = 750, gravity = 15 },
-    ["Military PKM"] = { speed = 850, gravity = 18 },
-    ["Military USP"] = { speed = 650, gravity = 12 },
-    ["Bruno's M4A1"] = { speed = 1000, gravity = 18 },
-    ["Salvaged AK47"] = { speed = 800, gravity = 15 },
-    ["Salvaged AK74u"] = { speed = 750, gravity = 15 },
-    ["Salvaged AK4"] = { speed = 800, gravity = 15 },
-    ["Salvaged Sniper"] = { speed = 1100, gravity = 20 },
-    ["Salvaged M14"] = { speed = 850, gravity = 18 },
-    ["Salvaged SMG"] = { speed = 700, gravity = 12 },
-    ["Salvaged Skorpion"] = { speed = 650, gravity = 12 },
-    ["Salvaged Python"] = { speed = 750, gravity = 15 },
-    ["Salvaged P250"] = { speed = 650, gravity = 12 },
-    ["Salvaged Pipe Rifle"] = { speed = 800, gravity = 20 },
-    ["Salvaged Pump Action"] = { speed = 550, gravity = 15 },
-    ["Salvaged Shotgun"] = { speed = 550, gravity = 15 },
-    ["Salvaged Double Barrel"] = { speed = 550, gravity = 15 },
-    ["Crossbow"] = { speed = 420, gravity = 35 },
-    ["Wooden Bow"] = { speed = 280, gravity = 30 },
-    ["Nail Gun"] = { speed = 350, gravity = 20 },
-    ["Wooden Spear"] = { speed = 200, gravity = 45 },
-    ["Stone Spear"] = { speed = 200, gravity = 45 },
-    ["Pumpkin Launcher"] = { speed = 300, gravity = 50 },
-    ["Salvaged RPG"] = { speed = 400, gravity = 60 },
-    ["Military Grenade Launcher"] = { speed = 350, gravity = 55 },
-    ["Salvaged Grenade Launcher"] = { speed = 350, gravity = 55 },
-    ["Military AA12"] = { speed = 550, gravity = 15 },
-    ["Salvaged Break Action"] = { speed = 550, gravity = 15 },
+    ["Military Barret"] = { speed = 2500, gravity = 0.55 },
+    ["Military Barrett"] = { speed = 2500, gravity = 0.55 },
+    ["Military M4A1"] = { speed = 2100, gravity = 0.55 },
+    ["Military M39"] = { speed = 2400, gravity = 0.52 },
+    ["Military MP7"] = { speed = 1900, gravity = 0.6 },
+    ["Military PKM"] = { speed = 2400, gravity = 0.55 },
+    ["Military USP"] = { speed = 1800, gravity = 0.6 },
+    ["Military AA12"] = { speed = 400, gravity = 0.6 },
+    ["Bruno's M4A1"] = { speed = 2100, gravity = 0.55 },
+    ["Salvaged AK47"] = { speed = 2100, gravity = 0.55 },
+    ["Salvaged AK74u"] = { speed = 1900, gravity = 0.6 },
+    ["Salvaged AK4"] = { speed = 2100, gravity = 0.55 },
+    ["Salvaged Sniper"] = { speed = 2100, gravity = 0.55 },
+    ["Salvaged M14"] = { speed = 2100, gravity = 0.55 },
+    ["Salvaged SMG"] = { speed = 1600, gravity = 0.6 },
+    ["Salvaged Skorpion"] = { speed = 1400, gravity = 0.6 },
+    ["Salvaged Python"] = { speed = 1500, gravity = 0.6 },
+    ["Salvaged P250"] = { speed = 1400, gravity = 0.6 },
+    ["Salvaged Pipe Rifle"] = { speed = 800, gravity = 0.55 },
+    ["Salvaged Pump Action"] = { speed = 400, gravity = 0.6 },
+    ["Salvaged Shotgun"] = { speed = 400, gravity = 0.6 },
+    ["Salvaged Double Barrel"] = { speed = 400, gravity = 0.6 },
+    ["Salvaged Break Action"] = { speed = 400, gravity = 0.6 },
+    ["Crossbow"] = { speed = 420, gravity = 0.2 },
+    ["Wooden Bow"] = { speed = 280, gravity = 0.2 },
+    ["Nail Gun"] = { speed = 165, gravity = 0.25 },
+    ["Pumpkin Launcher"] = { speed = 100, gravity = 0.12 },
+    ["Salvaged RPG"] = { speed = 100, gravity = 0.12 },
+    ["Military Grenade Launcher"] = { speed = 350, gravity = 0.55 },
+    ["Salvaged Grenade Launcher"] = { speed = 350, gravity = 0.55 },
 }
 
 M._last_held = nil
@@ -99,6 +97,8 @@ end
 
 function M.is_ranged_weapon_name(name)
     if not name or name == "" then return false end
+    local lower = name:lower()
+    if lower:find("bow", 1, true) or lower:find("crossbow", 1, true) then return true end
     if name_looks_melee(name) then return false end
 
     if not loaded then M.load() end
@@ -158,7 +158,17 @@ function M.get_held_ranged_weapon_name()
 end
 
 function M.holding_ranged_weapon()
-    return M.get_held_ranged_weapon_name() ~= nil
+    return M._last_held_ranged ~= nil
+end
+
+function M.cached_held_ranged()
+    return M._last_held_ranged
+end
+
+function M.is_bow_weapon_name(name)
+    if not name then return false end
+    local n = name:lower()
+    return n:find("bow", 1, true) ~= nil
 end
 
 function M.invalidate()
@@ -169,6 +179,10 @@ function M.invalidate()
     M._last_held = nil
     M._last_held_ranged = nil
     M._weapon_changed_at = 0
+    pcall(function()
+        local origin = April.require("game.combat_origin")
+        if origin.invalidate then origin.invalidate() end
+    end)
 end
 
 function M.in_game_ready()
@@ -253,9 +267,13 @@ local function read_tool_attributes(inst)
         end
     end)
     if speed then
+        local grav = gravity
+        if not grav or grav <= 0 or grav > 2 then
+            grav = 0.55
+        end
         return {
             speed = speed,
-            gravity = gravity or 35,
+            gravity = grav,
             name = inst_name(inst),
             from_attributes = true,
         }
@@ -340,23 +358,14 @@ function M.get_held_tool()
 end
 
 function M.drop_gravity(grav)
-    if not grav or grav <= 0 then return 35 end
-    if grav < 5 then return grav * ROBLOX_GRAV end
+    if not grav or grav <= 0 then return ROBLOX_GRAV * 0.55 end
+    if grav <= 2 then return grav * ROBLOX_GRAV end
     return grav
 end
 
 function M.get_weapon_stats(name)
     name = name or M.get_held_weapon_name()
     if not name then return nil end
-
-    local _, tool_inst = M.get_held_tool()
-    if tool_inst then
-        local from_attrs = read_tool_attributes(tool_inst)
-        if from_attrs then
-            from_attrs.name = name
-            return from_attrs
-        end
-    end
 
     local entry = M.get(name)
     if entry and entry.Bullet then
@@ -365,7 +374,9 @@ function M.get_weapon_stats(name)
             gravity = entry.Bullet.Gravity or 0.55,
             name = name,
             from_toolinfo = true,
-            is_bow = entry.Weapon and entry.Weapon.IsBow or false,
+            is_bow = (entry.Weapon and entry.Weapon.IsBow)
+                or name == "Wooden Bow"
+                or name == "Crossbow",
         }
     end
 
@@ -380,7 +391,16 @@ function M.get_weapon_stats(name)
         }
     end
 
-    return { speed = 950, gravity = 35, name = name }
+    local _, tool_inst = M.get_held_tool()
+    if tool_inst then
+        local from_attrs = read_tool_attributes(tool_inst)
+        if from_attrs then
+            from_attrs.name = name
+            return from_attrs
+        end
+    end
+
+    return { speed = 950, gravity = 0.55, name = name }
 end
 
 function M.tick()
@@ -410,6 +430,10 @@ function M.tick()
         M._last_held = held
         M._last_held_ranged = held
         M._weapon_changed_at = utility and utility.get_tick_count and utility.get_tick_count() or 0
+        pcall(function()
+            local origin = April.require("game.combat_origin")
+            if origin.invalidate then origin.invalidate() end
+        end)
         pcall(function()
             local gun_mods = April.require("features.combat.gun_mods")
             if gun_mods.on_weapon_changed then

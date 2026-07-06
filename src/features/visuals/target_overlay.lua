@@ -15,6 +15,7 @@ local P = "april_target_overlay"
 local GEAR_SLOTS = 7
 local GEAR_TTL = 500
 local TARGET_POLL_MS = 120
+local MAX_ATTACHMENTS = 5
 
 local gear_cache = {}
 local last_poll_ms = 0
@@ -23,7 +24,10 @@ M._target = nil
 M._layout = nil
 
 local SLOT_BG = { 0.14, 0.14, 0.16, 0.72 }
-local HELD_BG = { 0.2, 0.2, 0.22, 0.85 }
+local HELD_BG = { 0.52, 0.12, 0.14, 0.9 }
+local HELD_EDGE = { 0.95, 0.28, 0.32, 0.85 }
+local ATT_BG = { 0.16, 0.16, 0.18, 0.82 }
+local ATT_EDGE = { 0.45, 0.45, 0.48, 0.5 }
 local EMPTY_BG = { 0.08, 0.08, 0.1, 0.55 }
 local EMPTY_EDGE = { 1, 1, 1, 0.12 }
 local ROUND = 5
@@ -158,24 +162,44 @@ local function pack_gear(armor_list)
     return packed
 end
 
+local function pack_attachments(list)
+    local packed = {}
+    for i = 1, math.min(#(list or {}), MAX_ATTACHMENTS) do
+        packed[#packed + 1] = list[i]
+    end
+    return packed
+end
+
 local function build_layout(gear, gear_sz)
     local held = gear and gear.held
     local packed = pack_gear(gear and gear.armor)
+    local attachments = pack_attachments(gear and gear.attachments)
     local held_sz = math.floor(gear_sz * 1.28)
+    local att_sz = math.floor(gear_sz * 0.78)
     local gap = 5
+    local att_gap = 4
     local row_w = GEAR_SLOTS * gear_sz + (GEAR_SLOTS - 1) * gap
+    local att_row_w = #attachments > 0 and (#attachments * att_sz + (#attachments - 1) * att_gap) or 0
+    local held_row_w = held_sz + (#attachments > 0 and (10 + att_row_w) or 0)
+    local panel_w = math.max(row_w, held_row_w)
 
     local layout = {
         held = held,
+        attachments = attachments,
         packed = packed,
         filled = #packed,
         gear_sz = gear_sz,
         held_sz = held_sz,
+        att_sz = att_sz,
         gap = gap,
+        att_gap = att_gap,
         row_w = row_w,
+        held_row_w = held_row_w,
+        panel_w = panel_w,
         row_gap = 8,
         name_fs = 11,
         held_key = nil,
+        att_keys = {},
         gear_keys = {},
     }
 
@@ -183,6 +207,11 @@ local function build_layout(gear, gear_sz)
     for i = 1, layout.filled do
         layout.gear_keys[i] = resolve_image_key(packed[i])
         local key = layout.gear_keys[i]
+        if key then image_cache.begin_load(key) end
+    end
+    for i = 1, #attachments do
+        layout.att_keys[i] = resolve_image_key(attachments[i])
+        local key = layout.att_keys[i]
         if key then image_cache.begin_load(key) end
     end
     if layout.held_key then
@@ -201,14 +230,23 @@ end
 local function draw_slot(x, y, size, key, piece, style)
     local pad = 3
     local bg = SLOT_BG
+    local edge = nil
+
     if style == "held" then
         bg = HELD_BG
+        edge = HELD_EDGE
+    elseif style == "attachment" then
+        bg = ATT_BG
+        edge = ATT_EDGE
     elseif style == "empty" then
         bg = EMPTY_BG
+        edge = EMPTY_EDGE
     end
 
     draw.rect_filled(x, y, size, size, bg, ROUND)
-    if style == "empty" and draw.rect then
+    if edge and draw.rect then
+        draw.rect(x, y, size, size, edge, ROUND, 1.5)
+    elseif style == "empty" and draw.rect then
         draw.rect(x, y, size, size, EMPTY_EDGE, ROUND, 1)
     end
 
@@ -314,9 +352,19 @@ function M.draw()
     draw.text(cx - nw * 0.5, top, name, { 1, 1, 1, 1 }, layout.name_fs)
 
     local y = top + layout.name_fs + 6
-
     local held = held_piece(layout.held)
-    draw_slot(cx - layout.held_sz * 0.5, y, layout.held_sz, layout.held_key, held, held and "held" or "empty")
+    local row_x = cx - layout.held_row_w * 0.5
+
+    draw_slot(row_x, y, layout.held_sz, layout.held_key, held, held and "held" or "empty")
+
+    if #layout.attachments > 0 then
+        local ax = row_x + layout.held_sz + 10
+        for i = 1, #layout.attachments do
+            local sx = ax + (i - 1) * (layout.att_sz + layout.att_gap)
+            draw_slot(sx, y + (layout.held_sz - layout.att_sz) * 0.5, layout.att_sz, layout.att_keys[i], layout.attachments[i], "attachment")
+        end
+    end
+
     y = y + layout.held_sz + layout.row_gap
 
     local start_x = cx - layout.row_w * 0.5

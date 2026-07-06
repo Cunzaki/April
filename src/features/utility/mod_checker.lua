@@ -16,9 +16,10 @@ local HEAD_OFFSET = 3.5
 
 local seen = {}
 local active = {}
-local last_scan = 0
+local last_scan = -1
 local SCAN_MS = 2500
 M._session = nil
+M._was_enabled = false
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -35,13 +36,14 @@ end
 function M.reset_state()
     seen = {}
     active = {}
-    last_scan = 0
+    last_scan = -1
 end
 
 function M.tick_session()
     local sid = session_id()
     if M._session == nil then
         M._session = sid
+        last_scan = -1
         return
     end
     if sid ~= M._session then
@@ -93,6 +95,7 @@ end
 
 function M.init()
     image_cache.ensure(MOD_ICON_KEY, asset_urls.mod_warning_png())
+    last_scan = -1
 end
 
 function M.track_player(p, role)
@@ -135,16 +138,10 @@ function M.check_player(p)
 end
 
 function M.reconcile_active()
-    if not entity or not entity.get_players then
-        M.reset_state()
-        return
-    end
+    if not entity or not entity.get_players then return end
 
     local players = entity.get_players()
-    if #players == 0 then
-        M.reset_state()
-        return
-    end
+    if #players == 0 then return end
 
     local present = {}
     for _, p in ipairs(players) do
@@ -191,17 +188,27 @@ function M.on_player_removed(p)
     end
 end
 
+function M.is_staff(player)
+    if not player then return false end
+    local uid = player.user_id
+    if not uid or uid == 0 then return false end
+    if active[uid] then return true end
+    return mod_ids.role_for(uid) ~= nil
+end
+
 function M.update(_dt)
     M.tick_session()
 
     if not settings.enabled(P) then
-        M.reset_state()
+        if M._was_enabled then M.reset_state() end
+        M._was_enabled = false
         return
     end
+    M._was_enabled = true
 
     local now = tick_ms()
     local interval = settings.num("april_mod_checker_interval", SCAN_MS)
-    if now - last_scan >= interval then
+    if last_scan < 0 or (now - last_scan) >= interval then
         last_scan = now
         M.scan_all()
     end
@@ -230,82 +237,131 @@ function M.draw_mod_markers()
     end
 end
 
-function M.draw()
-    M.draw_mod_markers()
-
-    if not settings.enabled(P) then return end
-    if not draw or not draw.text then return end
-
+local function build_staff_rows()
     local rows = {}
     local me = env.get_local_player()
     local now = tick_ms()
 
-    for uid, entry in pairs(active) do
-        local still_here = false
-        local dist = nil
+    if not entity or not entity.get_players then return rows end
 
-        for _, p in ipairs(entity and entity.get_players and entity.get_players() or {}) do
-            if p.user_id == uid then
-                still_here = true
-                if me and me.position and p.position then
-                    local dx = p.position.x - me.position.x
-                    local dy = p.position.y - me.position.y
-                    local dz = p.position.z - me.position.z
-                    dist = math.floor(math.sqrt(dx * dx + dy * dy + dz * dz))
-                end
-                break
-            end
+    for _, p in ipairs(entity.get_players()) do
+        if p.is_local then goto continue end
+
+        local uid = p.user_id
+        if not uid or uid == 0 then goto continue end
+
+        local role = mod_ids.role_for(uid)
+        if not role then goto continue end
+
+        M.track_player(p, role)
+        local entry = active[uid]
+        if not entry then goto continue end
+
+        local dist = nil
+        if me and me.position and p.position then
+            local dx = p.position.x - me.position.x
+            local dy = p.position.y - me.position.y
+            local dz = p.position.z - me.position.z
+            dist = math.floor(math.sqrt(dx * dx + dy * dy + dz * dz))
         end
 
-        if not still_here then
-            active[uid] = nil
-            seen[uid] = nil
-            goto continue
+        local meta = format_duration(now - (entry.first_seen or now))
+        if dist then
+            meta = meta .. "  |  " .. dist .. "m"
         end
 
         rows[#rows + 1] = {
-            entry = entry,
-            dist = dist,
-            duration = format_duration(now - (entry.first_seen or now)),
+            name = entry.label or entry.username or "Unknown",
+            role = role,
+            meta = meta,
+            first_seen = entry.first_seen or now,
         }
 
         ::continue::
     end
 
-    if #rows == 0 then return end
-
     table.sort(rows, function(a, b)
-        return (a.entry.first_seen or 0) < (b.entry.first_seen or 0)
+        return (a.first_seen or 0) < (b.first_seen or 0)
     end)
 
-    if not draw.window then return end
+    return rows
+end
+
+local function draw_staff_panel(x, y, width, rows)
+    if not draw or not draw.text then return end
+
+    local pad = 10
+    local title_h = 24
+    local row_h = 44
+    local count = math.max(#rows, 1)
+    local height = title_h + count * row_h + 6
+
+    theme.draw_panel(x, y, width, height, {
+        bg = theme.alpha(theme.BG, 0.90),
+        border = theme.alpha(theme.BORDER, 0.45),
+        accent = theme.RED,
+        accent_w = 2,
+        rounding = theme.ROUND,
+    })
+
+    local title = "Staff In Lobby"
+    if #rows > 1 then
+        title = title .. " (" .. #rows .. ")"
+    end
+    draw_util.text(x + pad, y + 6, title, theme.TEXT, 12)
+
+    local div_y = y + title_h
+    if draw.line then
+        draw.line(x + pad, div_y, x + width - pad, div_y, theme.alpha(theme.BORDER, 0.55), 1)
+    end
+
+    local ry = div_y + 6
+    if #rows == 0 then
+        draw.text(x + pad + 12, ry, "No staff detected", theme.TEXT_MUTED, 11)
+        return
+    end
+
+    for i = 1, #rows do
+        local row = rows[i]
+        local accent = row.accent or theme.role_accent(row.role)
+
+        if i > 1 and draw.line then
+            draw.line(x + pad, ry - 4, x + width - pad, ry - 4, theme.alpha(theme.BORDER, 0.22), 1)
+        end
+
+        if draw.circle_filled then
+            draw.circle_filled(x + pad + 3, ry + 7, 3, accent, 8)
+        end
+
+        local name = row.name or "?"
+        if #name > 20 then name = name:sub(1, 18) .. ".." end
+        draw.text(x + pad + 12, ry, name, theme.TEXT, 13)
+
+        local role = row.role or "Staff"
+        if #role > 24 then role = role:sub(1, 22) .. ".." end
+        draw.text(x + pad + 12, ry + 15, role, accent, 11)
+
+        if row.meta and row.meta ~= "" then
+            draw.text(x + pad + 12, ry + 28, row.meta, theme.TEXT_MUTED, 10)
+        end
+
+        ry = ry + row_h
+    end
+end
+
+function M.draw()
+    M.draw_mod_markers()
+
+    if not settings.enabled(P) then return end
+
+    M.reconcile_active()
 
     local sw, _ = draw_util.screen_size()
     local panel_w = 260
     local x = sw - panel_w - 16
-    local items = {}
+    local rows = build_staff_rows()
 
-    for i = 1, #rows do
-        local row = rows[i]
-        local entry = row.entry
-        local meta = row.duration
-        if row.dist then
-            meta = meta .. "  |  " .. row.dist .. "m"
-        end
-
-        local name = entry.label or entry.username or "Unknown"
-        if #name > 18 then name = name:sub(1, 16) .. ".." end
-
-        local role = entry.role or "Staff"
-        items[#items + 1] = { name .. "  |  " .. role, meta }
-    end
-
-    local title = "Staff In Lobby"
-    if #items > 1 then
-        title = title .. " (" .. #items .. ")"
-    end
-
-    draw.window(x, 72, "april_staff_lobby", title, items)
+    draw_staff_panel(x, 72, panel_w, rows)
 end
 
 return M

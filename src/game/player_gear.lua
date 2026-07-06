@@ -1,6 +1,7 @@
 local env = April.require("core.env")
 local items = April.require("game.items")
 local item_catalog = April.require("game.item_catalog")
+local inventory = April.require("game.inventory")
 local weapons = April.require("game.weapons")
 
 local M = {}
@@ -15,6 +16,12 @@ local ARMOR_ATTRIBUTES = {
     "WaterFilter",
     "SteelToes",
     "Snorkle",
+}
+
+local ATTACHMENT_SLOT_HINTS = {
+    ["p1"] = true, ["p2"] = true, ["p3"] = true, ["p4"] = true,
+    ["slot1"] = true, ["slot2"] = true, ["slot3"] = true,
+    ["sight"] = true, ["muzzle"] = true, ["underbarrel"] = true,
 }
 
 local function parse_variant_name(name)
@@ -37,6 +44,55 @@ local function read_attribute(inst, key)
     return nil
 end
 
+local function is_tool(inst)
+    if not inst then return false end
+    local cn = inst.ClassName or inst.class_name
+    return cn == "Tool"
+end
+
+local function is_attachment_slot_name(name)
+    if not name or name == "" then return true end
+    local lower = name:lower()
+    if ATTACHMENT_SLOT_HINTS[lower] then return true end
+    if lower:match("^p%d+$") then return true end
+    if lower:match("^slot%d+$") then return true end
+    return false
+end
+
+local function is_armor_child_name(name)
+    if not name or name == "" then return true end
+    if name:sub(1, 6) == "Armor_" or name:sub(1, 6) == "Armor:" then return true end
+    if name:find("Armor", 1, true) and name:find("/", 1, true) then return true end
+    return false
+end
+
+local function is_attachment_name(name)
+    if not name or name == "" then return false end
+    if is_attachment_slot_name(name) then return false end
+
+    local base = select(1, parse_variant_name(name))
+    local row = item_catalog.get_by_name(base)
+    if row and row.type == "Attachment" then return true end
+
+    local t = items.get_type(base)
+    return t == "Attachment"
+end
+
+local function is_valid_held_label(name)
+    if not name or name == "" then return false end
+    if is_attachment_slot_name(name) then return false end
+    if is_armor_child_name(name) then return false end
+    if is_attachment_name(name) then return false end
+    return true
+end
+
+local function looks_like_held_item(name)
+    if not is_valid_held_label(name) then return false end
+    if weapons.is_weapon_name(name) then return true end
+    if items.is_held_display(name) then return true end
+    return true
+end
+
 local function add_armor_piece(out, seen, piece)
     if not piece or not piece.name then return end
     if seen[piece.name] then return end
@@ -45,7 +101,7 @@ local function add_armor_piece(out, seen, piece)
 end
 
 local function add_held_piece(out, label)
-    if not label or label == "" then return false end
+    if not is_valid_held_label(label) then return false end
 
     local piece = items.resolve_item_label(label)
     if not piece then
@@ -55,6 +111,21 @@ local function add_held_piece(out, label)
 
     out.held = piece
     return true
+end
+
+local function add_attachment_piece(out, seen, label)
+    if not label or label == "" then return end
+    if is_attachment_slot_name(label) then return end
+    if not is_attachment_name(label) then return end
+    if seen[label] then return end
+
+    seen[label] = true
+    local piece = items.resolve_item_label(label)
+    if not piece then
+        local base, variant = parse_variant_name(label)
+        piece = items.make_piece(base or label, variant)
+    end
+    table.insert(out.attachments, piece)
 end
 
 local function try_armor_model(out, seen, name)
@@ -161,22 +232,133 @@ local function resolve_player_inst(player)
     end)
 end
 
-local function scan_instance_tree(inst, out, seen, depth)
+local function find_inst_by_name(char, name)
+    if not char or not name then return nil end
+
+    for _, child in ipairs(env.safe_call(function() return char:get_children() end) or {}) do
+        local child_name = child.Name or child.name
+        if child_name == name then
+            return child
+        end
+    end
+
+    return nil
+end
+
+local function find_held_on_character(char)
+    if not char then return nil, nil end
+
+    local fallback = nil
+    for _, child in ipairs(env.safe_call(function() return char:get_children() end) or {}) do
+        local name = child.Name or child.name
+        if not name or name == "" or is_armor_child_name(name) then goto continue end
+        if not is_valid_held_label(name) then goto continue end
+
+        if is_tool(child) then
+            return name, child
+        end
+
+        local cn = child.ClassName or child.class_name
+        if cn == "Model" and looks_like_held_item(name) then
+            if weapons.is_weapon_name(name) or items.is_held_display(name) then
+                return name, child
+            end
+            fallback = fallback or { name = name, inst = child }
+        end
+
+        ::continue::
+    end
+
+    if fallback then
+        return fallback.name, fallback.inst
+    end
+
+    return nil, nil
+end
+
+local function resolve_held_weapon(player, char)
+    if player.tool_name and player.tool_name ~= "" and is_valid_held_label(player.tool_name) then
+        local inst = char and find_inst_by_name(char, player.tool_name) or nil
+        return player.tool_name, inst
+    end
+
+    if char then
+        local toolbar_name = inventory.get_toolbar_held_name(char)
+        if toolbar_name and is_valid_held_label(toolbar_name) then
+            local inst = find_inst_by_name(char, toolbar_name) or select(2, find_held_on_character(char))
+            return toolbar_name, inst
+        end
+
+        local name, inst = find_held_on_character(char)
+        if name then
+            return name, inst
+        end
+    end
+
+    if player.is_local then
+        local name = weapons.get_held_weapon_name()
+        if name and is_valid_held_label(name) then
+            local inst = char and (find_inst_by_name(char, name) or select(2, find_held_on_character(char))) or nil
+            return name, inst
+        end
+    end
+
+    return nil, nil
+end
+
+local function scan_attachments_folder(folder, out, seen)
+    if not folder or not env.is_valid(folder) then return end
+
+    local children = env.safe_call(function()
+        if folder.get_children then return folder:get_children() end
+        if folder.GetChildren then return folder:GetChildren() end
+    end) or {}
+
+    for _, child in ipairs(children) do
+        local name = child.Name or child.name
+        if name and name ~= "" then
+            add_attachment_piece(out, seen, name)
+        end
+    end
+end
+
+local function scan_weapon_attachments(char, tool_inst, out, seen)
+    if tool_inst and env.is_valid(tool_inst) then
+        local attachments = env.safe_call(function()
+            if tool_inst.find_first_child then return tool_inst:find_first_child("Attachments") end
+            return tool_inst:FindFirstChild("Attachments")
+        end)
+        scan_attachments_folder(attachments, out, seen)
+
+        local weapon = env.safe_call(function()
+            if tool_inst.find_first_child then return tool_inst:find_first_child("Weapon") end
+            return tool_inst:FindFirstChild("Weapon")
+        end)
+        if weapon and env.is_valid(weapon) then
+            local nested = env.safe_call(function()
+                if weapon.find_first_child then return weapon:find_first_child("Attachments") end
+                return weapon:FindFirstChild("Attachments")
+            end)
+            scan_attachments_folder(nested, out, seen)
+        end
+        return
+    end
+
+    if not char then return end
+    for _, child in ipairs(env.safe_call(function() return char:get_children() end) or {}) do
+        if is_tool(child) or (child.ClassName or child.class_name) == "Model" then
+            scan_weapon_attachments(char, child, out, seen)
+        end
+    end
+end
+
+local function scan_armor_tree(inst, out, seen, depth)
     if not inst or not env.is_valid(inst) or depth > 8 then return end
 
     local name = inst.Name or inst.name
     if name and name ~= "" then
         if name:sub(1, 6) == "Armor_" or name:sub(1, 6) == "Armor:" then
             try_armor_model(out, seen, name)
-        end
-
-        if not out.held then
-            local cn = (inst.ClassName or inst.class_name or ""):lower()
-            if cn == "tool" then
-                add_held_piece(out, name)
-            elseif items.is_held_display(name) or weapons.is_weapon_name(name) then
-                add_held_piece(out, name)
-            end
         end
     end
 
@@ -186,27 +368,32 @@ local function scan_instance_tree(inst, out, seen, depth)
     end) or {}
 
     for _, child in ipairs(children) do
-        scan_instance_tree(child, out, seen, depth + 1)
+        scan_armor_tree(child, out, seen, depth + 1)
     end
 end
 
 function M.scan_player(player)
     local out = {
         held = nil,
+        attachments = {},
         armor = {},
     }
 
     if not player then return out end
 
-    if player.tool_name and player.tool_name ~= "" then
-        add_held_piece(out, player.tool_name)
+    local char = resolve_character(player)
+    local held_name, tool_inst = resolve_held_weapon(player, char)
+
+    if held_name then
+        add_held_piece(out, held_name)
     end
 
-    local char = resolve_character(player)
-    local seen = {}
+    local att_seen = {}
+    scan_weapon_attachments(char, tool_inst, out, att_seen)
 
+    local seen = {}
     if char then
-        scan_instance_tree(char, out, seen, 0)
+        scan_armor_tree(char, out, seen, 0)
         scan_armor_attributes(char, out, seen)
     end
 

@@ -3,11 +3,19 @@
 local M = {}
 
 local EYE_OFFSET_Y = 2.5
-local SEARCH_RADII = { 4, 8 }
-local SEARCH_STEPS = 8
+local DEFAULT_STEPS = 16
+local MIN_RADIUS = 0.1
+local MAX_RADIUS = 1
 
 function M.eye_offset_y()
     return EYE_OFFSET_Y
+end
+
+function M.clamp_radius(radius)
+    radius = tonumber(radius) or 1
+    if radius < MIN_RADIUS then return MIN_RADIUS end
+    if radius > MAX_RADIUS then return MAX_RADIUS end
+    return math.floor(radius * 100 + 0.5) / 100
 end
 
 function M.is_visible_from(ox, oy, oz, tx, ty, tz)
@@ -23,27 +31,63 @@ function M.is_visible_from_pos(origin, target)
     return M.is_visible_from(origin.x, origin.y, origin.z, target.x, target.y, target.z)
 end
 
-function M.find_manipulation_position(origin, target_pos)
-    if not origin or not target_pos then return nil end
+local function search_peek(origin, target_pos, max_radius, steps)
+    max_radius = M.clamp_radius(max_radius)
+    steps = steps or DEFAULT_STEPS
 
-    if M.is_visible_from_pos(origin, target_pos) then
-        return { x = origin.x, y = origin.y, z = origin.z }
-    end
-
-    for _, radius in ipairs(SEARCH_RADII) do
-        for i = 0, SEARCH_STEPS - 1 do
-            local angle = (i / SEARCH_STEPS) * math.pi * 2
-            local cx = origin.x + math.cos(angle) * radius
-            local cy = origin.y
-            local cz = origin.z + math.sin(angle) * radius
-            local candidate = { x = cx, y = cy, z = cz }
-            if M.is_visible_from(cx, cy, cz, target_pos.x, target_pos.y, target_pos.z) then
-                return candidate
-            end
+    for i = 0, steps - 1 do
+        local angle = (i / steps) * math.pi * 2
+        local cx = origin.x + math.cos(angle) * max_radius
+        local cy = origin.y
+        local cz = origin.z + math.sin(angle) * max_radius
+        if M.is_visible_from(cx, cy, cz, target_pos.x, target_pos.y, target_pos.z) then
+            return { x = cx, y = cy, z = cz }, max_radius
         end
     end
 
-    return nil
+    return nil, max_radius
+end
+
+--[[ state: off | direct | ready | blocked ]]
+function M.evaluate_manipulation(origin, target_pos, opts)
+    opts = opts or {}
+
+    if not origin or not target_pos then
+        return { state = "blocked", peek = nil, radius = M.clamp_radius(opts.max_radius) }
+    end
+
+    if M.is_visible_from_pos(origin, target_pos) then
+        return { state = "direct", peek = nil, radius = M.clamp_radius(opts.max_radius) }
+    end
+
+    local peek, radius = search_peek(origin, target_pos, opts.max_radius, opts.steps)
+    if peek then
+        return { state = "ready", peek = peek, radius = radius }
+    end
+
+    return { state = "blocked", peek = nil, radius = M.clamp_radius(opts.max_radius) }
+end
+
+function M.find_manipulation_position(origin, target_pos, opts)
+    local ev = M.evaluate_manipulation(origin, target_pos, opts)
+    if ev.state == "direct" then
+        return { x = origin.x, y = origin.y, z = origin.z }
+    end
+    return ev.peek
+end
+
+function M.peek_track_origin(peek)
+    if not peek then return nil end
+    return {
+        x = peek.x,
+        y = peek.y + EYE_OFFSET_Y,
+        z = peek.z,
+    }
+end
+
+function M.ring_y(origin)
+    if not origin then return 0 end
+    return origin.y
 end
 
 function M.dist_sq(a, b)

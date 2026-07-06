@@ -131,41 +131,41 @@ end
 
 function M.register_menu()
     local G = menu_util.G
-    local T, _ = menu_util.group(G.COMBAT)
+    local T, _ = menu_util.group(G.GUN_MODS)
     local root = menu_util.parent(P)
 
     store.load()
 
-    menu_util.register_keybind(T, G.COMBAT, P, "Enable Gun Mods", false)
+    menu_util.register_keybind(T, G.GUN_MODS, P, "Enable Gun Mods", false)
 
-    menu_util.gap(T, G.COMBAT)
-    menu_util.input(T, G.COMBAT, HELD_ID, "Held Weapon", "—")
+    menu_util.gap(T, G.GUN_MODS)
+    menu_util.input(T, G.GUN_MODS, HELD_ID, "Held Weapon", "—")
 
-    menu.add_combo(T, G.COMBAT, profiles.MODE_ID, "Apply Mode", profiles.MODES, 0, root)
+    menu.add_combo(T, G.GUN_MODS, profiles.MODE_ID, "Apply Mode", profiles.MODES, 0, root)
 
-    M._combo_ctx = { T = T, G = G.COMBAT, root = root }
+    M._combo_ctx = { T = T, G = G.GUN_MODS, root = root }
     ensure_weapon_combo()
 
-    menu_util.gap(T, G.COMBAT)
-    menu.add_checkbox(T, G.COMBAT, "april_gm_recoil", "No Recoil", false, root)
-    menu.add_slider_int(T, G.COMBAT, "april_gm_recoil_pct", "Recoil Reduction %", 0, 100, 100, root)
+    menu_util.gap(T, G.GUN_MODS)
+    menu.add_checkbox(T, G.GUN_MODS, "april_gm_recoil", "No Recoil", false, root)
+    menu.add_slider_int(T, G.GUN_MODS, "april_gm_recoil_pct", "Recoil Reduction %", 0, 100, 100, root)
 
-    menu.add_checkbox(T, G.COMBAT, "april_gm_spread", "No Spread", false, root)
-    menu.add_slider_int(T, G.COMBAT, "april_gm_spread_pct", "Spread Reduction %", 0, 100, 100, root)
+    menu.add_checkbox(T, G.GUN_MODS, "april_gm_spread", "No Spread", false, root)
+    menu.add_slider_int(T, G.GUN_MODS, "april_gm_spread_pct", "Spread Reduction %", 0, 100, 100, root)
 
-    menu.add_checkbox(T, G.COMBAT, "april_gm_sway", "No Sway", false, root)
+    menu.add_checkbox(T, G.GUN_MODS, "april_gm_sway", "No Sway", false, root)
 
-    menu.add_checkbox(T, G.COMBAT, "april_gm_fire_rate", "Fire Rate", false, root)
-    menu.add_slider_float(T, G.COMBAT, "april_gm_fire_rate_mult", "Fire Rate Multiplier", 1.0, 3.0, 1.5, "%.2f", root)
+    menu.add_checkbox(T, G.GUN_MODS, "april_gm_fire_rate", "Fire Rate", false, root)
+    menu.add_slider_float(T, G.GUN_MODS, "april_gm_fire_rate_mult", "Fire Rate Multiplier", 1.0, 3.0, 1.5, "%.2f", root)
 
-    menu.add_checkbox(T, G.COMBAT, "april_gm_speed", "Bullet Speed", false, root)
-    menu.add_slider_int(T, G.COMBAT, "april_gm_speed_mult", "Speed Mult (100 = instant)", 0, 100, 100, root)
+    menu.add_checkbox(T, G.GUN_MODS, "april_gm_speed", "Bullet Speed", false, root)
+    menu.add_slider_int(T, G.GUN_MODS, "april_gm_speed_mult", "Speed Mult (100 = instant)", 0, 100, 100, root)
 
-    menu.add_checkbox(T, G.COMBAT, "april_gm_range", "Range", false, root)
-    menu.add_slider_int(T, G.COMBAT, "april_gm_range_mult", "Range Mult", 1, 20, 10, root)
+    menu.add_checkbox(T, G.GUN_MODS, "april_gm_range", "Range", false, root)
+    menu.add_slider_int(T, G.GUN_MODS, "april_gm_range_mult", "Range Mult", 1, 20, 10, root)
 
-    menu_util.gap(T, G.COMBAT)
-    menu_util.button(T, G.COMBAT, "april_gm_save", "Save Profile", function()
+    menu_util.gap(T, G.GUN_MODS)
+    menu_util.button(T, G.GUN_MODS, "april_gm_save", "Save Profile", function()
         local key = selected_weapon_key()
         if not key then
             notify.warning("Select a weapon to save", 3500)
@@ -177,7 +177,7 @@ function M.register_menu()
         notify.success("Saved profile: " .. label, 3500)
     end, P)
 
-    menu_util.button(T, G.COMBAT, "april_gm_clear", "Clear Saved Profile", function()
+    menu_util.button(T, G.GUN_MODS, "april_gm_clear", "Clear Saved Profile", function()
         local key = selected_weapon_key()
         if not key then
             notify.warning("Select a weapon to clear", 3500)

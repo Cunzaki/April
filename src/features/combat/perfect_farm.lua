@@ -1,25 +1,30 @@
 --[[
-    Farm helper — smooth camera aim at NodeSpark / TreeX weak spots (Rust-style).
-    When within range of a node/tree that has an active spark, camera.look_at keeps
-    crosshair on the weak spot so melee raycasts register tier-3 hits.
+    Farm helper — tier-3 weak spot hits on NodeSpark / TreeX.
+    Silent mode redirects engine melee raycasts via track_silent_target (LMB).
+    Camera mode uses camera.look_at to keep crosshair on the spark.
 ]]
 
 local settings = April.require("core.settings")
 local env = April.require("core.env")
+local debug = April.require("core.debug")
 local folders = April.require("game.folders")
 local farm_tools = April.require("game.farm_tools")
 local math_util = April.require("core.math_util")
 local menu_util = April.require("core.menu_util")
+local silent_ray = April.require("core.silent_ray")
 
 local M = {}
 
 local P = "april_farm_helper"
 local P_RADIUS = "april_farm_radius"
 local P_SMOOTH = "april_farm_smooth"
+local P_SILENT = "april_farm_silent"
+local SHOOT_VK = 0x01
 
 local spark_parts = {}
 local next_scan_ms = 0
 local SCAN_MS = 350
+M._tracking = false
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -37,6 +42,40 @@ local function part_position(part)
     local pos = part.Position or part.position
     if not pos or pos.x == nil then return nil end
     return pos
+end
+
+local function vec3_position(value)
+    if not value then return nil end
+    if value.x ~= nil then
+        return { x = value.x, y = value.y, z = value.z }
+    end
+    if value[1] then
+        return { x = value[1], y = value[2], z = value[3] }
+    end
+    return nil
+end
+
+local function camera_controller()
+    local lp = env.get_local_player()
+    local char = lp and lp.character
+    if not char or not env.is_valid(char) then return nil end
+    return find_child(char, "CameraController")
+end
+
+local function viewmodel_origin()
+    local cc = camera_controller()
+    if cc and env.is_valid(cc) then
+        local cf = env.safe_call(function() return cc:GetAttribute("ViewmodelCFrame") end)
+        local pos = vec3_position(cf and (cf.Position or cf.position))
+        if pos then return pos end
+    end
+
+    if camera and camera.get_position then
+        local cam = camera.get_position()
+        return vec3_position(cam)
+    end
+
+    return nil
 end
 
 local function spark_part_from_model(model)
@@ -89,10 +128,7 @@ local function player_position(lp)
     end
     if not char then return nil end
 
-    local root = env.safe_call(function()
-        return char:find_first_child("HumanoidRootPart")
-            or char:FindFirstChild("HumanoidRootPart")
-    end)
+    local root = find_child(char, "HumanoidRootPart")
     return part_position(root)
 end
 
@@ -120,6 +156,16 @@ local function nearest_spark(player_pos, radius)
     return best_part
 end
 
+local function silent_mode()
+    return settings.bool(P_SILENT, true) and silent_ray.available()
+end
+
+local function stop_silent()
+    if not M._tracking then return end
+    silent_ray.stop()
+    M._tracking = false
+end
+
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.MISC)
@@ -127,31 +173,69 @@ function M.register_menu()
 
     menu_util.register_keybind(T, G.MISC, P, "Farm Helper", false)
     menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
-    menu.add_slider_int(T, G.MISC, P_SMOOTH, "Aim Smoothness", 1, 30, 8, root)
-    menu_util.bind_children(P, { P_RADIUS, P_SMOOTH })
+    menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", true, root)
+    menu.add_slider_int(T, G.MISC, P_SMOOTH, "Camera Smoothness", 1, 30, 8, root)
+    menu_util.bind_children(P, { P_RADIUS, P_SILENT, P_SMOOTH })
 end
 
 function M.update(_dt)
-    if not settings.enabled(P) then return end
-    if not camera or not camera.look_at then return end
+    if not settings.enabled(P) then
+        stop_silent()
+        return
+    end
 
     farm_tools.load()
-    if not farm_tools.holding_farm_tool() then return end
+    if not farm_tools.holding_farm_tool() then
+        stop_silent()
+        return
+    end
 
     local lp = env.get_local_player()
     local pos = player_position(lp)
-    if not pos then return end
+    if not pos then
+        stop_silent()
+        return
+    end
 
     refresh_sparks()
 
     local radius = settings.num(P_RADIUS, 5)
-    if radius <= 0 then return end
+    if radius <= 0 then
+        stop_silent()
+        return
+    end
 
     local target = nearest_spark(pos, radius)
-    if not target then return end
+    if not target then
+        stop_silent()
+        return
+    end
 
     local aim = part_position(target)
-    if not aim then return end
+    if not aim then
+        stop_silent()
+        return
+    end
+
+    if silent_mode() then
+        local origin = viewmodel_origin()
+        if not origin then
+            stop_silent()
+            return
+        end
+
+        if silent_ray.track(origin, aim, SHOOT_VK) then
+            M._tracking = true
+        else
+            debug.error_once("farm:silent", "Silent farm hook unavailable — toggle Silent Farm off for camera aim")
+            stop_silent()
+        end
+        return
+    end
+
+    stop_silent()
+
+    if not camera or not camera.look_at then return end
 
     local smooth = math.max(1, settings.num(P_SMOOTH, 8))
     pcall(camera.look_at, aim.x, aim.y, aim.z, smooth)

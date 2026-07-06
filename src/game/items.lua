@@ -21,7 +21,6 @@ local HELD_TYPES = {
     Gun = true,
     Tool = true,
     Bench = true,
-    Attachment = true,
 }
 
 local function parse_variant_name(name)
@@ -95,10 +94,6 @@ function M.get_catalog(name)
     return item_catalog.get_by_name(M.normalize_name(name))
 end
 
-function M.get_by_id(id)
-    return item_catalog.get(id)
-end
-
 function M.get_type(name)
     local row = M.get_catalog(name)
     if row then return row.type end
@@ -128,6 +123,29 @@ local function rbx_id_from_image(img)
             return pick:match("(%d+)")
         end
     end
+    return nil
+end
+
+function M.get_by_id(id)
+    if type(id) ~= "number" then return nil end
+    if not loaded then M.load() end
+
+    local cat = item_catalog.get(id)
+    if cat and cat.name then
+        local row = by_name[cat.name]
+        if row then return row end
+    end
+
+    local rep = env.get_replicated_storage()
+    if rep then
+        local modules = env.safe_call(function() return rep:find_first_child("Modules") end)
+        local items_mod = modules and env.safe_call(function() return modules:find_first_child("Items") end)
+        if items_mod then
+            local ok, data = pcall(function() return require(items_mod) end)
+            if ok and data and data[id] then return data[id] end
+        end
+    end
+
     return nil
 end
 

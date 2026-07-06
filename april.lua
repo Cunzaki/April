@@ -1,11 +1,11 @@
 --[[
     April — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-06T11:04:52.424Z
+    Built: 2026-07-06T23:03:45.460Z
 ]]
 
 April = {
-    version = "3.35.0",
+    version = "3.55.0",
     debug = false,
     _mods = {},
     bundled = true,
@@ -1744,7 +1744,8 @@ local M = {}
 M.TAB = "April"
 
 M.G = {
-    COMBAT = "Combat",
+    SILENT_AIM = "Silent Aim",
+    GUN_MODS = "Gun Mods",
     VISUALS = "Visuals",
     WORLD = "World",
     RADAR = "Radar",
@@ -1753,12 +1754,13 @@ M.G = {
 }
 
 M.G_SIDE = {
-    [M.G.COMBAT] = "left",
-    [M.G.VISUALS] = "right",
-    [M.G.WORLD] = "left",
-    [M.G.RADAR] = "right",
-    [M.G.MISC] = "left",
-    [M.G.CONFIG] = "right",
+    [M.G.SILENT_AIM] = "left",
+    [M.G.GUN_MODS] = "right",
+    [M.G.VISUALS] = "left",
+    [M.G.WORLD] = "right",
+    [M.G.RADAR] = "left",
+    [M.G.MISC] = "right",
+    [M.G.CONFIG] = "left",
 }
 
 M._tab_ready = false
@@ -1786,9 +1788,10 @@ function M.ensure_groups()
     M.ensure_tab()
 
     local rows = {
-        { M.G.COMBAT, M.G.VISUALS },
-        { M.G.WORLD, M.G.RADAR },
-        { M.G.MISC, M.G.CONFIG },
+        { M.G.SILENT_AIM, M.G.GUN_MODS },
+        { M.G.VISUALS, M.G.WORLD },
+        { M.G.RADAR, M.G.MISC },
+        { M.G.CONFIG },
     }
 
     for _, row in ipairs(rows) do
@@ -2006,15 +2009,28 @@ end)()
 
 -- ── core/silent_ray.lua ──
 April._mods["core.silent_ray"] = (function()
---[[ Silent raycast hook helper — augments Vector's built-in silent aim with custom direction ]]
+--[[ Silent raycast hook — matches Fallen MouseRaycast (UnitRay * 1024). ]]
 
 local M = {}
 
 local hook_ready = false
+local tracking = false
+
+-- Fallen RaycastUtil:MouseRaycast uses UnitRay.Direction * (p15 or 1024)
+local MOUSE_RAY_LEN = 1024
+
 M._last_origin = nil
 M._last_target = nil
+M._last_ok = false
 
-local function vec3(x, y, z)
+local function unpack_pos(v)
+    if not v then return nil end
+    if v.x ~= nil then return v.x, v.y, v.z end
+    if v.X ~= nil then return v.X, v.Y, v.Z end
+    return nil
+end
+
+local function make_vec3(x, y, z)
     if Vector3 and Vector3.new then
         return Vector3.new(x, y, z)
     end
@@ -2029,11 +2045,11 @@ end
 
 function M.ensure_hook()
     if not M.available() then return false end
-    if not raycast.enable_silent_hook then
+    if hook_ready or (raycast.is_silent_hook_active and raycast.is_silent_hook_active()) then
         hook_ready = true
         return true
     end
-    if hook_ready or (raycast.is_silent_hook_active and raycast.is_silent_hook_active()) then
+    if not raycast.enable_silent_hook then
         hook_ready = true
         return true
     end
@@ -2042,9 +2058,28 @@ function M.ensure_hook()
     return hook_ready
 end
 
+function M.is_tracking()
+    return tracking
+end
+
+function M.last_ok()
+    return M._last_ok
+end
+
+function M.get_camera_origin()
+    if not camera or not camera.get_position then return nil end
+    local ok, pos = pcall(camera.get_position)
+    if not ok or not pos then return nil end
+    local x, y, z = unpack_pos(pos)
+    if not x then return nil end
+    return { x = x, y = y, z = z }
+end
+
 function M.stop()
     M._last_origin = nil
     M._last_target = nil
+    M._last_ok = false
+    tracking = false
     if not M.available() then return end
     pcall(raycast.stop_silent_tracking)
     if raycast.clear_silent_target then
@@ -2056,29 +2091,50 @@ function M.last_segment()
     return M._last_origin, M._last_target
 end
 
---[[ Direction length matters — pass full offset to predicted target. ]]
-function M.track(origin, target, shoot_vk)
-    if not origin or not target then
-        M.stop()
+--[[
+    Fallen: MouseRaycast -> hit, muzzle fires toward hit.
+    Silent hook replaces engine ray — peek manip uses peek eye as track origin.
+]]
+function M.track(origin, aim_point, shoot_vk)
+    M._last_ok = false
+
+    if not aim_point then
         return false
     end
-    if not M.ensure_hook() then return false end
 
-    local ox = origin.x or origin.X or 0
-    local oy = origin.y or origin.Y or 0
-    local oz = origin.z or origin.Z or 0
-    local tx = target.x or target.X or 0
-    local ty = target.y or target.Y or 0
-    local tz = target.z or target.Z or 0
+    origin = origin or M.get_camera_origin()
+    if not origin then
+        return false
+    end
 
-    M._last_origin = { x = ox, y = oy, z = oz }
-    M._last_target = { x = tx, y = ty, z = tz }
+    if not M.ensure_hook() then
+        return false
+    end
 
-    local dir = vec3(tx - ox, ty - oy, tz - oz)
-    local origin_v = vec3(ox, oy, oz)
+    local ox, oy, oz = unpack_pos(origin)
+    local ax, ay, az = unpack_pos(aim_point)
+    if not ox or not ax then
+        return false
+    end
+
+    local dx, dy, dz = ax - ox, ay - oy, az - oz
+    local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if dist < 0.001 then
+        return false
+    end
+
+    local inv = 1 / dist
+    local dir = make_vec3(dx * inv * MOUSE_RAY_LEN, dy * inv * MOUSE_RAY_LEN, dz * inv * MOUSE_RAY_LEN)
+    local origin_v = make_vec3(ox, oy, oz)
     local key = shoot_vk or 0x01
 
-    return raycast.track_silent_target(origin_v, dir, key) == true
+    M._last_origin = { x = ox, y = oy, z = oz }
+    M._last_target = { x = ax, y = ay, z = az }
+
+    local ok = raycast.track_silent_target(origin_v, dir, key) == true
+    M._last_ok = ok
+    tracking = ok
+    return ok
 end
 
 return M
@@ -2193,11 +2249,19 @@ April._mods["core.manip_math"] = (function()
 local M = {}
 
 local EYE_OFFSET_Y = 2.5
-local SEARCH_RADII = { 4, 8 }
-local SEARCH_STEPS = 8
+local DEFAULT_STEPS = 16
+local MIN_RADIUS = 0.1
+local MAX_RADIUS = 1
 
 function M.eye_offset_y()
     return EYE_OFFSET_Y
+end
+
+function M.clamp_radius(radius)
+    radius = tonumber(radius) or 1
+    if radius < MIN_RADIUS then return MIN_RADIUS end
+    if radius > MAX_RADIUS then return MAX_RADIUS end
+    return math.floor(radius * 100 + 0.5) / 100
 end
 
 function M.is_visible_from(ox, oy, oz, tx, ty, tz)
@@ -2213,27 +2277,63 @@ function M.is_visible_from_pos(origin, target)
     return M.is_visible_from(origin.x, origin.y, origin.z, target.x, target.y, target.z)
 end
 
-function M.find_manipulation_position(origin, target_pos)
-    if not origin or not target_pos then return nil end
+local function search_peek(origin, target_pos, max_radius, steps)
+    max_radius = M.clamp_radius(max_radius)
+    steps = steps or DEFAULT_STEPS
 
-    if M.is_visible_from_pos(origin, target_pos) then
-        return { x = origin.x, y = origin.y, z = origin.z }
-    end
-
-    for _, radius in ipairs(SEARCH_RADII) do
-        for i = 0, SEARCH_STEPS - 1 do
-            local angle = (i / SEARCH_STEPS) * math.pi * 2
-            local cx = origin.x + math.cos(angle) * radius
-            local cy = origin.y
-            local cz = origin.z + math.sin(angle) * radius
-            local candidate = { x = cx, y = cy, z = cz }
-            if M.is_visible_from(cx, cy, cz, target_pos.x, target_pos.y, target_pos.z) then
-                return candidate
-            end
+    for i = 0, steps - 1 do
+        local angle = (i / steps) * math.pi * 2
+        local cx = origin.x + math.cos(angle) * max_radius
+        local cy = origin.y
+        local cz = origin.z + math.sin(angle) * max_radius
+        if M.is_visible_from(cx, cy, cz, target_pos.x, target_pos.y, target_pos.z) then
+            return { x = cx, y = cy, z = cz }, max_radius
         end
     end
 
-    return nil
+    return nil, max_radius
+end
+
+--[[ state: off | direct | ready | blocked ]]
+function M.evaluate_manipulation(origin, target_pos, opts)
+    opts = opts or {}
+
+    if not origin or not target_pos then
+        return { state = "blocked", peek = nil, radius = M.clamp_radius(opts.max_radius) }
+    end
+
+    if M.is_visible_from_pos(origin, target_pos) then
+        return { state = "direct", peek = nil, radius = M.clamp_radius(opts.max_radius) }
+    end
+
+    local peek, radius = search_peek(origin, target_pos, opts.max_radius, opts.steps)
+    if peek then
+        return { state = "ready", peek = peek, radius = radius }
+    end
+
+    return { state = "blocked", peek = nil, radius = M.clamp_radius(opts.max_radius) }
+end
+
+function M.find_manipulation_position(origin, target_pos, opts)
+    local ev = M.evaluate_manipulation(origin, target_pos, opts)
+    if ev.state == "direct" then
+        return { x = origin.x, y = origin.y, z = origin.z }
+    end
+    return ev.peek
+end
+
+function M.peek_track_origin(peek)
+    if not peek then return nil end
+    return {
+        x = peek.x,
+        y = peek.y + EYE_OFFSET_Y,
+        z = peek.z,
+    }
+end
+
+function M.ring_y(origin)
+    if not origin then return 0 end
+    return origin.y
 end
 
 function M.dist_sq(a, b)
@@ -2397,7 +2497,7 @@ end)()
 
 -- ── core/cframe_move.lua ──
 April._mods["core.cframe_move"] = (function()
---[[ CFrame movement — position writes, zero velocity (no velocity exploits). ]]
+--[[ Movement helpers — position nudge + velocity (no WalkSpeed writes). ]]
 
 local env = April.require("core.env")
 
@@ -2407,6 +2507,12 @@ local BASE_PARTS = {
     Part = true, MeshPart = true, UnionOperation = true,
     WedgePart = true, CornerWedgePart = true, TrussPart = true,
 }
+
+local NOCLIP_PARTS = {
+    "HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso", "Head",
+}
+
+local HIP_OFFSET = 3.0
 
 function M.delta_time()
     if utility and utility.get_delta_time then
@@ -2431,6 +2537,13 @@ function M.read_pos(inst)
     }
 end
 
+function M.read_velocity(inst)
+    if not inst then return 0, 0, 0 end
+    local vel = inst.AssemblyLinearVelocity or inst.Velocity or inst.velocity
+    if not vel then return 0, 0, 0 end
+    return vel.X or vel.x or 0, vel.Y or vel.y or 0, vel.Z or vel.z or 0
+end
+
 function M.is_base_part(inst)
     if not inst then return false end
     if inst.is_a then
@@ -2441,18 +2554,36 @@ function M.is_base_part(inst)
     return BASE_PARTS[cn] == true
 end
 
+function M.find_part(char, name)
+    if not char then return nil end
+    return env.safe_call(function()
+        if char.find_first_child then return char:find_first_child(name) end
+        return char:FindFirstChild(name)
+    end)
+end
+
 function M.iter_parts(char)
     local out = {}
     if not char then return out end
-    local list = env.safe_call(function() return char:get_children() end)
-        or env.safe_call(function() return char:GetChildren() end)
-        or {}
-    for _, inst in ipairs(list) do
-        if M.is_base_part(inst) then
-            out[#out + 1] = inst
+
+    local desc = env.safe_call(function() return char:get_descendants() end)
+        or env.safe_call(function() return char:GetDescendants() end)
+    if desc then
+        for _, inst in ipairs(desc) do
+            if M.is_base_part(inst) then
+                out[#out + 1] = inst
+            end
         end
     end
+
     return out
+end
+
+function M.set_character_noclip(char, _root, enabled)
+    local collide = not enabled
+    for _, inst in ipairs(M.iter_parts(char)) do
+        M.set_part_collide(inst, collide)
+    end
 end
 
 function M.set_velocity(inst, x, y, z)
@@ -2464,31 +2595,17 @@ function M.set_velocity(inst, x, y, z)
     end
 end
 
-function M.zero_part(inst)
-    if not inst then return end
-    M.set_velocity(inst, 0, 0, 0)
-    if part and part.set_angular_velocity then
-        pcall(part.set_angular_velocity, inst, 0, 0, 0)
-    end
-end
-
-function M.set_position(inst, x, y, z)
+function M.set_position_only(inst, x, y, z)
     if not inst then return end
     if part and part.set_position then
         pcall(part.set_position, inst, x, y, z)
     else
         pcall(function() inst.Position = Vector3.new(x, y, z) end)
     end
-    M.zero_part(inst)
 end
 
-function M.zero_character(char, root)
-    if root then M.zero_part(root) end
-    for _, inst in ipairs(M.iter_parts(char)) do
-        if inst ~= root then
-            M.zero_part(inst)
-        end
-    end
+function M.set_position(inst, x, y, z)
+    M.set_position_only(inst, x, y, z)
 end
 
 function M.set_part_collide(inst, collide)
@@ -2500,46 +2617,20 @@ function M.set_part_collide(inst, collide)
     end
 end
 
-function M.set_part_anchored(inst, anchored)
-    if not inst then return end
-    if part and part.set_anchored then
-        pcall(part.set_anchored, inst, anchored)
-    else
-        pcall(function() inst.Anchored = anchored end)
-    end
-end
-
-function M.set_character_noclip(char, root, enabled)
+function M.set_noclip_parts(char, enabled)
     if not char then return end
     local collide = not enabled
-
-    if root then
-        M.set_part_collide(root, collide)
-    end
-
-    for _, inst in ipairs(M.iter_parts(char)) do
-        M.set_part_collide(inst, collide)
-    end
-
-    local desc = env.safe_call(function() return char:get_descendants() end)
-        or env.safe_call(function() return char:GetDescendants() end)
-    if desc then
-        for _, inst in ipairs(desc) do
-            if M.is_base_part(inst) then
-                M.set_part_collide(inst, collide)
-            end
+    for i = 1, #NOCLIP_PARTS do
+        local p = M.find_part(char, NOCLIP_PARTS[i])
+        if p and M.is_base_part(p) then
+            M.set_part_collide(p, collide)
         end
     end
 end
 
-function M.humanoid_flying(hum)
-    if not hum then return end
-    pcall(function() hum.state = 6 end)
-end
-
-function M.humanoid_running(hum)
-    if not hum then return end
-    pcall(function() hum.state = 8 end)
+function M.humanoid_state(hum, state)
+    if not hum or state == nil then return end
+    pcall(function() hum.state = state end)
 end
 
 function M.humanoid_suspend(hum)
@@ -2550,22 +2641,26 @@ function M.humanoid_suspend(hum)
     pcall(function() hum.sit = false end)
 end
 
-function M.humanoid_freeze(hum)
-    if not hum then return end
-    pcall(function() hum.auto_rotate = false end)
-    pcall(function() hum.evaluate_state_machine = false end)
-    pcall(function() hum.sit = false end)
+function M.humanoid_running(hum)
+    M.humanoid_state(hum, 8)
 end
 
-function M.humanoid_thaw(hum)
-    M.humanoid_release(hum)
+function M.zero_part(inst)
+    if not inst then return end
+    M.set_velocity(inst, 0, 0, 0)
+    if part and part.set_angular_velocity then
+        pcall(part.set_angular_velocity, inst, 0, 0, 0)
+    end
 end
 
-function M.humanoid_release(hum)
-    if not hum then return end
-    pcall(function() hum.platform_stand = false end)
-    pcall(function() hum.auto_rotate = true end)
-    pcall(function() hum.evaluate_state_machine = true end)
+function M.zero_character(char, root)
+    if root then M.zero_part(root) end
+    for i = 1, #NOCLIP_PARTS do
+        local p = char and M.find_part(char, NOCLIP_PARTS[i])
+        if p and p ~= root then
+            M.zero_part(p)
+        end
+    end
 end
 
 function M.camera_flat_axes()
@@ -2579,33 +2674,75 @@ function M.camera_flat_axes()
     if lm < 0.001 then return nil end
     lx, lz = lx / lm, lz / lm
 
-    local rx, rz = -lz, lx
-    return lx, lz, rx, rz
+    return lx, lz, -lz, lx
 end
 
---[[ WASD = flat XZ only. Space / Ctrl = vertical. ]]
-function M.read_fly_input()
+function M.read_flat_input()
     local lx, lz, rx, rz = M.camera_flat_axes()
-    local mx, mz, my = 0, 0, 0
+    if not lx then return 0, 0 end
 
-    if lx then
-        if M.key_down(0x57) then mx, mz = mx + lx, mz + lz end
-        if M.key_down(0x53) then mx, mz = mx - lx, mz - lz end
-        if M.key_down(0x41) then mx, mz = mx - rx, mz - rz end
-        if M.key_down(0x44) then mx, mz = mx + rx, mz + rz end
-    end
+    local mx, mz = 0, 0
+    if M.key_down(0x57) then mx, mz = mx + lx, mz + lz end
+    if M.key_down(0x53) then mx, mz = mx - lx, mz - lz end
+    if M.key_down(0x41) then mx, mz = mx - rx, mz - rz end
+    if M.key_down(0x44) then mx, mz = mx + rx, mz + rz end
 
+    local mag = math.sqrt(mx * mx + mz * mz)
+    if mag < 0.001 then return 0, 0 end
+    return mx / mag, mz / mag
+end
+
+function M.read_fly_input()
+    local mx, mz = M.read_flat_input()
+    local my = 0
     if M.key_down(0x20) then my = 1 end
     if M.key_down(0x11) then my = -1 end
+    return mx, my, mz
+end
 
-    local hm = math.sqrt(mx * mx + mz * mz)
-    if hm > 0.001 then
-        mx, mz = mx / hm, mz / hm
-    else
-        mx, mz = 0, 0
+function M.ground_distance(x, y, z)
+    if not raycast or not raycast.cast then return nil end
+    if raycast.is_ready and not raycast.is_ready() then return nil end
+
+    local hit, _, dist = raycast.cast(x, y + 2, z, x, y - 512, z)
+    if not hit then return nil end
+    return dist
+end
+
+function M.floor_y_at(x, y, z)
+    local dist = M.ground_distance(x, y, z)
+    if not dist then return nil end
+    return y + 2 - dist + HIP_OFFSET
+end
+
+function M.clamp_above_floor(x, y, z)
+    local floor_y = M.floor_y_at(x, y, z)
+    if floor_y and y < floor_y then return floor_y end
+    return y
+end
+
+--[[ Position nudge + matching velocity — legacy Fallen pattern. ]]
+function M.drive_root(root, pos, dx, dy, dz, speed, dt)
+    if not root or not pos then return pos end
+
+    dt = dt or M.delta_time()
+    local mag = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+    if mag < 0.001 then
+        M.set_velocity(root, 0, -0.1, 0)
+        return pos
     end
 
-    return mx, my, mz
+    dx, dy, dz = dx / mag, dy / mag, dz / mag
+    local step = speed * dt
+    local nx = pos.x + dx * step
+    local ny = pos.y + dy * step
+    local nz = pos.z + dz * step
+
+    M.set_position_only(root, nx, ny, nz)
+    M.set_velocity(root, dx * speed, dy * speed, dz * speed)
+
+    return { x = nx, y = ny, z = nz }
 end
 
 return M
@@ -2701,7 +2838,7 @@ end)()
 
 -- ── core/movement_ctrl.lua ──
 April._mods["core.movement_ctrl"] = (function()
---[[ Movement sim — Inf Fly + Spider (CFrame position, one tick). ]]
+--[[ Movement sim — Inf Fly, Spider, Noclip, Slowfall (velocity + position nudge). ]]
 
 local settings = April.require("core.settings")
 local env = April.require("core.env")
@@ -2709,15 +2846,25 @@ local move = April.require("core.cframe_move")
 
 local M = {}
 
-local _installed = false
+local P_FLY = "april_noclip_enabled"
+local P_SPIDER = "april_spider_enabled"
+local P_NOCLIP = "april_walk_noclip_enabled"
+local P_SLOWFALL = "april_slowfall_enabled"
 
 local MODE_NONE = "none"
 local MODE_FLY = "fly"
 local MODE_SPIDER = "spider"
+local MODE_NOCLIP = "noclip"
 
+local _installed = false
 local active_mode = MODE_NONE
 local tracked_char_id = nil
-local anchor_y = nil
+local noclip_on = false
+local last_state_ms = 0
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
 
 local function char_id(char)
     if not char then return nil end
@@ -2735,10 +2882,7 @@ end
 local function get_root(lp)
     local char = get_character(lp)
     if not char then return nil end
-    return env.safe_call(function()
-        if char.find_first_child then return char:find_first_child("HumanoidRootPart") end
-        return char:FindFirstChild("HumanoidRootPart")
-    end)
+    return move.find_part(char, "HumanoidRootPart")
 end
 
 local function get_humanoid(lp)
@@ -2754,101 +2898,124 @@ local function get_humanoid(lp)
 end
 
 local function resolve_mode()
-    if settings.enabled("april_walk_noclip_enabled") then return MODE_NONE end
-    if settings.enabled("april_noclip_enabled") then return MODE_FLY end
-    if settings.enabled("april_spider_enabled") then return MODE_SPIDER end
+    if settings.enabled(P_NOCLIP) then return MODE_NOCLIP end
+    if settings.enabled(P_FLY) then return MODE_FLY end
+    if settings.enabled(P_SPIDER) then return MODE_SPIDER end
     return MODE_NONE
 end
 
-local function sync_anchor(root)
-    local pos = move.read_pos(root)
-    if pos then anchor_y = pos.y end
+local function maybe_state(hum, state)
+    local now = tick_ms()
+    if now - last_state_ms < 150 then return end
+    last_state_ms = now
+    move.humanoid_state(hum, state)
 end
 
-local function leave_mode(root, hum, char)
-    move.humanoid_release(hum)
-    move.zero_character(char, root)
-    anchor_y = nil
+local function set_noclip(char, on)
+    if noclip_on == on then return end
+    noclip_on = on
+    move.set_noclip_parts(char, on)
 end
 
-local function enter_mode(root, hum, char)
-    move.humanoid_suspend(hum)
-    move.zero_character(char, root)
-    sync_anchor(root)
-    return anchor_y ~= nil
+local function leave_mode(char, hum)
+    set_noclip(char, false)
+    if hum then move.humanoid_running(hum) end
+    last_state_ms = 0
 end
 
-local function tick_fly(char, root, speed)
+local function tick_noclip(root, hum, speed, dt)
+    maybe_state(hum, 8)
+
     local pos = move.read_pos(root)
     if not pos then return end
-    if not anchor_y then anchor_y = pos.y end
 
     local mx, my, mz = move.read_fly_input()
-    local step = speed * move.delta_time()
+    local next_pos = move.drive_root(root, pos, mx, my, mz, speed, dt)
+    if not next_pos then return end
 
-    if my ~= 0 then
-        anchor_y = anchor_y + my * step
+    local ny = move.clamp_above_floor(next_pos.x, next_pos.y, next_pos.z)
+    if ny ~= next_pos.y then
+        move.set_position_only(root, next_pos.x, ny, next_pos.z)
+        local vx, _, vz = move.read_velocity(root)
+        move.set_velocity(root, vx, 0, vz)
     end
-
-    local nx, nz = pos.x, pos.z
-    if mx ~= 0 or mz ~= 0 then
-        nx = pos.x + mx * step
-        nz = pos.z + mz * step
-    end
-
-    move.set_position(root, nx, anchor_y, nz)
-    move.zero_character(char, root)
 end
 
-local function tick_spider(char, root, speed)
+local function tick_fly(root, hum, speed, dt)
+    maybe_state(hum, 6)
+
     local pos = move.read_pos(root)
     if not pos then return end
-    if not anchor_y then anchor_y = pos.y end
 
-    anchor_y = anchor_y + speed * move.delta_time()
-    move.set_position(root, pos.x, anchor_y, pos.z)
-    move.zero_character(char, root)
+    local mx, my, mz = move.read_fly_input()
+    local next_pos = move.drive_root(root, pos, mx, my, mz, speed, dt)
+    if not next_pos then return end
+
+    if my <= 0 then
+        local ny = move.clamp_above_floor(next_pos.x, next_pos.y, next_pos.z)
+        if ny > next_pos.y then
+            move.set_position_only(root, next_pos.x, ny, next_pos.z)
+            local vx, _, vz = move.read_velocity(root)
+            move.set_velocity(root, vx, 0, vz)
+        end
+    end
+end
+
+local function tick_spider(root, hum, speed, dt)
+    maybe_state(hum, 12)
+
+    local pos = move.read_pos(root)
+    if not pos then return end
+
+    local mx, my, mz = move.read_fly_input()
+    if my == 0 then my = 1 end
+
+    move.drive_root(root, pos, mx, my, mz, speed, dt)
+end
+
+local function tick_slowfall(root, dt)
+    local pos = move.read_pos(root)
+    if not pos then return end
+
+    local cap = settings.num("april_slowfall_speed", -5)
+    if cap > 0 then cap = -cap end
+
+    local vx, vy, vz = move.read_velocity(root)
+    if vy >= cap then return end
+
+    move.set_velocity(root, vx, cap, vz)
+    move.set_position_only(root, pos.x, pos.y + cap * dt * 0.05, pos.z)
+end
+
+local function abort_active()
+    if active_mode == MODE_NONE then return end
+
+    local lp = env.get_local_player()
+    if lp then
+        local char = get_character(lp)
+        local hum = get_humanoid(lp)
+        if char and hum then
+            leave_mode(char, hum)
+        end
+    end
+
+    active_mode = MODE_NONE
 end
 
 function M.tick(_dt)
     local misc_gate = April.require("core.misc_gate")
-    if not misc_gate.movement_allowed() then return end
+    if not misc_gate.movement_allowed() then
+        abort_active()
+        return
+    end
 
     local fling = April.require("features.movement.fling")
     if fling.is_active and fling.is_active() then
-        if active_mode ~= MODE_NONE then
-            local lp = env.get_local_player()
-            if lp then
-                local char = get_character(lp)
-                local root = get_root(lp)
-                local hum = get_humanoid(lp)
-                if char and root and hum then
-                    leave_mode(root, hum, char)
-                end
-            end
-            active_mode = MODE_NONE
-            anchor_y = nil
-        end
+        abort_active()
         return
     end
 
-    if settings.enabled("april_walk_noclip_enabled") then
-        if active_mode ~= MODE_NONE then
-            local lp = env.get_local_player()
-            if lp then
-                local char = get_character(lp)
-                local root = get_root(lp)
-                local hum = get_humanoid(lp)
-                if char and root and hum then
-                    leave_mode(root, hum, char)
-                end
-            end
-            active_mode = MODE_NONE
-            anchor_y = nil
-        end
-        return
-    end
-
+    local dt = move.delta_time()
     local lp = env.get_local_player()
     if not lp then return end
 
@@ -2861,8 +3028,10 @@ function M.tick(_dt)
 
     local cid = char_id(char)
     if cid ~= tracked_char_id then
+        if active_mode ~= MODE_NONE then
+            leave_mode(char, hum)
+        end
         active_mode = MODE_NONE
-        anchor_y = nil
         tracked_char_id = cid
     end
 
@@ -2870,29 +3039,33 @@ function M.tick(_dt)
 
     if active_mode ~= mode then
         if active_mode ~= MODE_NONE then
-            leave_mode(root, hum, char)
+            leave_mode(char, hum)
         end
         active_mode = mode
-        if mode ~= MODE_NONE and not enter_mode(root, hum, char) then
-            active_mode = MODE_NONE
-            return
+        if mode == MODE_NOCLIP then
+            set_noclip(char, true)
         end
     end
 
-    if mode == MODE_NONE then return end
-
-    if mode == MODE_FLY then
-        tick_fly(char, root, settings.num("april_noclip_speed", 72))
+    if mode == MODE_NOCLIP then
+        tick_noclip(root, hum, settings.num("april_walk_noclip_speed", 32), dt)
+    elseif mode == MODE_FLY then
+        tick_fly(root, hum, settings.num("april_noclip_speed", 72), dt)
     elseif mode == MODE_SPIDER then
-        tick_spider(char, root, settings.num("april_spider_speed", 20))
+        tick_spider(root, hum, settings.num("april_spider_speed", 20), dt)
+    elseif noclip_on then
+        set_noclip(char, false)
+    end
+
+    if mode == MODE_NONE and settings.enabled(P_SLOWFALL) then
+        tick_slowfall(root, dt)
     end
 end
 
 function M.install()
     if _installed then return end
     _installed = true
-    local runservice = April.require("core.runservice")
-    runservice.on_sim(function(dt)
+    April.require("core.runservice").on_sim(function(dt)
         M.tick(dt)
     end)
 end
@@ -2935,13 +3108,18 @@ local MENU_KEYS = {
     "april_crosshair_thickness", "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
     "april_crosshair_rainbow", "april_crosshair_rainbow_speed",
     "april_brainrot_enabled", "april_brainrot_enabled_mode", "april_brainrot_style", "april_brainrot_size",
-    "april_aimbot_fov", "april_aimbot_bone", "april_aimbot_priority",
-    "april_aimbot_sticky", "april_aimbot_visible", "april_aimbot_prediction", "april_aimbot_vis_ray",
-    "april_aimbot_draw_fov", "april_aimbot_fov_fill", "april_aimbot_target_line",
+    "april_silent_aim", "april_silent_aim_mode",
+    "april_silent_target_type", "april_silent_bone",
+    "april_silent_filter_health", "april_silent_filter_visible", "april_silent_filter_team",
+    "april_silent_max_dist", "april_silent_fov", "april_silent_sticky",
+    "april_silent_bullet_manip",
+    "april_silent_manip_dist", "april_silent_manip_status", "april_silent_manip_ring", "april_silent_manip_peek_vis",
+    "april_silent_draw_fov", "april_silent_fov_style", "april_silent_target_line",
     "april_gunmods_enabled", "april_gunmods_enabled_mode", "april_gm_mode", "april_gm_weapon_select", "april_gm_recoil", "april_gm_recoil_pct", "april_gm_spread", "april_gm_spread_pct",
     "april_gm_sway", "april_gm_fire_rate", "april_gm_fire_rate_mult",
     "april_gm_speed", "april_gm_speed_mult", "april_gm_range", "april_gm_range_mult",
     "april_farm_helper", "april_farm_helper_mode", "april_farm_radius", "april_farm_smooth",
+    "april_farm_silent",
     "april_world_enabled", "april_world_enabled_mode", "april_stone_node", "april_metal_node", "april_phosphate_node",
     "april_corn_plant", "april_tomato_plant", "april_pumpkin_plant", "april_lemon_plant",
     "april_raspberry_plant", "april_blueberry_plant", "april_wool_plant", "april_hemp_plant",
@@ -2972,6 +3150,7 @@ local MENU_KEYS = {
     "april_map_labels",
     "april_noclip_enabled", "april_noclip_enabled_mode", "april_noclip_speed",
     "april_spider_enabled", "april_spider_enabled_mode", "april_spider_speed",
+    "april_slowfall_enabled", "april_slowfall_enabled_mode", "april_slowfall_speed",
     "april_walk_noclip_enabled", "april_walk_noclip_enabled_mode", "april_walk_noclip_speed",
     "april_fling_enabled", "april_fling_fov", "april_fling_key", "april_fling_key_mode", "april_fling_duration",
     "april_desync_enabled", "april_desync_enabled_mode", "april_desync_autosend", "april_desync_autosend_len",
@@ -2985,7 +3164,7 @@ local MENU_KEYS = {
 
 local COLOR_KEYS = {
     "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
-    "april_aimbot_prediction", "april_aimbot_vis_ray", "april_aimbot_draw_fov", "april_aimbot_target_line",
+    "april_silent_aim", "april_silent_draw_fov", "april_silent_target_line",
     "april_stone_node", "april_metal_node", "april_phosphate_node", "april_corn_plant", "april_tomato_plant",
     "april_pumpkin_plant", "april_lemon_plant", "april_raspberry_plant", "april_blueberry_plant",
     "april_wool_plant", "april_hemp_plant", "april_deer", "april_boar", "april_wolf",
@@ -3019,6 +3198,7 @@ local LEGACY_HOTKEY_TO_CHECKBOX = {
     april_map_enabled_key = "april_map_enabled",
     april_noclip_enabled_key = "april_noclip_enabled",
     april_spider_enabled_key = "april_spider_enabled",
+    april_slowfall_enabled_key = "april_slowfall_enabled",
     april_desync_enabled_key = "april_desync_enabled",
     april_bullet_manip_enabled_key = "april_bullet_manip_enabled",
     april_mod_checker_enabled_key = "april_mod_checker_enabled",
@@ -3036,11 +3216,12 @@ local HOTKEY_KEYS = {
     "april_map_enabled",
     "april_noclip_enabled",
     "april_spider_enabled",
+    "april_slowfall_enabled",
     "april_walk_noclip_enabled",
     "april_desync_enabled",
     "april_bullet_manip_enabled",
     "april_tung_esp_enabled",
-    "april_aimbot_prediction",
+    "april_silent_aim",
 }
 
 function M.get_config_path(name)
@@ -5199,7 +5380,6 @@ local HELD_TYPES = {
     Gun = true,
     Tool = true,
     Bench = true,
-    Attachment = true,
 }
 
 local function parse_variant_name(name)
@@ -5273,10 +5453,6 @@ function M.get_catalog(name)
     return item_catalog.get_by_name(M.normalize_name(name))
 end
 
-function M.get_by_id(id)
-    return item_catalog.get(id)
-end
-
 function M.get_type(name)
     local row = M.get_catalog(name)
     if row then return row.type end
@@ -5306,6 +5482,29 @@ local function rbx_id_from_image(img)
             return pick:match("(%d+)")
         end
     end
+    return nil
+end
+
+function M.get_by_id(id)
+    if type(id) ~= "number" then return nil end
+    if not loaded then M.load() end
+
+    local cat = item_catalog.get(id)
+    if cat and cat.name then
+        local row = by_name[cat.name]
+        if row then return row end
+    end
+
+    local rep = env.get_replicated_storage()
+    if rep then
+        local modules = env.safe_call(function() return rep:find_first_child("Modules") end)
+        local items_mod = modules and env.safe_call(function() return modules:find_first_child("Items") end)
+        if items_mod then
+            local ok, data = pcall(function() return require(items_mod) end)
+            if ok and data and data[id] then return data[id] end
+        end
+    end
+
     return nil
 end
 
@@ -5461,40 +5660,38 @@ local weapon_names = {}
 
 local ROBLOX_GRAV = 196.2
 
--- Legacy effective drop constants (used when ToolInfo gravity is a multiplier < 5).
+-- ToolInfo-aligned fallbacks when live module is unavailable (gravity = Bullet.Gravity multiplier).
 local FALLBACK_STATS = {
-    ["Military Barret"] = { speed = 1500, gravity = 25 },
-    ["Military Barrett"] = { speed = 1500, gravity = 25 },
-    ["Military M4A1"] = { speed = 950, gravity = 18 },
-    ["Military M39"] = { speed = 900, gravity = 18 },
-    ["Military MP7"] = { speed = 750, gravity = 15 },
-    ["Military PKM"] = { speed = 850, gravity = 18 },
-    ["Military USP"] = { speed = 650, gravity = 12 },
-    ["Bruno's M4A1"] = { speed = 1000, gravity = 18 },
-    ["Salvaged AK47"] = { speed = 800, gravity = 15 },
-    ["Salvaged AK74u"] = { speed = 750, gravity = 15 },
-    ["Salvaged AK4"] = { speed = 800, gravity = 15 },
-    ["Salvaged Sniper"] = { speed = 1100, gravity = 20 },
-    ["Salvaged M14"] = { speed = 850, gravity = 18 },
-    ["Salvaged SMG"] = { speed = 700, gravity = 12 },
-    ["Salvaged Skorpion"] = { speed = 650, gravity = 12 },
-    ["Salvaged Python"] = { speed = 750, gravity = 15 },
-    ["Salvaged P250"] = { speed = 650, gravity = 12 },
-    ["Salvaged Pipe Rifle"] = { speed = 800, gravity = 20 },
-    ["Salvaged Pump Action"] = { speed = 550, gravity = 15 },
-    ["Salvaged Shotgun"] = { speed = 550, gravity = 15 },
-    ["Salvaged Double Barrel"] = { speed = 550, gravity = 15 },
-    ["Crossbow"] = { speed = 420, gravity = 35 },
-    ["Wooden Bow"] = { speed = 280, gravity = 30 },
-    ["Nail Gun"] = { speed = 350, gravity = 20 },
-    ["Wooden Spear"] = { speed = 200, gravity = 45 },
-    ["Stone Spear"] = { speed = 200, gravity = 45 },
-    ["Pumpkin Launcher"] = { speed = 300, gravity = 50 },
-    ["Salvaged RPG"] = { speed = 400, gravity = 60 },
-    ["Military Grenade Launcher"] = { speed = 350, gravity = 55 },
-    ["Salvaged Grenade Launcher"] = { speed = 350, gravity = 55 },
-    ["Military AA12"] = { speed = 550, gravity = 15 },
-    ["Salvaged Break Action"] = { speed = 550, gravity = 15 },
+    ["Military Barret"] = { speed = 2500, gravity = 0.55 },
+    ["Military Barrett"] = { speed = 2500, gravity = 0.55 },
+    ["Military M4A1"] = { speed = 2100, gravity = 0.55 },
+    ["Military M39"] = { speed = 2400, gravity = 0.52 },
+    ["Military MP7"] = { speed = 1900, gravity = 0.6 },
+    ["Military PKM"] = { speed = 2400, gravity = 0.55 },
+    ["Military USP"] = { speed = 1800, gravity = 0.6 },
+    ["Military AA12"] = { speed = 400, gravity = 0.6 },
+    ["Bruno's M4A1"] = { speed = 2100, gravity = 0.55 },
+    ["Salvaged AK47"] = { speed = 2100, gravity = 0.55 },
+    ["Salvaged AK74u"] = { speed = 1900, gravity = 0.6 },
+    ["Salvaged AK4"] = { speed = 2100, gravity = 0.55 },
+    ["Salvaged Sniper"] = { speed = 2100, gravity = 0.55 },
+    ["Salvaged M14"] = { speed = 2100, gravity = 0.55 },
+    ["Salvaged SMG"] = { speed = 1600, gravity = 0.6 },
+    ["Salvaged Skorpion"] = { speed = 1400, gravity = 0.6 },
+    ["Salvaged Python"] = { speed = 1500, gravity = 0.6 },
+    ["Salvaged P250"] = { speed = 1400, gravity = 0.6 },
+    ["Salvaged Pipe Rifle"] = { speed = 800, gravity = 0.55 },
+    ["Salvaged Pump Action"] = { speed = 400, gravity = 0.6 },
+    ["Salvaged Shotgun"] = { speed = 400, gravity = 0.6 },
+    ["Salvaged Double Barrel"] = { speed = 400, gravity = 0.6 },
+    ["Salvaged Break Action"] = { speed = 400, gravity = 0.6 },
+    ["Crossbow"] = { speed = 420, gravity = 0.2 },
+    ["Wooden Bow"] = { speed = 280, gravity = 0.2 },
+    ["Nail Gun"] = { speed = 165, gravity = 0.25 },
+    ["Pumpkin Launcher"] = { speed = 100, gravity = 0.12 },
+    ["Salvaged RPG"] = { speed = 100, gravity = 0.12 },
+    ["Military Grenade Launcher"] = { speed = 350, gravity = 0.55 },
+    ["Salvaged Grenade Launcher"] = { speed = 350, gravity = 0.55 },
 }
 
 M._last_held = nil
@@ -5551,6 +5748,8 @@ end
 
 function M.is_ranged_weapon_name(name)
     if not name or name == "" then return false end
+    local lower = name:lower()
+    if lower:find("bow", 1, true) or lower:find("crossbow", 1, true) then return true end
     if name_looks_melee(name) then return false end
 
     if not loaded then M.load() end
@@ -5610,7 +5809,17 @@ function M.get_held_ranged_weapon_name()
 end
 
 function M.holding_ranged_weapon()
-    return M.get_held_ranged_weapon_name() ~= nil
+    return M._last_held_ranged ~= nil
+end
+
+function M.cached_held_ranged()
+    return M._last_held_ranged
+end
+
+function M.is_bow_weapon_name(name)
+    if not name then return false end
+    local n = name:lower()
+    return n:find("bow", 1, true) ~= nil
 end
 
 function M.invalidate()
@@ -5621,6 +5830,10 @@ function M.invalidate()
     M._last_held = nil
     M._last_held_ranged = nil
     M._weapon_changed_at = 0
+    pcall(function()
+        local origin = April.require("game.combat_origin")
+        if origin.invalidate then origin.invalidate() end
+    end)
 end
 
 function M.in_game_ready()
@@ -5705,9 +5918,13 @@ local function read_tool_attributes(inst)
         end
     end)
     if speed then
+        local grav = gravity
+        if not grav or grav <= 0 or grav > 2 then
+            grav = 0.55
+        end
         return {
             speed = speed,
-            gravity = gravity or 35,
+            gravity = grav,
             name = inst_name(inst),
             from_attributes = true,
         }
@@ -5792,23 +6009,14 @@ function M.get_held_tool()
 end
 
 function M.drop_gravity(grav)
-    if not grav or grav <= 0 then return 35 end
-    if grav < 5 then return grav * ROBLOX_GRAV end
+    if not grav or grav <= 0 then return ROBLOX_GRAV * 0.55 end
+    if grav <= 2 then return grav * ROBLOX_GRAV end
     return grav
 end
 
 function M.get_weapon_stats(name)
     name = name or M.get_held_weapon_name()
     if not name then return nil end
-
-    local _, tool_inst = M.get_held_tool()
-    if tool_inst then
-        local from_attrs = read_tool_attributes(tool_inst)
-        if from_attrs then
-            from_attrs.name = name
-            return from_attrs
-        end
-    end
 
     local entry = M.get(name)
     if entry and entry.Bullet then
@@ -5817,7 +6025,9 @@ function M.get_weapon_stats(name)
             gravity = entry.Bullet.Gravity or 0.55,
             name = name,
             from_toolinfo = true,
-            is_bow = entry.Weapon and entry.Weapon.IsBow or false,
+            is_bow = (entry.Weapon and entry.Weapon.IsBow)
+                or name == "Wooden Bow"
+                or name == "Crossbow",
         }
     end
 
@@ -5832,7 +6042,16 @@ function M.get_weapon_stats(name)
         }
     end
 
-    return { speed = 950, gravity = 35, name = name }
+    local _, tool_inst = M.get_held_tool()
+    if tool_inst then
+        local from_attrs = read_tool_attributes(tool_inst)
+        if from_attrs then
+            from_attrs.name = name
+            return from_attrs
+        end
+    end
+
+    return { speed = 950, gravity = 0.55, name = name }
 end
 
 function M.tick()
@@ -5863,6 +6082,10 @@ function M.tick()
         M._last_held_ranged = held
         M._weapon_changed_at = utility and utility.get_tick_count and utility.get_tick_count() or 0
         pcall(function()
+            local origin = April.require("game.combat_origin")
+            if origin.invalidate then origin.invalidate() end
+        end)
+        pcall(function()
             local gun_mods = April.require("features.combat.gun_mods")
             if gun_mods.on_weapon_changed then
                 gun_mods.on_weapon_changed(held)
@@ -5886,485 +6109,6 @@ function M.on_modules_ready()
             gun_mods.on_modules_ready()
         end
     end)
-end
-
-return M
-
-end)()
-
--- ── game/farm_tools.lua ──
-April._mods["game.farm_tools"] = (function()
---[[ Gather / farm tool detection for Farm Helper (NodeSpark / TreeX). ]]
-
-local bootstrap = April.require("game.bootstrap")
-local env = April.require("core.env")
-
-local M = {}
-
-local loaded = false
-local farm_tools = {}
-
--- Fallback when ToolInfo is unavailable (Melee + Trees or Nodes in dump ToolInfo).
-local FALLBACK_GATHER_TOOLS = {
-    ["Stone Hatchet"] = true,
-    ["Iron Shard Hatchet"] = true,
-    ["Steel Axe"] = true,
-    Chainsaw = true,
-    ["Stone Pickaxe"] = true,
-    ["Iron Shard Pickaxe"] = true,
-    ["Steel Pickaxe"] = true,
-    ["Mining Drill"] = true,
-    ["Bone Tool"] = true,
-    ["Candy Cane"] = true,
-    ["Carrot Blade"] = true,
-    ["Halloween Scythe"] = true,
-    Boulder = true,
-}
-
-local NAME_HINTS = {
-    "hatchet", "pickaxe", "pick axe", " axe", "axe ",
-    "chainsaw", "mining drill", "bone tool",
-    "candy cane", "carrot blade", "halloween scythe", "boulder",
-}
-
-local function inst_name(inst)
-    if not inst then return nil end
-    return inst.name or inst.Name
-end
-
-local function entry_can_gather(entry)
-    if not entry or not entry.Melee then return false end
-    local od = entry.ObjectDamages
-    if not od then return false end
-    return od.Trees ~= nil or od.Nodes ~= nil
-end
-
-local function normalize(name)
-    if not name or name == "" then return nil end
-    return name
-end
-
-local function name_hint_match(name)
-    local n = (name or ""):lower()
-    for _, hint in ipairs(NAME_HINTS) do
-        if n:find(hint, 1, true) then return true end
-    end
-    return false
-end
-
-function M.load()
-    if loaded then return true end
-
-    farm_tools = {}
-    for name in pairs(FALLBACK_GATHER_TOOLS) do
-        farm_tools[name] = true
-    end
-
-    local data = bootstrap.get_module("ToolInfo")
-    if type(data) == "table" then
-        for name, entry in pairs(data) do
-            if type(name) == "string" and entry_can_gather(entry) then
-                farm_tools[name] = true
-            end
-        end
-    end
-
-    loaded = true
-    return next(farm_tools) ~= nil
-end
-
-function M.invalidate()
-    loaded = false
-    farm_tools = {}
-end
-
-function M.is_farm_tool_name(name)
-    name = normalize(name)
-    if not name then return false end
-    if not loaded then M.load() end
-    if farm_tools[name] then return true end
-    return name_hint_match(name)
-end
-
-local function pick_farm_name(name)
-    if M.is_farm_tool_name(name) then return name end
-    return nil
-end
-
-local function scan_children(list)
-    if not list then return nil end
-    for _, child in ipairs(list) do
-        local hit = pick_farm_name(inst_name(child))
-        if hit then return hit end
-    end
-    return nil
-end
-
-function M.get_held_farm_tool_name()
-    if not loaded then M.load() end
-
-    local lp = env.get_local_player()
-    if not lp then return nil end
-
-    local char = lp.character
-    if char and env.is_valid(char) then
-        local hit = scan_children(env.safe_call(function() return char:get_children() end))
-        if hit then return hit end
-    end
-
-    local ws = env.get_workspace()
-    if ws then
-        local vms = env.safe_call(function() return ws:find_first_child("Viewmodels") end)
-            or env.safe_call(function() return ws:FindFirstChild("Viewmodels") end)
-        if vms then
-            for _, vm in ipairs(env.safe_call(function() return vms:get_children() end) or {}) do
-                if inst_name(vm) == "Viewmodel" then
-                    local hit = scan_children(env.safe_call(function() return vm:get_children() end))
-                    if hit then return hit end
-                end
-            end
-        end
-    end
-
-    return pick_farm_name(lp.tool_name)
-end
-
-function M.holding_farm_tool()
-    return M.get_held_farm_tool_name() ~= nil
-end
-
-function M.all_names()
-    if not loaded then M.load() end
-    local out = {}
-    for name in pairs(farm_tools) do
-        out[#out + 1] = name
-    end
-    table.sort(out)
-    return out
-end
-
-return M
-
-end)()
-
--- ── game/inventory.lua ──
-April._mods["game.inventory"] = (function()
-local env = April.require("core.env")
-local items = April.require("game.items")
-
-local M = {}
-
-function M.get_local_inventory()
-    local lp = env.get_local_player()
-    if not lp or not lp.character then return nil end
-    local char = lp.character
-    if not env.is_valid(char) then return nil end
-    local ic = env.safe_call(function() return char:find_first_child("InventoryController") end)
-    if not ic then return nil end
-    local fetch = env.safe_call(function() return ic:find_first_child("Fetch") end)
-    if not fetch or not fetch.Invoke then return nil end
-    local ok, inv, toolbar, armor = pcall(function() return fetch:Invoke() end)
-    if not ok or not inv then return nil end
-    return { inventory = inv, toolbar = toolbar, armor = armor }
-end
-
-function M.resolve_item_name(id)
-    if type(id) ~= "number" then return tostring(id) end
-    local rep = env.get_replicated_storage()
-    if not rep then return "Item#" .. id end
-    local modules = env.safe_call(function() return rep:find_first_child("Modules") end)
-    local items_mod = modules and env.safe_call(function() return modules:find_first_child("Items") end)
-    if items_mod then
-        local ok, data = pcall(function() return require(items_mod) end)
-        if ok and data and data[id] and data[id].Name then
-            return data[id].Name
-        end
-    end
-    return "Item#" .. id
-end
-
-function M.get_held_tool_name()
-    local lp = env.get_local_player()
-    if not lp then return nil end
-    if lp.tool_name and lp.tool_name ~= "" then return lp.tool_name end
-    local char = lp.character
-    if not char or not env.is_valid(char) then return nil end
-    for _, child in ipairs(env.safe_call(function() return char:get_children() end) or {}) do
-        if child.ClassName == "Tool" then return child.Name end
-    end
-    return nil
-end
-
-return M
-
-end)()
-
--- ── game/player_gear.lua ──
-April._mods["game.player_gear"] = (function()
-local env = April.require("core.env")
-local items = April.require("game.items")
-local item_catalog = April.require("game.item_catalog")
-local weapons = April.require("game.weapons")
-
-local M = {}
-
-local ARMOR_ATTRIBUTES = {
-    "ResistWet",
-    "HasFlippers",
-    "HasTank",
-    "HasGoggles",
-    "NVG",
-    "SilentSteps",
-    "WaterFilter",
-    "SteelToes",
-    "Snorkle",
-}
-
-local function parse_variant_name(name)
-    if not name then return nil, nil end
-    local base, variant = name:match("^([^/]+)/(.+)$")
-    if base and variant then
-        return base, variant
-    end
-    return name, nil
-end
-
-local function read_attribute(inst, key)
-    if not inst or not key then return nil end
-    if inst.GetAttribute then
-        return inst:GetAttribute(key)
-    end
-    if inst.get_attribute then
-        return inst:get_attribute(key)
-    end
-    return nil
-end
-
-local function add_armor_piece(out, seen, piece)
-    if not piece or not piece.name then return end
-    if seen[piece.name] then return end
-    seen[piece.name] = true
-    table.insert(out.armor, piece)
-end
-
-local function add_held_piece(out, label)
-    if not label or label == "" then return false end
-
-    local piece = items.resolve_item_label(label)
-    if not piece then
-        local base, variant = parse_variant_name(label)
-        piece = items.make_piece(base or label, variant)
-    end
-
-    out.held = piece
-    return true
-end
-
-local function try_armor_model(out, seen, name)
-    if not name then return end
-
-    if name:sub(1, 6) == "Armor_" then
-        add_armor_piece(out, seen, items.resolve_armor_model(name))
-        return
-    end
-
-    if name:sub(1, 6) == "Armor:" then
-        add_armor_piece(out, seen, items.resolve_item_label(name:sub(7)))
-    end
-end
-
-local function try_armor_attribute(out, seen, attr_key)
-    if not attr_key or attr_key:sub(1, 6) ~= "Armor_" then return end
-
-    local tail = attr_key:match("^Armor_(.+)$")
-    if not tail then return end
-
-    local piece = items.resolve_armor_model(attr_key)
-    if piece then
-        add_armor_piece(out, seen, piece)
-        return
-    end
-
-    local row = item_catalog.get_by_attribute(tail)
-    if row and row.name then
-        if tail == "ResistWet" and (seen["Hazmat Suit"] or seen["Wetsuit"]) then
-            return
-        end
-        add_armor_piece(out, seen, items.make_piece(row.name, nil))
-    end
-end
-
-local function scan_armor_attributes(inst, out, seen)
-    for _, attr in ipairs(ARMOR_ATTRIBUTES) do
-        local key = "Armor_" .. attr
-        if read_attribute(inst, key) then
-            try_armor_attribute(out, seen, key)
-        end
-    end
-
-    local attrs = env.safe_call(function()
-        if inst.get_attributes then return inst:get_attributes() end
-        if inst.GetAttributes then return inst:GetAttributes() end
-    end)
-
-    if type(attrs) == "table" then
-        for key in pairs(attrs) do
-            if type(key) == "string" then
-                try_armor_attribute(out, seen, key)
-            end
-        end
-    end
-end
-
-local function scan_sleeves_string(out, seen, sleeves)
-    if not sleeves or sleeves == "" then return end
-    for entry in sleeves:gmatch("[^%^]+") do
-        entry = entry:match("^%s*(.-)%s*$")
-        if entry and entry ~= "" then
-            add_armor_piece(out, seen, items.resolve_item_label(entry))
-        end
-    end
-end
-
-local function resolve_character(player)
-    if player.character and env.is_valid(player.character) then
-        return player.character
-    end
-
-    if player.player and env.is_valid(player.player) then
-        local char = env.safe_call(function()
-            local pl = player.player
-            if pl.Character then return pl.Character end
-            if pl.character then return pl.character end
-        end)
-        if char and env.is_valid(char) then return char end
-    end
-
-    if player.name and game and game.workspace then
-        local char = env.safe_call(function()
-            if game.workspace.find_first_child then
-                return game.workspace:find_first_child(player.name)
-            end
-        end)
-        if char and env.is_valid(char) then return char end
-    end
-
-    return nil
-end
-
-local function resolve_player_inst(player)
-    if player.player and env.is_valid(player.player) then
-        return player.player
-    end
-    if not player.name or not game or not game.players then return nil end
-    return env.safe_call(function()
-        if game.players.find_first_child then
-            return game.players:find_first_child(player.name)
-        end
-    end)
-end
-
-local function scan_instance_tree(inst, out, seen, depth)
-    if not inst or not env.is_valid(inst) or depth > 8 then return end
-
-    local name = inst.Name or inst.name
-    if name and name ~= "" then
-        if name:sub(1, 6) == "Armor_" or name:sub(1, 6) == "Armor:" then
-            try_armor_model(out, seen, name)
-        end
-
-        if not out.held then
-            local cn = (inst.ClassName or inst.class_name or ""):lower()
-            if cn == "tool" then
-                add_held_piece(out, name)
-            elseif items.is_held_display(name) or weapons.is_weapon_name(name) then
-                add_held_piece(out, name)
-            end
-        end
-    end
-
-    local children = env.safe_call(function()
-        if inst.get_children then return inst:get_children() end
-        if inst.GetChildren then return inst:GetChildren() end
-    end) or {}
-
-    for _, child in ipairs(children) do
-        scan_instance_tree(child, out, seen, depth + 1)
-    end
-end
-
-function M.scan_player(player)
-    local out = {
-        held = nil,
-        armor = {},
-    }
-
-    if not player then return out end
-
-    if player.tool_name and player.tool_name ~= "" then
-        add_held_piece(out, player.tool_name)
-    end
-
-    local char = resolve_character(player)
-    local seen = {}
-
-    if char then
-        scan_instance_tree(char, out, seen, 0)
-        scan_armor_attributes(char, out, seen)
-    end
-
-    local pl = resolve_player_inst(player)
-    if pl then
-        scan_armor_attributes(pl, out, seen)
-        scan_sleeves_string(out, seen, read_attribute(pl, "ArmorSleeves"))
-    end
-
-    return out
-end
-
-return M
-
-end)()
-
--- ── game/player_state.lua ──
-April._mods["game.player_state"] = (function()
---[[ Fallen player state — Humanoid:GetAttribute("Downed") from game scripts. ]]
-
-local env = April.require("core.env")
-
-local M = {}
-
-function M.is_downed(player)
-    if not player then return false end
-
-    local hum = player.humanoid
-    if not hum and player.character then
-        hum = env.safe_call(function()
-            if player.character.FindFirstChildOfClass then
-                return player.character:FindFirstChildOfClass("Humanoid")
-            end
-            return player.character:FindFirstChild("Humanoid")
-        end)
-    end
-    if not hum then return false end
-
-    local down = env.safe_call(function()
-        if hum.GetAttribute then
-            return hum:GetAttribute("Downed")
-        end
-        if hum.get_attribute then
-            return hum:get_attribute("Downed")
-        end
-        return nil
-    end)
-
-    return down == true
-end
-
-function M.is_combat_target(player)
-    if not player or player.is_local then return false end
-    if not player.is_alive then return false end
-    return true
 end
 
 return M
@@ -6902,6 +6646,1143 @@ end
 
 function M.selected_editor_weapon_key()
     return M.editor_weapon_key(M.selected_editor_weapon())
+end
+
+return M
+
+end)()
+
+-- ── game/combat_stats.lua ──
+April._mods["game.combat_stats"] = (function()
+--[[ Effective weapon stats for silent aim — ToolInfo + ammo + optional gun mod multipliers. ]]
+
+local settings = April.require("core.settings")
+local weapons = April.require("game.weapons")
+
+local M = {}
+
+local function profiles_mod()
+    return April.require("game.gun_mod_profiles")
+end
+
+local function store_mod()
+    return April.require("game.weapon_profile_store")
+end
+
+local function inventory_mod()
+    return April.require("game.inventory")
+end
+
+local function profile_speed_mult(held)
+    if not settings.enabled("april_gunmods_enabled") then return 0 end
+
+    if settings.enabled("april_gm_speed") then
+        return settings.num("april_gm_speed_mult", 100)
+    end
+
+    if not held then return 0 end
+
+    local profiles = profiles_mod()
+    local store = store_mod()
+
+    if profiles.is_global_mode() then
+        if not store.has_saved(profiles.GLOBAL_PROFILE_KEY) then return 0 end
+        local p = store.get(profiles.GLOBAL_PROFILE_KEY)
+        if not p or not p.speed then return 0 end
+        return p.speed_mult or 0
+    end
+
+    if store.has_saved(held) then
+        local p = store.get(held)
+        if p and p.speed then return p.speed_mult or 0 end
+    end
+
+    return 0
+end
+
+local function ammo_modifiers()
+    local inv = inventory_mod()
+    if not inv or not inv.get_equipped_ammo_stats then
+        return 1, 1
+    end
+    local ammo = inv.get_equipped_ammo_stats()
+    if not ammo then return 1, 1 end
+    return ammo.speed_mult or 1, ammo.gravity_mult or 1
+end
+
+function M.get_effective_stats(weapon_name)
+    weapon_name = weapon_name or weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
+    local base = weapons.get_weapon_stats(weapon_name)
+    if not base then
+        base = { speed = 950, gravity = 0.55, name = weapon_name or "Unknown" }
+    end
+
+    local speed = base.speed or 950
+    local gravity = base.gravity or 0.55
+    local is_bow = base.is_bow
+        or (weapon_name and (weapon_name:find("Bow", 1, true) or weapon_name:find("Crossbow", 1, true)))
+
+    local sm = profile_speed_mult(weapon_name)
+    if sm ~= 0 then
+        speed = speed * (1 + sm)
+    end
+
+    local ammo_speed, ammo_grav = ammo_modifiers()
+    speed = speed * ammo_speed
+    gravity = gravity * ammo_grav
+
+    return {
+        speed = speed,
+        gravity = gravity,
+        name = weapon_name or base.name,
+        is_bow = is_bow == true,
+        base_speed = base.speed,
+        speed_mult = sm,
+        ammo_speed_mult = ammo_speed,
+        ammo_gravity_mult = ammo_grav,
+    }
+end
+
+return M
+
+end)()
+
+-- ── core/ballistic.lua ──
+April._mods["core.ballistic"] = (function()
+--[[ Ballistic prediction — muzzle lead + drop for Fallen projectiles. ]]
+
+local math_util = April.require("core.math_util")
+
+local M = {}
+
+local ROBLOX_GRAV = 196.2
+local LEAD_PASSES = 6
+
+local function vec3(v)
+    if not v then return 0, 0, 0 end
+    return v.x or v.X or 0, v.y or v.Y or 0, v.z or v.Z or 0
+end
+
+local function combat_stats_mod()
+    return April.require("game.combat_stats")
+end
+
+function M.gravity_accel(gravity_mult)
+    if not gravity_mult or gravity_mult <= 0 then
+        return ROBLOX_GRAV * 0.55
+    end
+    if gravity_mult <= 2 then
+        return ROBLOX_GRAV * gravity_mult
+    end
+    return gravity_mult
+end
+
+function M.calculate_drop(bullet_speed, bullet_gravity, position, origin)
+    local px, py, pz = vec3(position)
+    local ox, oy, oz = vec3(origin)
+
+    local speed = math.max(bullet_speed or 950, 1)
+    local dist = math_util.distance3(px - ox, py - oy, pz - oz)
+    local time = dist / speed
+    local g = M.gravity_accel(bullet_gravity)
+    return 0.5 * g * time * time
+end
+
+--[[
+    Mouse hit point for muzzle projectile (ViewmodelController uses v321 from MouseRaycast).
+    Position + Velocity * time + (0, Drop, 0) — drop from muzzle distance / speed only.
+]]
+function M.calculate_target_position(bullet_speed, bullet_gravity, velocity, position, origin)
+    local px, py, pz = vec3(position)
+    local ox, oy, oz = vec3(origin)
+    local vx, vy, vz = vec3(velocity)
+
+    local speed = math.max(bullet_speed or 950, 1)
+    local g = M.gravity_accel(bullet_gravity)
+
+    local horiz_speed = math.sqrt(vx * vx + vz * vz)
+    if horiz_speed < 1.5 then
+        vx, vy, vz = 0, vy, 0
+    end
+
+    vy = math.max(-80, math.min(80, vy))
+
+    local time = math_util.distance3(px - ox, py - oy, pz - oz) / speed
+
+    for _ = 1, LEAD_PASSES do
+        local tx = px + vx * time
+        local ty = py + vy * time
+        local tz = pz + vz * time
+        time = math_util.distance3(tx - ox, ty - oy, tz - oz) / speed
+    end
+
+    local tx = px + vx * time
+    local ty = py + vy * time
+    local tz = pz + vz * time
+    local drop = 0.5 * g * time * time
+
+    return {
+        x = tx,
+        y = ty + drop,
+        z = tz,
+    }
+end
+
+function M.predict_for_weapon(origin, position, velocity, weapon_name)
+    local stats = combat_stats_mod().get_effective_stats(weapon_name)
+    return M.calculate_target_position(stats.speed, stats.gravity, velocity, position, origin)
+end
+
+return M
+
+end)()
+
+-- ── game/combat_origin.lua ──
+April._mods["game.combat_origin"] = (function()
+--[[ Ray origins — cheap per-frame viewmodel muzzle / server body (no tree scans). ]]
+
+local env = April.require("core.env")
+local weapons = April.require("game.weapons")
+
+local M = {}
+
+local frame = { t = 0, weapon = nil, muzzle = nil, server = nil }
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function find_child(parent, name)
+    if not parent then return nil end
+    return env.safe_call(function()
+        return parent:find_first_child(name) or parent:FindFirstChild(name)
+    end)
+end
+
+local function part_pos(part)
+    if not part or not env.is_valid(part) then return nil end
+    local p = part.Position or part.position
+    if p and p.x ~= nil then
+        return { x = p.x, y = p.y, z = p.z }
+    end
+    return nil
+end
+
+local function vec3_from_cf(cf)
+    if not cf then return nil end
+    local pos = cf.Position or cf.position
+    if pos and pos.x ~= nil then
+        return { x = pos.x, y = pos.y, z = pos.z }
+    end
+    return nil
+end
+
+local function camera_origin()
+    if not camera or not camera.get_position then return nil end
+    local ok, pos = pcall(camera.get_position)
+    if ok and pos and pos.x then
+        return { x = pos.x, y = pos.y, z = pos.z }
+    end
+    return nil
+end
+
+local function viewmodel_cframe_origin()
+    local lp = env.get_local_player()
+    local char = lp and lp.character
+    if not char or not env.is_valid(char) then return nil end
+
+    local cc = find_child(char, "CameraController")
+    if not cc then return nil end
+
+    local cf = env.safe_call(function() return cc:GetAttribute("ViewmodelCFrame") end)
+    if not cf then return nil end
+
+    local pos = vec3_from_cf(cf)
+    if not pos then return nil end
+
+    local look = cf.LookVector or cf.lookVector
+    if look and look.x then
+        return {
+            x = pos.x + look.x * 0.5,
+            y = pos.y + look.y * 0.5,
+            z = pos.z + look.z * 0.5,
+        }
+    end
+    return pos
+end
+
+local function flashpart_origin()
+    local ws = env.get_workspace()
+    if not ws then return nil end
+
+    local vms = env.safe_call(function() return ws:find_first_child("Viewmodels") end)
+        or env.safe_call(function() return ws:FindFirstChild("Viewmodels") end)
+    if not vms then return nil end
+
+    local vm = env.safe_call(function() return vms:find_first_child("Viewmodel") end)
+        or env.safe_call(function() return vms:FindFirstChild("Viewmodel") end)
+    if not vm then return nil end
+
+    local flash = find_child(vm, "FlashPart") or find_child(vm, "Flash")
+    return part_pos(flash)
+end
+
+local function compute_muzzle(weapon)
+    local flash = flashpart_origin()
+    if flash then return flash end
+
+    local cframe = viewmodel_cframe_origin()
+    if cframe then return cframe end
+
+    if weapon and weapons.is_bow_weapon_name(weapon) then
+        return camera_origin()
+    end
+
+    return camera_origin()
+end
+
+local function compute_server()
+    local lp = env.get_local_player()
+    if not lp then return nil end
+
+    if lp.position then
+        return { x = lp.position.x, y = lp.position.y, z = lp.position.z }
+    end
+
+    local char = lp.character
+    if char and env.is_valid(char) then
+        return part_pos(find_child(char, "HumanoidRootPart"))
+    end
+
+    return nil
+end
+
+function M.invalidate()
+    frame.t = 0
+    frame.weapon = nil
+    frame.muzzle = nil
+    frame.server = nil
+end
+
+function M.sync_weapon(weapon)
+    weapon = weapon or weapons.cached_held_ranged()
+    local now = tick_ms()
+    if frame.t == now and frame.weapon == weapon and frame.muzzle then
+        return
+    end
+    frame.t = now
+    frame.weapon = weapon
+    frame.muzzle = compute_muzzle(weapon)
+    frame.server = compute_server()
+end
+
+function M.get_muzzle_origin()
+    M.sync_weapon()
+    return frame.muzzle
+end
+
+function M.get_server_origin()
+    M.sync_weapon()
+    return frame.server
+end
+
+function M.get_camera_origin()
+    if not camera or not camera.get_position then return nil end
+    local ok, pos = pcall(camera.get_position)
+    if ok and pos and pos.x then
+        return { x = pos.x, y = pos.y, z = pos.z }
+    end
+    return nil
+end
+
+function M.get_fire_origin()
+    M.sync_weapon()
+    return frame.muzzle or frame.server
+end
+
+return M
+
+end)()
+
+-- ── game/farm_tools.lua ──
+April._mods["game.farm_tools"] = (function()
+--[[ Gather / farm tool detection for Farm Helper (NodeSpark / TreeX). ]]
+
+local bootstrap = April.require("game.bootstrap")
+local env = April.require("core.env")
+
+local M = {}
+
+local loaded = false
+local farm_tools = {}
+
+-- Fallback when ToolInfo is unavailable (Melee + Trees or Nodes in dump ToolInfo).
+local FALLBACK_GATHER_TOOLS = {
+    ["Stone Hatchet"] = true,
+    ["Iron Shard Hatchet"] = true,
+    ["Steel Axe"] = true,
+    Chainsaw = true,
+    ["Stone Pickaxe"] = true,
+    ["Iron Shard Pickaxe"] = true,
+    ["Steel Pickaxe"] = true,
+    ["Mining Drill"] = true,
+    ["Bone Tool"] = true,
+    ["Candy Cane"] = true,
+    ["Carrot Blade"] = true,
+    ["Halloween Scythe"] = true,
+    Boulder = true,
+}
+
+local NAME_HINTS = {
+    "hatchet", "pickaxe", "pick axe", " axe", "axe ",
+    "chainsaw", "mining drill", "bone tool",
+    "candy cane", "carrot blade", "halloween scythe", "boulder",
+}
+
+local function inst_name(inst)
+    if not inst then return nil end
+    return inst.name or inst.Name
+end
+
+local function entry_can_gather(entry)
+    if not entry or not entry.Melee then return false end
+    local od = entry.ObjectDamages
+    if not od then return false end
+    return od.Trees ~= nil or od.Nodes ~= nil
+end
+
+local function normalize(name)
+    if not name or name == "" then return nil end
+    return name
+end
+
+local function name_hint_match(name)
+    local n = (name or ""):lower()
+    for _, hint in ipairs(NAME_HINTS) do
+        if n:find(hint, 1, true) then return true end
+    end
+    return false
+end
+
+function M.load()
+    if loaded then return true end
+
+    farm_tools = {}
+    for name in pairs(FALLBACK_GATHER_TOOLS) do
+        farm_tools[name] = true
+    end
+
+    local data = bootstrap.get_module("ToolInfo")
+    if type(data) == "table" then
+        for name, entry in pairs(data) do
+            if type(name) == "string" and entry_can_gather(entry) then
+                farm_tools[name] = true
+            end
+        end
+    end
+
+    loaded = true
+    return next(farm_tools) ~= nil
+end
+
+function M.invalidate()
+    loaded = false
+    farm_tools = {}
+end
+
+function M.is_farm_tool_name(name)
+    name = normalize(name)
+    if not name then return false end
+    if not loaded then M.load() end
+    if farm_tools[name] then return true end
+    return name_hint_match(name)
+end
+
+local function pick_farm_name(name)
+    if M.is_farm_tool_name(name) then return name end
+    return nil
+end
+
+local function scan_children(list)
+    if not list then return nil end
+    for _, child in ipairs(list) do
+        local hit = pick_farm_name(inst_name(child))
+        if hit then return hit end
+    end
+    return nil
+end
+
+function M.get_held_farm_tool_name()
+    if not loaded then M.load() end
+
+    local lp = env.get_local_player()
+    if not lp then return nil end
+
+    local char = lp.character
+    if char and env.is_valid(char) then
+        local hit = scan_children(env.safe_call(function() return char:get_children() end))
+        if hit then return hit end
+    end
+
+    local ws = env.get_workspace()
+    if ws then
+        local vms = env.safe_call(function() return ws:find_first_child("Viewmodels") end)
+            or env.safe_call(function() return ws:FindFirstChild("Viewmodels") end)
+        if vms then
+            for _, vm in ipairs(env.safe_call(function() return vms:get_children() end) or {}) do
+                if inst_name(vm) == "Viewmodel" then
+                    local hit = scan_children(env.safe_call(function() return vm:get_children() end))
+                    if hit then return hit end
+                end
+            end
+        end
+    end
+
+    return pick_farm_name(lp.tool_name)
+end
+
+function M.holding_farm_tool()
+    return M.get_held_farm_tool_name() ~= nil
+end
+
+function M.all_names()
+    if not loaded then M.load() end
+    local out = {}
+    for name in pairs(farm_tools) do
+        out[#out + 1] = name
+    end
+    table.sort(out)
+    return out
+end
+
+return M
+
+end)()
+
+-- ── game/inventory.lua ──
+April._mods["game.inventory"] = (function()
+local env = April.require("core.env")
+local items = April.require("game.items")
+local item_catalog = April.require("game.item_catalog")
+
+local M = {}
+
+function M.get_local_inventory()
+    local lp = env.get_local_player()
+    if not lp or not lp.character then return nil end
+    local char = lp.character
+    if not env.is_valid(char) then return nil end
+    local ic = env.safe_call(function() return char:find_first_child("InventoryController") end)
+    if not ic then return nil end
+    local fetch = env.safe_call(function() return ic:find_first_child("Fetch") end)
+    if not fetch or not fetch.Invoke then return nil end
+    local ok, inv, toolbar, armor = pcall(function() return fetch:Invoke() end)
+    if not ok or not inv then return nil end
+    return { inventory = inv, toolbar = toolbar, armor = armor }
+end
+
+function M.resolve_item_name(id)
+    if type(id) ~= "number" then return tostring(id) end
+
+    local row = item_catalog.get(id)
+    if row and row.name then return row.name end
+
+    local rep = env.get_replicated_storage()
+    if not rep then return "Item#" .. id end
+    local modules = env.safe_call(function() return rep:find_first_child("Modules") end)
+    local items_mod = modules and env.safe_call(function() return modules:find_first_child("Items") end)
+    if items_mod then
+        local ok, data = pcall(function() return require(items_mod) end)
+        if ok and data and data[id] and data[id].Name then
+            return data[id].Name
+        end
+    end
+    return "Item#" .. id
+end
+
+local function read_attribute(inst, key)
+    if not inst or not key then return nil end
+    if inst.GetAttribute then return inst:GetAttribute(key) end
+    if inst.get_attribute then return inst:get_attribute(key) end
+    return nil
+end
+
+local function find_child(char, name)
+    if not char then return nil end
+    return env.safe_call(function()
+        if char.find_first_child then return char:find_first_child(name) end
+        return char:FindFirstChild(name)
+    end)
+end
+
+function M.get_toolbar_entry(char)
+    if not char or not env.is_valid(char) then return nil, nil end
+
+    local ic = find_child(char, "InventoryController")
+    if not ic then return nil, nil end
+
+    local fetch = env.safe_call(function()
+        if ic.find_first_child then return ic:find_first_child("Fetch") end
+        return ic:FindFirstChild("Fetch")
+    end)
+    if not fetch or not fetch.Invoke then return nil, nil end
+
+    local slot = read_attribute(find_child(char, "EquipController"), "Equipped")
+    if type(slot) ~= "number" or slot <= 0 then
+        slot = read_attribute(find_child(char, "ViewmodelController"), "Equipped")
+    end
+    if type(slot) ~= "number" or slot <= 0 then return nil, nil end
+
+    local ok, data = pcall(function() return fetch:Invoke() end)
+    if not ok or type(data) ~= "table" then return nil, nil end
+
+    local toolbar = data.Toolbar or data.toolbar
+    if type(toolbar) ~= "table" then return nil, nil end
+
+    local entry = toolbar[slot]
+    if not entry or entry == 0 then return nil, nil end
+    if type(entry) == "table" and entry.Amount and entry.Amount <= 0 then return nil, nil end
+
+    return entry, slot
+end
+
+function M.get_equipped_ammo_stats()
+    local lp = env.get_local_player()
+    local char = lp and lp.character
+    if not char or not env.is_valid(char) then return nil end
+
+    local entry = M.get_toolbar_entry(char)
+    if not entry or type(entry) ~= "table" then return nil end
+
+    local ammo = entry.Ammo
+    if not ammo or type(ammo) ~= "table" then return nil end
+
+    local ammo_id = ammo.ID
+    if type(ammo_id) ~= "number" then return nil end
+
+    items.load()
+    local row = items.get_by_id and items.get_by_id(ammo_id)
+    if row and row.AmmoStats then return row.AmmoStats end
+
+    local rep = env.get_replicated_storage()
+    if rep then
+        local modules = env.safe_call(function() return rep:find_first_child("Modules") end)
+        local items_mod = modules and env.safe_call(function() return modules:find_first_child("Items") end)
+        if items_mod then
+            local ok, data = pcall(function() return require(items_mod) end)
+            if ok and data and data[ammo_id] and data[ammo_id].AmmoStats then
+                return data[ammo_id].AmmoStats
+            end
+        end
+    end
+
+    return nil
+end
+
+function M.get_toolbar_held_name(char)
+    local entry = M.get_toolbar_entry(char)
+    if not entry then return nil end
+
+    local id = type(entry) == "table" and entry.ID or entry
+    if type(id) ~= "number" then return nil end
+
+    return M.resolve_item_name(id)
+end
+
+function M.get_held_tool_name()
+    local lp = env.get_local_player()
+    if not lp then return nil end
+    if lp.tool_name and lp.tool_name ~= "" then return lp.tool_name end
+
+    local char = lp.character
+    if not char or not env.is_valid(char) then return nil end
+
+    local toolbar_name = M.get_toolbar_held_name(char)
+    if toolbar_name and toolbar_name ~= "" then return toolbar_name end
+
+    for _, child in ipairs(env.safe_call(function() return char:get_children() end) or {}) do
+        if child.ClassName == "Tool" then return child.Name end
+    end
+    return nil
+end
+
+return M
+
+end)()
+
+-- ── game/player_gear.lua ──
+April._mods["game.player_gear"] = (function()
+local env = April.require("core.env")
+local items = April.require("game.items")
+local item_catalog = April.require("game.item_catalog")
+local inventory = April.require("game.inventory")
+local weapons = April.require("game.weapons")
+
+local M = {}
+
+local ARMOR_ATTRIBUTES = {
+    "ResistWet",
+    "HasFlippers",
+    "HasTank",
+    "HasGoggles",
+    "NVG",
+    "SilentSteps",
+    "WaterFilter",
+    "SteelToes",
+    "Snorkle",
+}
+
+local ATTACHMENT_SLOT_HINTS = {
+    ["p1"] = true, ["p2"] = true, ["p3"] = true, ["p4"] = true,
+    ["slot1"] = true, ["slot2"] = true, ["slot3"] = true,
+    ["sight"] = true, ["muzzle"] = true, ["underbarrel"] = true,
+}
+
+local function parse_variant_name(name)
+    if not name then return nil, nil end
+    local base, variant = name:match("^([^/]+)/(.+)$")
+    if base and variant then
+        return base, variant
+    end
+    return name, nil
+end
+
+local function read_attribute(inst, key)
+    if not inst or not key then return nil end
+    if inst.GetAttribute then
+        return inst:GetAttribute(key)
+    end
+    if inst.get_attribute then
+        return inst:get_attribute(key)
+    end
+    return nil
+end
+
+local function is_tool(inst)
+    if not inst then return false end
+    local cn = inst.ClassName or inst.class_name
+    return cn == "Tool"
+end
+
+local function is_attachment_slot_name(name)
+    if not name or name == "" then return true end
+    local lower = name:lower()
+    if ATTACHMENT_SLOT_HINTS[lower] then return true end
+    if lower:match("^p%d+$") then return true end
+    if lower:match("^slot%d+$") then return true end
+    return false
+end
+
+local function is_armor_child_name(name)
+    if not name or name == "" then return true end
+    if name:sub(1, 6) == "Armor_" or name:sub(1, 6) == "Armor:" then return true end
+    if name:find("Armor", 1, true) and name:find("/", 1, true) then return true end
+    return false
+end
+
+local function is_attachment_name(name)
+    if not name or name == "" then return false end
+    if is_attachment_slot_name(name) then return false end
+
+    local base = select(1, parse_variant_name(name))
+    local row = item_catalog.get_by_name(base)
+    if row and row.type == "Attachment" then return true end
+
+    local t = items.get_type(base)
+    return t == "Attachment"
+end
+
+local function is_valid_held_label(name)
+    if not name or name == "" then return false end
+    if is_attachment_slot_name(name) then return false end
+    if is_armor_child_name(name) then return false end
+    if is_attachment_name(name) then return false end
+    return true
+end
+
+local function looks_like_held_item(name)
+    if not is_valid_held_label(name) then return false end
+    if weapons.is_weapon_name(name) then return true end
+    if items.is_held_display(name) then return true end
+    return true
+end
+
+local function add_armor_piece(out, seen, piece)
+    if not piece or not piece.name then return end
+    if seen[piece.name] then return end
+    seen[piece.name] = true
+    table.insert(out.armor, piece)
+end
+
+local function add_held_piece(out, label)
+    if not is_valid_held_label(label) then return false end
+
+    local piece = items.resolve_item_label(label)
+    if not piece then
+        local base, variant = parse_variant_name(label)
+        piece = items.make_piece(base or label, variant)
+    end
+
+    out.held = piece
+    return true
+end
+
+local function add_attachment_piece(out, seen, label)
+    if not label or label == "" then return end
+    if is_attachment_slot_name(label) then return end
+    if not is_attachment_name(label) then return end
+    if seen[label] then return end
+
+    seen[label] = true
+    local piece = items.resolve_item_label(label)
+    if not piece then
+        local base, variant = parse_variant_name(label)
+        piece = items.make_piece(base or label, variant)
+    end
+    table.insert(out.attachments, piece)
+end
+
+local function try_armor_model(out, seen, name)
+    if not name then return end
+
+    if name:sub(1, 6) == "Armor_" then
+        add_armor_piece(out, seen, items.resolve_armor_model(name))
+        return
+    end
+
+    if name:sub(1, 6) == "Armor:" then
+        add_armor_piece(out, seen, items.resolve_item_label(name:sub(7)))
+    end
+end
+
+local function try_armor_attribute(out, seen, attr_key)
+    if not attr_key or attr_key:sub(1, 6) ~= "Armor_" then return end
+
+    local tail = attr_key:match("^Armor_(.+)$")
+    if not tail then return end
+
+    local piece = items.resolve_armor_model(attr_key)
+    if piece then
+        add_armor_piece(out, seen, piece)
+        return
+    end
+
+    local row = item_catalog.get_by_attribute(tail)
+    if row and row.name then
+        if tail == "ResistWet" and (seen["Hazmat Suit"] or seen["Wetsuit"]) then
+            return
+        end
+        add_armor_piece(out, seen, items.make_piece(row.name, nil))
+    end
+end
+
+local function scan_armor_attributes(inst, out, seen)
+    for _, attr in ipairs(ARMOR_ATTRIBUTES) do
+        local key = "Armor_" .. attr
+        if read_attribute(inst, key) then
+            try_armor_attribute(out, seen, key)
+        end
+    end
+
+    local attrs = env.safe_call(function()
+        if inst.get_attributes then return inst:get_attributes() end
+        if inst.GetAttributes then return inst:GetAttributes() end
+    end)
+
+    if type(attrs) == "table" then
+        for key in pairs(attrs) do
+            if type(key) == "string" then
+                try_armor_attribute(out, seen, key)
+            end
+        end
+    end
+end
+
+local function scan_sleeves_string(out, seen, sleeves)
+    if not sleeves or sleeves == "" then return end
+    for entry in sleeves:gmatch("[^%^]+") do
+        entry = entry:match("^%s*(.-)%s*$")
+        if entry and entry ~= "" then
+            add_armor_piece(out, seen, items.resolve_item_label(entry))
+        end
+    end
+end
+
+local function resolve_character(player)
+    if player.character and env.is_valid(player.character) then
+        return player.character
+    end
+
+    if player.player and env.is_valid(player.player) then
+        local char = env.safe_call(function()
+            local pl = player.player
+            if pl.Character then return pl.Character end
+            if pl.character then return pl.character end
+        end)
+        if char and env.is_valid(char) then return char end
+    end
+
+    if player.name and game and game.workspace then
+        local char = env.safe_call(function()
+            if game.workspace.find_first_child then
+                return game.workspace:find_first_child(player.name)
+            end
+        end)
+        if char and env.is_valid(char) then return char end
+    end
+
+    return nil
+end
+
+local function resolve_player_inst(player)
+    if player.player and env.is_valid(player.player) then
+        return player.player
+    end
+    if not player.name or not game or not game.players then return nil end
+    return env.safe_call(function()
+        if game.players.find_first_child then
+            return game.players:find_first_child(player.name)
+        end
+    end)
+end
+
+local function find_inst_by_name(char, name)
+    if not char or not name then return nil end
+
+    for _, child in ipairs(env.safe_call(function() return char:get_children() end) or {}) do
+        local child_name = child.Name or child.name
+        if child_name == name then
+            return child
+        end
+    end
+
+    return nil
+end
+
+local function find_held_on_character(char)
+    if not char then return nil, nil end
+
+    local fallback = nil
+    for _, child in ipairs(env.safe_call(function() return char:get_children() end) or {}) do
+        local name = child.Name or child.name
+        if not name or name == "" or is_armor_child_name(name) then goto continue end
+        if not is_valid_held_label(name) then goto continue end
+
+        if is_tool(child) then
+            return name, child
+        end
+
+        local cn = child.ClassName or child.class_name
+        if cn == "Model" and looks_like_held_item(name) then
+            if weapons.is_weapon_name(name) or items.is_held_display(name) then
+                return name, child
+            end
+            fallback = fallback or { name = name, inst = child }
+        end
+
+        ::continue::
+    end
+
+    if fallback then
+        return fallback.name, fallback.inst
+    end
+
+    return nil, nil
+end
+
+local function resolve_held_weapon(player, char)
+    if player.tool_name and player.tool_name ~= "" and is_valid_held_label(player.tool_name) then
+        local inst = char and find_inst_by_name(char, player.tool_name) or nil
+        return player.tool_name, inst
+    end
+
+    if char then
+        local toolbar_name = inventory.get_toolbar_held_name(char)
+        if toolbar_name and is_valid_held_label(toolbar_name) then
+            local inst = find_inst_by_name(char, toolbar_name) or select(2, find_held_on_character(char))
+            return toolbar_name, inst
+        end
+
+        local name, inst = find_held_on_character(char)
+        if name then
+            return name, inst
+        end
+    end
+
+    if player.is_local then
+        local name = weapons.get_held_weapon_name()
+        if name and is_valid_held_label(name) then
+            local inst = char and (find_inst_by_name(char, name) or select(2, find_held_on_character(char))) or nil
+            return name, inst
+        end
+    end
+
+    return nil, nil
+end
+
+local function scan_attachments_folder(folder, out, seen)
+    if not folder or not env.is_valid(folder) then return end
+
+    local children = env.safe_call(function()
+        if folder.get_children then return folder:get_children() end
+        if folder.GetChildren then return folder:GetChildren() end
+    end) or {}
+
+    for _, child in ipairs(children) do
+        local name = child.Name or child.name
+        if name and name ~= "" then
+            add_attachment_piece(out, seen, name)
+        end
+    end
+end
+
+local function scan_weapon_attachments(char, tool_inst, out, seen)
+    if tool_inst and env.is_valid(tool_inst) then
+        local attachments = env.safe_call(function()
+            if tool_inst.find_first_child then return tool_inst:find_first_child("Attachments") end
+            return tool_inst:FindFirstChild("Attachments")
+        end)
+        scan_attachments_folder(attachments, out, seen)
+
+        local weapon = env.safe_call(function()
+            if tool_inst.find_first_child then return tool_inst:find_first_child("Weapon") end
+            return tool_inst:FindFirstChild("Weapon")
+        end)
+        if weapon and env.is_valid(weapon) then
+            local nested = env.safe_call(function()
+                if weapon.find_first_child then return weapon:find_first_child("Attachments") end
+                return weapon:FindFirstChild("Attachments")
+            end)
+            scan_attachments_folder(nested, out, seen)
+        end
+        return
+    end
+
+    if not char then return end
+    for _, child in ipairs(env.safe_call(function() return char:get_children() end) or {}) do
+        if is_tool(child) or (child.ClassName or child.class_name) == "Model" then
+            scan_weapon_attachments(char, child, out, seen)
+        end
+    end
+end
+
+local function scan_armor_tree(inst, out, seen, depth)
+    if not inst or not env.is_valid(inst) or depth > 8 then return end
+
+    local name = inst.Name or inst.name
+    if name and name ~= "" then
+        if name:sub(1, 6) == "Armor_" or name:sub(1, 6) == "Armor:" then
+            try_armor_model(out, seen, name)
+        end
+    end
+
+    local children = env.safe_call(function()
+        if inst.get_children then return inst:get_children() end
+        if inst.GetChildren then return inst:GetChildren() end
+    end) or {}
+
+    for _, child in ipairs(children) do
+        scan_armor_tree(child, out, seen, depth + 1)
+    end
+end
+
+function M.scan_player(player)
+    local out = {
+        held = nil,
+        attachments = {},
+        armor = {},
+    }
+
+    if not player then return out end
+
+    local char = resolve_character(player)
+    local held_name, tool_inst = resolve_held_weapon(player, char)
+
+    if held_name then
+        add_held_piece(out, held_name)
+    end
+
+    local att_seen = {}
+    scan_weapon_attachments(char, tool_inst, out, att_seen)
+
+    local seen = {}
+    if char then
+        scan_armor_tree(char, out, seen, 0)
+        scan_armor_attributes(char, out, seen)
+    end
+
+    local pl = resolve_player_inst(player)
+    if pl then
+        scan_armor_attributes(pl, out, seen)
+        scan_sleeves_string(out, seen, read_attribute(pl, "ArmorSleeves"))
+    end
+
+    return out
+end
+
+return M
+
+end)()
+
+-- ── game/player_state.lua ──
+April._mods["game.player_state"] = (function()
+--[[ Fallen player state — Humanoid:GetAttribute("Downed") from game scripts. ]]
+
+local env = April.require("core.env")
+
+local M = {}
+
+function M.is_downed(player)
+    if not player then return false end
+
+    local hum = player.humanoid
+    if not hum and player.character then
+        hum = env.safe_call(function()
+            if player.character.FindFirstChildOfClass then
+                return player.character:FindFirstChildOfClass("Humanoid")
+            end
+            return player.character:FindFirstChild("Humanoid")
+        end)
+    end
+    if not hum then return false end
+
+    local down = env.safe_call(function()
+        if hum.GetAttribute then
+            return hum:GetAttribute("Downed")
+        end
+        if hum.get_attribute then
+            return hum:get_attribute("Downed")
+        end
+        return nil
+    end)
+
+    return down == true
+end
+
+function M.is_combat_target(player)
+    if not player or player.is_local then return false end
+    if not player.is_alive then return false end
+    return true
+end
+
+function M.passes_health_check(player)
+    if not player then return false end
+    if not player.is_alive then return false end
+    if M.is_downed(player) then return false end
+    if player.health and player.health <= 0 then return false end
+    return true
+end
+
+function M.passes_team_check(player)
+    if not player then return false end
+    if not entity or not entity.get_local_player then return true end
+
+    local lp = entity.get_local_player()
+    if not lp then return true end
+    if not lp.has_team or not player.has_team then return true end
+    if not lp.team or not player.team or lp.team == "" or player.team == "" then return true end
+
+    return lp.team ~= player.team
 end
 
 return M
@@ -7779,6 +8660,31 @@ local esp_util = April.require("core.esp_util")
 
 local M = {}
 
+M.SILENT_BONES = {
+    "Head",
+    "Torso",
+    "Left Arm",
+    "Right Arm",
+    "Left Leg",
+    "Right Leg",
+    "Closest",
+}
+
+M.BONE_MAP = {
+    ["Head"] = "Head",
+    ["Torso"] = "UpperTorso",
+    ["Left Arm"] = "LeftUpperArm",
+    ["Right Arm"] = "RightUpperArm",
+    ["Left Leg"] = "LeftUpperLeg",
+    ["Right Leg"] = "RightUpperLeg",
+    ["Closest"] = "Closest",
+}
+
+function M.bone_from_index(idx)
+    local label = M.SILENT_BONES[(idx or 0) + 1] or "Head"
+    return M.BONE_MAP[label] or label
+end
+
 function M.register_targeting(T, G, prefix, parent_id, opts)
     opts = opts or {}
     local p = prefix
@@ -7799,6 +8705,620 @@ function M.register_targeting(T, G, prefix, parent_id, opts)
     menu.add_checkbox(T, G, p .. "target_line", "Target Line", false, menu_util.parent(parent_id, { colorpicker = opts.line_color or { 1, 0.2, 0.2, 1 } }))
 end
 
+function M.register_silent_aim(T, G, prefix, parent_id, opts)
+    opts = opts or {}
+    local p = prefix
+    local root = menu_util.parent(parent_id)
+
+    menu.add_combo(T, G, p .. "target_type", "Target Type", { "Crosshair", "Distance" }, 0, root)
+    menu.add_combo(T, G, p .. "bone", "Target Hitbox", M.SILENT_BONES, 0, root)
+
+    menu_util.gap(T, G)
+    menu_util.label(T, G, "Filters")
+    menu.add_checkbox(T, G, p .. "filter_health", "Health Check", true, root)
+    menu.add_checkbox(T, G, p .. "filter_visible", "Visible Only", false, root)
+    menu.add_checkbox(T, G, p .. "filter_team", "Team Check", true, root)
+
+    menu_util.gap(T, G)
+    menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, root)
+    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 150, root)
+    menu.add_checkbox(T, G, p .. "sticky", "Sticky Target", false, root)
+    menu.add_checkbox(T, G, p .. "bullet_manip", "Bullet Manipulation", false, root)
+    menu.add_slider_float(T, G, p .. "manip_dist", "Manip Distance", 0.1, 1, 1, "%.2f", root)
+    menu.add_checkbox(T, G, p .. "manip_status", "Manip Status Bar", false, root)
+    menu.add_checkbox(T, G, p .. "manip_ring", "Manip Ring Visual", false, root)
+    menu.add_checkbox(T, G, p .. "manip_peek_vis", "Manip Peek Visual", true, root)
+
+    menu_util.gap(T, G)
+    menu_util.label(T, G, "Visuals")
+    menu.add_checkbox(T, G, p .. "draw_fov", "Field Of View Circle", false, menu_util.parent(parent_id, { colorpicker = opts.fov_color or { 0.55, 0.2, 1, 1 } }))
+    menu.add_combo(T, G, p .. "fov_style", "FOV Style", { "Outline", "Filled Circle" }, 1, root)
+    menu.add_checkbox(T, G, p .. "target_line", "Target Line", false, menu_util.parent(parent_id, { colorpicker = opts.line_color or { 1, 0.25, 0.25, 1 } }))
+end
+
+return M
+
+end)()
+
+-- ── features/combat/targeting.lua ──
+April._mods["features.combat.targeting"] = (function()
+local settings = April.require("core.settings")
+local weapons = April.require("game.weapons")
+local ballistic = April.require("core.ballistic")
+local combat_origin = April.require("game.combat_origin")
+local combat_menu = April.require("features.combat.combat_menu")
+local math_util = April.require("core.math_util")
+local esp_util = April.require("core.esp_util")
+local player_state = April.require("game.player_state")
+
+local M = {}
+
+M.BONES = esp_util.AIM_BONES
+
+local function w2s(x, y, z)
+    return esp_util.w2s(x, y, z)
+end
+
+local function passes_visibility(target, aim, origin)
+    if not raycast then return true end
+    if not origin or not aim then return true end
+
+    local char = target and target.character
+    if char and utility and utility.is_valid(char) and raycast.is_player_visible then
+        return raycast.is_player_visible(char.address)
+    end
+
+    if raycast.is_visible then
+        return raycast.is_visible(origin.x, origin.y, origin.z, aim.x, aim.y, aim.z)
+    end
+
+    return true
+end
+
+function M.bone_name(prefix)
+    local idx = settings.num(prefix .. "bone", 0)
+    return combat_menu.bone_from_index(idx)
+end
+
+function M.target_priority_crosshair(prefix)
+    local idx = settings.num(prefix .. "target_type", 0)
+    return idx == 0
+end
+
+function M.passes_filters(target, prefix, aim, origin)
+    if not target then return false end
+
+    if settings.bool(prefix .. "filter_health", true) then
+        if not player_state.passes_health_check(target) then return false end
+    end
+
+    if settings.bool(prefix .. "filter_team", true) then
+        if not player_state.passes_team_check(target) then return false end
+    end
+
+    if settings.bool(prefix .. "filter_visible", false) then
+        if not passes_visibility(target, aim, origin) then return false end
+    end
+
+    return true
+end
+
+function M.within_max_distance(target, origin, prefix)
+    local max_d = settings.num(prefix .. "max_dist", 500)
+    if max_d <= 0 or not origin then return true end
+
+    local dist = target.distance_to and target:distance_to(origin) or nil
+    if not dist and target.position and origin then
+        local pos = target.position
+        dist = math_util.distance3((pos.x or 0) - origin.x, (pos.y or 0) - origin.y, (pos.z or 0) - origin.z)
+    end
+
+    return dist == nil or dist <= max_d
+end
+
+function M.bone_world(target, bone)
+    if not target or not target.is_alive then return nil end
+    if bone == "Closest" then return nil end
+
+    if bone == "Head" and target.head_position then
+        local pos = target.head_position
+        return { x = pos.x, y = pos.y, z = pos.z }
+    end
+
+    if target.character then
+        local env = April.require("core.env")
+        local part = env.safe_call(function()
+            return target.character:find_first_child(bone) or target.character:FindFirstChild(bone)
+        end)
+        if part and env.is_valid(part) then
+            local ppos = part.Position or part.position
+            if ppos and ppos.x then
+                return { x = ppos.x, y = ppos.y, z = ppos.z }
+            end
+        end
+    end
+
+    if target.position then
+        local pos = target.position
+        if bone == "Head" then
+            return nil
+        end
+        return { x = pos.x, y = pos.y, z = pos.z }
+    end
+    return nil
+end
+
+function M.closest_bone_world(target, cx, cy)
+    cx = cx or 0
+    cy = cy or 0
+    if target.get_bones_screen then
+        local bones = target:get_bones_screen()
+        if bones then
+            local best_name, best_dist = nil, math.huge
+            for name, entry in pairs(bones) do
+                local bx = entry.x or entry[1]
+                local by = entry.y or entry[2]
+                if bx and by then
+                    local d = math_util.screen_fov_dist(bx, by, cx, cy)
+                    if d < best_dist then
+                        best_dist = d
+                        best_name = name
+                    end
+                end
+            end
+            if best_name then
+                local world = M.bone_world(target, best_name)
+                if world then return world end
+            end
+        end
+    end
+    return M.bone_world(target, "Head")
+end
+
+local function target_velocity(target)
+    if target.velocity then
+        local v = target.velocity
+        if v.x ~= nil then
+            return {
+                x = v.x,
+                y = math.max(-100, math.min(100, v.y or 0)),
+                z = v.z,
+            }
+        end
+    end
+
+    if target.character then
+        local env = April.require("core.env")
+        local root = env.safe_call(function()
+            return target.character:find_first_child("HumanoidRootPart")
+                or target.character:FindFirstChild("HumanoidRootPart")
+        end)
+        if root and env.is_valid(root) then
+            local vel = root.AssemblyLinearVelocity or root.Velocity or root.velocity
+            if vel and vel.x then
+                return {
+                    x = vel.x,
+                    y = math.max(-100, math.min(100, vel.y or 0)),
+                    z = vel.z,
+                }
+            end
+        end
+    end
+
+    return { x = 0, y = 0, z = 0 }
+end
+
+function M.predict_point(origin, point, target, weapon_name)
+    if not origin or not point then return point end
+    local vel = target_velocity(target)
+    weapon_name = weapon_name or weapons.cached_held_ranged()
+    return ballistic.predict_for_weapon(origin, point, vel, weapon_name)
+end
+
+function M.resolve_bone_world(target, bone, cx, cy)
+    bone = bone or "Head"
+    if bone == "Closest" then
+        return M.closest_bone_world(target, cx, cy)
+    end
+    return M.bone_world(target, bone)
+end
+
+function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
+    bone = bone or M.bone_name(prefix)
+    local base = M.resolve_bone_world(target, bone, cx, cy)
+    if not base then return nil end
+
+    if use_prediction == false then
+        return base
+    end
+
+    origin = origin or combat_origin.get_fire_origin()
+    if not origin then return base end
+
+    return M.predict_point(origin, base, target, weapons.cached_held_ranged())
+end
+
+function M.is_target_valid(target, prefix, cx, cy, fov_px)
+    if not player_state.is_combat_target(target) then return false end
+
+    local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
+    if not M.within_max_distance(target, origin, prefix) then return false end
+
+    local bone = M.bone_name(prefix)
+    local base = M.resolve_bone_world(target, bone == "Closest" and "Head" or bone, cx, cy)
+    if not base then return false end
+
+    if not M.passes_filters(target, prefix, base, origin) then return false end
+
+    local sx, sy, on_screen = w2s(base.x, base.y, base.z)
+    if not on_screen then return false end
+
+    local fov_dist = math_util.screen_fov_dist(sx, sy, cx, cy)
+    return fov_dist <= fov_px
+end
+
+function M.find_target(cx, cy, fov_px, prefix)
+    if not entity or not entity.get_players then return nil end
+
+    local bone = M.bone_name(prefix)
+    local screen_bone = bone == "Closest" and "Head" or bone
+    local use_fov = M.target_priority_crosshair(prefix)
+    local best, best_score = nil, use_fov and fov_px or math.huge
+    local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
+    local filter_visible = settings.bool(prefix .. "filter_visible", false)
+
+    for _, p in ipairs(entity.get_players()) do
+        if not player_state.is_combat_target(p) then goto continue end
+        if not M.within_max_distance(p, origin, prefix) then goto continue end
+
+        local base = M.bone_world(p, screen_bone)
+        if not base then goto continue end
+
+        if filter_visible and not passes_visibility(p, base, origin) then goto continue end
+        if not M.passes_filters(p, prefix, base, origin) then goto continue end
+
+        local sx, sy, on_screen = w2s(base.x, base.y, base.z)
+        if not on_screen then goto continue end
+
+        local fov_dist = math_util.screen_fov_dist(sx, sy, cx, cy)
+        if fov_dist > fov_px then goto continue end
+
+        local score = use_fov and fov_dist or (p.distance_to and origin and p:distance_to(origin) or fov_dist)
+        if score < best_score then
+            best_score = score
+            best = p
+        end
+        ::continue::
+    end
+    return best
+end
+
+function M.screen_center()
+    if draw and draw.get_screen_size then
+        return draw.get_screen_size()
+    end
+    return 1920, 1080
+end
+
+return M
+
+end)()
+
+-- ── features/combat/silent_resolve.lua ──
+April._mods["features.combat.silent_resolve"] = (function()
+--[[ Resolve silent hook — camera ray, or peek eye when bullet manip needs a corner ray. ]]
+
+local settings = April.require("core.settings")
+local combat_origin = April.require("game.combat_origin")
+local silent_ray = April.require("core.silent_ray")
+local manip_math = April.require("core.manip_math")
+local targeting = April.require("features.combat.targeting")
+
+local M = {}
+
+local OFF_INFO = { state = "off", peek = nil, radius = 1 }
+
+function M.resolve_track(target, prefix, cx, cy)
+    if not target then return nil, nil, OFF_INFO end
+
+    local camera = silent_ray.get_camera_origin()
+    if not camera then return nil, nil, OFF_INFO end
+
+    local aim = targeting.resolve_bone_world(target, targeting.bone_name(prefix), cx, cy)
+    if not aim then return nil, nil, OFF_INFO end
+
+    local track_origin = camera
+    local manip_info = OFF_INFO
+
+    if settings.bool(prefix .. "bullet_manip", false) then
+        local body = combat_origin.get_server_origin()
+        local max_r = manip_math.clamp_radius(settings.num(prefix .. "manip_dist", 1))
+
+        if body then
+            local ev = manip_math.evaluate_manipulation(body, aim, { max_radius = max_r })
+            manip_info = {
+                state = ev.state,
+                peek = ev.peek,
+                radius = ev.radius or max_r,
+            }
+            if ev.state == "ready" and ev.peek then
+                track_origin = manip_math.peek_track_origin(ev.peek) or camera
+            end
+        else
+            manip_info = { state = "blocked", peek = nil, radius = max_r }
+        end
+    end
+
+    return track_origin, aim, manip_info
+end
+
+return M
+
+end)()
+
+-- ── features/combat/aimbot.lua ──
+April._mods["features.combat.aimbot"] = (function()
+local settings = April.require("core.settings")
+local targeting = April.require("features.combat.targeting")
+local player_state = April.require("game.player_state")
+local weapons = April.require("game.weapons")
+local combat_origin = April.require("game.combat_origin")
+local draw_util = April.require("core.draw_util")
+local menu_util = April.require("core.menu_util")
+local combat_menu = April.require("features.combat.combat_menu")
+local silent_ray = April.require("core.silent_ray")
+local silent_resolve = April.require("features.combat.silent_resolve")
+local manip_math = April.require("core.manip_math")
+local desync_vis = April.require("core.desync_vis")
+local theme = April.require("core.ui_theme")
+
+local M = {}
+local locked_target = nil
+local PREFIX = "april_silent_"
+local P_MASTER = "april_silent_aim"
+local SHOOT_VK = 0x01
+local TARGET_SCAN_MS = 33
+
+local cached_track = { origin = nil, aim = nil, manip = { state = "off" }, tracking = false }
+local last_target_scan = 0
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function w2s(x, y, z)
+    if draw and draw.world_to_screen then
+        return draw.world_to_screen(x, y, z)
+    end
+    if utility and utility.world_to_screen then
+        return utility.world_to_screen(x, y, z)
+    end
+    return 0, 0, false
+end
+
+local function holding_weapon()
+    if weapons.holding_ranged_weapon() then return true end
+    if weapons.get_held_ranged_weapon_name() then return true end
+    local lp = entity and entity.get_local_player and entity.get_local_player()
+    if lp and lp.tool_name and lp.tool_name ~= "" then
+        return weapons.is_ranged_weapon_name(lp.tool_name)
+    end
+    return false
+end
+
+local MANIP_LABELS = {
+    direct = "MANIP: CLEAR SHOT",
+    ready = "MANIP: RAY READY",
+    blocked = "MANIP: NO PEEK",
+    off = "",
+}
+
+local function draw_manip_status(cx, cy, fov, info)
+    if not info or info.state == "off" then return end
+    if not settings.bool(PREFIX .. "manip_status", false) then return end
+
+    local ready = info.state == "ready" or info.state == "direct"
+    local text = MANIP_LABELS[info.state] or "MANIP: ..."
+    local col = ready and theme.GREEN or theme.RED
+
+    local tw = theme.text_w(text, 11)
+    local pad_x, pad_y = 10, 4
+    local w = tw + pad_x * 2
+    local h = 18
+    local x = cx - w * 0.5
+    local y = cy + fov + 10
+
+    theme.draw_panel(x, y, w, h, {
+        bg = theme.alpha(theme.PANEL_DEEP, 0.9),
+        border = theme.alpha(ready and theme.GREEN or theme.RED, 0.45),
+        accent = theme.alpha(col, 0.85),
+        accent_w = 2,
+    })
+    draw_util.text_centered(cx, y + pad_y, text, col, 11)
+end
+
+local function draw_manip_ring(info)
+    if not settings.bool(PREFIX .. "bullet_manip", false) then return end
+    if not settings.bool(PREFIX .. "manip_ring", false) then return end
+
+    local body = combat_origin.get_server_origin()
+    if not body then return end
+
+    local radius = manip_math.clamp_radius(settings.num(PREFIX .. "manip_dist", 1))
+    local ring_y = manip_math.ring_y(body)
+
+    local ring_col = { 0.15, 0.95, 0.55, 0.55 }
+    if info and info.state == "blocked" then
+        ring_col = { 0.95, 0.25, 0.25, 0.45 }
+    elseif info and info.state == "ready" then
+        ring_col = { 0.2, 0.95, 0.45, 0.7 }
+    end
+
+    desync_vis.draw_sphere_ring(body.x, ring_y, body.z, radius, ring_col, 1.5)
+end
+
+local function draw_manip_peek(info)
+    if not settings.bool(PREFIX .. "manip_peek_vis", true) then return end
+    if not info or not info.peek then return end
+    if info.state ~= "ready" then return end
+
+    local body = combat_origin.get_server_origin()
+    if not body then return end
+
+    local peek = info.peek
+    local col_peek = { 1, 0.85, 0.2, 0.95 }
+    local show_labels = settings.bool(PREFIX .. "manip_status", false)
+    local eye_y = peek.y + manip_math.eye_offset_y()
+
+    desync_vis.draw_cross(peek.x, eye_y, peek.z, 0.85, col_peek, 2)
+    if show_labels then
+        desync_vis.draw_labeled(peek.x, eye_y, peek.z, "PEEK", col_peek, 11)
+    end
+    desync_vis.draw_link(body, peek, { col_peek[1], col_peek[2], col_peek[3], 0.3 }, 1)
+
+    local ray_from = manip_math.peek_track_origin(peek)
+    if ray_from and cached_track.aim then
+        desync_vis.draw_link(ray_from, cached_track.aim, { 1, 0.45, 0.2, 0.55 }, 1.5)
+    end
+end
+
+function M.register_menu()
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.SILENT_AIM)
+
+    menu_util.register_keybind(T, G.SILENT_AIM, P_MASTER, "Enable Silent Aim", false)
+
+    combat_menu.register_silent_aim(T, G.SILENT_AIM, PREFIX, P_MASTER, {
+        fov_default = 150,
+        fov_color = theme.CYAN,
+        line_color = theme.RED,
+    })
+
+    menu_util.bind_children(P_MASTER, {
+        PREFIX .. "target_type", PREFIX .. "bone",
+        PREFIX .. "filter_health", PREFIX .. "filter_visible", PREFIX .. "filter_team",
+        PREFIX .. "max_dist", PREFIX .. "fov", PREFIX .. "sticky",
+        PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
+        PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_ring", PREFIX .. "manip_peek_vis",
+    })
+
+    menu_util.bind_children(PREFIX .. "bullet_manip", {
+        PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_ring", PREFIX .. "manip_peek_vis",
+    })
+end
+
+local function active()
+    return settings.enabled(P_MASTER) and silent_ray.available()
+end
+
+local function update_target(cx, cy, fov)
+    local sticky = settings.bool(PREFIX .. "sticky", false)
+    local now = tick_ms()
+
+    if sticky and locked_target then
+        if not targeting.is_target_valid(locked_target, PREFIX, cx, cy, fov) then
+            locked_target = nil
+        end
+    end
+
+    if locked_target and sticky then
+        return
+    end
+
+    if now - last_target_scan < TARGET_SCAN_MS then
+        return
+    end
+    last_target_scan = now
+    locked_target = targeting.find_target(cx, cy, fov, PREFIX)
+end
+
+function M.update(_dt)
+    cached_track.origin = nil
+    cached_track.aim = nil
+    cached_track.manip = { state = "off" }
+    cached_track.tracking = false
+
+    if not active() then
+        locked_target = nil
+        silent_ray.stop()
+        return
+    end
+
+    silent_ray.ensure_hook()
+
+    if not holding_weapon() then
+        silent_ray.stop()
+        return
+    end
+
+    combat_origin.sync_weapon(weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name())
+
+    local sw, sh = targeting.screen_center()
+    local cx, cy = sw * 0.5, sh * 0.5
+    local fov = settings.num(PREFIX .. "fov", 150)
+
+    update_target(cx, cy, fov)
+
+    if not locked_target or not player_state.is_combat_target(locked_target) then
+        silent_ray.stop()
+        return
+    end
+
+    local origin, aim, manip_info = silent_resolve.resolve_track(locked_target, PREFIX, cx, cy)
+    if not aim or not origin then
+        silent_ray.stop()
+        return
+    end
+
+    cached_track.origin = origin
+    cached_track.aim = aim
+    cached_track.manip = manip_info or { state = "off" }
+    cached_track.tracking = silent_ray.track(origin, aim, SHOOT_VK) == true
+end
+
+function M.get_target()
+    return locked_target
+end
+
+function M.draw()
+    local sw, sh = targeting.screen_center()
+    local cx, cy = sw * 0.5, sh * 0.5
+    local fov = settings.num(PREFIX .. "fov", 150)
+
+    if active() and settings.bool(PREFIX .. "draw_fov", false) then
+        local col = settings.color(PREFIX .. "draw_fov", { 0.4, 0.9, 1, 1 })
+        local filled = settings.num(PREFIX .. "fov_style", 1) == 1
+
+        if filled and draw and draw.circle_filled then
+            local fill = settings.color(PREFIX .. "draw_fov", { 0.4, 0.9, 1, 0.12 })
+            local c = { fill[1], fill[2], fill[3], (fill[4] or 1) * 0.25 }
+            draw.circle_filled(cx, cy, fov, c, 64)
+        end
+        if draw and draw.circle then
+            draw.circle(cx, cy, fov, col, 64, 1)
+        else
+            draw_util.circle(cx, cy, fov, col, false)
+        end
+    end
+
+    if active() and settings.bool(PREFIX .. "bullet_manip", false) then
+        draw_manip_ring(cached_track.manip)
+        draw_manip_status(cx, cy, fov, cached_track.manip)
+        draw_manip_peek(cached_track.manip)
+    end
+
+    if active() and locked_target and settings.bool(PREFIX .. "target_line", false) then
+        local aim = cached_track.aim
+        if aim then
+            local tx, ty, vis = w2s(aim.x, aim.y, aim.z)
+            if vis then
+                local col = settings.color(PREFIX .. "target_line", { 1, 0.25, 0.25, 1 })
+                draw_util.line(cx, cy, tx, ty, col, 1.5)
+            end
+        end
+    end
+end
+
 return M
 
 end)()
@@ -7806,27 +9326,32 @@ end)()
 -- ── features/combat/perfect_farm.lua ──
 April._mods["features.combat.perfect_farm"] = (function()
 --[[
-    Farm helper — smooth camera aim at NodeSpark / TreeX weak spots (Rust-style).
-    When within range of a node/tree that has an active spark, camera.look_at keeps
-    crosshair on the weak spot so melee raycasts register tier-3 hits.
+    Farm helper — tier-3 weak spot hits on NodeSpark / TreeX.
+    Silent mode redirects engine melee raycasts via track_silent_target (LMB).
+    Camera mode uses camera.look_at to keep crosshair on the spark.
 ]]
 
 local settings = April.require("core.settings")
 local env = April.require("core.env")
+local debug = April.require("core.debug")
 local folders = April.require("game.folders")
 local farm_tools = April.require("game.farm_tools")
 local math_util = April.require("core.math_util")
 local menu_util = April.require("core.menu_util")
+local silent_ray = April.require("core.silent_ray")
 
 local M = {}
 
 local P = "april_farm_helper"
 local P_RADIUS = "april_farm_radius"
 local P_SMOOTH = "april_farm_smooth"
+local P_SILENT = "april_farm_silent"
+local SHOOT_VK = 0x01
 
 local spark_parts = {}
 local next_scan_ms = 0
 local SCAN_MS = 350
+M._tracking = false
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -7844,6 +9369,40 @@ local function part_position(part)
     local pos = part.Position or part.position
     if not pos or pos.x == nil then return nil end
     return pos
+end
+
+local function vec3_position(value)
+    if not value then return nil end
+    if value.x ~= nil then
+        return { x = value.x, y = value.y, z = value.z }
+    end
+    if value[1] then
+        return { x = value[1], y = value[2], z = value[3] }
+    end
+    return nil
+end
+
+local function camera_controller()
+    local lp = env.get_local_player()
+    local char = lp and lp.character
+    if not char or not env.is_valid(char) then return nil end
+    return find_child(char, "CameraController")
+end
+
+local function viewmodel_origin()
+    local cc = camera_controller()
+    if cc and env.is_valid(cc) then
+        local cf = env.safe_call(function() return cc:GetAttribute("ViewmodelCFrame") end)
+        local pos = vec3_position(cf and (cf.Position or cf.position))
+        if pos then return pos end
+    end
+
+    if camera and camera.get_position then
+        local cam = camera.get_position()
+        return vec3_position(cam)
+    end
+
+    return nil
 end
 
 local function spark_part_from_model(model)
@@ -7896,10 +9455,7 @@ local function player_position(lp)
     end
     if not char then return nil end
 
-    local root = env.safe_call(function()
-        return char:find_first_child("HumanoidRootPart")
-            or char:FindFirstChild("HumanoidRootPart")
-    end)
+    local root = find_child(char, "HumanoidRootPart")
     return part_position(root)
 end
 
@@ -7927,6 +9483,16 @@ local function nearest_spark(player_pos, radius)
     return best_part
 end
 
+local function silent_mode()
+    return settings.bool(P_SILENT, true) and silent_ray.available()
+end
+
+local function stop_silent()
+    if not M._tracking then return end
+    silent_ray.stop()
+    M._tracking = false
+end
+
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.MISC)
@@ -7934,31 +9500,69 @@ function M.register_menu()
 
     menu_util.register_keybind(T, G.MISC, P, "Farm Helper", false)
     menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
-    menu.add_slider_int(T, G.MISC, P_SMOOTH, "Aim Smoothness", 1, 30, 8, root)
-    menu_util.bind_children(P, { P_RADIUS, P_SMOOTH })
+    menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", true, root)
+    menu.add_slider_int(T, G.MISC, P_SMOOTH, "Camera Smoothness", 1, 30, 8, root)
+    menu_util.bind_children(P, { P_RADIUS, P_SILENT, P_SMOOTH })
 end
 
 function M.update(_dt)
-    if not settings.enabled(P) then return end
-    if not camera or not camera.look_at then return end
+    if not settings.enabled(P) then
+        stop_silent()
+        return
+    end
 
     farm_tools.load()
-    if not farm_tools.holding_farm_tool() then return end
+    if not farm_tools.holding_farm_tool() then
+        stop_silent()
+        return
+    end
 
     local lp = env.get_local_player()
     local pos = player_position(lp)
-    if not pos then return end
+    if not pos then
+        stop_silent()
+        return
+    end
 
     refresh_sparks()
 
     local radius = settings.num(P_RADIUS, 5)
-    if radius <= 0 then return end
+    if radius <= 0 then
+        stop_silent()
+        return
+    end
 
     local target = nearest_spark(pos, radius)
-    if not target then return end
+    if not target then
+        stop_silent()
+        return
+    end
 
     local aim = part_position(target)
-    if not aim then return end
+    if not aim then
+        stop_silent()
+        return
+    end
+
+    if silent_mode() then
+        local origin = viewmodel_origin()
+        if not origin then
+            stop_silent()
+            return
+        end
+
+        if silent_ray.track(origin, aim, SHOOT_VK) then
+            M._tracking = true
+        else
+            debug.error_once("farm:silent", "Silent farm hook unavailable — toggle Silent Farm off for camera aim")
+            stop_silent()
+        end
+        return
+    end
+
+    stop_silent()
+
+    if not camera or not camera.look_at then return end
 
     local smooth = math.max(1, settings.num(P_SMOOTH, 8))
     pcall(camera.look_at, aim.x, aim.y, aim.z, smooth)
@@ -8103,41 +9707,41 @@ end
 
 function M.register_menu()
     local G = menu_util.G
-    local T, _ = menu_util.group(G.COMBAT)
+    local T, _ = menu_util.group(G.GUN_MODS)
     local root = menu_util.parent(P)
 
     store.load()
 
-    menu_util.register_keybind(T, G.COMBAT, P, "Enable Gun Mods", false)
+    menu_util.register_keybind(T, G.GUN_MODS, P, "Enable Gun Mods", false)
 
-    menu_util.gap(T, G.COMBAT)
-    menu_util.input(T, G.COMBAT, HELD_ID, "Held Weapon", "—")
+    menu_util.gap(T, G.GUN_MODS)
+    menu_util.input(T, G.GUN_MODS, HELD_ID, "Held Weapon", "—")
 
-    menu.add_combo(T, G.COMBAT, profiles.MODE_ID, "Apply Mode", profiles.MODES, 0, root)
+    menu.add_combo(T, G.GUN_MODS, profiles.MODE_ID, "Apply Mode", profiles.MODES, 0, root)
 
-    M._combo_ctx = { T = T, G = G.COMBAT, root = root }
+    M._combo_ctx = { T = T, G = G.GUN_MODS, root = root }
     ensure_weapon_combo()
 
-    menu_util.gap(T, G.COMBAT)
-    menu.add_checkbox(T, G.COMBAT, "april_gm_recoil", "No Recoil", false, root)
-    menu.add_slider_int(T, G.COMBAT, "april_gm_recoil_pct", "Recoil Reduction %", 0, 100, 100, root)
+    menu_util.gap(T, G.GUN_MODS)
+    menu.add_checkbox(T, G.GUN_MODS, "april_gm_recoil", "No Recoil", false, root)
+    menu.add_slider_int(T, G.GUN_MODS, "april_gm_recoil_pct", "Recoil Reduction %", 0, 100, 100, root)
 
-    menu.add_checkbox(T, G.COMBAT, "april_gm_spread", "No Spread", false, root)
-    menu.add_slider_int(T, G.COMBAT, "april_gm_spread_pct", "Spread Reduction %", 0, 100, 100, root)
+    menu.add_checkbox(T, G.GUN_MODS, "april_gm_spread", "No Spread", false, root)
+    menu.add_slider_int(T, G.GUN_MODS, "april_gm_spread_pct", "Spread Reduction %", 0, 100, 100, root)
 
-    menu.add_checkbox(T, G.COMBAT, "april_gm_sway", "No Sway", false, root)
+    menu.add_checkbox(T, G.GUN_MODS, "april_gm_sway", "No Sway", false, root)
 
-    menu.add_checkbox(T, G.COMBAT, "april_gm_fire_rate", "Fire Rate", false, root)
-    menu.add_slider_float(T, G.COMBAT, "april_gm_fire_rate_mult", "Fire Rate Multiplier", 1.0, 3.0, 1.5, "%.2f", root)
+    menu.add_checkbox(T, G.GUN_MODS, "april_gm_fire_rate", "Fire Rate", false, root)
+    menu.add_slider_float(T, G.GUN_MODS, "april_gm_fire_rate_mult", "Fire Rate Multiplier", 1.0, 3.0, 1.5, "%.2f", root)
 
-    menu.add_checkbox(T, G.COMBAT, "april_gm_speed", "Bullet Speed", false, root)
-    menu.add_slider_int(T, G.COMBAT, "april_gm_speed_mult", "Speed Mult (100 = instant)", 0, 100, 100, root)
+    menu.add_checkbox(T, G.GUN_MODS, "april_gm_speed", "Bullet Speed", false, root)
+    menu.add_slider_int(T, G.GUN_MODS, "april_gm_speed_mult", "Speed Mult (100 = instant)", 0, 100, 100, root)
 
-    menu.add_checkbox(T, G.COMBAT, "april_gm_range", "Range", false, root)
-    menu.add_slider_int(T, G.COMBAT, "april_gm_range_mult", "Range Mult", 1, 20, 10, root)
+    menu.add_checkbox(T, G.GUN_MODS, "april_gm_range", "Range", false, root)
+    menu.add_slider_int(T, G.GUN_MODS, "april_gm_range_mult", "Range Mult", 1, 20, 10, root)
 
-    menu_util.gap(T, G.COMBAT)
-    menu_util.button(T, G.COMBAT, "april_gm_save", "Save Profile", function()
+    menu_util.gap(T, G.GUN_MODS)
+    menu_util.button(T, G.GUN_MODS, "april_gm_save", "Save Profile", function()
         local key = selected_weapon_key()
         if not key then
             notify.warning("Select a weapon to save", 3500)
@@ -8149,7 +9753,7 @@ function M.register_menu()
         notify.success("Saved profile: " .. label, 3500)
     end, P)
 
-    menu_util.button(T, G.COMBAT, "april_gm_clear", "Clear Saved Profile", function()
+    menu_util.button(T, G.GUN_MODS, "april_gm_clear", "Clear Saved Profile", function()
         local key = selected_weapon_key()
         if not key then
             notify.warning("Select a weapon to clear", 3500)
@@ -8349,268 +9953,6 @@ return M
 
 end)()
 
--- ── features/combat/targeting.lua ──
-April._mods["features.combat.targeting"] = (function()
-local settings = April.require("core.settings")
-local weapons = April.require("game.weapons")
-local math_util = April.require("core.math_util")
-local esp_util = April.require("core.esp_util")
-local player_state = April.require("game.player_state")
-
-local M = {}
-
-M.BONES = esp_util.AIM_BONES
-
-local function w2s(x, y, z)
-    return esp_util.w2s(x, y, z)
-end
-
-local function passes_visibility(target, aim, cam)
-    if not raycast then return true end
-    if not cam then return true end
-
-    local char = target and target.character
-    if char and utility and utility.is_valid(char) and raycast.is_player_visible then
-        return raycast.is_player_visible(char.address)
-    end
-
-    if aim and raycast.is_visible then
-        return raycast.is_visible(cam.x, cam.y, cam.z, aim.x, aim.y, aim.z)
-    end
-
-    return true
-end
-
-function M.bone_name(prefix)
-    local idx = settings.num(prefix .. "bone", 0)
-    return M.BONES[(idx or 0) + 1] or "Head"
-end
-
-function M.weapon_stats()
-    local stats = weapons.get_weapon_stats()
-    if stats then return stats end
-    return { speed = 950, gravity = 35, name = "Unknown" }
-end
-
-function M.bone_world(target, bone)
-    if not target or not target.is_alive then return nil end
-    if bone == "Closest" then return nil end
-
-    if target.character then
-        local env = April.require("core.env")
-        local part = env.safe_call(function()
-            return target.character:find_first_child(bone) or target.character:FindFirstChild(bone)
-        end)
-        if part and env.is_valid(part) then
-            local ppos = part.Position or part.position
-            if ppos and ppos.x then
-                return { x = ppos.x, y = ppos.y, z = ppos.z }
-            end
-        end
-    end
-
-    if target.get_bone_screen then
-        local _, _, vis = target:get_bone_screen(bone)
-        if not vis then return nil end
-    end
-
-    if bone == "Head" and target.head_position then
-        local pos = target.head_position
-        return { x = pos.x, y = pos.y, z = pos.z }
-    end
-    if target.position then
-        local pos = target.position
-        return { x = pos.x, y = pos.y, z = pos.z }
-    end
-    return nil
-end
-
-function M.closest_bone_world(target, cx, cy)
-    cx = cx or 0
-    cy = cy or 0
-    if target.get_bones_screen then
-        local bones = target:get_bones_screen()
-        if bones then
-            local best_name, best_dist = nil, math.huge
-            for name, entry in pairs(bones) do
-                local bx = entry.x or entry[1]
-                local by = entry.y or entry[2]
-                if bx and by then
-                    local d = math_util.screen_fov_dist(bx, by, cx, cy)
-                    if d < best_dist then
-                        best_dist = d
-                        best_name = name
-                    end
-                end
-            end
-            if best_name then
-                local world = M.bone_world(target, best_name)
-                if world then return world end
-            end
-        end
-    end
-    return M.bone_world(target, "Head")
-end
-
-local function target_velocity(target)
-    if target.velocity then
-        return target.velocity.x or 0, target.velocity.y or 0, target.velocity.z or 0
-    end
-
-    if target.character then
-        local env = April.require("core.env")
-        local root = env.safe_call(function()
-            return target.character:find_first_child("HumanoidRootPart")
-                or target.character:FindFirstChild("HumanoidRootPart")
-        end)
-        if root then
-            local vel = root.Velocity or root.velocity
-            if vel and vel.x then
-                return vel.x, vel.y, vel.z
-            end
-            local assembly = root.AssemblyLinearVelocity
-            if assembly and assembly.x then
-                return assembly.x, assembly.y, assembly.z
-            end
-        end
-    end
-
-    return 0, 0, 0
-end
-
-function M.predict_point(origin, point, target)
-    local ox, oy, oz = origin.x, origin.y, origin.z
-    local px, py, pz = point.x, point.y, point.z
-
-    local stats = M.weapon_stats()
-    local speed = math.max(stats.speed or 950, 1)
-    local drop_g = weapons.drop_gravity(stats.gravity)
-
-    local vx, vy, vz = target_velocity(target)
-
-    local dx = px - ox
-    local dy = py - oy
-    local dz = pz - oz
-    local dist = math_util.distance3(dx, dy, dz)
-    local time_to_hit = dist / speed
-
-    for _ = 1, 3 do
-        local ax = px + vx * time_to_hit
-        local ay = py + vy * time_to_hit
-        local az = pz + vz * time_to_hit
-
-        dx = ax - ox
-        dy = ay - oy
-        dz = az - oz
-        dist = math_util.distance3(dx, dy, dz)
-        time_to_hit = dist / speed
-    end
-
-    local ax = px + vx * time_to_hit
-    local ay = py + vy * time_to_hit
-    local az = pz + vz * time_to_hit
-
-    local horiz_dx = ax - ox
-    local horiz_dz = az - oz
-    local horiz = math.sqrt(horiz_dx * horiz_dx + horiz_dz * horiz_dz)
-    local t_drop = horiz / speed
-    ay = ay + 0.5 * drop_g * t_drop * t_drop
-
-    return { x = ax, y = ay, z = az }
-end
-
-function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
-    bone = bone or M.bone_name(prefix)
-    local base
-    if bone == "Closest" then
-        base = M.closest_bone_world(target, cx, cy)
-    else
-        base = M.bone_world(target, bone)
-    end
-    if not base then return nil end
-
-    if use_prediction == false then
-        return base
-    end
-
-    if not origin and camera and camera.get_position then
-        origin = camera.get_position()
-    end
-    if not origin then return base end
-
-    return M.predict_point(origin, base, target)
-end
-
-function M.is_target_valid(target, prefix, cx, cy, fov_px)
-    if not player_state.is_combat_target(target) then return false, nil end
-
-    local cam = camera and camera.get_position and camera.get_position()
-    local aim = M.get_aim_point(target, prefix, nil, cam, cx, cy)
-    if not aim then return false, nil end
-
-    if settings.bool(prefix .. "visible", false) and not passes_visibility(target, aim, cam) then
-        return false, nil
-    end
-
-    local sx, sy, on_screen = w2s(aim.x, aim.y, aim.z)
-    if not on_screen then return false, nil end
-
-    local fov_dist = math_util.screen_fov_dist(sx, sy, cx, cy)
-    if fov_dist > fov_px then return false, nil end
-
-    return true, aim
-end
-
-function M.find_target(cx, cy, fov_px, prefix)
-    if not entity or not entity.get_players then return nil end
-
-    local bone = M.bone_name(prefix)
-    local use_fov = settings.num(prefix .. "priority", 1) == 1
-    local best, best_score = nil, use_fov and fov_px or math.huge
-    local cam = camera and camera.get_position and camera.get_position()
-
-    for _, p in ipairs(entity.get_players()) do
-        if not player_state.is_combat_target(p) then goto continue end
-
-        local aim
-        if bone == "Closest" then
-            aim = M.get_aim_point(p, prefix, "Closest", cam, cx, cy)
-        else
-            aim = M.get_aim_point(p, prefix, bone, cam, cx, cy)
-        end
-        if not aim then goto continue end
-
-        if settings.bool(prefix .. "visible", false) and not passes_visibility(p, aim, cam) then
-            goto continue
-        end
-
-        local sx, sy, on_screen = w2s(aim.x, aim.y, aim.z)
-        if not on_screen then goto continue end
-
-        local fov_dist = math_util.screen_fov_dist(sx, sy, cx, cy)
-        if fov_dist > fov_px then goto continue end
-
-        local score = use_fov and fov_dist or (p.distance_to and cam and p:distance_to(cam) or fov_dist)
-        if score < best_score then
-            best_score = score
-            best = p
-        end
-        ::continue::
-    end
-    return best
-end
-
-function M.screen_center()
-    if draw and draw.get_screen_size then
-        return draw.get_screen_size()
-    end
-    return 1920, 1080
-end
-
-return M
-
-end)()
-
 -- ── features/visuals/player_esp.lua ──
 April._mods["features.visuals.player_esp"] = (function()
 local settings = April.require("core.settings")
@@ -8708,6 +10050,7 @@ local P = "april_target_overlay"
 local GEAR_SLOTS = 7
 local GEAR_TTL = 500
 local TARGET_POLL_MS = 120
+local MAX_ATTACHMENTS = 5
 
 local gear_cache = {}
 local last_poll_ms = 0
@@ -8716,7 +10059,10 @@ M._target = nil
 M._layout = nil
 
 local SLOT_BG = { 0.14, 0.14, 0.16, 0.72 }
-local HELD_BG = { 0.2, 0.2, 0.22, 0.85 }
+local HELD_BG = { 0.52, 0.12, 0.14, 0.9 }
+local HELD_EDGE = { 0.95, 0.28, 0.32, 0.85 }
+local ATT_BG = { 0.16, 0.16, 0.18, 0.82 }
+local ATT_EDGE = { 0.45, 0.45, 0.48, 0.5 }
 local EMPTY_BG = { 0.08, 0.08, 0.1, 0.55 }
 local EMPTY_EDGE = { 1, 1, 1, 0.12 }
 local ROUND = 5
@@ -8851,24 +10197,44 @@ local function pack_gear(armor_list)
     return packed
 end
 
+local function pack_attachments(list)
+    local packed = {}
+    for i = 1, math.min(#(list or {}), MAX_ATTACHMENTS) do
+        packed[#packed + 1] = list[i]
+    end
+    return packed
+end
+
 local function build_layout(gear, gear_sz)
     local held = gear and gear.held
     local packed = pack_gear(gear and gear.armor)
+    local attachments = pack_attachments(gear and gear.attachments)
     local held_sz = math.floor(gear_sz * 1.28)
+    local att_sz = math.floor(gear_sz * 0.78)
     local gap = 5
+    local att_gap = 4
     local row_w = GEAR_SLOTS * gear_sz + (GEAR_SLOTS - 1) * gap
+    local att_row_w = #attachments > 0 and (#attachments * att_sz + (#attachments - 1) * att_gap) or 0
+    local held_row_w = held_sz + (#attachments > 0 and (10 + att_row_w) or 0)
+    local panel_w = math.max(row_w, held_row_w)
 
     local layout = {
         held = held,
+        attachments = attachments,
         packed = packed,
         filled = #packed,
         gear_sz = gear_sz,
         held_sz = held_sz,
+        att_sz = att_sz,
         gap = gap,
+        att_gap = att_gap,
         row_w = row_w,
+        held_row_w = held_row_w,
+        panel_w = panel_w,
         row_gap = 8,
         name_fs = 11,
         held_key = nil,
+        att_keys = {},
         gear_keys = {},
     }
 
@@ -8876,6 +10242,11 @@ local function build_layout(gear, gear_sz)
     for i = 1, layout.filled do
         layout.gear_keys[i] = resolve_image_key(packed[i])
         local key = layout.gear_keys[i]
+        if key then image_cache.begin_load(key) end
+    end
+    for i = 1, #attachments do
+        layout.att_keys[i] = resolve_image_key(attachments[i])
+        local key = layout.att_keys[i]
         if key then image_cache.begin_load(key) end
     end
     if layout.held_key then
@@ -8894,14 +10265,23 @@ end
 local function draw_slot(x, y, size, key, piece, style)
     local pad = 3
     local bg = SLOT_BG
+    local edge = nil
+
     if style == "held" then
         bg = HELD_BG
+        edge = HELD_EDGE
+    elseif style == "attachment" then
+        bg = ATT_BG
+        edge = ATT_EDGE
     elseif style == "empty" then
         bg = EMPTY_BG
+        edge = EMPTY_EDGE
     end
 
     draw.rect_filled(x, y, size, size, bg, ROUND)
-    if style == "empty" and draw.rect then
+    if edge and draw.rect then
+        draw.rect(x, y, size, size, edge, ROUND, 1.5)
+    elseif style == "empty" and draw.rect then
         draw.rect(x, y, size, size, EMPTY_EDGE, ROUND, 1)
     end
 
@@ -9007,9 +10387,19 @@ function M.draw()
     draw.text(cx - nw * 0.5, top, name, { 1, 1, 1, 1 }, layout.name_fs)
 
     local y = top + layout.name_fs + 6
-
     local held = held_piece(layout.held)
-    draw_slot(cx - layout.held_sz * 0.5, y, layout.held_sz, layout.held_key, held, held and "held" or "empty")
+    local row_x = cx - layout.held_row_w * 0.5
+
+    draw_slot(row_x, y, layout.held_sz, layout.held_key, held, held and "held" or "empty")
+
+    if #layout.attachments > 0 then
+        local ax = row_x + layout.held_sz + 10
+        for i = 1, #layout.attachments do
+            local sx = ax + (i - 1) * (layout.att_sz + layout.att_gap)
+            draw_slot(sx, y + (layout.held_sz - layout.att_sz) * 0.5, layout.att_sz, layout.att_keys[i], layout.attachments[i], "attachment")
+        end
+    end
+
     y = y + layout.held_sz + layout.row_gap
 
     local start_x = cx - layout.row_w * 0.5
@@ -10429,8 +11819,12 @@ function M.register_menu()
     menu_util.register_keybind(T, G.MISC, "april_spider_enabled", "Spider", false)
     menu.add_slider_int(T, G.MISC, "april_spider_speed", "Spider Climb Speed", 1, 50, 20, menu_util.parent("april_spider_enabled"))
 
+    menu_util.register_keybind(T, G.MISC, "april_slowfall_enabled", "Slowfall", false)
+    menu.add_slider_int(T, G.MISC, "april_slowfall_speed", "Fall Speed", 1, 50, 5, menu_util.parent("april_slowfall_enabled"))
+
     menu_util.bind_children("april_noclip_enabled", { "april_noclip_speed" })
     menu_util.bind_children("april_spider_enabled", { "april_spider_speed" })
+    menu_util.bind_children("april_slowfall_enabled", { "april_slowfall_speed" })
 end
 
 function M.update(_dt) end
@@ -10443,165 +11837,14 @@ end)()
 
 -- ── features/movement/noclip.lua ──
 April._mods["features.movement.noclip"] = (function()
---[[ Regular noclip — walk through walls, stay on the ground (raycast floor clamp). ]]
+--[[ Noclip menu — movement handled by core/movement_ctrl.lua ]]
 
-local settings = April.require("core.settings")
-local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
-local move = April.require("core.cframe_move")
-local misc_gate = April.require("core.misc_gate")
 
 local M = {}
 
 local P = "april_walk_noclip_enabled"
 local P_SPEED = "april_walk_noclip_speed"
-
-local HIP_OFFSET = 3.0
-local RAY_UP = 6.0
-local RAY_DOWN = 512.0
-
-local _installed = false
-local was_active = false
-
-local function get_character(lp)
-    if lp and lp.character then return lp.character end
-    if game and game.local_player and game.local_player.character then
-        return game.local_player.character
-    end
-    return nil
-end
-
-local function get_root(lp)
-    local char = get_character(lp)
-    if not char then return nil end
-    return env.safe_call(function()
-        if char.find_first_child then return char:find_first_child("HumanoidRootPart") end
-        return char:FindFirstChild("HumanoidRootPart")
-    end)
-end
-
-local function get_humanoid(lp)
-    if lp and lp.humanoid and env.is_valid(lp.humanoid) then
-        return lp.humanoid
-    end
-    local char = get_character(lp)
-    if not char then return nil end
-    return env.safe_call(function()
-        if char.find_first_child_of_class then return char:find_first_child_of_class("Humanoid") end
-        return char:FindFirstChildOfClass("Humanoid")
-    end)
-end
-
-local function ground_y_at(x, y, z)
-    if not raycast or not raycast.cast then return nil end
-    if raycast.is_ready and not raycast.is_ready() then return nil end
-
-    local start_y = y + RAY_UP
-    local hit, hit_pos, dist = raycast.cast(x, start_y, z, x, start_y - RAY_DOWN, z)
-    if not hit then return nil end
-
-    if hit_pos then
-        local hy = hit_pos.y or hit_pos.Y
-        if hy then return hy + HIP_OFFSET end
-    end
-    if dist then
-        return start_y - dist + HIP_OFFSET
-    end
-    return nil
-end
-
-local function read_walk_input()
-    local lx, lz, rx, rz = move.camera_flat_axes()
-    if not lx then return 0, 0 end
-
-    local mx, mz = 0, 0
-    if move.key_down(0x57) then mx, mz = mx + lx, mz + lz end
-    if move.key_down(0x53) then mx, mz = mx - lx, mz - lz end
-    if move.key_down(0x41) then mx, mz = mx - rx, mz - rz end
-    if move.key_down(0x44) then mx, mz = mx + rx, mz + rz end
-
-    local mag = math.sqrt(mx * mx + mz * mz)
-    if mag < 0.001 then return 0, 0 end
-    return mx / mag, mz / mag
-end
-
-local function enter(char, root, hum)
-    move.set_character_noclip(char, root, true)
-    move.humanoid_suspend(hum)
-    pcall(function() hum.state = 8 end)
-    move.zero_character(char, root)
-end
-
-local function leave(char, root, hum)
-    move.set_character_noclip(char, root, false)
-    move.humanoid_release(hum)
-    move.humanoid_running(hum)
-    move.zero_character(char, root)
-end
-
-local function tick_move(char, root, hum, speed)
-    move.set_character_noclip(char, root, true)
-    pcall(function() hum.state = 8 end)
-
-    local pos = move.read_pos(root)
-    if not pos then return end
-
-    local mx, mz = read_walk_input()
-    local step = speed * move.delta_time()
-    local nx, nz = pos.x, pos.z
-
-    if mx ~= 0 or mz ~= 0 then
-        nx = pos.x + mx * step
-        nz = pos.z + mz * step
-    end
-
-    local ny = ground_y_at(nx, pos.y, nz) or ground_y_at(pos.x, pos.y, pos.z) or pos.y
-    if ny < pos.y - 0.25 then
-        ny = ground_y_at(pos.x, pos.y, pos.z) or pos.y
-    end
-
-    move.set_position(root, nx, ny, nz)
-    move.zero_character(char, root)
-end
-
-local function tick(_dt)
-    if not misc_gate.movement_allowed() then return end
-
-    local fling = April.require("features.movement.fling")
-    if fling.is_active and fling.is_active() then return end
-
-    local on = settings.enabled(P)
-    local lp = env.get_local_player()
-
-    if was_active and not on then
-        local char = lp and get_character(lp)
-        local root = lp and get_root(lp)
-        local hum = lp and get_humanoid(lp)
-        if char and root and hum then
-            leave(char, root, hum)
-        end
-        was_active = false
-        return
-    end
-
-    if not on then
-        was_active = false
-        return
-    end
-
-    if not lp then return end
-    local char = get_character(lp)
-    local root = get_root(lp)
-    local hum = get_humanoid(lp)
-    if not char or not root or not hum then return end
-
-    if not was_active then
-        enter(char, root, hum)
-        was_active = true
-    end
-
-    tick_move(char, root, hum, settings.num(P_SPEED, 32))
-end
 
 function M.register_menu()
     local G = menu_util.G
@@ -10611,15 +11854,6 @@ function M.register_menu()
     menu_util.register_keybind(T, G.MISC, P, "Noclip", false)
     menu.add_slider_int(T, G.MISC, P_SPEED, "Noclip Speed", 8, 80, 32, root)
     menu_util.bind_children(P, { P_SPEED })
-end
-
-function M.install()
-    if _installed then return end
-    _installed = true
-    local runservice = April.require("core.runservice")
-    runservice.on_sim(function(dt)
-        tick(dt)
-    end)
 end
 
 function M.update(_dt) end
@@ -10969,7 +12203,6 @@ local function release_fling(char, root, hum)
     move.set_character_noclip(char, root, false)
     pcall(function() hum.platform_stand = false end)
     move.humanoid_running(hum)
-    move.humanoid_thaw(hum)
 end
 
 local function write_pos(inst, x, y, z)
@@ -11910,9 +13143,10 @@ local HEAD_OFFSET = 3.5
 
 local seen = {}
 local active = {}
-local last_scan = 0
+local last_scan = -1
 local SCAN_MS = 2500
 M._session = nil
+M._was_enabled = false
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -11929,13 +13163,14 @@ end
 function M.reset_state()
     seen = {}
     active = {}
-    last_scan = 0
+    last_scan = -1
 end
 
 function M.tick_session()
     local sid = session_id()
     if M._session == nil then
         M._session = sid
+        last_scan = -1
         return
     end
     if sid ~= M._session then
@@ -11987,6 +13222,7 @@ end
 
 function M.init()
     image_cache.ensure(MOD_ICON_KEY, asset_urls.mod_warning_png())
+    last_scan = -1
 end
 
 function M.track_player(p, role)
@@ -12029,16 +13265,10 @@ function M.check_player(p)
 end
 
 function M.reconcile_active()
-    if not entity or not entity.get_players then
-        M.reset_state()
-        return
-    end
+    if not entity or not entity.get_players then return end
 
     local players = entity.get_players()
-    if #players == 0 then
-        M.reset_state()
-        return
-    end
+    if #players == 0 then return end
 
     local present = {}
     for _, p in ipairs(players) do
@@ -12085,17 +13315,27 @@ function M.on_player_removed(p)
     end
 end
 
+function M.is_staff(player)
+    if not player then return false end
+    local uid = player.user_id
+    if not uid or uid == 0 then return false end
+    if active[uid] then return true end
+    return mod_ids.role_for(uid) ~= nil
+end
+
 function M.update(_dt)
     M.tick_session()
 
     if not settings.enabled(P) then
-        M.reset_state()
+        if M._was_enabled then M.reset_state() end
+        M._was_enabled = false
         return
     end
+    M._was_enabled = true
 
     local now = tick_ms()
     local interval = settings.num("april_mod_checker_interval", SCAN_MS)
-    if now - last_scan >= interval then
+    if last_scan < 0 or (now - last_scan) >= interval then
         last_scan = now
         M.scan_all()
     end
@@ -12124,82 +13364,131 @@ function M.draw_mod_markers()
     end
 end
 
-function M.draw()
-    M.draw_mod_markers()
-
-    if not settings.enabled(P) then return end
-    if not draw or not draw.text then return end
-
+local function build_staff_rows()
     local rows = {}
     local me = env.get_local_player()
     local now = tick_ms()
 
-    for uid, entry in pairs(active) do
-        local still_here = false
-        local dist = nil
+    if not entity or not entity.get_players then return rows end
 
-        for _, p in ipairs(entity and entity.get_players and entity.get_players() or {}) do
-            if p.user_id == uid then
-                still_here = true
-                if me and me.position and p.position then
-                    local dx = p.position.x - me.position.x
-                    local dy = p.position.y - me.position.y
-                    local dz = p.position.z - me.position.z
-                    dist = math.floor(math.sqrt(dx * dx + dy * dy + dz * dz))
-                end
-                break
-            end
+    for _, p in ipairs(entity.get_players()) do
+        if p.is_local then goto continue end
+
+        local uid = p.user_id
+        if not uid or uid == 0 then goto continue end
+
+        local role = mod_ids.role_for(uid)
+        if not role then goto continue end
+
+        M.track_player(p, role)
+        local entry = active[uid]
+        if not entry then goto continue end
+
+        local dist = nil
+        if me and me.position and p.position then
+            local dx = p.position.x - me.position.x
+            local dy = p.position.y - me.position.y
+            local dz = p.position.z - me.position.z
+            dist = math.floor(math.sqrt(dx * dx + dy * dy + dz * dz))
         end
 
-        if not still_here then
-            active[uid] = nil
-            seen[uid] = nil
-            goto continue
+        local meta = format_duration(now - (entry.first_seen or now))
+        if dist then
+            meta = meta .. "  |  " .. dist .. "m"
         end
 
         rows[#rows + 1] = {
-            entry = entry,
-            dist = dist,
-            duration = format_duration(now - (entry.first_seen or now)),
+            name = entry.label or entry.username or "Unknown",
+            role = role,
+            meta = meta,
+            first_seen = entry.first_seen or now,
         }
 
         ::continue::
     end
 
-    if #rows == 0 then return end
-
     table.sort(rows, function(a, b)
-        return (a.entry.first_seen or 0) < (b.entry.first_seen or 0)
+        return (a.first_seen or 0) < (b.first_seen or 0)
     end)
 
-    if not draw.window then return end
+    return rows
+end
+
+local function draw_staff_panel(x, y, width, rows)
+    if not draw or not draw.text then return end
+
+    local pad = 10
+    local title_h = 24
+    local row_h = 44
+    local count = math.max(#rows, 1)
+    local height = title_h + count * row_h + 6
+
+    theme.draw_panel(x, y, width, height, {
+        bg = theme.alpha(theme.BG, 0.90),
+        border = theme.alpha(theme.BORDER, 0.45),
+        accent = theme.RED,
+        accent_w = 2,
+        rounding = theme.ROUND,
+    })
+
+    local title = "Staff In Lobby"
+    if #rows > 1 then
+        title = title .. " (" .. #rows .. ")"
+    end
+    draw_util.text(x + pad, y + 6, title, theme.TEXT, 12)
+
+    local div_y = y + title_h
+    if draw.line then
+        draw.line(x + pad, div_y, x + width - pad, div_y, theme.alpha(theme.BORDER, 0.55), 1)
+    end
+
+    local ry = div_y + 6
+    if #rows == 0 then
+        draw.text(x + pad + 12, ry, "No staff detected", theme.TEXT_MUTED, 11)
+        return
+    end
+
+    for i = 1, #rows do
+        local row = rows[i]
+        local accent = row.accent or theme.role_accent(row.role)
+
+        if i > 1 and draw.line then
+            draw.line(x + pad, ry - 4, x + width - pad, ry - 4, theme.alpha(theme.BORDER, 0.22), 1)
+        end
+
+        if draw.circle_filled then
+            draw.circle_filled(x + pad + 3, ry + 7, 3, accent, 8)
+        end
+
+        local name = row.name or "?"
+        if #name > 20 then name = name:sub(1, 18) .. ".." end
+        draw.text(x + pad + 12, ry, name, theme.TEXT, 13)
+
+        local role = row.role or "Staff"
+        if #role > 24 then role = role:sub(1, 22) .. ".." end
+        draw.text(x + pad + 12, ry + 15, role, accent, 11)
+
+        if row.meta and row.meta ~= "" then
+            draw.text(x + pad + 12, ry + 28, row.meta, theme.TEXT_MUTED, 10)
+        end
+
+        ry = ry + row_h
+    end
+end
+
+function M.draw()
+    M.draw_mod_markers()
+
+    if not settings.enabled(P) then return end
+
+    M.reconcile_active()
 
     local sw, _ = draw_util.screen_size()
     local panel_w = 260
     local x = sw - panel_w - 16
-    local items = {}
+    local rows = build_staff_rows()
 
-    for i = 1, #rows do
-        local row = rows[i]
-        local entry = row.entry
-        local meta = row.duration
-        if row.dist then
-            meta = meta .. "  |  " .. row.dist .. "m"
-        end
-
-        local name = entry.label or entry.username or "Unknown"
-        if #name > 18 then name = name:sub(1, 16) .. ".." end
-
-        local role = entry.role or "Staff"
-        items[#items + 1] = { name .. "  |  " .. role, meta }
-    end
-
-    local title = "Staff In Lobby"
-    if #items > 1 then
-        title = title .. " (" .. #items .. ")"
-    end
-
-    draw.window(x, 72, "april_staff_lobby", title, items)
+    draw_staff_panel(x, 72, panel_w, rows)
 end
 
 return M
@@ -12333,6 +13622,7 @@ M.features = {}
 M._menu_registered = false
 
 M.FEATURE_ORDER = {
+    "features.combat.aimbot",
     "features.combat.gun_mods",
     "features.visuals.target_overlay",
     "features.visuals.crosshair",
@@ -12557,7 +13847,6 @@ local ok, err = pcall(function()
     end
 
     April.require("core.movement_ctrl").install()
-    April.require("features.movement.noclip").install()
     April.require("features.movement.fling").install()
 
     April._init_ok = true

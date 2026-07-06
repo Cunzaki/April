@@ -48,13 +48,16 @@ const ORDER = [
   "game/items.lua",
   "game/armor_map.lua",
   "game/weapons.lua",
+  "game/gc_weapon_mods.lua",
+  "game/weapon_profile_store.lua",
+  "game/gun_mod_profiles.lua",
+  "game/combat_stats.lua",
+  "core/ballistic.lua",
+  "game/combat_origin.lua",
   "game/farm_tools.lua",
   "game/inventory.lua",
   "game/player_gear.lua",
   "game/player_state.lua",
-  "game/gc_weapon_mods.lua",
-  "game/weapon_profile_store.lua",
-  "game/gun_mod_profiles.lua",
   "game/brainrot_catalog.lua",
   "game/npcs.lua",
   "game/mod_ids.lua",
@@ -62,9 +65,11 @@ const ORDER = [
   "game/esp_maps.lua",
   "game/esp_scan.lua",
   "features/combat/combat_menu.lua",
+  "features/combat/targeting.lua",
+  "features/combat/silent_resolve.lua",
+  "features/combat/aimbot.lua",
   "features/combat/perfect_farm.lua",
   "features/combat/gun_mods.lua",
-  "features/combat/targeting.lua",
   "features/visuals/player_esp.lua",
   "features/visuals/target_overlay.lua",
   "features/visuals/crosshair.lua",
@@ -92,7 +97,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.35.0",
+    version = "3.55.0",
     debug = false,
     _mods = {},
     bundled = true,
@@ -133,7 +138,6 @@ local ok, err = pcall(function()
     end
 
     April.require("core.movement_ctrl").install()
-    April.require("features.movement.noclip").install()
     April.require("features.movement.fling").install()
 
     April._init_ok = true
