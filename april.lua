@@ -1,7 +1,7 @@
 --[[
     April — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-06T23:03:45.460Z
+    Built: 2026-07-07T01:34:46.026Z
 ]]
 
 April = {
@@ -11866,7 +11866,9 @@ end)()
 
 -- ── features/movement/fling.lua ──
 April._mods["features.movement.fling"] = (function()
---[[ Fling — noclip TP spin: far-range entity lock, approach warmup, return to origin. ]]
+--[[ Fling — HRP collision spin: TP onto target, spin colliding root, return to origin.
+    Fallen player physics hull is HumanoidRootPart (Players collision group, ~2x2.5x2).
+    Only HRP stays collidable during fling; everything else is noclip. ]]
 
 local settings = April.require("core.settings")
 local env = April.require("core.env")
@@ -11892,6 +11894,10 @@ local SPIN_Y_START = 48000.0
 local SPIN_Y_MAX = 70000.0
 local SPIN_RAMP_SEC = 0.35
 local BASE_PREDICT = 0.05
+local MAX_SNAP_PASSES = 10
+
+-- HumanoidRootPart is the player-vs-player physics hull in Fallen (dump: Players group, 2x2.5x2).
+local FLING_HIT_PARTS = { "HumanoidRootPart" }
 
 local function fling_duration()
     return settings.num(P_DURATION, 2)
@@ -11904,11 +11910,16 @@ end
 local STATE_IDLE = 0
 local STATE_APPROACH = 1
 local STATE_FLING = 2
+local STATE_RETURN = 3
+
+local RETURN_TICKS = 15
+local MAX_ATTACH_DRIFT = 6.0
 
 local _installed = false
 local state = STATE_IDLE
 local fling_t0 = 0
 local approach_left = 0
+local return_left = 0
 local start_range = 0
 local saved_pos = nil
 local target_root = nil
@@ -12161,20 +12172,20 @@ local function read_attach_pos(tgt_root, lpos)
 end
 
 local function snap_passes(range, drift)
-    local base = 5
-    if range > 220 then base = 22
-    elseif range > 150 then base = 18
-    elseif range > 100 then base = 14
-    elseif range > 60 then base = 10
-    elseif range > 30 then base = 7
+    local base = 4
+    if range > 220 then base = 10
+    elseif range > 150 then base = 8
+    elseif range > 100 then base = 7
+    elseif range > 60 then base = 6
+    elseif range > 30 then base = 5
     end
 
-    if drift > 12 then base = base + 8
-    elseif drift > 6 then base = base + 5
-    elseif drift > 2 then base = base + 3
+    if drift > 12 then base = base + 3
+    elseif drift > 6 then base = base + 2
+    elseif drift > 2 then base = base + 1
     end
 
-    return base
+    return math.min(MAX_SNAP_PASSES, base)
 end
 
 local function approach_ticks_for(dist)
@@ -12182,27 +12193,44 @@ local function approach_ticks_for(dist)
     return math.min(12, math.floor(dist / 22) + 3)
 end
 
+local function set_fling_collision(char, active)
+    if not char then return end
+    for _, inst in ipairs(move.iter_parts(char)) do
+        move.set_part_collide(inst, false)
+    end
+    if not active then
+        move.set_character_noclip(char, nil, false)
+        return
+    end
+    for i = 1, #FLING_HIT_PARTS do
+        local hit = move.find_part(char, FLING_HIT_PARTS[i])
+        if hit and move.is_base_part(hit) then
+            move.set_part_collide(hit, true)
+        end
+    end
+end
+
 local function prep_fling(char, root, hum)
-    move.set_character_noclip(char, root, true)
+    set_fling_collision(char, true)
     move.humanoid_suspend(hum)
     pcall(function() hum.platform_stand = true end)
-    pcall(function() hum.auto_rotate = false end)
-    pcall(function() hum.evaluate_state_machine = false end)
     pcall(function() hum.sit = false end)
-    pcall(function() hum.state = 14 end)
+    move.humanoid_state(hum, 13)
 end
 
 local function release_fling(char, root, hum)
     if root then
-        move.set_velocity(root, 0, 0, 0)
-        if part and part.set_angular_velocity then
-            pcall(part.set_angular_velocity, root, 0, 0, 0)
-        end
+        move.zero_part(root)
     end
     move.zero_character(char, root)
-    move.set_character_noclip(char, root, false)
-    pcall(function() hum.platform_stand = false end)
-    move.humanoid_running(hum)
+    set_fling_collision(char, false)
+    if hum then
+        pcall(function() hum.platform_stand = false end)
+        pcall(function() hum.sit = false end)
+        pcall(function() hum.auto_rotate = true end)
+        pcall(function() hum.evaluate_state_machine = true end)
+        move.humanoid_running(hum)
+    end
 end
 
 local function write_pos(inst, x, y, z)
@@ -12214,19 +12242,36 @@ local function write_pos(inst, x, y, z)
     end
 end
 
-local function freeze_body(char, root)
+local function zero_linear(char, root)
     if root then
         move.set_velocity(root, 0, 0, 0)
     end
     for _, inst in ipairs(move.iter_parts(char)) do
         move.set_velocity(inst, 0, 0, 0)
-        if inst ~= root and part and part.set_angular_velocity then
-            pcall(part.set_angular_velocity, inst, 0, 0, 0)
-        end
     end
 end
 
-local function pin_to_target(char, root, tgt_root, from_pos)
+local function lock_at(root, char, x, y, z, passes)
+    passes = passes or 3
+    for _ = 1, passes do
+        write_pos(root, x, y, z)
+    end
+    zero_linear(char, root)
+end
+
+local function clear_session()
+    state = STATE_IDLE
+    fling_t0 = 0
+    approach_left = 0
+    return_left = 0
+    start_range = 0
+    saved_pos = nil
+    target_root = nil
+    target_player = nil
+    last_attach = nil
+end
+
+local function pin_to_target(root, tgt_root, from_pos)
     local lpos = move.read_pos(root)
     local tx, ty, tz = read_attach_pos(tgt_root, lpos)
     if not tx then return false end
@@ -12246,7 +12291,7 @@ local function pin_to_target(char, root, tgt_root, from_pos)
         write_pos(root, tx, ty, tz)
     end
 
-    freeze_body(char, root)
+    zero_linear(nil, root)
     return true, tx, ty, tz
 end
 
@@ -12256,26 +12301,62 @@ local function spin_strength(elapsed)
 end
 
 local function apply_spin(root, elapsed)
+    if not root then return end
     move.set_velocity(root, 0, 0, 0)
     if part and part.set_angular_velocity then
         pcall(part.set_angular_velocity, root, 0, spin_strength(elapsed), 0)
     end
 end
 
-local function stop_fling(root, char, hum)
-    if saved_pos and root then
-        write_pos(root, saved_pos.x, saved_pos.y, saved_pos.z)
-        move.set_velocity(root, 0, 0, 0)
-    end
-    release_fling(char, root, hum)
-    state = STATE_IDLE
-    fling_t0 = 0
-    approach_left = 0
-    start_range = 0
-    saved_pos = nil
+local function begin_return(root, char, hum)
+    state = STATE_RETURN
+    return_left = RETURN_TICKS
     target_root = nil
     target_player = nil
     last_attach = nil
+
+    set_fling_collision(char, false)
+    if root and part and part.set_angular_velocity then
+        pcall(part.set_angular_velocity, root, 0, 0, 0)
+    end
+    move.zero_character(char, root)
+    if hum then
+        pcall(function() hum.platform_stand = true end)
+        move.humanoid_suspend(hum)
+    end
+end
+
+local function finish_fling(root, char, hum)
+    if saved_pos and root then
+        lock_at(root, char, saved_pos.x, saved_pos.y, saved_pos.z, 6)
+        move.zero_part(root)
+    end
+    release_fling(char, root, hum)
+    clear_session()
+end
+
+local function stop_fling(root, char, hum)
+    begin_return(root, char, hum)
+end
+
+local function tick_return(root, char, hum)
+    if not saved_pos or not root then
+        finish_fling(root, char, hum)
+        return
+    end
+
+    lock_at(root, char, saved_pos.x, saved_pos.y, saved_pos.z, 4)
+    move.zero_character(char, root)
+
+    local pos = move.read_pos(root)
+    local settled = pos and math_util.distance3(
+        pos.x - saved_pos.x, pos.y - saved_pos.y, pos.z - saved_pos.z
+    ) < 1.5
+
+    return_left = return_left - 1
+    if settled or return_left <= 0 then
+        finish_fling(root, char, hum)
+    end
 end
 
 local function begin_fling(root, char, hum, tgt_player, tgt_root)
@@ -12304,7 +12385,7 @@ local function begin_fling(root, char, hum, tgt_player, tgt_root)
     end
 
     prep_fling(char, root, hum)
-    pin_to_target(char, root, tgt_root, pos)
+    pin_to_target(root, tgt_root, pos)
 
     if state == STATE_FLING then
         apply_spin(root, 0)
@@ -12316,7 +12397,8 @@ end
 local function tick_approach(root, char, hum)
     prep_fling(char, root, hum)
 
-    if not pin_to_target(char, root, target_root, nil) then
+    if not pin_to_target(root, target_root, nil) then
+        stop_fling(root, char, hum)
         return
     end
 
@@ -12342,18 +12424,28 @@ local function tick_fling(root, char, hum)
     refresh_target_root()
     prep_fling(char, root, hum)
 
-    local ok, tx, ty, tz = pin_to_target(char, root, target_root, nil)
+    local ok, tx, ty, tz = pin_to_target(root, target_root, nil)
     if not ok then
+        stop_fling(root, char, hum)
         return
     end
 
     apply_spin(root, elapsed)
-    write_pos(root, tx, ty, tz)
+    lock_at(root, char, tx, ty, tz, 3)
+
+    local pos = move.read_pos(root)
+    if pos and math_util.distance3(pos.x - tx, pos.y - ty, pos.z - tz) > MAX_ATTACH_DRIFT then
+        lock_at(root, char, tx, ty, tz, 5)
+    end
 end
 
 local function tick_active(root, char, hum)
     if state == STATE_APPROACH then
         tick_approach(root, char, hum)
+        return
+    end
+    if state == STATE_RETURN then
+        tick_return(root, char, hum)
         return
     end
     tick_fling(root, char, hum)
@@ -12405,20 +12497,23 @@ local function poll_key()
 end
 
 local function tick(_dt)
-    if not misc_gate.movement_allowed() then return end
+    if state == STATE_IDLE then
+        if not misc_gate.movement_allowed() then return end
+        poll_key()
+        return
+    end
 
-    poll_key()
-    if state == STATE_IDLE then return end
+    if state ~= STATE_RETURN and not misc_gate.movement_allowed() then
+        return
+    end
 
     local lp = env.get_local_player()
     if not lp then
-        state = STATE_IDLE
-        approach_left = 0
-        start_range = 0
-        target_root = nil
-        target_player = nil
-        saved_pos = nil
-        last_attach = nil
+        if state == STATE_RETURN and saved_pos then
+            return_left = RETURN_TICKS
+        else
+            clear_session()
+        end
         return
     end
 
@@ -12434,7 +12529,7 @@ local function tick(_dt)
 end
 
 function M.is_active()
-    return state == STATE_APPROACH or state == STATE_FLING
+    return state == STATE_APPROACH or state == STATE_FLING or state == STATE_RETURN
 end
 
 function M.register_menu()
@@ -12485,17 +12580,14 @@ local M = {}
 local P = "april_desync_enabled"
 local P_VIS = "april_desync_visualizer"
 
-local RANGE_RADIUS = 7.5
-local DESYNC_RING_RADIUS = 2.5
+local RANGE_RADIUS = 8
 
 local LOOP_MS = 30
 local last_tick = 0
 local last_flag_apply = 0
 local old_phys, old_send = nil, nil
 local was_active = false
-local was_sending = false
 local anchor_pos = nil
-local server_pos = nil
 
 local function now()
     if utility and utility.get_time then return utility.get_time() end
@@ -12572,22 +12664,6 @@ local function compute_rates(t)
     return phys, send
 end
 
-local function update_server_pos(root, sending_now)
-    if not root then return end
-    local pos = capture_pos(root)
-    if not pos then return end
-
-    if not settings.enabled("april_desync_autosend") then
-        server_pos = server_pos or pos
-    elseif sending_now and not was_sending then
-        server_pos = pos
-    elseif sending_now then
-        server_pos = pos
-    elseif was_sending and not sending_now then
-        server_pos = server_pos or pos
-    end
-end
-
 local function draw_center_dot(wx, wy, wz, col)
     local sx, sy, vis = esp_util.w2s(wx, wy, wz)
     if vis then
@@ -12599,17 +12675,12 @@ end
 local function draw_visualizer()
     if not anchor_pos then return end
 
-    local range_col = { 0.2, 0.85, 1, 0.55 }
-    desync_vis.draw_sphere_ring(anchor_pos.x, anchor_pos.y, anchor_pos.z, RANGE_RADIUS, range_col, 2)
-
-    if not settings.bool(P_VIS, false) then return end
-
     local col = settings.color(P_VIS, { 0.2, 0.85, 1, 0.9 })
-    draw_center_dot(anchor_pos.x, anchor_pos.y, anchor_pos.z, col)
+    local ring_col = { col[1], col[2], col[3], 0.55 }
+    desync_vis.draw_sphere_ring(anchor_pos.x, anchor_pos.y, anchor_pos.z, RANGE_RADIUS, ring_col, 2)
 
-    if server_pos then
-        desync_vis.draw_sphere_ring(server_pos.x, server_pos.y, server_pos.z, DESYNC_RING_RADIUS, col, 2)
-        desync_vis.draw_link(server_pos, anchor_pos, { col[1], col[2], col[3], (col[4] or 1) * 0.35 }, 1)
+    if settings.bool(P_VIS, false) then
+        draw_center_dot(anchor_pos.x, anchor_pos.y, anchor_pos.z, col)
     end
 end
 
@@ -12643,15 +12714,12 @@ function M.update(_dt)
     if was_active and not on then
         restore_rates()
         anchor_pos = nil
-        server_pos = nil
-        was_sending = false
     end
 
     if on and not was_active then
         pcall(fflag_mem.refresh)
         local root = get_root()
         anchor_pos = capture_pos(root)
-        server_pos = anchor_pos and { x = anchor_pos.x, y = anchor_pos.y, z = anchor_pos.z } or nil
     end
 
     was_active = on
@@ -12661,7 +12729,6 @@ function M.update(_dt)
     last_tick = t
 
     local phys, send = compute_rates(t)
-    local sending_now = phys ~= 0
     local root = get_root()
 
     if root and anchor_pos then
@@ -12669,16 +12736,11 @@ function M.update(_dt)
         if pos and dist_from_anchor(pos) > RANGE_RADIUS then
             restore_rates()
             anchor_pos = nil
-            server_pos = nil
-            was_sending = false
             was_active = false
             disable_desync()
             return
         end
     end
-
-    update_server_pos(root, sending_now)
-    was_sending = sending_now
 
     if phys ~= old_phys or send ~= old_send or (t - last_flag_apply) > 0.35 then
         apply_rates(phys, send)

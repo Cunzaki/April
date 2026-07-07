@@ -12,17 +12,14 @@ local M = {}
 local P = "april_desync_enabled"
 local P_VIS = "april_desync_visualizer"
 
-local RANGE_RADIUS = 7.5
-local DESYNC_RING_RADIUS = 2.5
+local RANGE_RADIUS = 8
 
 local LOOP_MS = 30
 local last_tick = 0
 local last_flag_apply = 0
 local old_phys, old_send = nil, nil
 local was_active = false
-local was_sending = false
 local anchor_pos = nil
-local server_pos = nil
 
 local function now()
     if utility and utility.get_time then return utility.get_time() end
@@ -99,22 +96,6 @@ local function compute_rates(t)
     return phys, send
 end
 
-local function update_server_pos(root, sending_now)
-    if not root then return end
-    local pos = capture_pos(root)
-    if not pos then return end
-
-    if not settings.enabled("april_desync_autosend") then
-        server_pos = server_pos or pos
-    elseif sending_now and not was_sending then
-        server_pos = pos
-    elseif sending_now then
-        server_pos = pos
-    elseif was_sending and not sending_now then
-        server_pos = server_pos or pos
-    end
-end
-
 local function draw_center_dot(wx, wy, wz, col)
     local sx, sy, vis = esp_util.w2s(wx, wy, wz)
     if vis then
@@ -126,17 +107,12 @@ end
 local function draw_visualizer()
     if not anchor_pos then return end
 
-    local range_col = { 0.2, 0.85, 1, 0.55 }
-    desync_vis.draw_sphere_ring(anchor_pos.x, anchor_pos.y, anchor_pos.z, RANGE_RADIUS, range_col, 2)
-
-    if not settings.bool(P_VIS, false) then return end
-
     local col = settings.color(P_VIS, { 0.2, 0.85, 1, 0.9 })
-    draw_center_dot(anchor_pos.x, anchor_pos.y, anchor_pos.z, col)
+    local ring_col = { col[1], col[2], col[3], 0.55 }
+    desync_vis.draw_sphere_ring(anchor_pos.x, anchor_pos.y, anchor_pos.z, RANGE_RADIUS, ring_col, 2)
 
-    if server_pos then
-        desync_vis.draw_sphere_ring(server_pos.x, server_pos.y, server_pos.z, DESYNC_RING_RADIUS, col, 2)
-        desync_vis.draw_link(server_pos, anchor_pos, { col[1], col[2], col[3], (col[4] or 1) * 0.35 }, 1)
+    if settings.bool(P_VIS, false) then
+        draw_center_dot(anchor_pos.x, anchor_pos.y, anchor_pos.z, col)
     end
 end
 
@@ -170,15 +146,12 @@ function M.update(_dt)
     if was_active and not on then
         restore_rates()
         anchor_pos = nil
-        server_pos = nil
-        was_sending = false
     end
 
     if on and not was_active then
         pcall(fflag_mem.refresh)
         local root = get_root()
         anchor_pos = capture_pos(root)
-        server_pos = anchor_pos and { x = anchor_pos.x, y = anchor_pos.y, z = anchor_pos.z } or nil
     end
 
     was_active = on
@@ -188,7 +161,6 @@ function M.update(_dt)
     last_tick = t
 
     local phys, send = compute_rates(t)
-    local sending_now = phys ~= 0
     local root = get_root()
 
     if root and anchor_pos then
@@ -196,16 +168,11 @@ function M.update(_dt)
         if pos and dist_from_anchor(pos) > RANGE_RADIUS then
             restore_rates()
             anchor_pos = nil
-            server_pos = nil
-            was_sending = false
             was_active = false
             disable_desync()
             return
         end
     end
-
-    update_server_pos(root, sending_now)
-    was_sending = sending_now
 
     if phys ~= old_phys or send ~= old_send or (t - last_flag_apply) > 0.35 then
         apply_rates(phys, send)
