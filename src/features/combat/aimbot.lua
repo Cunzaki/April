@@ -158,6 +158,7 @@ function M.register_menu()
     menu_util.bind_children(P_MASTER, {
         PREFIX .. "target_type", PREFIX .. "bone",
         PREFIX .. "filter_health", PREFIX .. "filter_visible", PREFIX .. "filter_team",
+        PREFIX .. "target_players", PREFIX .. "target_npcs", PREFIX .. "target_npc_soldiers", PREFIX .. "target_npc_bosses",
         PREFIX .. "max_dist", PREFIX .. "fov", PREFIX .. "sticky",
         PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
         PREFIX .. "wallbang", PREFIX .. "bullet_tp", PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
@@ -170,6 +171,10 @@ function M.register_menu()
 
     menu_util.bind_children(PREFIX .. "bullet_manip", {
         PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_ring", PREFIX .. "manip_peek_vis",
+    })
+
+    menu_util.bind_children(PREFIX .. "target_npcs", {
+        PREFIX .. "target_npc_soldiers", PREFIX .. "target_npc_bosses",
     })
 end
 
@@ -225,7 +230,7 @@ function M.update(_dt)
 
     update_target(cx, cy, fov)
 
-    if not locked_target or not player_state.is_combat_target(locked_target) then
+    if not locked_target or not targeting.is_aim_target(locked_target) then
         silent_ray.stop()
         return
     end

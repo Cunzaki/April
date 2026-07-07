@@ -1,26 +1,26 @@
-# April — Agent Guide (Vector / Fallen Survival)
+# April Fallen — Agent Guide (Vector / Fallen Survival)
 
-This file is the **source of truth for AI agents** working on April v3. Read it at the start of every session.
+This file is the **source of truth for AI agents** working on **April Fallen** (v3). Read it at the start of every session.
 
 ## What this project is
 
-**April** is a **Project Vector** external script for **Fallen Survival** (Roblox place `13800717766`). It runs in Vector's Lua VM against the live game process — not inside Roblox Studio.
+**April Fallen** is a **Project Vector** external script for **Fallen Survival** (Roblox place `13800717766`). It runs in Vector's Lua VM against the live game process — not inside Roblox Studio.
 
 | Artifact | Purpose |
 |----------|---------|
-| `April/src/` | Modular source (edit here) |
-| `April/scripts/bundle.mjs` | Bundles `src/` → `April/april.lua` |
-| `April/Script 1.lua` | Vector load file (sync from `april.lua` after build) |
-| `fallen_legacy.lua` | Previous monolith — reference for behavior & features |
-| `April/references/dump/` | Game instance/module dumps — **verify paths & asset IDs here** |
+| `April Fallen/src/` | Modular source (edit here) |
+| `April Fallen/scripts/bundle.mjs` | Bundles `src/` → `april.lua` |
+| `April Fallen/Script 1.lua` | Vector load file (sync from `april.lua` after build) |
+| `April Fallen/references/legacy/` | Previous monoliths & modular loaders — reference only |
+| `April Fallen/references/dump/` | Game instance/module dumps — **verify paths & asset IDs here** |
 
-**Build:** `node April/scripts/bundle.mjs` then copy `april.lua` → `Script 1.lua`.
+**Build:** `node April Fallen/scripts/bundle.mjs` then copy `april.lua` → `Script 1.lua`.
 
 ---
 
-## Mandatory: read `April/docs/API.md` every session
+## Mandatory: read `April Fallen/docs/API.md` every session
 
-**Before any draw, menu, entity, camera, input, image, or memory work — open and read the relevant section of `April/docs/API.md`.** Do not rely on memory alone; the API has non-obvious rules that break features if ignored.
+**Before any draw, menu, entity, camera, input, image, or memory work — open and read the relevant section of `April Fallen/docs/API.md`.** Do not rely on memory alone; the API has non-obvious rules that break features if ignored.
 
 ### API rules agents must follow
 
@@ -58,7 +58,7 @@ Asset IDs come from `references/dump/scripts/ReplicatedStorage.Modules.Items.Mod
 
 ---
 
-## Mandatory: `April/references/dump/`
+## Mandatory: `April Fallen/references/dump/`
 
 Verify folder paths, instance names, remotes, and **item Image fields** against the dump — not guesses.
 
@@ -83,7 +83,7 @@ src/features/    → combat, visuals, world, movement, radar, utility
 
 **Images:** `asset_urls.item_png(id)` → `image_cache.ensure(key, url)` → load on first draw, `draw.image` every frame after.
 
-**No fallbacks:** Only use APIs and patterns documented in `April/docs/API.md`. Do not invent alternate URLs, hooks, or fallbacks.
+**No fallbacks:** Only use APIs and patterns documented in `April Fallen/docs/API.md`. Do not invent alternate URLs, hooks, or fallbacks.
 
 ---
 

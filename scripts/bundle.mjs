@@ -92,7 +92,7 @@ const ORDER = [
 ];
 
 const header = `--[[
-    April — Fallen Survival for Project Vector
+    April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
     Built: ${new Date().toISOString()}
 ]]

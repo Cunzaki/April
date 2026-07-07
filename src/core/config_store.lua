@@ -33,6 +33,7 @@ local MENU_KEYS = {
     "april_silent_aim", "april_silent_aim_mode",
     "april_silent_target_type", "april_silent_bone",
     "april_silent_filter_health", "april_silent_filter_visible", "april_silent_filter_team",
+    "april_silent_target_players", "april_silent_target_npcs", "april_silent_target_npc_soldiers", "april_silent_target_npc_bosses",
     "april_silent_max_dist", "april_silent_fov", "april_silent_sticky",
     "april_silent_wallbang", "april_silent_bullet_tp", "april_silent_tp_ray_mode", "april_silent_tp_ray_vis",
     "april_silent_bullet_manip",
