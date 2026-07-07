@@ -66,6 +66,7 @@ const ORDER = [
   "game/esp_scan.lua",
   "features/combat/combat_menu.lua",
   "features/combat/targeting.lua",
+  "features/combat/bullet_tp_ray.lua",
   "features/combat/silent_resolve.lua",
   "features/combat/aimbot.lua",
   "features/combat/perfect_farm.lua",
@@ -97,7 +98,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.55.0",
+    version = "3.57.0",
     debug = false,
     _mods = {},
     bundled = true,

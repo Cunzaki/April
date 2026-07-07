@@ -108,12 +108,25 @@ function M.track(origin, aim_point, shoot_vk)
 
     local dx, dy, dz = ax - ox, ay - oy, az - oz
     local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-    if dist < 0.001 then
-        return false
-    end
+    local dir
 
-    local inv = 1 / dist
-    local dir = make_vec3(dx * inv * MOUSE_RAY_LEN, dy * inv * MOUSE_RAY_LEN, dz * inv * MOUSE_RAY_LEN)
+    if dist < 0.001 then
+        -- Bullet TP: origin sits on the target — use camera-relative stub direction.
+        local cam = M.get_camera_origin()
+        if cam then
+            dx, dy, dz = cam.x - ox, cam.y - oy, cam.z - oz
+            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+        end
+        if not dist or dist < 0.001 then
+            dir = make_vec3(0, MOUSE_RAY_LEN * 0.01, 0)
+        else
+            local inv = 1 / dist
+            dir = make_vec3(dx * inv * MOUSE_RAY_LEN, dy * inv * MOUSE_RAY_LEN, dz * inv * MOUSE_RAY_LEN)
+        end
+    else
+        local inv = 1 / dist
+        dir = make_vec3(dx * inv * MOUSE_RAY_LEN, dy * inv * MOUSE_RAY_LEN, dz * inv * MOUSE_RAY_LEN)
+    end
     local origin_v = make_vec3(ox, oy, oz)
     local key = shoot_vk or 0x01
 

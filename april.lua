@@ -1,11 +1,11 @@
 --[[
     April — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-07T01:34:46.026Z
+    Built: 2026-07-07T02:17:46.310Z
 ]]
 
 April = {
-    version = "3.55.0",
+    version = "3.57.0",
     debug = false,
     _mods = {},
     bundled = true,
@@ -2119,12 +2119,25 @@ function M.track(origin, aim_point, shoot_vk)
 
     local dx, dy, dz = ax - ox, ay - oy, az - oz
     local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-    if dist < 0.001 then
-        return false
-    end
+    local dir
 
-    local inv = 1 / dist
-    local dir = make_vec3(dx * inv * MOUSE_RAY_LEN, dy * inv * MOUSE_RAY_LEN, dz * inv * MOUSE_RAY_LEN)
+    if dist < 0.001 then
+        -- Bullet TP: origin sits on the target — use camera-relative stub direction.
+        local cam = M.get_camera_origin()
+        if cam then
+            dx, dy, dz = cam.x - ox, cam.y - oy, cam.z - oz
+            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+        end
+        if not dist or dist < 0.001 then
+            dir = make_vec3(0, MOUSE_RAY_LEN * 0.01, 0)
+        else
+            local inv = 1 / dist
+            dir = make_vec3(dx * inv * MOUSE_RAY_LEN, dy * inv * MOUSE_RAY_LEN, dz * inv * MOUSE_RAY_LEN)
+        end
+    else
+        local inv = 1 / dist
+        dir = make_vec3(dx * inv * MOUSE_RAY_LEN, dy * inv * MOUSE_RAY_LEN, dz * inv * MOUSE_RAY_LEN)
+    end
     local origin_v = make_vec3(ox, oy, oz)
     local key = shoot_vk or 0x01
 
@@ -3112,6 +3125,7 @@ local MENU_KEYS = {
     "april_silent_target_type", "april_silent_bone",
     "april_silent_filter_health", "april_silent_filter_visible", "april_silent_filter_team",
     "april_silent_max_dist", "april_silent_fov", "april_silent_sticky",
+    "april_silent_wallbang", "april_silent_bullet_tp", "april_silent_tp_ray_mode", "april_silent_tp_ray_vis",
     "april_silent_bullet_manip",
     "april_silent_manip_dist", "april_silent_manip_status", "april_silent_manip_ring", "april_silent_manip_peek_vis",
     "april_silent_draw_fov", "april_silent_fov_style", "april_silent_target_line",
@@ -3164,7 +3178,7 @@ local MENU_KEYS = {
 
 local COLOR_KEYS = {
     "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
-    "april_silent_aim", "april_silent_draw_fov", "april_silent_target_line",
+    "april_silent_aim", "april_silent_draw_fov", "april_silent_target_line", "april_silent_tp_ray_vis",
     "april_stone_node", "april_metal_node", "april_phosphate_node", "april_corn_plant", "april_tomato_plant",
     "april_pumpkin_plant", "april_lemon_plant", "april_raspberry_plant", "april_blueberry_plant",
     "april_wool_plant", "april_hemp_plant", "april_deer", "april_boar", "april_wolf",
@@ -8723,6 +8737,15 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, root)
     menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 150, root)
     menu.add_checkbox(T, G, p .. "sticky", "Sticky Target", false, root)
+    menu.add_checkbox(T, G, p .. "wallbang", "Wallbang", false, root)
+    menu_util.label(T, G, "Wallbang: likely invalid until target is visible to you (server checks).")
+    local tp_root = menu_util.parent(p .. "bullet_tp")
+    menu.add_checkbox(T, G, p .. "bullet_tp", "Bullet TP", false, root)
+    menu_util.label(T, G, "Bullet TP: likely invalid until target is visible to you (server checks).")
+    menu.add_combo(T, G, p .. "tp_ray_mode", "TP Ray Mode", { "Direct", "Snap", "Deep", "Curve", "Arch" }, 0, tp_root)
+    menu.add_checkbox(T, G, p .. "tp_ray_vis", "Visualize Ray Path", false, menu_util.parent(p .. "bullet_tp", {
+        colorpicker = { 0.95, 0.45, 1, 0.9 },
+    }))
     menu.add_checkbox(T, G, p .. "bullet_manip", "Bullet Manipulation", false, root)
     menu.add_slider_float(T, G, p .. "manip_dist", "Manip Distance", 0.1, 1, 1, "%.2f", root)
     menu.add_checkbox(T, G, p .. "manip_status", "Manip Status Bar", false, root)
@@ -9004,19 +9027,215 @@ return M
 
 end)()
 
+-- ── features/combat/bullet_tp_ray.lua ──
+April._mods["features.combat.bullet_tp_ray"] = (function()
+--[[ Bullet TP — ray origin placement, ballistic aim, path samples for visualize. ]]
+
+local ballistic = April.require("core.ballistic")
+local combat_origin = April.require("game.combat_origin")
+local math_util = April.require("core.math_util")
+local weapons = April.require("game.weapons")
+
+local M = {}
+
+M.RAY_MODES = { "Direct", "Snap", "Deep", "Curve", "Arch" }
+
+local BACK_STUDS = {
+    Direct = 3.5,
+    Snap = 1.75,
+    Deep = 6.0,
+    Curve = 3.5,
+    Arch = 3.5,
+}
+
+local function unit(dx, dy, dz)
+    local len = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if len < 0.001 then return 0, 0, 0, 0 end
+    local inv = 1 / len
+    return dx * inv, dy * inv, dz * inv, len
+end
+
+local function copy_pos(p)
+    return { x = p.x, y = p.y, z = p.z }
+end
+
+local function lerp(a, b, t)
+    return {
+        x = a.x + (b.x - a.x) * t,
+        y = a.y + (b.y - a.y) * t,
+        z = a.z + (b.z - a.z) * t,
+    }
+end
+
+function M.mode_name(idx)
+    return M.RAY_MODES[(idx or 0) + 1] or "Direct"
+end
+
+function M.back_studs(mode_name)
+    return BACK_STUDS[mode_name] or BACK_STUDS.Direct
+end
+
+function M.predict_aim(target, head, camera, weapon_name)
+    if not head then return nil end
+    local muzzle = combat_origin.get_muzzle_origin() or camera
+    if not muzzle then return copy_pos(head) end
+
+    local vel = { x = 0, y = 0, z = 0 }
+    if target and target.velocity and target.velocity.x ~= nil then
+        vel = target.velocity
+    end
+
+    return ballistic.predict_for_weapon(muzzle, head, vel, weapon_name)
+        or copy_pos(head)
+end
+
+--[[ Place silent-hook origin slightly before the aim point on the camera→target line. ]]
+function M.track_origin(camera, aim, mode_name)
+    if not aim then return nil end
+    if not camera then return copy_pos(aim) end
+
+    local dx, dy, dz = aim.x - camera.x, aim.y - camera.y, aim.z - camera.z
+    local ux, uy, uz, len = unit(dx, dy, dz)
+    if len < 0.05 then return copy_pos(aim) end
+
+    local back = M.back_studs(mode_name)
+    if back >= len - 0.35 then
+        back = math.max(0.75, len * 0.35)
+    end
+
+    return {
+        x = aim.x - ux * back,
+        y = aim.y - uy * back,
+        z = aim.z - uz * back,
+    }
+end
+
+local function sample_line(a, b, steps)
+    steps = steps or 12
+    local out = {}
+    for i = 0, steps do
+        out[#out + 1] = lerp(a, b, i / steps)
+    end
+    return out
+end
+
+local function sample_curve(from, to, steps)
+    steps = steps or 16
+    local mid = lerp(from, to, 0.5)
+    local dx, dy, dz = to.x - from.x, to.y - from.y, to.z - from.z
+    local len = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if len < 0.001 then return sample_line(from, to, steps) end
+
+    local bend = math.min(4.5, len * 0.12)
+    local px, py, pz = -dz / len * bend, 0, dx / len * bend
+    mid = { x = mid.x + px, y = mid.y + py, z = mid.z + pz }
+
+    local out = {}
+    for i = 0, steps do
+        local t = i / steps
+        local u = 1 - t
+        out[#out + 1] = {
+            x = u * u * from.x + 2 * u * t * mid.x + t * t * to.x,
+            y = u * u * from.y + 2 * u * t * mid.y + t * t * to.y,
+            z = u * u * from.z + 2 * u * t * mid.z + t * t * to.z,
+        }
+    end
+    return out
+end
+
+local function sample_arch(muzzle, aim, weapon_name, steps)
+    steps = steps or 20
+    if not muzzle or not aim then return {} end
+
+    local stats = April.require("game.combat_stats").get_effective_stats(weapon_name)
+    local speed = math.max(stats.speed or 950, 1)
+    local g = ballistic.gravity_accel(stats.gravity)
+
+    local dx, dy, dz = aim.x - muzzle.x, aim.y - muzzle.y, aim.z - muzzle.z
+    local horiz = math.sqrt(dx * dx + dz * dz)
+    local dist = math_util.distance3(dx, dy, dz)
+    local flight = dist / speed
+
+    local vx = dx / flight
+    local vy = (dy + 0.5 * g * flight * flight) / flight
+    local vz = dz / flight
+
+    local out = {}
+    for i = 0, steps do
+        local t = (i / steps) * flight
+        out[#out + 1] = {
+            x = muzzle.x + vx * t,
+            y = muzzle.y + vy * t - 0.5 * g * t * t,
+            z = muzzle.z + vz * t,
+        }
+    end
+    out[#out + 1] = copy_pos(aim)
+    return out
+end
+
+--[[ Path points for visualize — muzzle (or hook origin) through mode shape to aim. ]]
+function M.build_path(mode_name, hook_origin, aim, weapon_name)
+    if not hook_origin or not aim then return {} end
+
+    local muzzle = combat_origin.get_muzzle_origin() or hook_origin
+    local start = muzzle
+
+    if mode_name == "Curve" then
+        return sample_curve(start, aim, 18)
+    end
+    if mode_name == "Arch" then
+        return sample_arch(start, aim, weapon_name, 22)
+    end
+    return sample_line(start, aim, 14)
+end
+
+return M
+
+end)()
+
 -- ── features/combat/silent_resolve.lua ──
 April._mods["features.combat.silent_resolve"] = (function()
---[[ Resolve silent hook — camera ray, or peek eye when bullet manip needs a corner ray. ]]
+--[[ Resolve silent hook — camera / peek / wallbang / bullet TP ray origins. ]]
 
 local settings = April.require("core.settings")
 local combat_origin = April.require("game.combat_origin")
 local silent_ray = April.require("core.silent_ray")
 local manip_math = April.require("core.manip_math")
 local targeting = April.require("features.combat.targeting")
+local bullet_tp_ray = April.require("features.combat.bullet_tp_ray")
+local weapons = April.require("game.weapons")
 
 local M = {}
 
 local OFF_INFO = { state = "off", peek = nil, radius = 1 }
+local PIERCE_PAD = 1.25
+
+local function pierce_origin(from, to)
+    if not from or not to then return from end
+    if not raycast or not raycast.cast then return from end
+    if raycast.is_ready and not raycast.is_ready() then return from end
+
+    local fx, fy, fz = from.x, from.y, from.z
+    local tx, ty, tz = to.x, to.y, to.z
+    local dx, dy, dz = tx - fx, ty - fy, tz - fz
+    local len = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if len < 0.001 then return from end
+
+    local hit, _, dist = raycast.cast(fx, fy, fz, tx, ty, tz)
+    if not hit or not dist or dist <= 0.05 then return from end
+
+    local travel = dist + PIERCE_PAD
+    if travel >= len - 0.5 then
+        travel = len * 0.65
+    end
+
+    local t = travel / len
+    return {
+        x = fx + dx * t,
+        y = fy + dy * t,
+        z = fz + dz * t,
+    }
+end
 
 function M.resolve_track(target, prefix, cx, cy)
     if not target then return nil, nil, OFF_INFO end
@@ -9029,8 +9248,26 @@ function M.resolve_track(target, prefix, cx, cy)
 
     local track_origin = camera
     local manip_info = OFF_INFO
+    local bullet_tp = settings.bool(prefix .. "bullet_tp", false)
+    local wallbang = settings.bool(prefix .. "wallbang", false)
 
-    if settings.bool(prefix .. "bullet_manip", false) then
+    if bullet_tp then
+        local head = targeting.bone_world(target, "Head") or aim
+        local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
+        local mode_idx = settings.num(prefix .. "tp_ray_mode", 0)
+        local mode_name = bullet_tp_ray.mode_name(mode_idx)
+
+        aim = bullet_tp_ray.predict_aim(target, head, camera, weapon) or head
+        track_origin = bullet_tp_ray.track_origin(camera, aim, mode_name) or aim
+
+        manip_info = {
+            state = "tp",
+            peek = nil,
+            radius = 0,
+            tp_mode = mode_name,
+            tp_path = bullet_tp_ray.build_path(mode_name, track_origin, aim, weapon),
+        }
+    elseif settings.bool(prefix .. "bullet_manip", false) then
         local body = combat_origin.get_server_origin()
         local max_r = manip_math.clamp_radius(settings.num(prefix .. "manip_dist", 1))
 
@@ -9047,6 +9284,12 @@ function M.resolve_track(target, prefix, cx, cy)
         else
             manip_info = { state = "blocked", peek = nil, radius = max_r }
         end
+
+        if wallbang then
+            track_origin = pierce_origin(track_origin, aim) or track_origin
+        end
+    elseif wallbang then
+        track_origin = pierce_origin(track_origin, aim) or track_origin
     end
 
     return track_origin, aim, manip_info
@@ -9071,6 +9314,7 @@ local silent_resolve = April.require("features.combat.silent_resolve")
 local manip_math = April.require("core.manip_math")
 local desync_vis = April.require("core.desync_vis")
 local theme = April.require("core.ui_theme")
+local esp_util = April.require("core.esp_util")
 
 local M = {}
 local locked_target = nil
@@ -9182,6 +9426,26 @@ local function draw_manip_peek(info)
     end
 end
 
+local function draw_tp_ray_path(info)
+    if not settings.bool(PREFIX .. "bullet_tp", false) then return end
+    if not settings.bool(PREFIX .. "tp_ray_vis", false) then return end
+    if not info or not info.tp_path or #info.tp_path < 2 then return end
+
+    local col = settings.color(PREFIX .. "tp_ray_vis", { 0.95, 0.45, 1, 0.9 })
+    local path = info.tp_path
+    for i = 1, #path - 1 do
+        local a, b = path[i], path[i + 1]
+        esp_util.draw_world_line(a.x, a.y, a.z, b.x, b.y, b.z, col, 1.5)
+    end
+
+    local hook = cached_track.origin
+    local aim = cached_track.aim
+    if hook and aim then
+        desync_vis.draw_cross(hook.x, hook.y, hook.z, 0.45, { 1, 0.85, 0.2, 0.95 }, 2)
+        desync_vis.draw_link(hook, aim, { col[1], col[2], col[3], 0.35 }, 1)
+    end
+end
+
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.SILENT_AIM)
@@ -9199,7 +9463,12 @@ function M.register_menu()
         PREFIX .. "filter_health", PREFIX .. "filter_visible", PREFIX .. "filter_team",
         PREFIX .. "max_dist", PREFIX .. "fov", PREFIX .. "sticky",
         PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
+        PREFIX .. "wallbang", PREFIX .. "bullet_tp", PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
         PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_ring", PREFIX .. "manip_peek_vis",
+    })
+
+    menu_util.bind_children(PREFIX .. "bullet_tp", {
+        PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
     })
 
     menu_util.bind_children(PREFIX .. "bullet_manip", {
@@ -9305,6 +9574,10 @@ function M.draw()
         draw_manip_ring(cached_track.manip)
         draw_manip_status(cx, cy, fov, cached_track.manip)
         draw_manip_peek(cached_track.manip)
+    end
+
+    if active() then
+        draw_tp_ray_path(cached_track.manip)
     end
 
     if active() and locked_target and settings.bool(PREFIX .. "target_line", false) then

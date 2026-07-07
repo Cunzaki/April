@@ -11,6 +11,7 @@ local silent_resolve = April.require("features.combat.silent_resolve")
 local manip_math = April.require("core.manip_math")
 local desync_vis = April.require("core.desync_vis")
 local theme = April.require("core.ui_theme")
+local esp_util = April.require("core.esp_util")
 
 local M = {}
 local locked_target = nil
@@ -122,6 +123,26 @@ local function draw_manip_peek(info)
     end
 end
 
+local function draw_tp_ray_path(info)
+    if not settings.bool(PREFIX .. "bullet_tp", false) then return end
+    if not settings.bool(PREFIX .. "tp_ray_vis", false) then return end
+    if not info or not info.tp_path or #info.tp_path < 2 then return end
+
+    local col = settings.color(PREFIX .. "tp_ray_vis", { 0.95, 0.45, 1, 0.9 })
+    local path = info.tp_path
+    for i = 1, #path - 1 do
+        local a, b = path[i], path[i + 1]
+        esp_util.draw_world_line(a.x, a.y, a.z, b.x, b.y, b.z, col, 1.5)
+    end
+
+    local hook = cached_track.origin
+    local aim = cached_track.aim
+    if hook and aim then
+        desync_vis.draw_cross(hook.x, hook.y, hook.z, 0.45, { 1, 0.85, 0.2, 0.95 }, 2)
+        desync_vis.draw_link(hook, aim, { col[1], col[2], col[3], 0.35 }, 1)
+    end
+end
+
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.SILENT_AIM)
@@ -139,7 +160,12 @@ function M.register_menu()
         PREFIX .. "filter_health", PREFIX .. "filter_visible", PREFIX .. "filter_team",
         PREFIX .. "max_dist", PREFIX .. "fov", PREFIX .. "sticky",
         PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
+        PREFIX .. "wallbang", PREFIX .. "bullet_tp", PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
         PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_ring", PREFIX .. "manip_peek_vis",
+    })
+
+    menu_util.bind_children(PREFIX .. "bullet_tp", {
+        PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
     })
 
     menu_util.bind_children(PREFIX .. "bullet_manip", {
@@ -245,6 +271,10 @@ function M.draw()
         draw_manip_ring(cached_track.manip)
         draw_manip_status(cx, cy, fov, cached_track.manip)
         draw_manip_peek(cached_track.manip)
+    end
+
+    if active() then
+        draw_tp_ray_path(cached_track.manip)
     end
 
     if active() and locked_target and settings.bool(PREFIX .. "target_line", false) then
