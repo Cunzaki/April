@@ -1,8 +1,3 @@
---[[
-    Fallen hostile NPCs — Soldiers + bosses under Workspace.Military monuments.
-    Soldiers spawn at runtime (not in static dump); scan runs periodically.
-]]
-
 local env = April.require("core.env")
 local folders = April.require("game.folders")
 

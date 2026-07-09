@@ -1,5 +1,3 @@
---[[ Lightweight capability flags (no runtime probes — those block on getgc/refreshgc). ]]
-
 local M = {}
 
 function M.probe()

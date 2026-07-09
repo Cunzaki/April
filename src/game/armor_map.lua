@@ -1,5 +1,3 @@
---[[ Armor model names on character -> Items module display names (legacy ARMOR_MAP). ]]
-
 local M = {}
 
 M.BY_MODEL = {

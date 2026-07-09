@@ -1,8 +1,3 @@
---[[
-    Legacy Fallen keybinds — Toggle / Hold via menu combo + manual key polling.
-    Vector's built-in checkbox Hold/Toggle modes are disabled (show_mode = false).
-]]
-
 local settings = April.require("core.settings")
 
 local M = {}

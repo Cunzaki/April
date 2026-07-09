@@ -1,5 +1,3 @@
---[[ Movement-only packet desync (shared by desync, freecam, bullet manip). ]]
-
 local fflag_mem = April.require("core.fflag_mem")
 
 local M = {}

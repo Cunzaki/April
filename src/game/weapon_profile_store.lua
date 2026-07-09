@@ -1,5 +1,3 @@
---[[ Per-weapon gun mod profiles — persisted separately from config slots. ]]
-
 local settings = April.require("core.settings")
 local config_store = April.require("core.config_store")
 

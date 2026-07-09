@@ -1,5 +1,3 @@
---[[ Resolve silent hook — camera / peek / wallbang / bullet TP ray origins. ]]
-
 local settings = April.require("core.settings")
 local combat_origin = April.require("game.combat_origin")
 local silent_ray = April.require("core.silent_ray")

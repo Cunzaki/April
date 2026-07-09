@@ -1,5 +1,3 @@
---[[ Shared ESP scan helpers — part lookup + oriented 3D box data. ]]
-
 local env = April.require("core.env")
 
 local M = {}
@@ -256,7 +254,6 @@ function M.folder_scan_step(state, max_items)
     return false, state.out
 end
 
---[[ Scan direct children of folder keys against a name→toggle map. ]]
 function M.scan_folders(folder_keys, name_map, label_map, dynamic)
     local folders_mod = April.require("game.folders")
     local out = {}

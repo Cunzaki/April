@@ -1,11 +1,3 @@
---[[
-    Locate Fallen modules already loaded by the game client.
-    Plain loops only — no coroutines (Vector forbids yield during menu/C calls).
-
-    IMPORTANT: When refreshgc/applygc exist, never call getgc(true) — it breaks
-    the Fallen weapon-mod node cache (getgc({ keys }) returns 0 afterward).
-]]
-
 local M = {}
 
 M._table_cache = nil
@@ -71,7 +63,6 @@ function M.collect_tables(force)
         seen = {}
     end
 
-    -- Never getgc(true) when Fallen weapon GC API is present — poisons getgc(keys).
     if M.has_gc() and not M.uses_fallen_weapon_gc() then
         local ok, all = pcall(getgc, true)
         if ok and type(all) == "table" then

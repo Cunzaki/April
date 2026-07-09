@@ -1,5 +1,3 @@
---[[ Toast notifications — Project Vector themed HUD toasts. ]]
-
 local draw_util = April.require("core.draw_util")
 local theme = April.require("core.ui_theme")
 local text_util = April.require("core.text_util")

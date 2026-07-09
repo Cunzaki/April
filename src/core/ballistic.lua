@@ -1,5 +1,3 @@
---[[ Ballistic prediction — muzzle lead + drop for Fallen projectiles. ]]
-
 local math_util = April.require("core.math_util")
 
 local M = {}
@@ -37,10 +35,6 @@ function M.calculate_drop(bullet_speed, bullet_gravity, position, origin)
     return 0.5 * g * time * time
 end
 
---[[
-    Mouse hit point for muzzle projectile (ViewmodelController uses v321 from MouseRaycast).
-    Position + Velocity * time + (0, Drop, 0) — drop from muzzle distance / speed only.
-]]
 function M.calculate_target_position(bullet_speed, bullet_gravity, velocity, position, origin)
     local px, py, pz = vec3(position)
     local ox, oy, oz = vec3(origin)

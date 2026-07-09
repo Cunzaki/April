@@ -1,7 +1,3 @@
---[[
-    Config persistence — multi-slot save/load, colors, hotkeys, waypoints, autoload meta.
-]]
-
 local cache = April.require("core.cache")
 
 local M = {}

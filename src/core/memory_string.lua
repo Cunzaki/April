@@ -1,5 +1,3 @@
---[[ Scan process memory for ASCII / UTF-16 strings via memory.read_buffer (Vector Memory API). ]]
-
 local env = April.require("core.env")
 
 local M = {}

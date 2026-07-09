@@ -1,9 +1,3 @@
---[[
-    April Fallen — Fallen Survival for Project Vector
-    https://github.com/Cunzaki/April
-    Built: 2026-07-07T09:06:28.985Z
-]]
-
 April = {
     version = "3.57.0",
     debug = false,
@@ -11,7 +5,6 @@ April = {
     bundled = true,
 }
 
--- Required first: Scripts > April uses "full" mode (2-column group grid)
 if menu and menu.add_tab then
     menu.add_tab("April", "A", "full")
 end
@@ -25,8 +18,6 @@ function April.require(path)
     return mod
 end
 
-
--- ── core/env.lua ──
 April._mods["core.env"] = (function()
 local M = {}
 
@@ -75,7 +66,6 @@ return M
 
 end)()
 
--- ── core/math_util.lua ──
 April._mods["core.math_util"] = (function()
 local M = {}
 
@@ -109,24 +99,22 @@ return M
 
 end)()
 
--- ── core/text_util.lua ──
 April._mods["core.text_util"] = (function()
---[[ ASCII-safe UI text — Vector draw font lacks many Unicode glyphs (shows as ?). ]]
 
 local M = {}
 
 local REPLACEMENTS = {
-    ["\194\160"] = " ", -- nbsp
-    ["\226\128\166"] = "...", -- ellipsis …
-    ["\226\128\147"] = "-", -- em dash —
-    ["\226\128\148"] = "-", -- en dash –
-    ["\226\128\162"] = "*", -- bullet •
-    ["\194\183"] = "|", -- middle dot ·
-    ["\226\134\146"] = "->", -- arrow →
-    ["\226\134\144"] = "<-", -- arrow ←
-    ["\226\128\153"] = "'", -- right single quote
-    ["\226\128\156"] = '"', -- left double quote
-    ["\226\128\157"] = '"', -- right double quote
+    ["\194\160"] = " ",
+    ["\226\128\166"] = "...",
+    ["\226\128\147"] = "-",
+    ["\226\128\148"] = "-",
+    ["\226\128\162"] = "*",
+    ["\194\183"] = "|",
+    ["\226\134\146"] = "->",
+    ["\226\134\144"] = "<-",
+    ["\226\128\153"] = "'",
+    ["\226\128\156"] = '"',
+    ["\226\128\157"] = '"',
 }
 
 function M.sanitize(text)
@@ -145,7 +133,6 @@ return M
 
 end)()
 
--- ── core/cache.lua ──
 April._mods["core.cache"] = (function()
 local M = {}
 
@@ -184,9 +171,7 @@ return M
 
 end)()
 
--- ── core/capabilities.lua ──
 April._mods["core.capabilities"] = (function()
---[[ Lightweight capability flags (no runtime probes — those block on getgc/refreshgc). ]]
 
 local M = {}
 
@@ -224,11 +209,7 @@ return M
 
 end)()
 
--- ── core/debug.lua ──
 April._mods["core.debug"] = (function()
---[[
-    April debug — off by default. Set April.debug = true for console logs.
-]]
 
 local M = {}
 
@@ -294,7 +275,6 @@ function M.register_frame_hook(fn)
         return false
     end
 
-    -- Vector engine invokes global on_frame() every frame (primary hook).
     _G.on_frame = fn
 
     if callbacks and callbacks.add then
@@ -324,12 +304,7 @@ return M
 
 end)()
 
--- ── core/settings.lua ──
 April._mods["core.settings"] = (function()
---[[
-    Live menu reads — always fetch from menu.get (legacy cache_settings pattern).
-    Stale caching was breaking every feature after first read.
-]]
 
 local M = {}
 
@@ -351,7 +326,6 @@ function M.bool(id, default)
     return v == true or v == 1
 end
 
---[[ Strict checkbox read — never treats missing menu value as enabled. ]]
 function M.enabled(id)
     local ok, fb = pcall(function()
         return April.require("core.feature_bind")
@@ -370,7 +344,6 @@ function M.num(id, default)
     return tonumber(M.get(id, default)) or default or 0
 end
 
---[[ Combo index — zero-based per API.md; also accepts label strings. ]]
 function M.combo_index(id, labels, default)
     default = default or 0
     local v = M.get(id, default)
@@ -422,12 +395,7 @@ return M
 
 end)()
 
--- ── core/feature_bind.lua ──
 April._mods["core.feature_bind"] = (function()
---[[
-    Legacy Fallen keybinds — Toggle / Hold via menu combo + manual key polling.
-    Vector's built-in checkbox Hold/Toggle modes are disabled (show_mode = false).
-]]
 
 local settings = April.require("core.settings")
 
@@ -518,7 +486,6 @@ return M
 
 end)()
 
--- ── core/draw_util.lua ──
 April._mods["core.draw_util"] = (function()
 local math_util = April.require("core.math_util")
 local text_util = April.require("core.text_util")
@@ -616,16 +583,13 @@ return M
 
 end)()
 
--- ── core/ui_theme.lua ──
 April._mods["core.ui_theme"] = (function()
---[[ Project Vector — shared overlay / HUD theme (matches main cheat menu). ]]
 
 local draw_util = April.require("core.draw_util")
 local text_util = April.require("core.text_util")
 
 local M = {}
 
--- #0D0D0D base, #00C3E3 cyan accent
 M.BG          = { 13 / 255, 13 / 255, 13 / 255, 0.94 }
 M.PANEL       = { 18 / 255, 18 / 255, 20 / 255, 0.92 }
 M.PANEL_DEEP  = { 10 / 255, 10 / 255, 12 / 255, 0.90 }
@@ -834,9 +798,7 @@ return M
 
 end)()
 
--- ── core/notify.lua ──
 April._mods["core.notify"] = (function()
---[[ Toast notifications — Project Vector themed HUD toasts. ]]
 
 local draw_util = April.require("core.draw_util")
 local theme = April.require("core.ui_theme")
@@ -965,13 +927,7 @@ return M
 
 end)()
 
--- ── game/asset_urls.lua ──
 April._mods["game.asset_urls"] = (function()
---[[
-    One HTTPS URL per asset — April/docs/API.md Images section.
-    API example: draw.load_image("https://raw.githubusercontent.com/user/repo/main/icon.png")
-    Assets: https://github.com/Cunzaki/April/tree/main/assets
-]]
 
 local M = {}
 
@@ -1013,14 +969,7 @@ return M
 
 end)()
 
--- ── core/image_cache.lua ──
 April._mods["core.image_cache"] = (function()
---[[
-    Image loader — Vector on_frame pattern (working reference):
-      cam_icon = draw.load_image(url)   -- once, first frame
-      if draw.image_failed(cam_icon) then return end
-      draw.image(cam_icon, x, y, w, h, 255, 255, 255, 255)  -- every frame; no-ops until ready
-]]
 
 local asset_urls = April.require("game.asset_urls")
 local debug = April.require("core.debug")
@@ -1167,7 +1116,6 @@ return M
 
 end)()
 
--- ── core/esp_util.lua ──
 April._mods["core.esp_util"] = (function()
 local draw_util = April.require("core.draw_util")
 local settings = April.require("core.settings")
@@ -1579,7 +1527,6 @@ return M
 
 end)()
 
--- ── core/scheduler.lua ──
 April._mods["core.scheduler"] = (function()
 local debug = April.require("core.debug")
 
@@ -1614,7 +1561,7 @@ function M.tick()
 end
 
 function M.start_all()
-    -- Scans run from on_frame via M.tick() (same as legacy Fallen)
+
 end
 
 function M.stop_all()
@@ -1625,9 +1572,7 @@ return M
 
 end)()
 
--- ── core/incremental_scan.lua ──
 April._mods["core.incremental_scan"] = (function()
---[[ Time-budgeted ESP scans — spread work across frames to avoid stutter spikes. ]]
 
 local debug = April.require("core.debug")
 
@@ -1731,13 +1676,7 @@ return M
 
 end)()
 
--- ── core/menu_util.lua ──
 April._mods["core.menu_util"] = (function()
---[[
-    Vector "full" mode grid (Lone script pattern):
-      menu.add_group(tab, name)           → left column, new row
-      menu.add_group(tab, name, 0, true)  → right column, same row as previous left
-]]
 
 local M = {}
 
@@ -1782,7 +1721,6 @@ function M.ensure_tab()
     M._tab_ready = true
 end
 
---[[ Full-mode grid rows must be created left then right before any controls register. ]]
 function M.ensure_groups()
     if M._groups_ready then return end
     M.ensure_tab()
@@ -1973,7 +1911,6 @@ function M.button(T, G, id, label, callback, master_id)
     end
 end
 
---[[ Master toggle — key on checkbox row; Key Mode uses native parent only (no bind_master). ]]
 function M.keybind_children(_id)
     return {}
 end
@@ -2007,16 +1944,13 @@ return M
 
 end)()
 
--- ── core/silent_ray.lua ──
 April._mods["core.silent_ray"] = (function()
---[[ Silent raycast hook — matches Fallen MouseRaycast (UnitRay * 1024). ]]
 
 local M = {}
 
 local hook_ready = false
 local tracking = false
 
--- Fallen RaycastUtil:MouseRaycast uses UnitRay.Direction * (p15 or 1024)
 local MOUSE_RAY_LEN = 1024
 
 M._last_origin = nil
@@ -2091,10 +2025,6 @@ function M.last_segment()
     return M._last_origin, M._last_target
 end
 
---[[
-    Fallen: MouseRaycast -> hit, muzzle fires toward hit.
-    Silent hook replaces engine ray — peek manip uses peek eye as track origin.
-]]
 function M.track(origin, aim_point, shoot_vk)
     M._last_ok = false
 
@@ -2122,7 +2052,7 @@ function M.track(origin, aim_point, shoot_vk)
     local dir
 
     if dist < 0.001 then
-        -- Bullet TP: origin sits on the target — use camera-relative stub direction.
+
         local cam = M.get_camera_origin()
         if cam then
             dx, dy, dz = cam.x - ox, cam.y - oy, cam.z - oz
@@ -2154,9 +2084,7 @@ return M
 
 end)()
 
--- ── core/fflag_mem.lua ──
 April._mods["core.fflag_mem"] = (function()
---[[ Fast FFlag writes via cached addresses + memory.write (fallback: fflag API). ]]
 
 local M = {}
 
@@ -2255,9 +2183,7 @@ return M
 
 end)()
 
--- ── core/manip_math.lua ──
 April._mods["core.manip_math"] = (function()
---[[ Peek / bullet manipulation visibility math (raycast-backed). ]]
 
 local M = {}
 
@@ -2307,7 +2233,6 @@ local function search_peek(origin, target_pos, max_radius, steps)
     return nil, max_radius
 end
 
---[[ state: off | direct | ready | blocked ]]
 function M.evaluate_manipulation(origin, target_pos, opts)
     opts = opts or {}
 
@@ -2361,9 +2286,7 @@ return M
 
 end)()
 
--- ── core/desync_vis.lua ──
 April._mods["core.desync_vis"] = (function()
---[[ Shared 3D desync / manipulation visualizer helpers. ]]
 
 local esp_util = April.require("core.esp_util")
 local draw_util = April.require("core.draw_util")
@@ -2470,9 +2393,7 @@ return M
 
 end)()
 
--- ── core/packet_desync.lua ──
 April._mods["core.packet_desync"] = (function()
---[[ Movement-only packet desync (shared by desync, freecam, bullet manip). ]]
 
 local fflag_mem = April.require("core.fflag_mem")
 
@@ -2508,9 +2429,7 @@ return M
 
 end)()
 
--- ── core/cframe_move.lua ──
 April._mods["core.cframe_move"] = (function()
---[[ Movement helpers — position nudge + velocity (no WalkSpeed writes). ]]
 
 local env = April.require("core.env")
 
@@ -2734,7 +2653,6 @@ function M.clamp_above_floor(x, y, z)
     return y
 end
 
---[[ Position nudge + matching velocity — legacy Fallen pattern. ]]
 function M.drive_root(root, pos, dx, dy, dz, speed, dt)
     if not root or not pos then return pos end
 
@@ -2762,12 +2680,7 @@ return M
 
 end)()
 
--- ── core/runservice.lua ──
 April._mods["core.runservice"] = (function()
---[[
-    RunService helper — API 1.4 game.get_service("RunService").
-    Vector documents service retrieval; sim hooks always run from on_frame dispatch.
-]]
 
 local env = April.require("core.env")
 
@@ -2813,7 +2726,6 @@ function M.available()
     return M.get() ~= nil
 end
 
---[[ Movement uses part/camera APIs — only needs game + local player, not RunService events. ]]
 function M.movement_allowed()
     if not game then return false end
     return env.get_local_player() ~= nil
@@ -2833,9 +2745,7 @@ return M
 
 end)()
 
--- ── core/misc_gate.lua ──
 April._mods["core.misc_gate"] = (function()
---[[ Misc tab — movement features need RunService from Game API 1.4+ ]]
 
 local runservice = April.require("core.runservice")
 
@@ -2849,9 +2759,7 @@ return M
 
 end)()
 
--- ── core/movement_ctrl.lua ──
 April._mods["core.movement_ctrl"] = (function()
---[[ Movement sim — Inf Fly, Spider, Noclip, Slowfall (velocity + position nudge). ]]
 
 local settings = April.require("core.settings")
 local env = April.require("core.env")
@@ -3087,11 +2995,7 @@ return M
 
 end)()
 
--- ── core/config_store.lua ──
 April._mods["core.config_store"] = (function()
---[[
-    Config persistence — multi-slot save/load, colors, hotkeys, waypoints, autoload meta.
-]]
 
 local cache = April.require("core.cache")
 
@@ -3568,9 +3472,7 @@ return M
 
 end)()
 
--- ── core/memory_string.lua ──
 April._mods["core.memory_string"] = (function()
---[[ Scan process memory for ASCII / UTF-16 strings via memory.read_buffer (Vector Memory API). ]]
 
 local env = April.require("core.env")
 
@@ -3885,15 +3787,7 @@ return M
 
 end)()
 
--- ── game/module_scan.lua ──
 April._mods["game.module_scan"] = (function()
---[[
-    Locate Fallen modules already loaded by the game client.
-    Plain loops only — no coroutines (Vector forbids yield during menu/C calls).
-
-    IMPORTANT: When refreshgc/applygc exist, never call getgc(true) — it breaks
-    the Fallen weapon-mod node cache (getgc({ keys }) returns 0 afterward).
-]]
 
 local M = {}
 
@@ -3960,7 +3854,6 @@ function M.collect_tables(force)
         seen = {}
     end
 
-    -- Never getgc(true) when Fallen weapon GC API is present — poisons getgc(keys).
     if M.has_gc() and not M.uses_fallen_weapon_gc() then
         local ok, all = pcall(getgc, true)
         if ok and type(all) == "table" then
@@ -4036,12 +3929,7 @@ return M
 
 end)()
 
--- ── game/bootstrap.lua ──
 April._mods["game.bootstrap"] = (function()
---[[
-    Lightweight ToolInfo loader for weapon stats / aimbot prediction.
-    Uses GC scan only — no instance require (Fallen hides Modules from scripts).
-]]
 
 local env = April.require("core.env")
 local debug = April.require("core.debug")
@@ -4161,14 +4049,13 @@ function M.tick()
 end
 
 function M.start_background_retry()
-    -- no-op: frame tick is enough; avoids slow startup thread spam
+
 end
 
 return M
 
 end)()
 
--- ── game/folders.lua ──
 April._mods["game.folders"] = (function()
 local env = April.require("core.env")
 
@@ -4256,10 +4143,7 @@ return M
 
 end)()
 
--- ── game/item_images.lua ──
 April._mods["game.item_images"] = (function()
--- AUTO-GENERATED by scripts/extract-item-catalog.mjs — do not edit by hand
--- Source: dump/scripts/ReplicatedStorage.Modules.Items.ModuleScript.lua
 
 local M = {}
 
@@ -4619,10 +4503,7 @@ return M
 
 end)()
 
--- ── game/item_catalog.lua ──
 April._mods["game.item_catalog"] = (function()
--- AUTO-GENERATED by scripts/extract-item-catalog.mjs — do not edit by hand
--- Items: 341 entries from dump
 
 local M = {}
 
@@ -5370,7 +5251,6 @@ return M
 
 end)()
 
--- ── game/items.lua ──
 April._mods["game.items"] = (function()
 local env = April.require("core.env")
 local item_images = April.require("game.item_images")
@@ -5606,9 +5486,7 @@ return M
 
 end)()
 
--- ── game/armor_map.lua ──
 April._mods["game.armor_map"] = (function()
---[[ Armor model names on character -> Items module display names (legacy ARMOR_MAP). ]]
 
 local M = {}
 
@@ -5662,7 +5540,6 @@ return M
 
 end)()
 
--- ── game/weapons.lua ──
 April._mods["game.weapons"] = (function()
 local bootstrap = April.require("game.bootstrap")
 local env = April.require("core.env")
@@ -5675,7 +5552,6 @@ local weapon_names = {}
 
 local ROBLOX_GRAV = 196.2
 
--- ToolInfo-aligned fallbacks when live module is unavailable (gravity = Bullet.Gravity multiplier).
 local FALLBACK_STATS = {
     ["Military Barret"] = { speed = 2500, gravity = 0.55 },
     ["Military Barrett"] = { speed = 2500, gravity = 0.55 },
@@ -6130,9 +6006,7 @@ return M
 
 end)()
 
--- ── game/gc_weapon_mods.lua ──
 April._mods["game.gc_weapon_mods"] = (function()
---[[ Fallen weapon mods — Vector globals: refreshgc → getgc(keys) → applygc(keys, values) ]]
 
 local debug = April.require("core.debug")
 local env = April.require("core.env")
@@ -6309,9 +6183,7 @@ return M
 
 end)()
 
--- ── game/weapon_profile_store.lua ──
 April._mods["game.weapon_profile_store"] = (function()
---[[ Per-weapon gun mod profiles — persisted separately from config slots. ]]
 
 local settings = April.require("core.settings")
 local config_store = April.require("core.config_store")
@@ -6520,9 +6392,7 @@ return M
 
 end)()
 
--- ── game/gun_mod_profiles.lua ──
 April._mods["game.gun_mod_profiles"] = (function()
---[[ Map saved per-weapon profiles to applygc keys. ]]
 
 local settings = April.require("core.settings")
 local store = April.require("game.weapon_profile_store")
@@ -6667,9 +6537,7 @@ return M
 
 end)()
 
--- ── game/combat_stats.lua ──
 April._mods["game.combat_stats"] = (function()
---[[ Effective weapon stats for silent aim — ToolInfo + ammo + optional gun mod multipliers. ]]
 
 local settings = April.require("core.settings")
 local weapons = April.require("game.weapons")
@@ -6762,9 +6630,7 @@ return M
 
 end)()
 
--- ── core/ballistic.lua ──
 April._mods["core.ballistic"] = (function()
---[[ Ballistic prediction — muzzle lead + drop for Fallen projectiles. ]]
 
 local math_util = April.require("core.math_util")
 
@@ -6803,10 +6669,6 @@ function M.calculate_drop(bullet_speed, bullet_gravity, position, origin)
     return 0.5 * g * time * time
 end
 
---[[
-    Mouse hit point for muzzle projectile (ViewmodelController uses v321 from MouseRaycast).
-    Position + Velocity * time + (0, Drop, 0) — drop from muzzle distance / speed only.
-]]
 function M.calculate_target_position(bullet_speed, bullet_gravity, velocity, position, origin)
     local px, py, pz = vec3(position)
     local ox, oy, oz = vec3(origin)
@@ -6852,9 +6714,7 @@ return M
 
 end)()
 
--- ── game/combat_origin.lua ──
 April._mods["game.combat_origin"] = (function()
---[[ Ray origins — cheap per-frame viewmodel muzzle / server body (no tree scans). ]]
 
 local env = April.require("core.env")
 local weapons = April.require("game.weapons")
@@ -7019,9 +6879,7 @@ return M
 
 end)()
 
--- ── game/farm_tools.lua ──
 April._mods["game.farm_tools"] = (function()
---[[ Gather / farm tool detection for Farm Helper (NodeSpark / TreeX). ]]
 
 local bootstrap = April.require("game.bootstrap")
 local env = April.require("core.env")
@@ -7031,7 +6889,6 @@ local M = {}
 local loaded = false
 local farm_tools = {}
 
--- Fallback when ToolInfo is unavailable (Melee + Trees or Nodes in dump ToolInfo).
 local FALLBACK_GATHER_TOOLS = {
     ["Stone Hatchet"] = true,
     ["Iron Shard Hatchet"] = true,
@@ -7174,7 +7031,6 @@ return M
 
 end)()
 
--- ── game/inventory.lua ──
 April._mods["game.inventory"] = (function()
 local env = April.require("core.env")
 local items = April.require("game.items")
@@ -7325,7 +7181,6 @@ return M
 
 end)()
 
--- ── game/player_gear.lua ──
 April._mods["game.player_gear"] = (function()
 local env = April.require("core.env")
 local items = April.require("game.items")
@@ -7739,9 +7594,7 @@ return M
 
 end)()
 
--- ── game/player_state.lua ──
 April._mods["game.player_state"] = (function()
---[[ Fallen player state — Humanoid:GetAttribute("Downed") from game scripts. ]]
 
 local env = April.require("core.env")
 
@@ -7804,9 +7657,7 @@ return M
 
 end)()
 
--- ── game/brainrot_catalog.lua ──
 April._mods["game.brainrot_catalog"] = (function()
---[[ Brainrot character catalog — PNGs hosted on GitHub CDN. ]]
 
 local asset_urls = April.require("game.asset_urls")
 
@@ -7855,12 +7706,7 @@ return M
 
 end)()
 
--- ── game/npcs.lua ──
 April._mods["game.npcs"] = (function()
---[[
-    Fallen hostile NPCs — Soldiers + bosses under Workspace.Military monuments.
-    Soldiers spawn at runtime (not in static dump); scan runs periodically.
-]]
 
 local env = April.require("core.env")
 local folders = April.require("game.folders")
@@ -8013,9 +7859,7 @@ return M
 
 end)()
 
--- ── game/mod_ids.lua ──
 April._mods["game.mod_ids"] = (function()
---[[ Fallen staff / mod user IDs — from matchascript + legacy fallen list. ]]
 
 local M = {}
 
@@ -8076,7 +7920,7 @@ M.ROLES = {
     [363101315] = "Lead Developer",
     [47983795] = "Co-Founder",
     [16681869] = "Founder",
-    -- legacy extras
+
     [3544497889] = "Game Moderator",
     [3739152618] = "Game Moderator",
     [4252853044] = "Game Moderator",
@@ -8108,22 +7952,18 @@ return M
 
 end)()
 
--- ── game/turret_stats.lua ──
 April._mods["game.turret_stats"] = (function()
---[[ Fallen turret ranges — from dump/ReplicatedStorage.Modules.BenchInfo + RayParts layout. ]]
 
 local M = {}
 
--- Activation / targeting range (what the ring should represent).
 M.ACTIVATION_RANGE = {
-    ["Auto Turret"] = 100,      -- BenchInfo TypeArguments.TargetRange
-    ["Shotgun Turret"] = 110,   -- longest RayPart offset in Benches.Shotgun Turret.Default
+    ["Auto Turret"] = 100,
+    ["Shotgun Turret"] = 110,
 }
 
--- Projectile travel (for reference / future use).
 M.BULLET_RANGE = {
-    ["Auto Turret"] = 150,      -- BenchInfo TypeArguments.BulletRange
-    ["Shotgun Turret"] = 14.25, -- BenchInfo TypeArguments.BulletRange
+    ["Auto Turret"] = 150,
+    ["Shotgun Turret"] = 14.25,
 }
 
 M.DAMAGE_RANGE = {
@@ -8139,13 +7979,9 @@ return M
 
 end)()
 
--- ── game/esp_maps.lua ──
 April._mods["game.esp_maps"] = (function()
---[[ Fallen Survival ESP maps — derived from dump/hierarchy.txt + legacy fallen.lua ]]
 
 local M = {}
-
--- ── World: resource nodes (live in Workspace.Vegetation, not Workspace.Nodes) ──
 
 M.NODE_MAP = {
     ["Stone_Node"] = "april_stone_node",
@@ -8160,8 +7996,6 @@ M.NODE_LABELS = {
 }
 
 M.NODE_FOLDERS = { "vegetation", "nodes" }
-
--- ── World: farm plants (Workspace.Plants) ──
 
 M.PLANT_MAP = {
     ["Corn Plant"] = "april_corn_plant",
@@ -8188,8 +8022,6 @@ M.PLANT_LABELS = {
 }
 
 M.PLANT_FOLDERS = { "plants", "vegetation" }
-
--- ── World: animals (Workspace.Animals) ──
 
 M.ANIMAL_MAP = {
     ["PREFAB_ANIMAL_DEER"] = "april_deer",
@@ -8231,8 +8063,6 @@ M.WORLD_TOGGLES = {
     { id = "april_boar", label = "Wild Boar", color = { 0.4, 0.3, 0.2, 1 } },
     { id = "april_wolf", label = "Wolf", color = { 0.5, 0.5, 0.5, 1 } },
 }
-
--- ── Loot ──
 
 M.LOOT_MAP = {
     ["Wooden Crate"] = "april_wooden_crate",
@@ -8280,8 +8110,6 @@ M.LOOT_TOGGLES = {
 }
 
 M.LOOT_SCAN_FOLDERS = { "loners", "vegetation", "military", "events", "monuments" }
-
--- ── Base deployables (Workspace.Bases → player areas) ──
 
 M.BASE_MAP = {
     ["Base Cabinet"] = "april_base_cabinet",
@@ -8369,9 +8197,7 @@ return M
 
 end)()
 
--- ── game/esp_scan.lua ──
 April._mods["game.esp_scan"] = (function()
---[[ Shared ESP scan helpers — part lookup + oriented 3D box data. ]]
 
 local env = April.require("core.env")
 
@@ -8629,7 +8455,6 @@ function M.folder_scan_step(state, max_items)
     return false, state.out
 end
 
---[[ Scan direct children of folder keys against a name→toggle map. ]]
 function M.scan_folders(folder_keys, name_map, label_map, dynamic)
     local folders_mod = April.require("game.folders")
     local out = {}
@@ -8666,9 +8491,7 @@ return M
 
 end)()
 
--- ── features/combat/combat_menu.lua ──
 April._mods["features.combat.combat_menu"] = (function()
---[[ Aimbot / silent aim menu helpers ]]
 
 local menu_util = April.require("core.menu_util")
 local esp_util = April.require("core.esp_util")
@@ -8772,7 +8595,6 @@ return M
 
 end)()
 
--- ── features/combat/targeting.lua ──
 April._mods["features.combat.targeting"] = (function()
 local settings = April.require("core.settings")
 local weapons = April.require("game.weapons")
@@ -9212,9 +9034,7 @@ return M
 
 end)()
 
--- ── features/combat/bullet_tp_ray.lua ──
 April._mods["features.combat.bullet_tp_ray"] = (function()
---[[ Bullet TP — ray origin placement, ballistic aim, path samples for visualize. ]]
 
 local ballistic = April.require("core.ballistic")
 local combat_origin = April.require("game.combat_origin")
@@ -9274,7 +9094,6 @@ function M.predict_aim(target, head, camera, weapon_name)
         or copy_pos(head)
 end
 
---[[ Place silent-hook origin slightly before the aim point on the camera→target line. ]]
 function M.track_origin(camera, aim, mode_name)
     if not aim then return nil end
     if not camera then return copy_pos(aim) end
@@ -9358,7 +9177,6 @@ local function sample_arch(muzzle, aim, weapon_name, steps)
     return out
 end
 
---[[ Path points for visualize — muzzle (or hook origin) through mode shape to aim. ]]
 function M.build_path(mode_name, hook_origin, aim, weapon_name)
     if not hook_origin or not aim then return {} end
 
@@ -9378,9 +9196,7 @@ return M
 
 end)()
 
--- ── features/combat/silent_resolve.lua ──
 April._mods["features.combat.silent_resolve"] = (function()
---[[ Resolve silent hook — camera / peek / wallbang / bullet TP ray origins. ]]
 
 local settings = April.require("core.settings")
 local combat_origin = April.require("game.combat_origin")
@@ -9484,7 +9300,6 @@ return M
 
 end)()
 
--- ── features/combat/aimbot.lua ──
 April._mods["features.combat.aimbot"] = (function()
 local settings = April.require("core.settings")
 local targeting = April.require("features.combat.targeting")
@@ -9786,13 +9601,7 @@ return M
 
 end)()
 
--- ── features/combat/perfect_farm.lua ──
 April._mods["features.combat.perfect_farm"] = (function()
---[[
-    Farm helper — tier-3 weak spot hits on NodeSpark / TreeX.
-    Silent mode redirects engine melee raycasts via track_silent_target (LMB).
-    Camera mode uses camera.look_at to keep crosshair on the spark.
-]]
 
 local settings = April.require("core.settings")
 local env = April.require("core.env")
@@ -10035,7 +9844,6 @@ return M
 
 end)()
 
--- ── features/combat/gun_mods.lua ──
 April._mods["features.combat.gun_mods"] = (function()
 local settings = April.require("core.settings")
 local menu_util = April.require("core.menu_util")
@@ -10416,7 +10224,6 @@ return M
 
 end)()
 
--- ── features/visuals/player_esp.lua ──
 April._mods["features.visuals.player_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -10494,7 +10301,6 @@ return M
 
 end)()
 
--- ── features/visuals/target_overlay.lua ──
 April._mods["features.visuals.target_overlay"] = (function()
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
@@ -10883,7 +10689,6 @@ return M
 
 end)()
 
--- ── features/visuals/crosshair.lua ──
 April._mods["features.visuals.crosshair"] = (function()
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
@@ -10958,7 +10763,6 @@ return M
 
 end)()
 
--- ── features/visuals/brainrot_esp.lua ──
 April._mods["features.visuals.brainrot_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -11134,7 +10938,6 @@ return M
 
 end)()
 
--- ── features/world/world_esp.lua ──
 April._mods["features.world.world_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -11322,7 +11125,6 @@ return M
 
 end)()
 
--- ── features/world/loot_esp.lua ──
 April._mods["features.world.loot_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -11662,7 +11464,6 @@ return M
 
 end)()
 
--- ── features/world/base_esp.lua ──
 April._mods["features.world.base_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -11932,7 +11733,6 @@ return M
 
 end)()
 
--- ── features/world/npc_esp.lua ──
 April._mods["features.world.npc_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -12266,7 +12066,6 @@ return M
 
 end)()
 
--- ── features/movement/exploits.lua ──
 April._mods["features.movement.exploits"] = (function()
 local menu_util = April.require("core.menu_util")
 
@@ -12298,9 +12097,7 @@ return M
 
 end)()
 
--- ── features/movement/noclip.lua ──
 April._mods["features.movement.noclip"] = (function()
---[[ Noclip menu — movement handled by core/movement_ctrl.lua ]]
 
 local menu_util = April.require("core.menu_util")
 
@@ -12327,11 +12124,7 @@ return M
 
 end)()
 
--- ── features/movement/fling.lua ──
 April._mods["features.movement.fling"] = (function()
---[[ Fling — HRP collision spin: TP onto target, spin colliding root, return to origin.
-    Fallen player physics hull is HumanoidRootPart (Players collision group, ~2x2.5x2).
-    Only HRP stays collidable during fling; everything else is noclip. ]]
 
 local settings = April.require("core.settings")
 local env = April.require("core.env")
@@ -12359,7 +12152,6 @@ local SPIN_RAMP_SEC = 0.35
 local BASE_PREDICT = 0.05
 local MAX_SNAP_PASSES = 10
 
--- HumanoidRootPart is the player-vs-player physics hull in Fallen (dump: Players group, 2x2.5x2).
 local FLING_HIT_PARTS = { "HumanoidRootPart" }
 
 local function fling_duration()
@@ -13027,7 +12819,6 @@ return M
 
 end)()
 
--- ── features/movement/desync.lua ──
 April._mods["features.movement.desync"] = (function()
 local settings = April.require("core.settings")
 local env = April.require("core.env")
@@ -13222,7 +13013,6 @@ return M
 
 end)()
 
--- ── features/radar/waypoints.lua ──
 April._mods["features.radar.waypoints"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -13314,7 +13104,6 @@ return M
 
 end)()
 
--- ── features/radar/tactical_map.lua ──
 April._mods["features.radar.tactical_map"] = (function()
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
@@ -13648,7 +13437,6 @@ return M
 
 end)()
 
--- ── features/utility/mod_checker.lua ──
 April._mods["features.utility.mod_checker"] = (function()
 local settings = April.require("core.settings")
 local notify = April.require("core.notify")
@@ -14020,7 +13808,6 @@ return M
 
 end)()
 
--- ── features/utility/config.lua ──
 April._mods["features.utility.config"] = (function()
 local settings = April.require("core.settings")
 local menu_util = April.require("core.menu_util")
@@ -14134,7 +13921,6 @@ return M
 
 end)()
 
--- ── menu/tabs.lua ──
 April._mods["menu.tabs"] = (function()
 local menu_util = April.require("core.menu_util")
 local debug = April.require("core.debug")
@@ -14317,7 +14103,6 @@ return M
 
 end)()
 
--- ── app.lua ──
 April._mods["app"] = (function()
 local tabs = April.require("menu.tabs")
 local debug = April.require("core.debug")
@@ -14354,7 +14139,6 @@ return M
 
 end)()
 
--- Vector requires menu registration from the script main chunk (not nested init).
 do
     April.require("menu.tabs").register_all()
 end

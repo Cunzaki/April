@@ -1,11 +1,8 @@
---[[ Project Vector — shared overlay / HUD theme (matches main cheat menu). ]]
-
 local draw_util = April.require("core.draw_util")
 local text_util = April.require("core.text_util")
 
 local M = {}
 
--- #0D0D0D base, #00C3E3 cyan accent
 M.BG          = { 13 / 255, 13 / 255, 13 / 255, 0.94 }
 M.PANEL       = { 18 / 255, 18 / 255, 20 / 255, 0.92 }
 M.PANEL_DEEP  = { 10 / 255, 10 / 255, 12 / 255, 0.90 }

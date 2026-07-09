@@ -9,7 +9,6 @@ local weapon_names = {}
 
 local ROBLOX_GRAV = 196.2
 
--- ToolInfo-aligned fallbacks when live module is unavailable (gravity = Bullet.Gravity multiplier).
 local FALLBACK_STATS = {
     ["Military Barret"] = { speed = 2500, gravity = 0.55 },
     ["Military Barrett"] = { speed = 2500, gravity = 0.55 },

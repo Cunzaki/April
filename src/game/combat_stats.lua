@@ -1,5 +1,3 @@
---[[ Effective weapon stats for silent aim — ToolInfo + ammo + optional gun mod multipliers. ]]
-
 local settings = April.require("core.settings")
 local weapons = April.require("game.weapons")
 

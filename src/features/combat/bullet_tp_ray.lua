@@ -1,5 +1,3 @@
---[[ Bullet TP — ray origin placement, ballistic aim, path samples for visualize. ]]
-
 local ballistic = April.require("core.ballistic")
 local combat_origin = April.require("game.combat_origin")
 local math_util = April.require("core.math_util")
@@ -58,7 +56,6 @@ function M.predict_aim(target, head, camera, weapon_name)
         or copy_pos(head)
 end
 
---[[ Place silent-hook origin slightly before the aim point on the camera→target line. ]]
 function M.track_origin(camera, aim, mode_name)
     if not aim then return nil end
     if not camera then return copy_pos(aim) end
@@ -142,7 +139,6 @@ local function sample_arch(muzzle, aim, weapon_name, steps)
     return out
 end
 
---[[ Path points for visualize — muzzle (or hook origin) through mode shape to aim. ]]
 function M.build_path(mode_name, hook_origin, aim, weapon_name)
     if not hook_origin or not aim then return {} end
 

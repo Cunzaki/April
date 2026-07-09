@@ -31,7 +31,7 @@ function M.tick()
 end
 
 function M.start_all()
-    -- Scans run from on_frame via M.tick() (same as legacy Fallen)
+
 end
 
 function M.stop_all()

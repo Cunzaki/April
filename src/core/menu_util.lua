@@ -1,9 +1,3 @@
---[[
-    Vector "full" mode grid (Lone script pattern):
-      menu.add_group(tab, name)           → left column, new row
-      menu.add_group(tab, name, 0, true)  → right column, same row as previous left
-]]
-
 local M = {}
 
 M.TAB = "April"
@@ -47,7 +41,6 @@ function M.ensure_tab()
     M._tab_ready = true
 end
 
---[[ Full-mode grid rows must be created left then right before any controls register. ]]
 function M.ensure_groups()
     if M._groups_ready then return end
     M.ensure_tab()
@@ -238,7 +231,6 @@ function M.button(T, G, id, label, callback, master_id)
     end
 end
 
---[[ Master toggle — key on checkbox row; Key Mode uses native parent only (no bind_master). ]]
 function M.keybind_children(_id)
     return {}
 end

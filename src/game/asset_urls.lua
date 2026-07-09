@@ -1,9 +1,3 @@
---[[
-    One HTTPS URL per asset — April/docs/API.md Images section.
-    API example: draw.load_image("https://raw.githubusercontent.com/user/repo/main/icon.png")
-    Assets: https://github.com/Cunzaki/April/tree/main/assets
-]]
-
 local M = {}
 
 M.CDN_BASE = "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/assets"

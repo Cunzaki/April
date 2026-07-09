@@ -1,5 +1,3 @@
---[[ Time-budgeted ESP scans — spread work across frames to avoid stutter spikes. ]]
-
 local debug = April.require("core.debug")
 
 local M = {}

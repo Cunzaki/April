@@ -1,5 +1,3 @@
---[[ Gather / farm tool detection for Farm Helper (NodeSpark / TreeX). ]]
-
 local bootstrap = April.require("game.bootstrap")
 local env = April.require("core.env")
 
@@ -8,7 +6,6 @@ local M = {}
 local loaded = false
 local farm_tools = {}
 
--- Fallback when ToolInfo is unavailable (Melee + Trees or Nodes in dump ToolInfo).
 local FALLBACK_GATHER_TOOLS = {
     ["Stone Hatchet"] = true,
     ["Iron Shard Hatchet"] = true,

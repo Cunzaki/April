@@ -1,7 +1,3 @@
---[[ Fling — HRP collision spin: TP onto target, spin colliding root, return to origin.
-    Fallen player physics hull is HumanoidRootPart (Players collision group, ~2x2.5x2).
-    Only HRP stays collidable during fling; everything else is noclip. ]]
-
 local settings = April.require("core.settings")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
@@ -28,7 +24,6 @@ local SPIN_RAMP_SEC = 0.35
 local BASE_PREDICT = 0.05
 local MAX_SNAP_PASSES = 10
 
--- HumanoidRootPart is the player-vs-player physics hull in Fallen (dump: Players group, 2x2.5x2).
 local FLING_HIT_PARTS = { "HumanoidRootPart" }
 
 local function fling_duration()

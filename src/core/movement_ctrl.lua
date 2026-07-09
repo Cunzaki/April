@@ -1,5 +1,3 @@
---[[ Movement sim — Inf Fly, Spider, Noclip, Slowfall (velocity + position nudge). ]]
-
 local settings = April.require("core.settings")
 local env = April.require("core.env")
 local move = April.require("core.cframe_move")

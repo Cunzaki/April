@@ -1,5 +1,3 @@
---[[ Aimbot / silent aim menu helpers ]]
-
 local menu_util = April.require("core.menu_util")
 local esp_util = April.require("core.esp_util")
 

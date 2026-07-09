@@ -1,5 +1,3 @@
---[[ Shared 3D desync / manipulation visualizer helpers. ]]
-
 local esp_util = April.require("core.esp_util")
 local draw_util = April.require("core.draw_util")
 

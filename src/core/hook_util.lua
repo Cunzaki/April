@@ -1,7 +1,3 @@
---[[
-    Safe function hooking — uses hookfunction when Vector provides it, else table replace.
-]]
-
 local M = {}
 
 function M.can_hook()

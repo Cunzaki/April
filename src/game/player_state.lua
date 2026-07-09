@@ -1,5 +1,3 @@
---[[ Fallen player state — Humanoid:GetAttribute("Downed") from game scripts. ]]
-
 local env = April.require("core.env")
 
 local M = {}

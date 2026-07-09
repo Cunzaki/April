@@ -1,5 +1,3 @@
---[[ Fast FFlag writes via cached addresses + memory.write (fallback: fflag API). ]]
-
 local M = {}
 
 local cache = {}

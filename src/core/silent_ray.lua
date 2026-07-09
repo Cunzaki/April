@@ -1,11 +1,8 @@
---[[ Silent raycast hook — matches Fallen MouseRaycast (UnitRay * 1024). ]]
-
 local M = {}
 
 local hook_ready = false
 local tracking = false
 
--- Fallen RaycastUtil:MouseRaycast uses UnitRay.Direction * (p15 or 1024)
 local MOUSE_RAY_LEN = 1024
 
 M._last_origin = nil
@@ -80,10 +77,6 @@ function M.last_segment()
     return M._last_origin, M._last_target
 end
 
---[[
-    Fallen: MouseRaycast -> hit, muzzle fires toward hit.
-    Silent hook replaces engine ray — peek manip uses peek eye as track origin.
-]]
 function M.track(origin, aim_point, shoot_vk)
     M._last_ok = false
 
@@ -111,7 +104,7 @@ function M.track(origin, aim_point, shoot_vk)
     local dir
 
     if dist < 0.001 then
-        -- Bullet TP: origin sits on the target — use camera-relative stub direction.
+
         local cam = M.get_camera_origin()
         if cam then
             dx, dy, dz = cam.x - ox, cam.y - oy, cam.z - oz

@@ -1,5 +1,3 @@
---[[ Map saved per-weapon profiles to applygc keys. ]]
-
 local settings = April.require("core.settings")
 local store = April.require("game.weapon_profile_store")
 local weapons = April.require("game.weapons")

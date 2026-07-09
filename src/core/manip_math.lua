@@ -1,5 +1,3 @@
---[[ Peek / bullet manipulation visibility math (raycast-backed). ]]
-
 local M = {}
 
 local EYE_OFFSET_Y = 2.5
@@ -48,7 +46,6 @@ local function search_peek(origin, target_pos, max_radius, steps)
     return nil, max_radius
 end
 
---[[ state: off | direct | ready | blocked ]]
 function M.evaluate_manipulation(origin, target_pos, opts)
     opts = opts or {}
 

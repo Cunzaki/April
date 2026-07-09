@@ -1,7 +1,3 @@
---[[
-    April debug — off by default. Set April.debug = true for console logs.
-]]
-
 local M = {}
 
 local seen_errors = {}
@@ -66,7 +62,6 @@ function M.register_frame_hook(fn)
         return false
     end
 
-    -- Vector engine invokes global on_frame() every frame (primary hook).
     _G.on_frame = fn
 
     if callbacks and callbacks.add then

@@ -1,4 +1,3 @@
--- Load April (local bundled file first, then GitHub).
 local REMOTE_URL = "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/april.lua"
 
 local LOCAL_PATHS = {

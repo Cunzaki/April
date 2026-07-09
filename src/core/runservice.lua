@@ -1,8 +1,3 @@
---[[
-    RunService helper — API 1.4 game.get_service("RunService").
-    Vector documents service retrieval; sim hooks always run from on_frame dispatch.
-]]
-
 local env = April.require("core.env")
 
 local M = {}
@@ -47,7 +42,6 @@ function M.available()
     return M.get() ~= nil
 end
 
---[[ Movement uses part/camera APIs — only needs game + local player, not RunService events. ]]
 function M.movement_allowed()
     if not game then return false end
     return env.get_local_player() ~= nil

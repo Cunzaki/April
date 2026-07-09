@@ -1,5 +1,3 @@
---[[ Movement helpers — position nudge + velocity (no WalkSpeed writes). ]]
-
 local env = April.require("core.env")
 
 local M = {}
@@ -222,7 +220,6 @@ function M.clamp_above_floor(x, y, z)
     return y
 end
 
---[[ Position nudge + matching velocity — legacy Fallen pattern. ]]
 function M.drive_root(root, pos, dx, dy, dz, speed, dt)
     if not root or not pos then return pos end
 

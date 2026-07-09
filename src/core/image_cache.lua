@@ -1,10 +1,3 @@
---[[
-    Image loader — Vector on_frame pattern (working reference):
-      cam_icon = draw.load_image(url)   -- once, first frame
-      if draw.image_failed(cam_icon) then return end
-      draw.image(cam_icon, x, y, w, h, 255, 255, 255, 255)  -- every frame; no-ops until ready
-]]
-
 local asset_urls = April.require("game.asset_urls")
 local debug = April.require("core.debug")
 

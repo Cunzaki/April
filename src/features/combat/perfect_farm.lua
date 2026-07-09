@@ -1,9 +1,3 @@
---[[
-    Farm helper — tier-3 weak spot hits on NodeSpark / TreeX.
-    Silent mode redirects engine melee raycasts via track_silent_target (LMB).
-    Camera mode uses camera.look_at to keep crosshair on the spark.
-]]
-
 local settings = April.require("core.settings")
 local env = April.require("core.env")
 local debug = April.require("core.debug")

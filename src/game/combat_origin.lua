@@ -1,5 +1,3 @@
---[[ Ray origins — cheap per-frame viewmodel muzzle / server body (no tree scans). ]]
-
 local env = April.require("core.env")
 local weapons = April.require("game.weapons")
 

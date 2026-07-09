@@ -1,8 +1,3 @@
---[[
-    Lightweight ToolInfo loader for weapon stats / aimbot prediction.
-    Uses GC scan only — no instance require (Fallen hides Modules from scripts).
-]]
-
 local env = April.require("core.env")
 local debug = April.require("core.debug")
 local module_scan = April.require("game.module_scan")
@@ -121,7 +116,7 @@ function M.tick()
 end
 
 function M.start_background_retry()
-    -- no-op: frame tick is enough; avoids slow startup thread spam
+
 end
 
 return M

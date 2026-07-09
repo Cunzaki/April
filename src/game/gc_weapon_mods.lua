@@ -1,5 +1,3 @@
---[[ Fallen weapon mods — Vector globals: refreshgc → getgc(keys) → applygc(keys, values) ]]
-
 local debug = April.require("core.debug")
 local env = April.require("core.env")
 

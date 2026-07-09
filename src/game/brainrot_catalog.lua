@@ -1,5 +1,3 @@
---[[ Brainrot character catalog — PNGs hosted on GitHub CDN. ]]
-
 local asset_urls = April.require("game.asset_urls")
 
 local M = {}

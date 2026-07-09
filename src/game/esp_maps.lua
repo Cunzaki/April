@@ -1,8 +1,4 @@
---[[ Fallen Survival ESP maps — derived from dump/hierarchy.txt + legacy fallen.lua ]]
-
 local M = {}
-
--- ── World: resource nodes (live in Workspace.Vegetation, not Workspace.Nodes) ──
 
 M.NODE_MAP = {
     ["Stone_Node"] = "april_stone_node",
@@ -17,8 +13,6 @@ M.NODE_LABELS = {
 }
 
 M.NODE_FOLDERS = { "vegetation", "nodes" }
-
--- ── World: farm plants (Workspace.Plants) ──
 
 M.PLANT_MAP = {
     ["Corn Plant"] = "april_corn_plant",
@@ -45,8 +39,6 @@ M.PLANT_LABELS = {
 }
 
 M.PLANT_FOLDERS = { "plants", "vegetation" }
-
--- ── World: animals (Workspace.Animals) ──
 
 M.ANIMAL_MAP = {
     ["PREFAB_ANIMAL_DEER"] = "april_deer",
@@ -88,8 +80,6 @@ M.WORLD_TOGGLES = {
     { id = "april_boar", label = "Wild Boar", color = { 0.4, 0.3, 0.2, 1 } },
     { id = "april_wolf", label = "Wolf", color = { 0.5, 0.5, 0.5, 1 } },
 }
-
--- ── Loot ──
 
 M.LOOT_MAP = {
     ["Wooden Crate"] = "april_wooden_crate",
@@ -137,8 +127,6 @@ M.LOOT_TOGGLES = {
 }
 
 M.LOOT_SCAN_FOLDERS = { "loners", "vegetation", "military", "events", "monuments" }
-
--- ── Base deployables (Workspace.Bases → player areas) ──
 
 M.BASE_MAP = {
     ["Base Cabinet"] = "april_base_cabinet",

@@ -1,5 +1,3 @@
---[[ Fallen staff / mod user IDs — from matchascript + legacy fallen list. ]]
-
 local M = {}
 
 M.ROLES = {
@@ -59,7 +57,7 @@ M.ROLES = {
     [363101315] = "Lead Developer",
     [47983795] = "Co-Founder",
     [16681869] = "Founder",
-    -- legacy extras
+
     [3544497889] = "Game Moderator",
     [3739152618] = "Game Moderator",
     [4252853044] = "Game Moderator",
