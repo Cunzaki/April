@@ -1,10 +1,17 @@
+--[[
+    April Fallen — Fallen Survival for Project Vector
+    https://github.com/Cunzaki/April
+    Built: 2026-07-09T09:03:11.722Z
+]]
+
 April = {
-    version = "3.57.0",
+    version = "3.64.0",
     debug = false,
     _mods = {},
     bundled = true,
 }
 
+-- Required first: Scripts > April uses "full" mode (2-column group grid)
 if menu and menu.add_tab then
     menu.add_tab("April", "A", "full")
 end
@@ -18,6 +25,8 @@ function April.require(path)
     return mod
 end
 
+
+-- ── core/env.lua ──
 April._mods["core.env"] = (function()
 local M = {}
 
@@ -66,6 +75,7 @@ return M
 
 end)()
 
+-- ── core/math_util.lua ──
 April._mods["core.math_util"] = (function()
 local M = {}
 
@@ -99,8 +109,8 @@ return M
 
 end)()
 
+-- ── core/text_util.lua ──
 April._mods["core.text_util"] = (function()
-
 local M = {}
 
 local REPLACEMENTS = {
@@ -133,6 +143,7 @@ return M
 
 end)()
 
+-- ── core/cache.lua ──
 April._mods["core.cache"] = (function()
 local M = {}
 
@@ -171,8 +182,8 @@ return M
 
 end)()
 
+-- ── core/capabilities.lua ──
 April._mods["core.capabilities"] = (function()
-
 local M = {}
 
 function M.probe()
@@ -209,8 +220,8 @@ return M
 
 end)()
 
+-- ── core/debug.lua ──
 April._mods["core.debug"] = (function()
-
 local M = {}
 
 local seen_errors = {}
@@ -304,8 +315,8 @@ return M
 
 end)()
 
+-- ── core/settings.lua ──
 April._mods["core.settings"] = (function()
-
 local M = {}
 
 local _callbacks = {}
@@ -395,8 +406,8 @@ return M
 
 end)()
 
+-- ── core/feature_bind.lua ──
 April._mods["core.feature_bind"] = (function()
-
 local settings = April.require("core.settings")
 
 local M = {}
@@ -486,6 +497,7 @@ return M
 
 end)()
 
+-- ── core/draw_util.lua ──
 April._mods["core.draw_util"] = (function()
 local math_util = April.require("core.math_util")
 local text_util = April.require("core.text_util")
@@ -583,8 +595,8 @@ return M
 
 end)()
 
+-- ── core/ui_theme.lua ──
 April._mods["core.ui_theme"] = (function()
-
 local draw_util = April.require("core.draw_util")
 local text_util = April.require("core.text_util")
 
@@ -798,8 +810,8 @@ return M
 
 end)()
 
+-- ── core/notify.lua ──
 April._mods["core.notify"] = (function()
-
 local draw_util = April.require("core.draw_util")
 local theme = April.require("core.ui_theme")
 local text_util = April.require("core.text_util")
@@ -927,8 +939,8 @@ return M
 
 end)()
 
+-- ── game/asset_urls.lua ──
 April._mods["game.asset_urls"] = (function()
-
 local M = {}
 
 M.CDN_BASE = "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/assets"
@@ -969,8 +981,8 @@ return M
 
 end)()
 
+-- ── core/image_cache.lua ──
 April._mods["core.image_cache"] = (function()
-
 local asset_urls = April.require("game.asset_urls")
 local debug = April.require("core.debug")
 
@@ -1116,6 +1128,7 @@ return M
 
 end)()
 
+-- ── core/esp_util.lua ──
 April._mods["core.esp_util"] = (function()
 local draw_util = April.require("core.draw_util")
 local settings = April.require("core.settings")
@@ -1527,6 +1540,7 @@ return M
 
 end)()
 
+-- ── core/scheduler.lua ──
 April._mods["core.scheduler"] = (function()
 local debug = April.require("core.debug")
 
@@ -1572,8 +1586,8 @@ return M
 
 end)()
 
+-- ── core/incremental_scan.lua ──
 April._mods["core.incremental_scan"] = (function()
-
 local debug = April.require("core.debug")
 
 local M = {}
@@ -1676,8 +1690,8 @@ return M
 
 end)()
 
+-- ── core/menu_util.lua ──
 April._mods["core.menu_util"] = (function()
-
 local M = {}
 
 M.TAB = "April"
@@ -1919,6 +1933,9 @@ function M.bind_children(master_id, extra_ids)
     M.bind_master(master_id, extra_ids or {})
 end
 
+-- Custom Toggle / Hold bind (Vector's built-in Always/Hold/Toggle is unreliable).
+-- Checkbox key is for display + our listener; Bind Mode combo is Toggle|Hold.
+-- Gate features with settings.enabled(id).
 function M.register_keybind(T, G, id, label, default, extra)
     extra = extra or {}
     local cb_opts = { show_mode = false, key = extra.key or 0 }
@@ -1937,6 +1954,7 @@ function M.register_keybind(T, G, id, label, default, extra)
         key_id = id,
     })
 
+    M.bind_master(id, { mode_id })
     return mode_id
 end
 
@@ -1944,7 +1962,148 @@ return M
 
 end)()
 
+-- ── core/ballistic.lua ──
+April._mods["core.ballistic"] = (function()
+local math_util = April.require("core.math_util")
+
+local M = {}
+
+local ROBLOX_GRAV = 196.2
+
+local function vec3(v)
+    if not v then return 0, 0, 0 end
+    return v.x or v.X or 0, v.y or v.Y or 0, v.z or v.Z or 0
+end
+
+local function combat_stats_mod()
+    return April.require("game.combat_stats")
+end
+
+function M.gravity_accel(gravity_mult)
+    -- Fallen: Gravity field is a multiplier on workspace gravity (CreateProjectile).
+    if not gravity_mult or gravity_mult <= 0 then
+        return ROBLOX_GRAV * 0.55
+    end
+    if gravity_mult <= 2 then
+        return ROBLOX_GRAV * gravity_mult
+    end
+    return gravity_mult
+end
+
+function M.calculate_drop(bullet_speed, bullet_gravity, position, origin)
+    local px, py, pz = vec3(position)
+    local ox, oy, oz = vec3(origin)
+    local speed = math.max(bullet_speed or 950, 1)
+    local dist = math_util.distance3(px - ox, py - oy, pz - oz)
+    local time = dist / speed
+    local g = M.gravity_accel(bullet_gravity)
+    return 0.5 * g * time * time
+end
+
+-- Legacy lead+drop solver (movement prediction). Prefer hitpart_only + curve for silent.
+function M.calculate_target_position(bullet_speed, bullet_gravity, velocity, position, origin)
+    local px, py, pz = vec3(position)
+    local ox, oy, oz = vec3(origin)
+    local vx, vy, vz = vec3(velocity)
+
+    local speed = math.max(bullet_speed or 950, 1)
+    local g = M.gravity_accel(bullet_gravity)
+
+    local horiz_speed = math.sqrt(vx * vx + vz * vz)
+    if horiz_speed < 1.5 then
+        vx, vy, vz = 0, vy, 0
+    end
+    vy = math.max(-80, math.min(80, vy))
+
+    local time = math_util.distance3(px - ox, py - oy, pz - oz) / speed
+    for _ = 1, 6 do
+        local tx = px + vx * time
+        local ty = py + vy * time
+        local tz = pz + vz * time
+        time = math_util.distance3(tx - ox, ty - oy, tz - oz) / speed
+    end
+
+    local drop = 0.5 * g * time * time
+    return {
+        x = px + vx * time,
+        y = py + vy * time + drop,
+        z = pz + vz * time,
+    }
+end
+
+function M.predict_for_weapon(origin, position, velocity, weapon_name)
+    local stats = combat_stats_mod().get_effective_stats(weapon_name)
+    return M.calculate_target_position(stats.speed, stats.gravity, velocity, position, origin)
+end
+
+-- Ballistic arc that still lands exactly on hitpart (no target velocity lead).
+-- Returns sample points + initial launch direction for silent ray faking.
+function M.curve_to_hit(origin, hit, bullet_speed, bullet_gravity, steps)
+    if not origin or not hit then return nil end
+    steps = steps or 18
+
+    local ox, oy, oz = vec3(origin)
+    local hx, hy, hz = vec3(hit)
+    local dx, dy, dz = hx - ox, hy - oy, hz - oz
+    local dist = math_util.distance3(dx, dy, dz)
+    if dist < 0.05 then
+        return {
+            path = { { x = ox, y = oy, z = oz }, { x = hx, y = hy, z = hz } },
+            aim = { x = hx, y = hy, z = hz },
+            launch_dir = { x = 0, y = 1, z = 0 },
+            flight = 0,
+        }
+    end
+
+    local speed = math.max(bullet_speed or 950, 1)
+    local g = M.gravity_accel(bullet_gravity)
+    local flight = dist / speed
+    if flight < 0.001 then flight = 0.001 end
+
+    -- Launch velocity that reaches hit under gravity (classic ballistic aim-up).
+    local vx = dx / flight
+    local vy = (dy + 0.5 * g * flight * flight) / flight
+    local vz = dz / flight
+
+    local path = {}
+    for i = 0, steps do
+        local t = (i / steps) * flight
+        path[#path + 1] = {
+            x = ox + vx * t,
+            y = oy + vy * t - 0.5 * g * t * t,
+            z = oz + vz * t,
+        }
+    end
+    -- Guarantee exact endpoint on hitpart
+    path[#path + 1] = { x = hx, y = hy, z = hz }
+
+    local lm = math.sqrt(vx * vx + vy * vy + vz * vz)
+    local launch_dir = lm > 0.001
+        and { x = vx / lm, y = vy / lm, z = vz / lm }
+        or { x = dx / dist, y = dy / dist, z = dz / dist }
+
+    return {
+        path = path,
+        aim = { x = hx, y = hy, z = hz },
+        launch_dir = launch_dir,
+        flight = flight,
+        speed = speed,
+        gravity = g,
+    }
+end
+
+function M.curve_for_weapon(origin, hit, weapon_name, steps)
+    local stats = combat_stats_mod().get_effective_stats(weapon_name)
+    return M.curve_to_hit(origin, hit, stats.speed, stats.gravity, steps)
+end
+
+return M
+
+end)()
+
+-- ── core/silent_ray.lua ──
 April._mods["core.silent_ray"] = (function()
+local ballistic = April.require("core.ballistic")
 
 local M = {}
 
@@ -1956,6 +2115,7 @@ local MOUSE_RAY_LEN = 1024
 M._last_origin = nil
 M._last_target = nil
 M._last_ok = false
+M._last_curve = nil
 
 local function unpack_pos(v)
     if not v then return nil end
@@ -2012,6 +2172,7 @@ end
 function M.stop()
     M._last_origin = nil
     M._last_target = nil
+    M._last_curve = nil
     M._last_ok = false
     tracking = false
     if not M.available() then return end
@@ -2025,8 +2186,14 @@ function M.last_segment()
     return M._last_origin, M._last_target
 end
 
+function M.last_curve()
+    return M._last_curve
+end
+
+-- Direct ray to aim (legacy / bullet TP).
 function M.track(origin, aim_point, shoot_vk)
     M._last_ok = false
+    M._last_curve = nil
 
     if not aim_point then
         return false
@@ -2052,7 +2219,6 @@ function M.track(origin, aim_point, shoot_vk)
     local dir
 
     if dist < 0.001 then
-
         local cam = M.get_camera_origin()
         if cam then
             dx, dy, dz = cam.x - ox, cam.y - oy, cam.z - oz
@@ -2080,12 +2246,74 @@ function M.track(origin, aim_point, shoot_vk)
     return ok
 end
 
+-- Fake ballistic curve for visuals / elevated hook origin.
+-- Direction always points at hitpart so instant silent still connects.
+-- Optional: pull track origin slightly up the arc so the ray is angled (looks arched).
+function M.track_curve(origin, hit_point, weapon_name, shoot_vk)
+    M._last_ok = false
+
+    if not hit_point then
+        return false
+    end
+
+    origin = origin or M.get_camera_origin()
+    if not origin then
+        return false
+    end
+
+    if not M.ensure_hook() then
+        return false
+    end
+
+    local curve = ballistic.curve_for_weapon(origin, hit_point, weapon_name, 20)
+    M._last_curve = curve
+
+    local ox, oy, oz = unpack_pos(origin)
+    local hx, hy, hz = unpack_pos(hit_point)
+    if not ox or not hx then
+        return false
+    end
+
+    -- Elevate track origin ~25% along the ballistic arc (above LOS) so the
+    -- hooked ray is angled downward into the hitpart — fakes drop without missing.
+    local track_o = { x = ox, y = oy, z = oz }
+    if curve and curve.path and #curve.path >= 4 then
+        local mid = curve.path[math.max(2, math.floor(#curve.path * 0.25))]
+        if mid then
+            track_o = { x = mid.x, y = mid.y, z = mid.z }
+        end
+    end
+
+    local dx = hx - track_o.x
+    local dy = hy - track_o.y
+    local dz = hz - track_o.z
+    local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+    local dir
+    if dist < 0.001 then
+        dir = make_vec3(0, MOUSE_RAY_LEN * 0.01, 0)
+    else
+        local inv = 1 / dist
+        dir = make_vec3(dx * inv * MOUSE_RAY_LEN, dy * inv * MOUSE_RAY_LEN, dz * inv * MOUSE_RAY_LEN)
+    end
+
+    local origin_v = make_vec3(track_o.x, track_o.y, track_o.z)
+    local key = shoot_vk or 0x01
+
+    M._last_origin = track_o
+    M._last_target = { x = hx, y = hy, z = hz }
+
+    local ok = raycast.track_silent_target(origin_v, dir, key) == true
+    M._last_ok = ok
+    tracking = ok
+    return ok
+end
+
 return M
 
 end)()
 
+-- ── core/fflag_mem.lua ──
 April._mods["core.fflag_mem"] = (function()
-
 local M = {}
 
 local cache = {}
@@ -2183,8 +2411,8 @@ return M
 
 end)()
 
+-- ── core/manip_math.lua ──
 April._mods["core.manip_math"] = (function()
-
 local M = {}
 
 local EYE_OFFSET_Y = 2.5
@@ -2286,8 +2514,8 @@ return M
 
 end)()
 
+-- ── core/desync_vis.lua ──
 April._mods["core.desync_vis"] = (function()
-
 local esp_util = April.require("core.esp_util")
 local draw_util = April.require("core.draw_util")
 
@@ -2393,8 +2621,8 @@ return M
 
 end)()
 
+-- ── core/packet_desync.lua ──
 April._mods["core.packet_desync"] = (function()
-
 local fflag_mem = April.require("core.fflag_mem")
 
 local M = {}
@@ -2429,7 +2657,10 @@ return M
 
 end)()
 
+-- ── core/cframe_move.lua ──
 April._mods["core.cframe_move"] = (function()
+-- Soft movement helpers. Prefer velocity writes on HRP only — avoid position
+-- teleports, limb velocity spam, and insane pulse values (those ban).
 
 local env = April.require("core.env")
 
@@ -2445,6 +2676,7 @@ local NOCLIP_PARTS = {
 }
 
 local HIP_OFFSET = 3.0
+local DEFAULT_GRAVITY = 196.2
 
 function M.delta_time()
     if utility and utility.get_delta_time then
@@ -2523,7 +2755,29 @@ function M.set_velocity(inst, x, y, z)
     if part and part.set_velocity then
         pcall(part.set_velocity, inst, x, y, z)
     else
-        pcall(function() inst.Velocity = Vector3.new(x, y, z) end)
+        pcall(function()
+            if inst.set_velocity then
+                inst:set_velocity(x, y, z)
+            else
+                inst.Velocity = Vector3.new(x, y, z)
+            end
+        end)
+    end
+end
+
+function M.set_angular_velocity(inst, x, y, z)
+    if not inst then return end
+    x, y, z = x or 0, y or 0, z or 0
+    if part and part.set_angular_velocity then
+        pcall(part.set_angular_velocity, inst, x, y, z)
+    else
+        pcall(function()
+            if inst.set_angular_velocity then
+                inst:set_angular_velocity(x, y, z)
+            else
+                inst.AngularVelocity = Vector3.new(x, y, z)
+            end
+        end)
     end
 end
 
@@ -2532,7 +2786,13 @@ function M.set_position_only(inst, x, y, z)
     if part and part.set_position then
         pcall(part.set_position, inst, x, y, z)
     else
-        pcall(function() inst.Position = Vector3.new(x, y, z) end)
+        pcall(function()
+            if inst.set_position then
+                inst:set_position(x, y, z)
+            else
+                inst.Position = Vector3.new(x, y, z)
+            end
+        end)
     end
 end
 
@@ -2562,7 +2822,11 @@ end
 
 function M.humanoid_state(hum, state)
     if not hum or state == nil then return end
-    pcall(function() hum.state = state end)
+    pcall(function()
+        if hum.set_state then hum:set_state(state)
+        else hum.state = state
+        end
+    end)
 end
 
 function M.humanoid_suspend(hum)
@@ -2580,9 +2844,7 @@ end
 function M.zero_part(inst)
     if not inst then return end
     M.set_velocity(inst, 0, 0, 0)
-    if part and part.set_angular_velocity then
-        pcall(part.set_angular_velocity, inst, 0, 0, 0)
-    end
+    M.set_angular_velocity(inst, 0, 0, 0)
 end
 
 function M.zero_character(char, root)
@@ -2593,6 +2855,15 @@ function M.zero_character(char, root)
             M.zero_part(p)
         end
     end
+end
+
+function M.workspace_gravity()
+    local ws = env.get_workspace and env.get_workspace() or (game and game.workspace)
+    if ws then
+        local g = ws.Gravity or ws.gravity
+        if type(g) == "number" and g > 0 then return g end
+    end
+    return DEFAULT_GRAVITY
 end
 
 function M.camera_flat_axes()
@@ -2653,6 +2924,7 @@ function M.clamp_above_floor(x, y, z)
     return y
 end
 
+-- Legacy position+velocity drive (teleports). Prefer drive_root_velocity.
 function M.drive_root(root, pos, dx, dy, dz, speed, dt)
     if not root or not pos then return pos end
 
@@ -2660,7 +2932,7 @@ function M.drive_root(root, pos, dx, dy, dz, speed, dt)
     local mag = math.sqrt(dx * dx + dy * dy + dz * dz)
 
     if mag < 0.001 then
-        M.set_velocity(root, 0, -0.1, 0)
+        M.set_velocity(root, 0, 0, 0)
         return pos
     end
 
@@ -2676,12 +2948,53 @@ function M.drive_root(root, pos, dx, dy, dz, speed, dt)
     return { x = nx, y = ny, z = nz }
 end
 
+-- Velocity-only HRP drive: no position writes. Smooth lerp toward target vel.
+function M.drive_root_velocity(root, dx, dy, dz, speed, dt, opts)
+    if not root then return end
+    opts = opts or {}
+    dt = dt or M.delta_time()
+
+    local mag = math.sqrt(dx * dx + dy * dy + dz * dz)
+    local tx, ty, tz = 0, 0, 0
+    if mag >= 0.001 then
+        dx, dy, dz = dx / mag, dy / mag, dz / mag
+        tx, ty, tz = dx * speed, dy * speed, dz * speed
+    end
+
+    -- Soft gravity cancel when hovering / moving so we don't need PlatformStand.
+    if opts.cancel_gravity ~= false and math.abs(ty) < 0.01 and mag < 0.001 then
+        -- idle hover: hold altitude with near-zero vertical (server still sees freefall-ish)
+        ty = 0
+    elseif opts.cancel_gravity ~= false and math.abs(dy) < 0.01 and mag >= 0.001 then
+        -- horizontal move: keep Y stable
+        ty = 0
+    end
+
+    local cx, cy, cz = M.read_velocity(root)
+    local blend = opts.blend or 0.35
+    blend = math.max(0.05, math.min(1, blend))
+
+    local nx = cx + (tx - cx) * blend
+    local ny = cy + (ty - cy) * blend
+    local nz = cz + (tz - cz) * blend
+
+    local max_speed = opts.max_speed or (speed * 1.15)
+    local sm = math.sqrt(nx * nx + ny * ny + nz * nz)
+    if sm > max_speed and sm > 0.001 then
+        local s = max_speed / sm
+        nx, ny, nz = nx * s, ny * s, nz * s
+    end
+
+    M.set_velocity(root, nx, ny, nz)
+    M.set_angular_velocity(root, 0, 0, 0)
+end
+
 return M
 
 end)()
 
+-- ── core/runservice.lua ──
 April._mods["core.runservice"] = (function()
-
 local env = April.require("core.env")
 
 local M = {}
@@ -2745,8 +3058,8 @@ return M
 
 end)()
 
+-- ── core/misc_gate.lua ──
 April._mods["core.misc_gate"] = (function()
-
 local runservice = April.require("core.runservice")
 
 local M = {}
@@ -2759,7 +3072,11 @@ return M
 
 end)()
 
+-- ── core/movement_ctrl.lua ──
 April._mods["core.movement_ctrl"] = (function()
+-- Inf Fly / Slowfall — velocity-only, HRP-only.
+-- Slowfall includes shoot-while-airborne bypass: force Humanoid Running so
+-- ViewmodelController's v64 stays grounded (dump: StateChanged → v64 ≥ 1 freezes fire).
 
 local settings = April.require("core.settings")
 local env = April.require("core.env")
@@ -2768,20 +3085,19 @@ local move = April.require("core.cframe_move")
 local M = {}
 
 local P_FLY = "april_noclip_enabled"
-local P_SPIDER = "april_spider_enabled"
-local P_NOCLIP = "april_walk_noclip_enabled"
+local P_SPEED = "april_noclip_speed"
 local P_SLOWFALL = "april_slowfall_enabled"
 
-local MODE_NONE = "none"
-local MODE_FLY = "fly"
-local MODE_SPIDER = "spider"
-local MODE_NOCLIP = "noclip"
-
 local _installed = false
-local active_mode = MODE_NONE
+local fly_active = false
 local tracked_char_id = nil
-local noclip_on = false
-local last_state_ms = 0
+local last_ground_ms = 0
+
+-- Slider 2–4 → modest studs/s
+local SPEED_SCALE = 16
+local MAX_FLY_SPEED = 72
+local VEL_BLEND = 0.28
+local GROUND_STATE_MS = 45
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -2818,109 +3134,116 @@ local function get_humanoid(lp)
     end)
 end
 
-local function resolve_mode()
-    if settings.enabled(P_NOCLIP) then return MODE_NOCLIP end
-    if settings.enabled(P_FLY) then return MODE_FLY end
-    if settings.enabled(P_SPIDER) then return MODE_SPIDER end
-    return MODE_NONE
+local function hum_alive(hum)
+    if not hum then return false end
+    local hp = hum.Health or hum.health
+    if hp == nil then return true end
+    return hp > 0
 end
 
-local function maybe_state(hum, state)
+local function fly_speed()
+    local raw = settings.num(P_SPEED, 3)
+    if raw < 2 then raw = 2 end
+    if raw > 4 then raw = 4 end
+    local spd = raw * SPEED_SCALE
+    if spd > MAX_FLY_SPEED then spd = MAX_FLY_SPEED end
+    return spd
+end
+
+-- Soft grounded spoof: keep State = Running (8) so ViewmodelController v64 stays 0.
+-- Dump: Humanoid.StateChanged sets v64=0 on Landed/Running; v64≥1 freezes fire cooldown.
+-- Prefer ChangeState (fires the signal); fall back to memory state write.
+local function keep_grounded_for_shoot(hum)
+    if not hum or not hum_alive(hum) then return end
     local now = tick_ms()
-    if now - last_state_ms < 150 then return end
-    last_state_ms = now
-    move.humanoid_state(hum, state)
-end
+    if now - last_ground_ms < GROUND_STATE_MS then return end
+    last_ground_ms = now
 
-local function set_noclip(char, on)
-    if noclip_on == on then return end
-    noclip_on = on
-    move.set_noclip_parts(char, on)
-end
+    pcall(function() hum.Jump = false end)
+    pcall(function() hum.jump = false end)
 
-local function leave_mode(char, hum)
-    set_noclip(char, false)
-    if hum then move.humanoid_running(hum) end
-    last_state_ms = 0
-end
+    -- ChangeState fires StateChanged → v64 = 0 in ViewmodelController
+    local changed = false
+    pcall(function()
+        if hum.ChangeState then
+            hum:ChangeState(8) -- Running
+            changed = true
+        elseif hum.change_state then
+            hum:change_state(8)
+            changed = true
+        end
+    end)
 
-local function tick_noclip(root, hum, speed, dt)
-    maybe_state(hum, 8)
-
-    local pos = move.read_pos(root)
-    if not pos then return end
-
-    local mx, my, mz = move.read_fly_input()
-    local next_pos = move.drive_root(root, pos, mx, my, mz, speed, dt)
-    if not next_pos then return end
-
-    local ny = move.clamp_above_floor(next_pos.x, next_pos.y, next_pos.z)
-    if ny ~= next_pos.y then
-        move.set_position_only(root, next_pos.x, ny, next_pos.z)
-        local vx, _, vz = move.read_velocity(root)
-        move.set_velocity(root, vx, 0, vz)
-    end
-end
-
-local function tick_fly(root, hum, speed, dt)
-    maybe_state(hum, 6)
-
-    local pos = move.read_pos(root)
-    if not pos then return end
-
-    local mx, my, mz = move.read_fly_input()
-    local next_pos = move.drive_root(root, pos, mx, my, mz, speed, dt)
-    if not next_pos then return end
-
-    if my <= 0 then
-        local ny = move.clamp_above_floor(next_pos.x, next_pos.y, next_pos.z)
-        if ny > next_pos.y then
-            move.set_position_only(root, next_pos.x, ny, next_pos.z)
-            local vx, _, vz = move.read_velocity(root)
-            move.set_velocity(root, vx, 0, vz)
+    if not changed then
+        -- Memory write fallback (may not fire StateChanged on all builds)
+        move.humanoid_state(hum, 8)
+        -- Pulse Landed then Running to encourage a transition
+        if (now % 200) < GROUND_STATE_MS then
+            move.humanoid_state(hum, 7)
         end
     end
+
+    pcall(function()
+        local ws = hum.WalkSpeed or hum.walk_speed
+        if ws and hum.WalkspeedCheck ~= nil then
+            hum.WalkspeedCheck = ws
+        end
+    end)
 end
 
-local function tick_spider(root, hum, speed, dt)
-    maybe_state(hum, 12)
+local function clear_swim_block()
+    -- WaterController.IsSwim also freezes fire (v127). Soft-clear when possible.
+    local lp = env.get_local_player()
+    local char = get_character(lp)
+    if not char then return end
+    local water = env.safe_call(function()
+        return char:FindFirstChild("WaterController")
+            or (char.find_first_child and char:find_first_child("WaterController"))
+    end)
+    if not water then return end
+    pcall(function()
+        if water.set_attribute then water:set_attribute("IsSwim", false)
+        elseif water.SetAttribute then water:SetAttribute("IsSwim", false)
+        end
+    end)
+end
 
-    local pos = move.read_pos(root)
-    if not pos then return end
+local function tick_fly(root, hum, dt)
+    if not hum_alive(hum) then return end
 
     local mx, my, mz = move.read_fly_input()
-    if my == 0 then my = 1 end
+    local speed = fly_speed()
 
-    move.drive_root(root, pos, mx, my, mz, speed, dt)
+    move.drive_root_velocity(root, mx, my, mz, speed, dt, {
+        blend = VEL_BLEND,
+        max_speed = speed * 1.08,
+        cancel_gravity = true,
+    })
+
+    -- Built-in shoot-while-fly: same grounded spoof as slowfall
+    keep_grounded_for_shoot(hum)
+    clear_swim_block()
 end
 
-local function tick_slowfall(root, dt)
-    local pos = move.read_pos(root)
-    if not pos then return end
-
-    local cap = settings.num("april_slowfall_speed", -5)
-    if cap > 0 then cap = -cap end
+local function tick_slowfall(root, hum, dt)
+    local raw = settings.num("april_slowfall_speed", 5)
+    if raw < 1 then raw = 1 end
+    local cap = -(1.5 + (raw * 0.28))
 
     local vx, vy, vz = move.read_velocity(root)
-    if vy >= cap then return end
+    if vy < cap then
+        local next_y = vy + (cap - vy) * math.min(1, dt * 10)
+        if next_y < cap then next_y = cap end
+        move.set_velocity(root, vx, next_y, vz)
+    end
 
-    move.set_velocity(root, vx, cap, vz)
-    move.set_position_only(root, pos.x, pos.y + cap * dt * 0.05, pos.z)
+    -- Shoot while jumping / falling bypass (core of this feature)
+    keep_grounded_for_shoot(hum)
+    clear_swim_block()
 end
 
 local function abort_active()
-    if active_mode == MODE_NONE then return end
-
-    local lp = env.get_local_player()
-    if lp then
-        local char = get_character(lp)
-        local hum = get_humanoid(lp)
-        if char and hum then
-            leave_mode(char, hum)
-        end
-    end
-
-    active_mode = MODE_NONE
+    fly_active = false
 end
 
 function M.tick(_dt)
@@ -2949,37 +3272,21 @@ function M.tick(_dt)
 
     local cid = char_id(char)
     if cid ~= tracked_char_id then
-        if active_mode ~= MODE_NONE then
-            leave_mode(char, hum)
-        end
-        active_mode = MODE_NONE
+        fly_active = false
         tracked_char_id = cid
+        last_ground_ms = 0
     end
 
-    local mode = resolve_mode()
+    local want_fly = settings.enabled(P_FLY)
 
-    if active_mode ~= mode then
-        if active_mode ~= MODE_NONE then
-            leave_mode(char, hum)
+    if want_fly then
+        fly_active = true
+        tick_fly(root, hum, dt)
+    else
+        fly_active = false
+        if settings.enabled(P_SLOWFALL) then
+            tick_slowfall(root, hum, dt)
         end
-        active_mode = mode
-        if mode == MODE_NOCLIP then
-            set_noclip(char, true)
-        end
-    end
-
-    if mode == MODE_NOCLIP then
-        tick_noclip(root, hum, settings.num("april_walk_noclip_speed", 32), dt)
-    elseif mode == MODE_FLY then
-        tick_fly(root, hum, settings.num("april_noclip_speed", 72), dt)
-    elseif mode == MODE_SPIDER then
-        tick_spider(root, hum, settings.num("april_spider_speed", 20), dt)
-    elseif noclip_on then
-        set_noclip(char, false)
-    end
-
-    if mode == MODE_NONE and settings.enabled(P_SLOWFALL) then
-        tick_slowfall(root, dt)
     end
 end
 
@@ -2995,8 +3302,8 @@ return M
 
 end)()
 
+-- ── core/config_store.lua ──
 April._mods["core.config_store"] = (function()
-
 local cache = April.require("core.cache")
 
 local M = {}
@@ -3021,9 +3328,14 @@ local MENU_KEYS = {
     "april_esp_text_size",
     "april_tung_esp_enabled", "april_tung_esp_max_dist",
         "april_target_overlay", "april_target_overlay_fov", "april_target_overlay_gear_size", "april_target_overlay_top",
+        "april_target_overlay_fallback_fov",
     "april_crosshair_enabled", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
     "april_crosshair_thickness", "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
     "april_crosshair_rainbow", "april_crosshair_rainbow_speed",
+    "april_bullet_tracers", "april_bullet_tracers_color2",
+    "april_bullet_tracers_thick", "april_bullet_tracers_life",
+    "april_hitmarkers", "april_hitmarkers_head", "april_hitmarkers_style",
+    "april_hitmarkers_size", "april_hitmarkers_gap", "april_hitmarkers_life", "april_hitmarkers_thick",
     "april_brainrot_enabled", "april_brainrot_enabled_mode", "april_brainrot_style", "april_brainrot_size",
     "april_silent_aim", "april_silent_aim_mode",
     "april_silent_target_type", "april_silent_bone",
@@ -3032,7 +3344,7 @@ local MENU_KEYS = {
     "april_silent_max_dist", "april_silent_fov", "april_silent_sticky",
     "april_silent_wallbang", "april_silent_bullet_tp", "april_silent_tp_ray_mode", "april_silent_tp_ray_vis",
     "april_silent_bullet_manip",
-    "april_silent_manip_dist", "april_silent_manip_status", "april_silent_manip_ring", "april_silent_manip_peek_vis",
+    "april_silent_manip_dist", "april_silent_manip_status", "april_silent_manip_peek_vis",
     "april_silent_draw_fov", "april_silent_fov_style", "april_silent_target_line",
     "april_gunmods_enabled", "april_gunmods_enabled_mode", "april_gm_mode", "april_gm_weapon_select", "april_gm_recoil", "april_gm_recoil_pct", "april_gm_spread", "april_gm_spread_pct",
     "april_gm_sway", "april_gm_fire_rate", "april_gm_fire_rate_mult",
@@ -3068,10 +3380,8 @@ local MENU_KEYS = {
     "april_map_show_base", "april_map_show_waypoints",
     "april_map_labels",
     "april_noclip_enabled", "april_noclip_enabled_mode", "april_noclip_speed",
-    "april_spider_enabled", "april_spider_enabled_mode", "april_spider_speed",
     "april_slowfall_enabled", "april_slowfall_enabled_mode", "april_slowfall_speed",
-    "april_walk_noclip_enabled", "april_walk_noclip_enabled_mode", "april_walk_noclip_speed",
-    "april_fling_enabled", "april_fling_fov", "april_fling_key", "april_fling_key_mode", "april_fling_duration",
+    "april_fling_enabled", "april_fling_enabled_mode", "april_fling_fov", "april_fling_duration",
     "april_desync_enabled", "april_desync_enabled_mode", "april_desync_autosend", "april_desync_autosend_len",
     "april_desync_visualizer",
     "april_bullet_manip_enabled", "april_bullet_manip_enabled_mode", "april_bullet_manip_range", "april_bullet_manip_speed",
@@ -3083,6 +3393,8 @@ local MENU_KEYS = {
 
 local COLOR_KEYS = {
     "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
+    "april_bullet_tracers", "april_bullet_tracers_color2",
+    "april_hitmarkers", "april_hitmarkers_head",
     "april_silent_aim", "april_silent_draw_fov", "april_silent_target_line", "april_silent_tp_ray_vis",
     "april_stone_node", "april_metal_node", "april_phosphate_node", "april_corn_plant", "april_tomato_plant",
     "april_pumpkin_plant", "april_lemon_plant", "april_raspberry_plant", "april_blueberry_plant",
@@ -3116,7 +3428,6 @@ local LEGACY_HOTKEY_TO_CHECKBOX = {
     april_waypoints_enabled_key = "april_waypoints_enabled",
     april_map_enabled_key = "april_map_enabled",
     april_noclip_enabled_key = "april_noclip_enabled",
-    april_spider_enabled_key = "april_spider_enabled",
     april_slowfall_enabled_key = "april_slowfall_enabled",
     april_desync_enabled_key = "april_desync_enabled",
     april_bullet_manip_enabled_key = "april_bullet_manip_enabled",
@@ -3134,9 +3445,8 @@ local HOTKEY_KEYS = {
     "april_waypoints_enabled",
     "april_map_enabled",
     "april_noclip_enabled",
-    "april_spider_enabled",
     "april_slowfall_enabled",
-    "april_walk_noclip_enabled",
+    "april_fling_enabled",
     "april_desync_enabled",
     "april_bullet_manip_enabled",
     "april_tung_esp_enabled",
@@ -3472,8 +3782,8 @@ return M
 
 end)()
 
+-- ── core/memory_string.lua ──
 April._mods["core.memory_string"] = (function()
-
 local env = April.require("core.env")
 
 local M = {}
@@ -3787,8 +4097,8 @@ return M
 
 end)()
 
+-- ── game/module_scan.lua ──
 April._mods["game.module_scan"] = (function()
-
 local M = {}
 
 M._table_cache = nil
@@ -3929,8 +4239,8 @@ return M
 
 end)()
 
+-- ── game/bootstrap.lua ──
 April._mods["game.bootstrap"] = (function()
-
 local env = April.require("core.env")
 local debug = April.require("core.debug")
 local module_scan = April.require("game.module_scan")
@@ -4056,6 +4366,7 @@ return M
 
 end)()
 
+-- ── game/folders.lua ──
 April._mods["game.folders"] = (function()
 local env = April.require("core.env")
 
@@ -4143,8 +4454,8 @@ return M
 
 end)()
 
+-- ── game/item_images.lua ──
 April._mods["game.item_images"] = (function()
-
 local M = {}
 
 M.by_name = {
@@ -4503,8 +4814,8 @@ return M
 
 end)()
 
+-- ── game/item_catalog.lua ──
 April._mods["game.item_catalog"] = (function()
-
 local M = {}
 
 M.by_id = {
@@ -5251,6 +5562,7 @@ return M
 
 end)()
 
+-- ── game/items.lua ──
 April._mods["game.items"] = (function()
 local env = April.require("core.env")
 local item_images = April.require("game.item_images")
@@ -5486,8 +5798,8 @@ return M
 
 end)()
 
+-- ── game/armor_map.lua ──
 April._mods["game.armor_map"] = (function()
-
 local M = {}
 
 M.BY_MODEL = {
@@ -5540,6 +5852,7 @@ return M
 
 end)()
 
+-- ── game/weapons.lua ──
 April._mods["game.weapons"] = (function()
 local bootstrap = April.require("game.bootstrap")
 local env = April.require("core.env")
@@ -6006,8 +6319,8 @@ return M
 
 end)()
 
+-- ── game/gc_weapon_mods.lua ──
 April._mods["game.gc_weapon_mods"] = (function()
-
 local debug = April.require("core.debug")
 local env = April.require("core.env")
 
@@ -6183,8 +6496,8 @@ return M
 
 end)()
 
+-- ── game/weapon_profile_store.lua ──
 April._mods["game.weapon_profile_store"] = (function()
-
 local settings = April.require("core.settings")
 local config_store = April.require("core.config_store")
 
@@ -6392,8 +6705,8 @@ return M
 
 end)()
 
+-- ── game/gun_mod_profiles.lua ──
 April._mods["game.gun_mod_profiles"] = (function()
-
 local settings = April.require("core.settings")
 local store = April.require("game.weapon_profile_store")
 local weapons = April.require("game.weapons")
@@ -6439,15 +6752,18 @@ function M.build_mods_from_profile(profile)
     return mods
 end
 
+-- Neutral attachment-style mults (game uses 1 + Mult for speed/range/sway/spread/recoil,
+-- and delay *= 1 - FireRateMult). Only used when disabling gun mods / clearing apply.
+-- Do NOT merge these into active apply payloads — that stomps attachment FireRateMult etc.
 function M.build_reset_mods()
     return {
         RecoilMult = 0,
         AimSpreadMult = 0,
         HipSpreadMult = 0,
         SwayMult = 0,
-        FireRateMult = 1,
-        SpeedMult = 1,
-        RangeMult = 1,
+        FireRateMult = 0,
+        SpeedMult = 0,
+        RangeMult = 0,
     }
 end
 
@@ -6476,14 +6792,12 @@ function M.is_global_mode()
 end
 
 function M.build_mods_for_weapon(name)
-    local mods = M.build_reset_mods()
+    -- Only keys the profile actually enables. Writing FireRateMult=1 (or any default)
+    -- onto every GC table that has FireRateMult overwrites attachment FireRateMult
+    -- (Items.AttachmentStats) and breaks RPM when attachments are equipped.
     local profile = store.get(name)
-    if not profile then return mods end
-    local patched = M.build_mods_from_profile(profile)
-    for k, v in pairs(patched) do
-        mods[k] = v
-    end
-    return mods
+    if not profile then return {} end
+    return M.build_mods_from_profile(profile)
 end
 
 function M.build_mods_for_apply(held)
@@ -6537,8 +6851,8 @@ return M
 
 end)()
 
+-- ── game/combat_stats.lua ──
 April._mods["game.combat_stats"] = (function()
-
 local settings = April.require("core.settings")
 local weapons = April.require("game.weapons")
 
@@ -6630,92 +6944,8 @@ return M
 
 end)()
 
-April._mods["core.ballistic"] = (function()
-
-local math_util = April.require("core.math_util")
-
-local M = {}
-
-local ROBLOX_GRAV = 196.2
-local LEAD_PASSES = 6
-
-local function vec3(v)
-    if not v then return 0, 0, 0 end
-    return v.x or v.X or 0, v.y or v.Y or 0, v.z or v.Z or 0
-end
-
-local function combat_stats_mod()
-    return April.require("game.combat_stats")
-end
-
-function M.gravity_accel(gravity_mult)
-    if not gravity_mult or gravity_mult <= 0 then
-        return ROBLOX_GRAV * 0.55
-    end
-    if gravity_mult <= 2 then
-        return ROBLOX_GRAV * gravity_mult
-    end
-    return gravity_mult
-end
-
-function M.calculate_drop(bullet_speed, bullet_gravity, position, origin)
-    local px, py, pz = vec3(position)
-    local ox, oy, oz = vec3(origin)
-
-    local speed = math.max(bullet_speed or 950, 1)
-    local dist = math_util.distance3(px - ox, py - oy, pz - oz)
-    local time = dist / speed
-    local g = M.gravity_accel(bullet_gravity)
-    return 0.5 * g * time * time
-end
-
-function M.calculate_target_position(bullet_speed, bullet_gravity, velocity, position, origin)
-    local px, py, pz = vec3(position)
-    local ox, oy, oz = vec3(origin)
-    local vx, vy, vz = vec3(velocity)
-
-    local speed = math.max(bullet_speed or 950, 1)
-    local g = M.gravity_accel(bullet_gravity)
-
-    local horiz_speed = math.sqrt(vx * vx + vz * vz)
-    if horiz_speed < 1.5 then
-        vx, vy, vz = 0, vy, 0
-    end
-
-    vy = math.max(-80, math.min(80, vy))
-
-    local time = math_util.distance3(px - ox, py - oy, pz - oz) / speed
-
-    for _ = 1, LEAD_PASSES do
-        local tx = px + vx * time
-        local ty = py + vy * time
-        local tz = pz + vz * time
-        time = math_util.distance3(tx - ox, ty - oy, tz - oz) / speed
-    end
-
-    local tx = px + vx * time
-    local ty = py + vy * time
-    local tz = pz + vz * time
-    local drop = 0.5 * g * time * time
-
-    return {
-        x = tx,
-        y = ty + drop,
-        z = tz,
-    }
-end
-
-function M.predict_for_weapon(origin, position, velocity, weapon_name)
-    local stats = combat_stats_mod().get_effective_stats(weapon_name)
-    return M.calculate_target_position(stats.speed, stats.gravity, velocity, position, origin)
-end
-
-return M
-
-end)()
-
+-- ── game/combat_origin.lua ──
 April._mods["game.combat_origin"] = (function()
-
 local env = April.require("core.env")
 local weapons = April.require("game.weapons")
 
@@ -6786,20 +7016,82 @@ local function viewmodel_cframe_origin()
     return pos
 end
 
+local function find_flash_in(model)
+    if not model then return nil end
+    local flash = find_child(model, "FlashPart") or find_child(model, "Flash")
+    if flash then return part_pos(flash) end
+    local weapon = find_child(model, "Weapon")
+    if weapon then
+        flash = find_child(weapon, "FlashPart") or find_child(weapon, "Flash")
+        if flash then return part_pos(flash) end
+    end
+    local desc = env.safe_call(function()
+        if model.get_descendants then return model:get_descendants() end
+        return model:GetDescendants()
+    end) or {}
+    for _, d in ipairs(desc) do
+        local n = d.Name or d.name
+        if n == "FlashPart" or n == "Flash" then
+            return part_pos(d)
+        end
+    end
+    return nil
+end
+
+local function camera_viewmodel()
+    local ws = env.get_workspace()
+    if not ws then return nil end
+    local cam = env.safe_call(function()
+        return ws.CurrentCamera or ws.currentCamera
+            or (ws.FindFirstChild and ws:FindFirstChild("CurrentCamera"))
+    end)
+    if not cam then return nil end
+    local kids = env.safe_call(function()
+        if cam.get_children then return cam:get_children() end
+        return cam:GetChildren()
+    end) or {}
+    for _, child in ipairs(kids) do
+        local cn = child.ClassName or child.class_name
+        if cn == "Model" then
+            if find_child(child, "Weapon") or find_child(child, "Arms") then
+                return child
+            end
+        end
+    end
+    return nil
+end
+
 local function flashpart_origin()
+    -- Live VM is parented to CurrentCamera (ViewmodelController), not workspace.Viewmodels
+    local live = camera_viewmodel()
+    local pos = find_flash_in(live)
+    if pos then return pos end
+
     local ws = env.get_workspace()
     if not ws then return nil end
 
-    local vms = env.safe_call(function() return ws:find_first_child("Viewmodels") end)
-        or env.safe_call(function() return ws:FindFirstChild("Viewmodels") end)
-    if not vms then return nil end
+    local vfx = find_child(ws, "VFX")
+    local vms = vfx and find_child(vfx, "VMs")
+    if vms then
+        local kids = env.safe_call(function()
+            if vms.get_children then return vms:get_children() end
+            return vms:GetChildren()
+        end) or {}
+        for _, child in ipairs(kids) do
+            pos = find_flash_in(child)
+            if pos then return pos end
+        end
+    end
 
-    local vm = env.safe_call(function() return vms:find_first_child("Viewmodel") end)
-        or env.safe_call(function() return vms:FindFirstChild("Viewmodel") end)
-    if not vm then return nil end
+    -- Legacy fallback
+    local legacy = find_child(ws, "Viewmodels")
+    if legacy then
+        local vm = find_child(legacy, "Viewmodel") or find_child(legacy, "ViewModel")
+        pos = find_flash_in(vm)
+        if pos then return pos end
+    end
 
-    local flash = find_child(vm, "FlashPart") or find_child(vm, "Flash")
-    return part_pos(flash)
+    return nil
 end
 
 local function compute_muzzle(weapon)
@@ -6879,8 +7171,51 @@ return M
 
 end)()
 
-April._mods["game.farm_tools"] = (function()
+-- ── game/combat_target.lua ──
+April._mods["game.combat_target"] = (function()
+-- Shared combat target: prefer silent-aim lock, else nil.
+-- Visuals (gear / tracers / hitmarkers) should use this instead of their own FOV.
 
+local M = {}
+
+function M.get()
+    local ok, aimbot = pcall(function()
+        return April.require("features.combat.aimbot")
+    end)
+    if not ok or not aimbot or not aimbot.get_target then return nil end
+
+    local t = aimbot.get_target()
+    if not t then return nil end
+
+    local player_state = April.require("game.player_state")
+    if player_state and player_state.is_combat_target and not player_state.is_combat_target(t) then
+        return nil
+    end
+    return t
+end
+
+function M.aim_point(target)
+    if not target then return nil end
+    local pos = target.head_position or target.position
+    if not pos then return nil end
+    return {
+        x = pos.x or pos.X or pos[1],
+        y = pos.y or pos.Y or pos[2],
+        z = pos.z or pos.Z or pos[3],
+    }
+end
+
+function M.health(target)
+    if not target then return nil end
+    return target.health
+end
+
+return M
+
+end)()
+
+-- ── game/farm_tools.lua ──
+April._mods["game.farm_tools"] = (function()
 local bootstrap = April.require("game.bootstrap")
 local env = April.require("core.env")
 
@@ -7031,6 +7366,7 @@ return M
 
 end)()
 
+-- ── game/inventory.lua ──
 April._mods["game.inventory"] = (function()
 local env = April.require("core.env")
 local items = April.require("game.items")
@@ -7181,6 +7517,7 @@ return M
 
 end)()
 
+-- ── game/player_gear.lua ──
 April._mods["game.player_gear"] = (function()
 local env = April.require("core.env")
 local items = April.require("game.items")
@@ -7594,8 +7931,8 @@ return M
 
 end)()
 
+-- ── game/player_state.lua ──
 April._mods["game.player_state"] = (function()
-
 local env = April.require("core.env")
 
 local M = {}
@@ -7657,8 +7994,8 @@ return M
 
 end)()
 
+-- ── game/brainrot_catalog.lua ──
 April._mods["game.brainrot_catalog"] = (function()
-
 local asset_urls = April.require("game.asset_urls")
 
 local M = {}
@@ -7706,8 +8043,8 @@ return M
 
 end)()
 
+-- ── game/npcs.lua ──
 April._mods["game.npcs"] = (function()
-
 local env = April.require("core.env")
 local folders = April.require("game.folders")
 
@@ -7859,8 +8196,8 @@ return M
 
 end)()
 
+-- ── game/mod_ids.lua ──
 April._mods["game.mod_ids"] = (function()
-
 local M = {}
 
 M.ROLES = {
@@ -7952,8 +8289,8 @@ return M
 
 end)()
 
+-- ── game/turret_stats.lua ──
 April._mods["game.turret_stats"] = (function()
-
 local M = {}
 
 M.ACTIVATION_RANGE = {
@@ -7979,8 +8316,8 @@ return M
 
 end)()
 
+-- ── game/esp_maps.lua ──
 April._mods["game.esp_maps"] = (function()
-
 local M = {}
 
 M.NODE_MAP = {
@@ -8197,8 +8534,8 @@ return M
 
 end)()
 
+-- ── game/esp_scan.lua ──
 April._mods["game.esp_scan"] = (function()
-
 local env = April.require("core.env")
 
 local M = {}
@@ -8491,8 +8828,8 @@ return M
 
 end)()
 
+-- ── features/combat/combat_menu.lua ──
 April._mods["features.combat.combat_menu"] = (function()
-
 local menu_util = April.require("core.menu_util")
 local esp_util = April.require("core.esp_util")
 
@@ -8581,7 +8918,6 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_checkbox(T, G, p .. "bullet_manip", "Bullet Manipulation", false, root)
     menu.add_slider_float(T, G, p .. "manip_dist", "Manip Distance", 0.1, 1, 1, "%.2f", root)
     menu.add_checkbox(T, G, p .. "manip_status", "Manip Status Bar", false, root)
-    menu.add_checkbox(T, G, p .. "manip_ring", "Manip Ring Visual", false, root)
     menu.add_checkbox(T, G, p .. "manip_peek_vis", "Manip Peek Visual", true, root)
 
     menu_util.gap(T, G)
@@ -8595,6 +8931,7 @@ return M
 
 end)()
 
+-- ── features/combat/targeting.lua ──
 April._mods["features.combat.targeting"] = (function()
 local settings = April.require("core.settings")
 local weapons = April.require("game.weapons")
@@ -9034,23 +9371,24 @@ return M
 
 end)()
 
+-- ── features/combat/bullet_tp_ray.lua ──
 April._mods["features.combat.bullet_tp_ray"] = (function()
-
 local ballistic = April.require("core.ballistic")
 local combat_origin = April.require("game.combat_origin")
 local math_util = April.require("core.math_util")
-local weapons = April.require("game.weapons")
 
 local M = {}
 
+-- Prefer Direct/Snap — most consistent valids. Deep/Curve/Arch kept for visuals.
 M.RAY_MODES = { "Direct", "Snap", "Deep", "Curve", "Arch" }
 
+-- Tighter back offsets for Direct/Snap = hook closer to target = more valids.
 local BACK_STUDS = {
-    Direct = 3.5,
-    Snap = 1.75,
-    Deep = 6.0,
-    Curve = 3.5,
-    Arch = 3.5,
+    Direct = 2.25,
+    Snap = 1.15,
+    Deep = 5.5,
+    Curve = 2.75,
+    Arch = 2.75,
 }
 
 local function unit(dx, dy, dz)
@@ -9061,6 +9399,7 @@ local function unit(dx, dy, dz)
 end
 
 local function copy_pos(p)
+    if not p then return nil end
     return { x = p.x, y = p.y, z = p.z }
 end
 
@@ -9080,18 +9419,14 @@ function M.back_studs(mode_name)
     return BACK_STUDS[mode_name] or BACK_STUDS.Direct
 end
 
-function M.predict_aim(target, head, camera, weapon_name)
-    if not head then return nil end
-    local muzzle = combat_origin.get_muzzle_origin() or camera
-    if not muzzle then return copy_pos(head) end
+-- Exact hitpart — no velocity / drop lead (silent is instant).
+function M.hitpart_aim(head)
+    return copy_pos(head)
+end
 
-    local vel = { x = 0, y = 0, z = 0 }
-    if target and target.velocity and target.velocity.x ~= nil then
-        vel = target.velocity
-    end
-
-    return ballistic.predict_for_weapon(muzzle, head, vel, weapon_name)
-        or copy_pos(head)
+-- Kept for callers; intentionally ignores velocity (instant hook).
+function M.predict_aim(_target, head, _camera, _weapon_name)
+    return M.hitpart_aim(head)
 end
 
 function M.track_origin(camera, aim, mode_name)
@@ -9103,8 +9438,16 @@ function M.track_origin(camera, aim, mode_name)
     if len < 0.05 then return copy_pos(aim) end
 
     local back = M.back_studs(mode_name)
+
+    -- Snap: pull slightly toward camera along LOS for cleaner server ray.
+    if mode_name == "Snap" then
+        back = math.min(back, math.max(0.55, len * 0.08))
+    elseif mode_name == "Direct" then
+        back = math.min(back, math.max(0.85, len * 0.12))
+    end
+
     if back >= len - 0.35 then
-        back = math.max(0.75, len * 0.35)
+        back = math.max(0.55, len * 0.28)
     end
 
     return {
@@ -9148,33 +9491,9 @@ local function sample_curve(from, to, steps)
 end
 
 local function sample_arch(muzzle, aim, weapon_name, steps)
-    steps = steps or 20
-    if not muzzle or not aim then return {} end
-
-    local stats = April.require("game.combat_stats").get_effective_stats(weapon_name)
-    local speed = math.max(stats.speed or 950, 1)
-    local g = ballistic.gravity_accel(stats.gravity)
-
-    local dx, dy, dz = aim.x - muzzle.x, aim.y - muzzle.y, aim.z - muzzle.z
-    local horiz = math.sqrt(dx * dx + dz * dz)
-    local dist = math_util.distance3(dx, dy, dz)
-    local flight = dist / speed
-
-    local vx = dx / flight
-    local vy = (dy + 0.5 * g * flight * flight) / flight
-    local vz = dz / flight
-
-    local out = {}
-    for i = 0, steps do
-        local t = (i / steps) * flight
-        out[#out + 1] = {
-            x = muzzle.x + vx * t,
-            y = muzzle.y + vy * t - 0.5 * g * t * t,
-            z = muzzle.z + vz * t,
-        }
-    end
-    out[#out + 1] = copy_pos(aim)
-    return out
+    local curve = ballistic.curve_for_weapon(muzzle, aim, weapon_name, steps or 20)
+    if curve and curve.path then return curve.path end
+    return sample_line(muzzle, aim, steps or 14)
 end
 
 function M.build_path(mode_name, hook_origin, aim, weapon_name)
@@ -9196,8 +9515,8 @@ return M
 
 end)()
 
+-- ── features/combat/silent_resolve.lua ──
 April._mods["features.combat.silent_resolve"] = (function()
-
 local settings = April.require("core.settings")
 local combat_origin = April.require("game.combat_origin")
 local silent_ray = April.require("core.silent_ray")
@@ -9205,6 +9524,7 @@ local manip_math = April.require("core.manip_math")
 local targeting = April.require("features.combat.targeting")
 local bullet_tp_ray = April.require("features.combat.bullet_tp_ray")
 local weapons = April.require("game.weapons")
+local ballistic = April.require("core.ballistic")
 
 local M = {}
 
@@ -9244,6 +9564,7 @@ function M.resolve_track(target, prefix, cx, cy)
     local camera = silent_ray.get_camera_origin()
     if not camera then return nil, nil, OFF_INFO end
 
+    -- Exact hitpart — no velocity lead (silent hook is instant).
     local aim = targeting.resolve_bone_world(target, targeting.bone_name(prefix), cx, cy)
     if not aim then return nil, nil, OFF_INFO end
 
@@ -9251,14 +9572,15 @@ function M.resolve_track(target, prefix, cx, cy)
     local manip_info = OFF_INFO
     local bullet_tp = settings.bool(prefix .. "bullet_tp", false)
     local wallbang = settings.bool(prefix .. "wallbang", false)
+    local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
 
     if bullet_tp then
         local head = targeting.bone_world(target, "Head") or aim
-        local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
         local mode_idx = settings.num(prefix .. "tp_ray_mode", 0)
         local mode_name = bullet_tp_ray.mode_name(mode_idx)
 
-        aim = bullet_tp_ray.predict_aim(target, head, camera, weapon) or head
+        -- Hitpart only — no movement prediction (hook is instant).
+        aim = bullet_tp_ray.hitpart_aim(head) or head
         track_origin = bullet_tp_ray.track_origin(camera, aim, mode_name) or aim
 
         manip_info = {
@@ -9267,6 +9589,8 @@ function M.resolve_track(target, prefix, cx, cy)
             radius = 0,
             tp_mode = mode_name,
             tp_path = bullet_tp_ray.build_path(mode_name, track_origin, aim, weapon),
+            use_curve = false,
+            weapon = weapon,
         }
     elseif settings.bool(prefix .. "bullet_manip", false) then
         local body = combat_origin.get_server_origin()
@@ -9278,19 +9602,34 @@ function M.resolve_track(target, prefix, cx, cy)
                 state = ev.state,
                 peek = ev.peek,
                 radius = ev.radius or max_r,
+                use_curve = true,
+                weapon = weapon,
             }
             if ev.state == "ready" and ev.peek then
                 track_origin = manip_math.peek_track_origin(ev.peek) or camera
             end
         else
-            manip_info = { state = "blocked", peek = nil, radius = max_r }
+            manip_info = { state = "blocked", peek = nil, radius = max_r, use_curve = true, weapon = weapon }
         end
 
         if wallbang then
             track_origin = pierce_origin(track_origin, aim) or track_origin
         end
-    elseif wallbang then
-        track_origin = pierce_origin(track_origin, aim) or track_origin
+    else
+        -- Default silent: fake weapon drop curve, still lands on hitpart.
+        local muzzle = combat_origin.get_muzzle_origin() or camera
+        local curve = ballistic.curve_for_weapon(muzzle, aim, weapon, 18)
+        manip_info = {
+            state = "curve",
+            peek = nil,
+            radius = 0,
+            use_curve = true,
+            weapon = weapon,
+            curve_path = curve and curve.path or nil,
+        }
+        if wallbang then
+            track_origin = pierce_origin(track_origin, aim) or track_origin
+        end
     end
 
     return track_origin, aim, manip_info
@@ -9300,6 +9639,7 @@ return M
 
 end)()
 
+-- ── features/combat/aimbot.lua ──
 April._mods["features.combat.aimbot"] = (function()
 local settings = April.require("core.settings")
 local targeting = April.require("features.combat.targeting")
@@ -9381,26 +9721,6 @@ local function draw_manip_status(cx, cy, fov, info)
     draw_util.text_centered(cx, y + pad_y, text, col, 11)
 end
 
-local function draw_manip_ring(info)
-    if not settings.bool(PREFIX .. "bullet_manip", false) then return end
-    if not settings.bool(PREFIX .. "manip_ring", false) then return end
-
-    local body = combat_origin.get_server_origin()
-    if not body then return end
-
-    local radius = manip_math.clamp_radius(settings.num(PREFIX .. "manip_dist", 1))
-    local ring_y = manip_math.ring_y(body)
-
-    local ring_col = { 0.15, 0.95, 0.55, 0.55 }
-    if info and info.state == "blocked" then
-        ring_col = { 0.95, 0.25, 0.25, 0.45 }
-    elseif info and info.state == "ready" then
-        ring_col = { 0.2, 0.95, 0.45, 0.7 }
-    end
-
-    desync_vis.draw_sphere_ring(body.x, ring_y, body.z, radius, ring_col, 1.5)
-end
-
 local function draw_manip_peek(info)
     if not settings.bool(PREFIX .. "manip_peek_vis", true) then return end
     if not info or not info.peek then return end
@@ -9427,12 +9747,22 @@ local function draw_manip_peek(info)
 end
 
 local function draw_tp_ray_path(info)
-    if not settings.bool(PREFIX .. "bullet_tp", false) then return end
-    if not settings.bool(PREFIX .. "tp_ray_vis", false) then return end
-    if not info or not info.tp_path or #info.tp_path < 2 then return end
+    if not info then return end
+
+    local path = info.tp_path or info.curve_path
+    if not path or #path < 2 then return end
+
+    if info.state == "tp" then
+        if not settings.bool(PREFIX .. "bullet_tp", false) then return end
+        if not settings.bool(PREFIX .. "tp_ray_vis", false) then return end
+    elseif info.state ~= "curve" then
+        return
+    end
 
     local col = settings.color(PREFIX .. "tp_ray_vis", { 0.95, 0.45, 1, 0.9 })
-    local path = info.tp_path
+    if info.state == "curve" then
+        col = { 0.45, 0.85, 1, 0.45 }
+    end
     for i = 1, #path - 1 do
         local a, b = path[i], path[i + 1]
         esp_util.draw_world_line(a.x, a.y, a.z, b.x, b.y, b.z, col, 1.5)
@@ -9440,7 +9770,7 @@ local function draw_tp_ray_path(info)
 
     local hook = cached_track.origin
     local aim = cached_track.aim
-    if hook and aim then
+    if hook and aim and info.state == "tp" then
         desync_vis.draw_cross(hook.x, hook.y, hook.z, 0.45, { 1, 0.85, 0.2, 0.95 }, 2)
         desync_vis.draw_link(hook, aim, { col[1], col[2], col[3], 0.35 }, 1)
     end
@@ -9465,7 +9795,7 @@ function M.register_menu()
         PREFIX .. "max_dist", PREFIX .. "fov", PREFIX .. "sticky",
         PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
         PREFIX .. "wallbang", PREFIX .. "bullet_tp", PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
-        PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_ring", PREFIX .. "manip_peek_vis",
+        PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
     })
 
     menu_util.bind_children(PREFIX .. "bullet_tp", {
@@ -9473,7 +9803,7 @@ function M.register_menu()
     })
 
     menu_util.bind_children(PREFIX .. "bullet_manip", {
-        PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_ring", PREFIX .. "manip_peek_vis",
+        PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
     })
 
     menu_util.bind_children(PREFIX .. "target_npcs", {
@@ -9547,7 +9877,19 @@ function M.update(_dt)
     cached_track.origin = origin
     cached_track.aim = aim
     cached_track.manip = manip_info or { state = "off" }
-    cached_track.tracking = silent_ray.track(origin, aim, SHOOT_VK) == true
+
+    local info = cached_track.manip
+    if info.use_curve and silent_ray.track_curve then
+        cached_track.tracking = silent_ray.track_curve(origin, aim, info.weapon, SHOOT_VK) == true
+        if silent_ray.last_curve then
+            local curve = silent_ray.last_curve()
+            if curve and curve.path then
+                info.curve_path = curve.path
+            end
+        end
+    else
+        cached_track.tracking = silent_ray.track(origin, aim, SHOOT_VK) == true
+    end
 end
 
 function M.get_target()
@@ -9576,7 +9918,6 @@ function M.draw()
     end
 
     if active() and settings.bool(PREFIX .. "bullet_manip", false) then
-        draw_manip_ring(cached_track.manip)
         draw_manip_status(cx, cy, fov, cached_track.manip)
         draw_manip_peek(cached_track.manip)
     end
@@ -9601,8 +9942,8 @@ return M
 
 end)()
 
+-- ── features/combat/perfect_farm.lua ──
 April._mods["features.combat.perfect_farm"] = (function()
-
 local settings = April.require("core.settings")
 local env = April.require("core.env")
 local debug = April.require("core.debug")
@@ -9844,6 +10185,7 @@ return M
 
 end)()
 
+-- ── features/combat/gun_mods.lua ──
 April._mods["features.combat.gun_mods"] = (function()
 local settings = April.require("core.settings")
 local menu_util = April.require("core.menu_util")
@@ -9873,6 +10215,7 @@ M._held_display = "—"
 M._combo_registered = false
 M._combo_ctx = nil
 M._had_applied_mods = false
+M._last_applied_keys = nil
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -9912,6 +10255,30 @@ local function clear_apply_state()
     M._gc_redo_at = 0
     M._last_held_apply = nil
     M._had_applied_mods = false
+    M._last_applied_keys = nil
+end
+
+-- Only neutralize keys we actually patched (never blanket-write FireRateMult etc.)
+local function build_clear_payload()
+    local keys = M._last_applied_keys
+    if not keys or not next(keys) then
+        return nil
+    end
+    local out = {}
+    for k in pairs(keys) do
+        out[k] = 0
+    end
+    return out
+end
+
+local function remember_applied(mods)
+    local keys = {}
+    if type(mods) == "table" then
+        for k in pairs(mods) do
+            keys[k] = true
+        end
+    end
+    M._last_applied_keys = keys
 end
 
 local function schedule_session_gc_refresh()
@@ -10080,10 +10447,16 @@ function M.reset_mods()
         return true
     end
 
-    local mods = profiles.build_reset_mods()
+    local mods = build_clear_payload()
+    if not mods then
+        M._had_applied_mods = false
+        notify.info("Gun mods cleared (nothing to reset)", 3000)
+        return true
+    end
     local ok, count, msg = gc.apply_weapon(mods)
     if ok then
         M._had_applied_mods = false
+        M._last_applied_keys = nil
         notify.info("Gun mods reset (" .. tostring(count) .. " nodes)", 3500)
     else
         notify.warning("Gun mods reset: " .. tostring(msg or "failed"), 4000)
@@ -10099,8 +10472,10 @@ function M.try_apply(silent)
     local held = profiles.held_weapon_name()
     if not held then
         if M._had_applied_mods then
-            gc.apply_weapon(profiles.build_reset_mods())
+            local clear = build_clear_payload()
+            if clear then gc.apply_weapon(clear) end
             M._had_applied_mods = false
+            M._last_applied_keys = nil
         end
         M._apply_dirty = false
         M._force_apply = false
@@ -10108,10 +10483,12 @@ function M.try_apply(silent)
     end
 
     local mods = profiles.build_mods_for_apply(held)
-    if not mods or not profiles.should_apply_for_held(held) then
+    if not mods or not next(mods) or not profiles.should_apply_for_held(held) then
         if M._had_applied_mods then
-            gc.apply_weapon(profiles.build_reset_mods())
+            local clear = build_clear_payload()
+            if clear then gc.apply_weapon(clear) end
             M._had_applied_mods = false
+            M._last_applied_keys = nil
         end
         M._apply_dirty = false
         M._force_apply = false
@@ -10125,6 +10502,7 @@ function M.try_apply(silent)
     local ok, count, msg = gc.apply_weapon(mods)
     if ok then
         M._had_applied_mods = true
+        remember_applied(mods)
         M._apply_dirty = false
         M._force_apply = false
         M._retry_until = 0
@@ -10224,6 +10602,7 @@ return M
 
 end)()
 
+-- ── features/visuals/player_esp.lua ──
 April._mods["features.visuals.player_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -10301,6 +10680,7 @@ return M
 
 end)()
 
+-- ── features/visuals/target_overlay.lua ──
 April._mods["features.visuals.target_overlay"] = (function()
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
@@ -10310,6 +10690,7 @@ local image_cache = April.require("core.image_cache")
 local items = April.require("game.items")
 local player_gear = April.require("game.player_gear")
 local player_state = April.require("game.player_state")
+local combat_target = April.require("game.combat_target")
 local math_util = April.require("core.math_util")
 local text_util = April.require("core.text_util")
 
@@ -10589,11 +10970,18 @@ function M.register_menu()
     local T, _ = menu_util.group(G.VISUALS)
 
     menu.add_checkbox(T, G.VISUALS, P, "Target Gear", false)
-    menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Target FOV", 40, 400, 150, menu_util.parent(P))
     menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, menu_util.parent(P))
     menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, menu_util.parent(P))
+    menu.add_checkbox(T, G.VISUALS, P .. "_fallback_fov", "Fallback Crosshair FOV", false, menu_util.parent(P))
+    menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Fallback FOV", 40, 400, 150, menu_util.parent(P))
 
-    menu_util.bind_master(P, { P .. "_fov", P .. "_gear_size", P .. "_top" })
+    menu_util.bind_master(P, {
+        P .. "_gear_size", P .. "_top",
+        P .. "_fallback_fov", P .. "_fov",
+    })
+    menu_util.bind_when(function()
+        return settings.enabled(P) and settings.bool(P .. "_fallback_fov", false)
+    end, { P .. "_fov" }, { P, P .. "_fallback_fov" })
 end
 
 function M.refresh_target()
@@ -10603,9 +10991,13 @@ function M.refresh_target()
         return
     end
 
-    local fov = settings.num(P .. "_fov", 150)
     local gear_sz = settings.num(P .. "_gear_size", 48)
-    local target = find_crosshair_target(fov)
+
+    -- Prefer silent-aim lock; optional FOV fallback when no lock.
+    local target = combat_target.get()
+    if not target and settings.bool(P .. "_fallback_fov", false) then
+        target = find_crosshair_target(settings.num(P .. "_fov", 150))
+    end
 
     if not target or not player_state.is_combat_target(target) then
         M._target = nil
@@ -10689,6 +11081,7 @@ return M
 
 end)()
 
+-- ── features/visuals/crosshair.lua ──
 April._mods["features.visuals.crosshair"] = (function()
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
@@ -10763,6 +11156,380 @@ return M
 
 end)()
 
+-- ── features/visuals/bullet_tracers.lua ──
+April._mods["features.visuals.bullet_tracers"] = (function()
+-- Pure draw bullet tracers (3D world lines). No instance.new.
+-- Fires on LMB while silent-aim has a target, or on confirmed HP drop.
+
+local settings = April.require("core.settings")
+local menu_util = April.require("core.menu_util")
+local combat_origin = April.require("game.combat_origin")
+local combat_target = April.require("game.combat_target")
+local weapons = April.require("game.weapons")
+local move = April.require("core.cframe_move")
+local esp_util = April.require("core.esp_util")
+local draw_util = April.require("core.draw_util")
+
+local M = {}
+
+local P = "april_bullet_tracers"
+local MAX = 36
+local tracers = {}
+local was_fire = false
+local last_hp = {}
+local last_spawn = 0
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function fire_origin()
+    local weapon = weapons.cached_held_ranged and weapons.cached_held_ranged()
+    combat_origin.sync_weapon(weapon)
+    return combat_origin.get_fire_origin()
+        or combat_origin.get_camera_origin()
+end
+
+local function entity_pos(ent)
+    if not ent then return nil end
+    local pos = ent.head_position or ent.position
+    if not pos then return nil end
+    return {
+        x = pos.x or pos.X or pos[1],
+        y = pos.y or pos.Y or pos[2],
+        z = pos.z or pos.Z or pos[3],
+    }
+end
+
+local function spawn(from, to)
+    local now = tick_ms()
+    if now - last_spawn < 20 then return end
+    last_spawn = now
+    while #tracers >= MAX do table.remove(tracers, 1) end
+    tracers[#tracers + 1] = {
+        from = from,
+        to = to,
+        born = now,
+        life = settings.num("april_bullet_tracers_life", 450),
+    }
+end
+
+local function try_spawn_to_target()
+    local from = fire_origin()
+    if not from then return end
+    local tgt = combat_target.get()
+    local to = entity_pos(tgt)
+    if not to then return end
+    spawn(from, to)
+end
+
+function M.register_menu()
+    local G = menu_util.G
+    local T = menu_util.group(G.VISUALS)
+    local root = menu_util.parent(P)
+
+    menu.add_checkbox(T, G.VISUALS, P, "Bullet Tracers", false, {
+        colorpicker = { 1, 0.55, 0.15, 0.95 },
+    })
+    menu.add_colorpicker(T, G.VISUALS, "april_bullet_tracers_color2", "Tracer Glow",
+        { 1, 0.25, 0.35, 0.55 }, root)
+    menu.add_slider_int(T, G.VISUALS, "april_bullet_tracers_thick", "Thickness", 1, 6, 2, root)
+    menu.add_slider_int(T, G.VISUALS, "april_bullet_tracers_life", "Life (ms)", 100, 1500, 450, root)
+
+    menu_util.bind_children(P, {
+        "april_bullet_tracers_color2",
+        "april_bullet_tracers_thick", "april_bullet_tracers_life",
+    })
+end
+
+function M.notify_hit(from, to)
+    if not settings.enabled(P) then return end
+    from = from or fire_origin()
+    to = to or entity_pos(combat_target.get())
+    if from and to then spawn(from, to) end
+end
+
+function M.update(_dt)
+    if not settings.enabled(P) then
+        was_fire = false
+        tracers = {}
+        return
+    end
+
+    local firing = move.key_down(0x01)
+    if firing and not was_fire then
+        try_spawn_to_target()
+    end
+    was_fire = firing
+
+    -- Damage confirm while holding fire
+    if firing then
+        local tgt = combat_target.get()
+        if tgt and tgt.health ~= nil then
+            local uid = tostring(tgt.user_id or tgt.name or "?")
+            local prev = last_hp[uid]
+            last_hp[uid] = tgt.health
+            if prev and tgt.health < prev - 0.35 then
+                try_spawn_to_target()
+            end
+        end
+    end
+
+    local now = tick_ms()
+    local i = 1
+    while i <= #tracers do
+        if now - tracers[i].born > tracers[i].life then
+            table.remove(tracers, i)
+        else
+            i = i + 1
+        end
+    end
+end
+
+function M.draw()
+    if not settings.enabled(P) then return end
+
+    local c1 = settings.color(P, { 1, 0.55, 0.15, 0.95 })
+    local c2 = settings.color("april_bullet_tracers_color2", { 1, 0.25, 0.35, 0.55 })
+    local thick = settings.num("april_bullet_tracers_thick", 2)
+    local now = tick_ms()
+
+    for i = 1, #tracers do
+        local tr = tracers[i]
+        local a = 1 - ((now - tr.born) / math.max(1, tr.life))
+        if a <= 0 then goto continue end
+
+        local glow = { c2[1], c2[2], c2[3], (c2[4] or 0.55) * a * 0.5 }
+        local core = { c1[1], c1[2], c1[3], (c1[4] or 0.95) * a }
+
+        -- Soft outer + bright core (world-space 3D lines)
+        esp_util.draw_world_line(
+            tr.from.x, tr.from.y, tr.from.z,
+            tr.to.x, tr.to.y, tr.to.z,
+            glow, thick + 2
+        )
+        esp_util.draw_world_line(
+            tr.from.x, tr.from.y, tr.from.z,
+            tr.to.x, tr.to.y, tr.to.z,
+            core, thick
+        )
+
+        -- Tip spark
+        local sx, sy, vis = nil, nil, false
+        if utility and utility.world_to_screen then
+            sx, sy, vis = utility.world_to_screen(tr.to.x, tr.to.y, tr.to.z)
+        end
+        if vis and sx and draw_util.circle then
+            draw_util.circle(sx, sy, 2 + thick, core, true)
+        end
+
+        ::continue::
+    end
+end
+
+return M
+
+end)()
+
+-- ── features/visuals/hitmarkers.lua ──
+April._mods["features.visuals.hitmarkers"] = (function()
+-- Screen hitmarkers (draw only). Triggered by HP drop / game HitMarker flash.
+
+local settings = April.require("core.settings")
+local menu_util = April.require("core.menu_util")
+local combat_target = April.require("game.combat_target")
+local env = April.require("core.env")
+local draw_util = April.require("core.draw_util")
+
+local M = {}
+
+local P = "april_hitmarkers"
+local markers = {}
+local last_hp = {}
+local last_spawn = 0
+local hitmarker_was = false
+local MAX = 12
+
+local STYLES = { "Cross", "X", "Dot", "Bracket" }
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function spawn(is_head)
+    local now = tick_ms()
+    if now - last_spawn < 30 then return end
+    last_spawn = now
+    while #markers >= MAX do table.remove(markers, 1) end
+    markers[#markers + 1] = {
+        born = now,
+        life = settings.num("april_hitmarkers_life", 280),
+        head = is_head == true,
+    }
+end
+
+local function watch_hp()
+    local tgt = combat_target.get()
+    if not tgt or tgt.health == nil then return end
+    local uid = tostring(tgt.user_id or tgt.name or "?")
+    local prev = last_hp[uid]
+    last_hp[uid] = tgt.health
+    if prev and tgt.health < prev - 0.35 then
+        local max_hp = tgt.max_health or 100
+        local drop = prev - tgt.health
+        spawn(drop >= (max_hp * 0.35) or drop >= 40)
+    end
+end
+
+local function watch_game_hitmarker()
+    local lp = env.get_local_player and env.get_local_player()
+    if not lp then return end
+    local pg = env.safe_call(function()
+        return lp.PlayerGui
+            or (lp.find_first_child and lp:find_first_child("PlayerGui"))
+            or (lp.FindFirstChild and lp:FindFirstChild("PlayerGui"))
+    end)
+    if not pg then return end
+    local main = env.safe_call(function()
+        return pg:FindFirstChild("Main") or (pg.find_first_child and pg:find_first_child("Main"))
+    end)
+    if not main then return end
+    local hm = env.safe_call(function()
+        return main:FindFirstChild("HitMarker") or (main.find_first_child and main:find_first_child("HitMarker"))
+    end)
+    if not hm then return end
+    local vis = env.safe_call(function() return hm.Visible end)
+    if vis and not hitmarker_was then
+        local rot = env.safe_call(function() return hm.Rotation end)
+        -- Game uses red children for headshots; Rotation alone isn't enough — treat as body.
+        spawn(false)
+        local ok, tracers = pcall(function()
+            return April.require("features.visuals.bullet_tracers")
+        end)
+        if ok and tracers and tracers.notify_hit then tracers.notify_hit() end
+    end
+    hitmarker_was = vis and true or false
+end
+
+function M.register_menu()
+    local G = menu_util.G
+    local T = menu_util.group(G.VISUALS)
+    local root = menu_util.parent(P)
+
+    menu.add_checkbox(T, G.VISUALS, P, "Hitmarkers", false, {
+        colorpicker = { 1, 1, 1, 0.95 },
+    })
+    menu.add_checkbox(T, G.VISUALS, "april_hitmarkers_head", "Headshot Color", true, {
+        parent = P,
+        colorpicker = { 1, 0.2, 0.2, 1 },
+    })
+    menu.add_combo(T, G.VISUALS, "april_hitmarkers_style", "Style", STYLES, 0, root)
+    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_size", "Size", 4, 28, 10, root)
+    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_gap", "Gap", 0, 12, 3, root)
+    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_life", "Life (ms)", 80, 800, 280, root)
+    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_thick", "Thickness", 1, 4, 2, root)
+
+    menu_util.bind_children(P, {
+        "april_hitmarkers_head",
+        "april_hitmarkers_style", "april_hitmarkers_size",
+        "april_hitmarkers_gap", "april_hitmarkers_life", "april_hitmarkers_thick",
+    })
+end
+
+function M.update(_dt)
+    if not settings.enabled(P) then
+        markers = {}
+        hitmarker_was = false
+        return
+    end
+    watch_hp()
+    watch_game_hitmarker()
+
+    local now = tick_ms()
+    local i = 1
+    while i <= #markers do
+        if now - markers[i].born > markers[i].life then
+            table.remove(markers, i)
+        else
+            i = i + 1
+        end
+    end
+end
+
+local function draw_cross(cx, cy, size, gap, thick, col)
+    local s = size
+    local g = gap
+    draw_util.line(cx - s, cy, cx - g, cy, col, thick)
+    draw_util.line(cx + g, cy, cx + s, cy, col, thick)
+    draw_util.line(cx, cy - s, cx, cy - g, col, thick)
+    draw_util.line(cx, cy + g, cx, cy + s, col, thick)
+end
+
+local function draw_x(cx, cy, size, gap, thick, col)
+    local s = size * 0.75
+    local g = gap * 0.7
+    draw_util.line(cx - s, cy - s, cx - g, cy - g, col, thick)
+    draw_util.line(cx + g, cy + g, cx + s, cy + s, col, thick)
+    draw_util.line(cx + s, cy - s, cx + g, cy - g, col, thick)
+    draw_util.line(cx - g, cy + g, cx - s, cy + s, col, thick)
+end
+
+local function draw_bracket(cx, cy, size, gap, thick, col)
+    local s = size
+    local g = gap
+    local arm = s * 0.45
+    draw_util.line(cx - s, cy - s, cx - s, cy - g, col, thick)
+    draw_util.line(cx - s, cy - s, cx - s + arm, cy - s, col, thick)
+    draw_util.line(cx - s, cy + g, cx - s, cy + s, col, thick)
+    draw_util.line(cx - s, cy + s, cx - s + arm, cy + s, col, thick)
+    draw_util.line(cx + s, cy - s, cx + s, cy - g, col, thick)
+    draw_util.line(cx + s, cy - s, cx + s - arm, cy - s, col, thick)
+    draw_util.line(cx + s, cy + g, cx + s, cy + s, col, thick)
+    draw_util.line(cx + s, cy + s, cx + s - arm, cy + s, col, thick)
+end
+
+function M.draw()
+    if not settings.enabled(P) then return end
+    if #markers == 0 then return end
+
+    local sw, sh = draw_util.screen_size()
+    local cx, cy = sw * 0.5, sh * 0.5
+    local style = settings.num("april_hitmarkers_style", 0)
+    local size = settings.num("april_hitmarkers_size", 10)
+    local gap = settings.num("april_hitmarkers_gap", 3)
+    local thick = settings.num("april_hitmarkers_thick", 2)
+    local body_col = settings.color(P, { 1, 1, 1, 0.95 })
+    local head_col = settings.color("april_hitmarkers_head", { 1, 0.2, 0.2, 1 })
+    local now = tick_ms()
+
+    for i = 1, #markers do
+        local m = markers[i]
+        local a = 1 - ((now - m.born) / math.max(1, m.life))
+        if a <= 0 then goto continue end
+        local expand = 1 + (1 - a) * 0.35
+        local col = m.head and head_col or body_col
+        col = { col[1], col[2], col[3], (col[4] or 1) * a }
+        local s = size * expand
+        local g = gap
+
+        if style == 1 then
+            draw_x(cx, cy, s, g, thick, col)
+        elseif style == 2 then
+            draw_util.circle(cx, cy, 2 + s * 0.15, col, true)
+        elseif style == 3 then
+            draw_bracket(cx, cy, s, g, thick, col)
+        else
+            draw_cross(cx, cy, s, g, thick, col)
+        end
+        ::continue::
+    end
+end
+
+return M
+
+end)()
+
+-- ── features/visuals/brainrot_esp.lua ──
 April._mods["features.visuals.brainrot_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -10938,6 +11705,7 @@ return M
 
 end)()
 
+-- ── features/world/world_esp.lua ──
 April._mods["features.world.world_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -11125,6 +11893,7 @@ return M
 
 end)()
 
+-- ── features/world/loot_esp.lua ──
 April._mods["features.world.loot_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -11464,6 +12233,7 @@ return M
 
 end)()
 
+-- ── features/world/base_esp.lua ──
 April._mods["features.world.base_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -11733,6 +12503,7 @@ return M
 
 end)()
 
+-- ── features/world/npc_esp.lua ──
 April._mods["features.world.npc_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -11934,7 +12705,8 @@ local function draw_npc_health(bounds, entry)
     end
 
     if not hp or not max_hp or max_hp <= 0 then return end
-    draw.health_bar(bounds.x - 6, bounds.y, bounds.h, hp, max_hp)
+    -- Flush against box left edge (was -6, left a visible gap).
+    draw.health_bar(bounds.x - 1, bounds.y, bounds.h, hp, max_hp)
 end
 
 function M.update(_dt)
@@ -12066,6 +12838,7 @@ return M
 
 end)()
 
+-- ── features/movement/exploits.lua ──
 April._mods["features.movement.exploits"] = (function()
 local menu_util = April.require("core.menu_util")
 
@@ -12073,19 +12846,35 @@ local M = {}
 
 function M.register_menu()
     local G = menu_util.G
-    local T, _ = menu_util.group(G.MISC)
+    local T = menu_util.group(G.MISC)
 
-    menu_util.register_keybind(T, G.MISC, "april_noclip_enabled", "Inf Fly", false)
-    menu.add_slider_int(T, G.MISC, "april_noclip_speed", "Inf Fly Speed", 16, 200, 72, menu_util.parent("april_noclip_enabled"))
-
-    menu_util.register_keybind(T, G.MISC, "april_spider_enabled", "Spider", false)
-    menu.add_slider_int(T, G.MISC, "april_spider_speed", "Spider Climb Speed", 1, 50, 20, menu_util.parent("april_spider_enabled"))
+    -- Id kept as april_noclip_enabled for config compatibility; label is Fly.
+    menu_util.register_keybind(T, G.MISC, "april_noclip_enabled", "Fly", false, { key = 0x46 })
+    menu.add_slider_int(
+        T,
+        G.MISC,
+        "april_noclip_speed",
+        "Fly Speed",
+        2,
+        4,
+        3,
+        menu_util.parent("april_noclip_enabled")
+    )
 
     menu_util.register_keybind(T, G.MISC, "april_slowfall_enabled", "Slowfall", false)
-    menu.add_slider_int(T, G.MISC, "april_slowfall_speed", "Fall Speed", 1, 50, 5, menu_util.parent("april_slowfall_enabled"))
+    menu.add_slider_int(
+        T,
+        G.MISC,
+        "april_slowfall_speed",
+        "Fall Speed",
+        1,
+        50,
+        5,
+        menu_util.parent("april_slowfall_enabled")
+    )
+    menu_util.label(T, G.MISC, "Slowfall: includes shoot-while-jumping bypass")
 
     menu_util.bind_children("april_noclip_enabled", { "april_noclip_speed" })
-    menu_util.bind_children("april_spider_enabled", { "april_spider_speed" })
     menu_util.bind_children("april_slowfall_enabled", { "april_slowfall_speed" })
 end
 
@@ -12097,35 +12886,8 @@ return M
 
 end)()
 
-April._mods["features.movement.noclip"] = (function()
-
-local menu_util = April.require("core.menu_util")
-
-local M = {}
-
-local P = "april_walk_noclip_enabled"
-local P_SPEED = "april_walk_noclip_speed"
-
-function M.register_menu()
-    local G = menu_util.G
-    local T, _ = menu_util.group(G.MISC)
-    local root = menu_util.parent(P)
-
-    menu_util.register_keybind(T, G.MISC, P, "Noclip", false)
-    menu.add_slider_int(T, G.MISC, P_SPEED, "Noclip Speed", 8, 80, 32, root)
-    menu_util.bind_children(P, { P_SPEED })
-end
-
-function M.update(_dt) end
-
-function M.draw() end
-
-return M
-
-end)()
-
+-- ── features/movement/fling.lua ──
 April._mods["features.movement.fling"] = (function()
-
 local settings = April.require("core.settings")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
@@ -12139,10 +12901,7 @@ local M = {}
 
 local P = "april_fling_enabled"
 local P_FOV = "april_fling_fov"
-local P_KEY = "april_fling_key"
-local P_KEY_MODE = "april_fling_key_mode"
 local P_DURATION = "april_fling_duration"
-local KEY_MODES = { "Toggle", "Hold" }
 
 local MAX_DIST = 300.0
 local FAR_RANGE = 40.0
@@ -12156,10 +12915,6 @@ local FLING_HIT_PARTS = { "HumanoidRootPart" }
 
 local function fling_duration()
     return settings.num(P_DURATION, 2)
-end
-
-local function key_is_hold()
-    return settings.combo_index(P_KEY_MODE, KEY_MODES, 0) == 1
 end
 
 local STATE_IDLE = 0
@@ -12180,7 +12935,6 @@ local saved_pos = nil
 local target_root = nil
 local target_player = nil
 local last_attach = nil
-local key_was_down = false
 
 local function now()
     if utility and utility.get_time then return utility.get_time() end
@@ -12725,36 +13479,24 @@ local function try_trigger()
     begin_fling(root, char, hum, tgt_player, tgt_root)
 end
 
-local function poll_key()
-    if not settings.enabled(P) then
-        key_was_down = false
-        return
-    end
-    if state ~= STATE_IDLE then return end
-    if not menu or not menu.get_key then return end
+-- Rising-edge trigger so Hold mode fires once per press, Toggle/Always once when enabled.
+local was_enabled = false
 
-    local key = menu.get_key(P_KEY) or 0
-    if key <= 0 then
-        key_was_down = false
-        return
-    end
-    if not input or not input.is_key_down then return end
-
-    local down = input.is_key_down(key)
-    if key_is_hold() then
-        if down then
-            try_trigger()
-        end
-    elseif down and not key_was_down then
+local function poll_enable()
+    local on = settings.enabled(P)
+    if on and not was_enabled then
         try_trigger()
     end
-    key_was_down = down
+    was_enabled = on
 end
 
 local function tick(_dt)
     if state == STATE_IDLE then
-        if not misc_gate.movement_allowed() then return end
-        poll_key()
+        if not misc_gate.movement_allowed() then
+            was_enabled = settings.enabled(P)
+            return
+        end
+        poll_enable()
         return
     end
 
@@ -12789,17 +13531,13 @@ end
 
 function M.register_menu()
     local G = menu_util.G
-    local T, _ = menu_util.group(G.MISC)
+    local T = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
-    menu.add_checkbox(T, G.MISC, P, "Fling", false)
+    menu_util.register_keybind(T, G.MISC, P, "Fling", false)
     menu.add_slider_int(T, G.MISC, P_FOV, "Fling FOV", 20, 600, 150, root)
     menu.add_slider_int(T, G.MISC, P_DURATION, "Fling Duration", 2, 10, 2, root)
-    menu.add_combo(T, G.MISC, P_KEY_MODE, "Fling Key Mode", KEY_MODES, 0, root)
-    if menu.add_hotkey then
-        menu.add_hotkey(T, G.MISC, P_KEY, "Fling Key", 0, root)
-    end
-    menu_util.bind_children(P, { P_FOV, P_DURATION, P_KEY_MODE, P_KEY })
+    menu_util.bind_children(P, { P_FOV, P_DURATION })
 end
 
 function M.install()
@@ -12819,6 +13557,7 @@ return M
 
 end)()
 
+-- ── features/movement/desync.lua ──
 April._mods["features.movement.desync"] = (function()
 local settings = April.require("core.settings")
 local env = April.require("core.env")
@@ -13013,6 +13752,7 @@ return M
 
 end)()
 
+-- ── features/radar/waypoints.lua ──
 April._mods["features.radar.waypoints"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -13104,6 +13844,7 @@ return M
 
 end)()
 
+-- ── features/radar/tactical_map.lua ──
 April._mods["features.radar.tactical_map"] = (function()
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
@@ -13437,6 +14178,7 @@ return M
 
 end)()
 
+-- ── features/utility/mod_checker.lua ──
 April._mods["features.utility.mod_checker"] = (function()
 local settings = April.require("core.settings")
 local notify = April.require("core.notify")
@@ -13808,6 +14550,7 @@ return M
 
 end)()
 
+-- ── features/utility/config.lua ──
 April._mods["features.utility.config"] = (function()
 local settings = April.require("core.settings")
 local menu_util = April.require("core.menu_util")
@@ -13921,6 +14664,7 @@ return M
 
 end)()
 
+-- ── menu/tabs.lua ──
 April._mods["menu.tabs"] = (function()
 local menu_util = April.require("core.menu_util")
 local debug = April.require("core.debug")
@@ -13937,6 +14681,8 @@ M.FEATURE_ORDER = {
     "features.combat.gun_mods",
     "features.visuals.target_overlay",
     "features.visuals.crosshair",
+    "features.visuals.bullet_tracers",
+    "features.visuals.hitmarkers",
     "features.visuals.brainrot_esp",
     "features.world.world_esp",
     "features.world.loot_esp",
@@ -13947,7 +14693,6 @@ M.FEATURE_ORDER = {
     "features.utility.mod_checker",
     "features.combat.perfect_farm",
     "features.movement.exploits",
-    "features.movement.noclip",
     "features.movement.fling",
     "features.movement.desync",
     "features.utility.config",
@@ -14103,6 +14848,7 @@ return M
 
 end)()
 
+-- ── app.lua ──
 April._mods["app"] = (function()
 local tabs = April.require("menu.tabs")
 local debug = April.require("core.debug")
@@ -14139,6 +14885,7 @@ return M
 
 end)()
 
+-- Vector requires menu registration from the script main chunk (not nested init).
 do
     April.require("menu.tabs").register_all()
 end

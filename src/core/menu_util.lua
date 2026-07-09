@@ -239,6 +239,9 @@ function M.bind_children(master_id, extra_ids)
     M.bind_master(master_id, extra_ids or {})
 end
 
+-- Custom Toggle / Hold bind (Vector's built-in Always/Hold/Toggle is unreliable).
+-- Checkbox key is for display + our listener; Bind Mode combo is Toggle|Hold.
+-- Gate features with settings.enabled(id).
 function M.register_keybind(T, G, id, label, default, extra)
     extra = extra or {}
     local cb_opts = { show_mode = false, key = extra.key or 0 }
@@ -257,6 +260,7 @@ function M.register_keybind(T, G, id, label, default, extra)
         key_id = id,
     })
 
+    M.bind_master(id, { mode_id })
     return mode_id
 end
 

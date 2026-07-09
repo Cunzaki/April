@@ -1,3 +1,6 @@
+-- Soft movement helpers. Prefer velocity writes on HRP only — avoid position
+-- teleports, limb velocity spam, and insane pulse values (those ban).
+
 local env = April.require("core.env")
 
 local M = {}
@@ -12,6 +15,7 @@ local NOCLIP_PARTS = {
 }
 
 local HIP_OFFSET = 3.0
+local DEFAULT_GRAVITY = 196.2
 
 function M.delta_time()
     if utility and utility.get_delta_time then
@@ -90,7 +94,29 @@ function M.set_velocity(inst, x, y, z)
     if part and part.set_velocity then
         pcall(part.set_velocity, inst, x, y, z)
     else
-        pcall(function() inst.Velocity = Vector3.new(x, y, z) end)
+        pcall(function()
+            if inst.set_velocity then
+                inst:set_velocity(x, y, z)
+            else
+                inst.Velocity = Vector3.new(x, y, z)
+            end
+        end)
+    end
+end
+
+function M.set_angular_velocity(inst, x, y, z)
+    if not inst then return end
+    x, y, z = x or 0, y or 0, z or 0
+    if part and part.set_angular_velocity then
+        pcall(part.set_angular_velocity, inst, x, y, z)
+    else
+        pcall(function()
+            if inst.set_angular_velocity then
+                inst:set_angular_velocity(x, y, z)
+            else
+                inst.AngularVelocity = Vector3.new(x, y, z)
+            end
+        end)
     end
 end
 
@@ -99,7 +125,13 @@ function M.set_position_only(inst, x, y, z)
     if part and part.set_position then
         pcall(part.set_position, inst, x, y, z)
     else
-        pcall(function() inst.Position = Vector3.new(x, y, z) end)
+        pcall(function()
+            if inst.set_position then
+                inst:set_position(x, y, z)
+            else
+                inst.Position = Vector3.new(x, y, z)
+            end
+        end)
     end
 end
 
@@ -129,7 +161,11 @@ end
 
 function M.humanoid_state(hum, state)
     if not hum or state == nil then return end
-    pcall(function() hum.state = state end)
+    pcall(function()
+        if hum.set_state then hum:set_state(state)
+        else hum.state = state
+        end
+    end)
 end
 
 function M.humanoid_suspend(hum)
@@ -147,9 +183,7 @@ end
 function M.zero_part(inst)
     if not inst then return end
     M.set_velocity(inst, 0, 0, 0)
-    if part and part.set_angular_velocity then
-        pcall(part.set_angular_velocity, inst, 0, 0, 0)
-    end
+    M.set_angular_velocity(inst, 0, 0, 0)
 end
 
 function M.zero_character(char, root)
@@ -160,6 +194,15 @@ function M.zero_character(char, root)
             M.zero_part(p)
         end
     end
+end
+
+function M.workspace_gravity()
+    local ws = env.get_workspace and env.get_workspace() or (game and game.workspace)
+    if ws then
+        local g = ws.Gravity or ws.gravity
+        if type(g) == "number" and g > 0 then return g end
+    end
+    return DEFAULT_GRAVITY
 end
 
 function M.camera_flat_axes()
@@ -220,6 +263,7 @@ function M.clamp_above_floor(x, y, z)
     return y
 end
 
+-- Legacy position+velocity drive (teleports). Prefer drive_root_velocity.
 function M.drive_root(root, pos, dx, dy, dz, speed, dt)
     if not root or not pos then return pos end
 
@@ -227,7 +271,7 @@ function M.drive_root(root, pos, dx, dy, dz, speed, dt)
     local mag = math.sqrt(dx * dx + dy * dy + dz * dz)
 
     if mag < 0.001 then
-        M.set_velocity(root, 0, -0.1, 0)
+        M.set_velocity(root, 0, 0, 0)
         return pos
     end
 
@@ -241,6 +285,47 @@ function M.drive_root(root, pos, dx, dy, dz, speed, dt)
     M.set_velocity(root, dx * speed, dy * speed, dz * speed)
 
     return { x = nx, y = ny, z = nz }
+end
+
+-- Velocity-only HRP drive: no position writes. Smooth lerp toward target vel.
+function M.drive_root_velocity(root, dx, dy, dz, speed, dt, opts)
+    if not root then return end
+    opts = opts or {}
+    dt = dt or M.delta_time()
+
+    local mag = math.sqrt(dx * dx + dy * dy + dz * dz)
+    local tx, ty, tz = 0, 0, 0
+    if mag >= 0.001 then
+        dx, dy, dz = dx / mag, dy / mag, dz / mag
+        tx, ty, tz = dx * speed, dy * speed, dz * speed
+    end
+
+    -- Soft gravity cancel when hovering / moving so we don't need PlatformStand.
+    if opts.cancel_gravity ~= false and math.abs(ty) < 0.01 and mag < 0.001 then
+        -- idle hover: hold altitude with near-zero vertical (server still sees freefall-ish)
+        ty = 0
+    elseif opts.cancel_gravity ~= false and math.abs(dy) < 0.01 and mag >= 0.001 then
+        -- horizontal move: keep Y stable
+        ty = 0
+    end
+
+    local cx, cy, cz = M.read_velocity(root)
+    local blend = opts.blend or 0.35
+    blend = math.max(0.05, math.min(1, blend))
+
+    local nx = cx + (tx - cx) * blend
+    local ny = cy + (ty - cy) * blend
+    local nz = cz + (tz - cz) * blend
+
+    local max_speed = opts.max_speed or (speed * 1.15)
+    local sm = math.sqrt(nx * nx + ny * ny + nz * nz)
+    if sm > max_speed and sm > 0.001 then
+        local s = max_speed / sm
+        nx, ny, nz = nx * s, ny * s, nz * s
+    end
+
+    M.set_velocity(root, nx, ny, nz)
+    M.set_angular_velocity(root, 0, 0, 0)
 end
 
 return M

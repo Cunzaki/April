@@ -7,6 +7,7 @@
     "extract-images": "node scripts/extract-item-images.mjs",
     "download-assets": "node scripts/download-assets.mjs",
     "download-missing": "node scripts/download-assets.mjs --missing-only --slow",
-    "assets": "node scripts/extract-item-images.mjs && node scripts/download-assets.mjs"
+    "assets": "node scripts/extract-item-images.mjs && node scripts/download-assets.mjs",
+    "dump": "node scripts/dump-rbxlx.mjs"
   }
 }

@@ -198,7 +198,8 @@ local function draw_npc_health(bounds, entry)
     end
 
     if not hp or not max_hp or max_hp <= 0 then return end
-    draw.health_bar(bounds.x - 6, bounds.y, bounds.h, hp, max_hp)
+    -- Flush against box left edge (was -6, left a visible gap).
+    draw.health_bar(bounds.x - 1, bounds.y, bounds.h, hp, max_hp)
 end
 
 function M.update(_dt)

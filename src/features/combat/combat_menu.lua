@@ -86,7 +86,6 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_checkbox(T, G, p .. "bullet_manip", "Bullet Manipulation", false, root)
     menu.add_slider_float(T, G, p .. "manip_dist", "Manip Distance", 0.1, 1, 1, "%.2f", root)
     menu.add_checkbox(T, G, p .. "manip_status", "Manip Status Bar", false, root)
-    menu.add_checkbox(T, G, p .. "manip_ring", "Manip Ring Visual", false, root)
     menu.add_checkbox(T, G, p .. "manip_peek_vis", "Manip Peek Visual", true, root)
 
     menu_util.gap(T, G)

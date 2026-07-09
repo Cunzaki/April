@@ -26,6 +26,7 @@ M._held_display = "—"
 M._combo_registered = false
 M._combo_ctx = nil
 M._had_applied_mods = false
+M._last_applied_keys = nil
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -65,6 +66,30 @@ local function clear_apply_state()
     M._gc_redo_at = 0
     M._last_held_apply = nil
     M._had_applied_mods = false
+    M._last_applied_keys = nil
+end
+
+-- Only neutralize keys we actually patched (never blanket-write FireRateMult etc.)
+local function build_clear_payload()
+    local keys = M._last_applied_keys
+    if not keys or not next(keys) then
+        return nil
+    end
+    local out = {}
+    for k in pairs(keys) do
+        out[k] = 0
+    end
+    return out
+end
+
+local function remember_applied(mods)
+    local keys = {}
+    if type(mods) == "table" then
+        for k in pairs(mods) do
+            keys[k] = true
+        end
+    end
+    M._last_applied_keys = keys
 end
 
 local function schedule_session_gc_refresh()
@@ -233,10 +258,16 @@ function M.reset_mods()
         return true
     end
 
-    local mods = profiles.build_reset_mods()
+    local mods = build_clear_payload()
+    if not mods then
+        M._had_applied_mods = false
+        notify.info("Gun mods cleared (nothing to reset)", 3000)
+        return true
+    end
     local ok, count, msg = gc.apply_weapon(mods)
     if ok then
         M._had_applied_mods = false
+        M._last_applied_keys = nil
         notify.info("Gun mods reset (" .. tostring(count) .. " nodes)", 3500)
     else
         notify.warning("Gun mods reset: " .. tostring(msg or "failed"), 4000)
@@ -252,8 +283,10 @@ function M.try_apply(silent)
     local held = profiles.held_weapon_name()
     if not held then
         if M._had_applied_mods then
-            gc.apply_weapon(profiles.build_reset_mods())
+            local clear = build_clear_payload()
+            if clear then gc.apply_weapon(clear) end
             M._had_applied_mods = false
+            M._last_applied_keys = nil
         end
         M._apply_dirty = false
         M._force_apply = false
@@ -261,10 +294,12 @@ function M.try_apply(silent)
     end
 
     local mods = profiles.build_mods_for_apply(held)
-    if not mods or not profiles.should_apply_for_held(held) then
+    if not mods or not next(mods) or not profiles.should_apply_for_held(held) then
         if M._had_applied_mods then
-            gc.apply_weapon(profiles.build_reset_mods())
+            local clear = build_clear_payload()
+            if clear then gc.apply_weapon(clear) end
             M._had_applied_mods = false
+            M._last_applied_keys = nil
         end
         M._apply_dirty = false
         M._force_apply = false
@@ -278,6 +313,7 @@ function M.try_apply(silent)
     local ok, count, msg = gc.apply_weapon(mods)
     if ok then
         M._had_applied_mods = true
+        remember_applied(mods)
         M._apply_dirty = false
         M._force_apply = false
         M._retry_until = 0

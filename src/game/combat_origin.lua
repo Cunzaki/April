@@ -68,20 +68,82 @@ local function viewmodel_cframe_origin()
     return pos
 end
 
+local function find_flash_in(model)
+    if not model then return nil end
+    local flash = find_child(model, "FlashPart") or find_child(model, "Flash")
+    if flash then return part_pos(flash) end
+    local weapon = find_child(model, "Weapon")
+    if weapon then
+        flash = find_child(weapon, "FlashPart") or find_child(weapon, "Flash")
+        if flash then return part_pos(flash) end
+    end
+    local desc = env.safe_call(function()
+        if model.get_descendants then return model:get_descendants() end
+        return model:GetDescendants()
+    end) or {}
+    for _, d in ipairs(desc) do
+        local n = d.Name or d.name
+        if n == "FlashPart" or n == "Flash" then
+            return part_pos(d)
+        end
+    end
+    return nil
+end
+
+local function camera_viewmodel()
+    local ws = env.get_workspace()
+    if not ws then return nil end
+    local cam = env.safe_call(function()
+        return ws.CurrentCamera or ws.currentCamera
+            or (ws.FindFirstChild and ws:FindFirstChild("CurrentCamera"))
+    end)
+    if not cam then return nil end
+    local kids = env.safe_call(function()
+        if cam.get_children then return cam:get_children() end
+        return cam:GetChildren()
+    end) or {}
+    for _, child in ipairs(kids) do
+        local cn = child.ClassName or child.class_name
+        if cn == "Model" then
+            if find_child(child, "Weapon") or find_child(child, "Arms") then
+                return child
+            end
+        end
+    end
+    return nil
+end
+
 local function flashpart_origin()
+    -- Live VM is parented to CurrentCamera (ViewmodelController), not workspace.Viewmodels
+    local live = camera_viewmodel()
+    local pos = find_flash_in(live)
+    if pos then return pos end
+
     local ws = env.get_workspace()
     if not ws then return nil end
 
-    local vms = env.safe_call(function() return ws:find_first_child("Viewmodels") end)
-        or env.safe_call(function() return ws:FindFirstChild("Viewmodels") end)
-    if not vms then return nil end
+    local vfx = find_child(ws, "VFX")
+    local vms = vfx and find_child(vfx, "VMs")
+    if vms then
+        local kids = env.safe_call(function()
+            if vms.get_children then return vms:get_children() end
+            return vms:GetChildren()
+        end) or {}
+        for _, child in ipairs(kids) do
+            pos = find_flash_in(child)
+            if pos then return pos end
+        end
+    end
 
-    local vm = env.safe_call(function() return vms:find_first_child("Viewmodel") end)
-        or env.safe_call(function() return vms:FindFirstChild("Viewmodel") end)
-    if not vm then return nil end
+    -- Legacy fallback
+    local legacy = find_child(ws, "Viewmodels")
+    if legacy then
+        local vm = find_child(legacy, "Viewmodel") or find_child(legacy, "ViewModel")
+        pos = find_flash_in(vm)
+        if pos then return pos end
+    end
 
-    local flash = find_child(vm, "FlashPart") or find_child(vm, "Flash")
-    return part_pos(flash)
+    return nil
 end
 
 local function compute_muzzle(weapon)

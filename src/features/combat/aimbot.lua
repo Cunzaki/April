@@ -78,26 +78,6 @@ local function draw_manip_status(cx, cy, fov, info)
     draw_util.text_centered(cx, y + pad_y, text, col, 11)
 end
 
-local function draw_manip_ring(info)
-    if not settings.bool(PREFIX .. "bullet_manip", false) then return end
-    if not settings.bool(PREFIX .. "manip_ring", false) then return end
-
-    local body = combat_origin.get_server_origin()
-    if not body then return end
-
-    local radius = manip_math.clamp_radius(settings.num(PREFIX .. "manip_dist", 1))
-    local ring_y = manip_math.ring_y(body)
-
-    local ring_col = { 0.15, 0.95, 0.55, 0.55 }
-    if info and info.state == "blocked" then
-        ring_col = { 0.95, 0.25, 0.25, 0.45 }
-    elseif info and info.state == "ready" then
-        ring_col = { 0.2, 0.95, 0.45, 0.7 }
-    end
-
-    desync_vis.draw_sphere_ring(body.x, ring_y, body.z, radius, ring_col, 1.5)
-end
-
 local function draw_manip_peek(info)
     if not settings.bool(PREFIX .. "manip_peek_vis", true) then return end
     if not info or not info.peek then return end
@@ -124,12 +104,22 @@ local function draw_manip_peek(info)
 end
 
 local function draw_tp_ray_path(info)
-    if not settings.bool(PREFIX .. "bullet_tp", false) then return end
-    if not settings.bool(PREFIX .. "tp_ray_vis", false) then return end
-    if not info or not info.tp_path or #info.tp_path < 2 then return end
+    if not info then return end
+
+    local path = info.tp_path or info.curve_path
+    if not path or #path < 2 then return end
+
+    if info.state == "tp" then
+        if not settings.bool(PREFIX .. "bullet_tp", false) then return end
+        if not settings.bool(PREFIX .. "tp_ray_vis", false) then return end
+    elseif info.state ~= "curve" then
+        return
+    end
 
     local col = settings.color(PREFIX .. "tp_ray_vis", { 0.95, 0.45, 1, 0.9 })
-    local path = info.tp_path
+    if info.state == "curve" then
+        col = { 0.45, 0.85, 1, 0.45 }
+    end
     for i = 1, #path - 1 do
         local a, b = path[i], path[i + 1]
         esp_util.draw_world_line(a.x, a.y, a.z, b.x, b.y, b.z, col, 1.5)
@@ -137,7 +127,7 @@ local function draw_tp_ray_path(info)
 
     local hook = cached_track.origin
     local aim = cached_track.aim
-    if hook and aim then
+    if hook and aim and info.state == "tp" then
         desync_vis.draw_cross(hook.x, hook.y, hook.z, 0.45, { 1, 0.85, 0.2, 0.95 }, 2)
         desync_vis.draw_link(hook, aim, { col[1], col[2], col[3], 0.35 }, 1)
     end
@@ -162,7 +152,7 @@ function M.register_menu()
         PREFIX .. "max_dist", PREFIX .. "fov", PREFIX .. "sticky",
         PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
         PREFIX .. "wallbang", PREFIX .. "bullet_tp", PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
-        PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_ring", PREFIX .. "manip_peek_vis",
+        PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
     })
 
     menu_util.bind_children(PREFIX .. "bullet_tp", {
@@ -170,7 +160,7 @@ function M.register_menu()
     })
 
     menu_util.bind_children(PREFIX .. "bullet_manip", {
-        PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_ring", PREFIX .. "manip_peek_vis",
+        PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
     })
 
     menu_util.bind_children(PREFIX .. "target_npcs", {
@@ -244,7 +234,19 @@ function M.update(_dt)
     cached_track.origin = origin
     cached_track.aim = aim
     cached_track.manip = manip_info or { state = "off" }
-    cached_track.tracking = silent_ray.track(origin, aim, SHOOT_VK) == true
+
+    local info = cached_track.manip
+    if info.use_curve and silent_ray.track_curve then
+        cached_track.tracking = silent_ray.track_curve(origin, aim, info.weapon, SHOOT_VK) == true
+        if silent_ray.last_curve then
+            local curve = silent_ray.last_curve()
+            if curve and curve.path then
+                info.curve_path = curve.path
+            end
+        end
+    else
+        cached_track.tracking = silent_ray.track(origin, aim, SHOOT_VK) == true
+    end
 end
 
 function M.get_target()
@@ -273,7 +275,6 @@ function M.draw()
     end
 
     if active() and settings.bool(PREFIX .. "bullet_manip", false) then
-        draw_manip_ring(cached_track.manip)
         draw_manip_status(cx, cy, fov, cached_track.manip)
         draw_manip_peek(cached_track.manip)
     end

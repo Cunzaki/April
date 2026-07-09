@@ -1,3 +1,7 @@
+-- Inf Fly / Slowfall — velocity-only, HRP-only.
+-- Slowfall includes shoot-while-airborne bypass: force Humanoid Running so
+-- ViewmodelController's v64 stays grounded (dump: StateChanged → v64 ≥ 1 freezes fire).
+
 local settings = April.require("core.settings")
 local env = April.require("core.env")
 local move = April.require("core.cframe_move")
@@ -5,20 +9,19 @@ local move = April.require("core.cframe_move")
 local M = {}
 
 local P_FLY = "april_noclip_enabled"
-local P_SPIDER = "april_spider_enabled"
-local P_NOCLIP = "april_walk_noclip_enabled"
+local P_SPEED = "april_noclip_speed"
 local P_SLOWFALL = "april_slowfall_enabled"
 
-local MODE_NONE = "none"
-local MODE_FLY = "fly"
-local MODE_SPIDER = "spider"
-local MODE_NOCLIP = "noclip"
-
 local _installed = false
-local active_mode = MODE_NONE
+local fly_active = false
 local tracked_char_id = nil
-local noclip_on = false
-local last_state_ms = 0
+local last_ground_ms = 0
+
+-- Slider 2–4 → modest studs/s
+local SPEED_SCALE = 16
+local MAX_FLY_SPEED = 72
+local VEL_BLEND = 0.28
+local GROUND_STATE_MS = 45
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -55,109 +58,116 @@ local function get_humanoid(lp)
     end)
 end
 
-local function resolve_mode()
-    if settings.enabled(P_NOCLIP) then return MODE_NOCLIP end
-    if settings.enabled(P_FLY) then return MODE_FLY end
-    if settings.enabled(P_SPIDER) then return MODE_SPIDER end
-    return MODE_NONE
+local function hum_alive(hum)
+    if not hum then return false end
+    local hp = hum.Health or hum.health
+    if hp == nil then return true end
+    return hp > 0
 end
 
-local function maybe_state(hum, state)
+local function fly_speed()
+    local raw = settings.num(P_SPEED, 3)
+    if raw < 2 then raw = 2 end
+    if raw > 4 then raw = 4 end
+    local spd = raw * SPEED_SCALE
+    if spd > MAX_FLY_SPEED then spd = MAX_FLY_SPEED end
+    return spd
+end
+
+-- Soft grounded spoof: keep State = Running (8) so ViewmodelController v64 stays 0.
+-- Dump: Humanoid.StateChanged sets v64=0 on Landed/Running; v64≥1 freezes fire cooldown.
+-- Prefer ChangeState (fires the signal); fall back to memory state write.
+local function keep_grounded_for_shoot(hum)
+    if not hum or not hum_alive(hum) then return end
     local now = tick_ms()
-    if now - last_state_ms < 150 then return end
-    last_state_ms = now
-    move.humanoid_state(hum, state)
-end
+    if now - last_ground_ms < GROUND_STATE_MS then return end
+    last_ground_ms = now
 
-local function set_noclip(char, on)
-    if noclip_on == on then return end
-    noclip_on = on
-    move.set_noclip_parts(char, on)
-end
+    pcall(function() hum.Jump = false end)
+    pcall(function() hum.jump = false end)
 
-local function leave_mode(char, hum)
-    set_noclip(char, false)
-    if hum then move.humanoid_running(hum) end
-    last_state_ms = 0
-end
+    -- ChangeState fires StateChanged → v64 = 0 in ViewmodelController
+    local changed = false
+    pcall(function()
+        if hum.ChangeState then
+            hum:ChangeState(8) -- Running
+            changed = true
+        elseif hum.change_state then
+            hum:change_state(8)
+            changed = true
+        end
+    end)
 
-local function tick_noclip(root, hum, speed, dt)
-    maybe_state(hum, 8)
-
-    local pos = move.read_pos(root)
-    if not pos then return end
-
-    local mx, my, mz = move.read_fly_input()
-    local next_pos = move.drive_root(root, pos, mx, my, mz, speed, dt)
-    if not next_pos then return end
-
-    local ny = move.clamp_above_floor(next_pos.x, next_pos.y, next_pos.z)
-    if ny ~= next_pos.y then
-        move.set_position_only(root, next_pos.x, ny, next_pos.z)
-        local vx, _, vz = move.read_velocity(root)
-        move.set_velocity(root, vx, 0, vz)
-    end
-end
-
-local function tick_fly(root, hum, speed, dt)
-    maybe_state(hum, 6)
-
-    local pos = move.read_pos(root)
-    if not pos then return end
-
-    local mx, my, mz = move.read_fly_input()
-    local next_pos = move.drive_root(root, pos, mx, my, mz, speed, dt)
-    if not next_pos then return end
-
-    if my <= 0 then
-        local ny = move.clamp_above_floor(next_pos.x, next_pos.y, next_pos.z)
-        if ny > next_pos.y then
-            move.set_position_only(root, next_pos.x, ny, next_pos.z)
-            local vx, _, vz = move.read_velocity(root)
-            move.set_velocity(root, vx, 0, vz)
+    if not changed then
+        -- Memory write fallback (may not fire StateChanged on all builds)
+        move.humanoid_state(hum, 8)
+        -- Pulse Landed then Running to encourage a transition
+        if (now % 200) < GROUND_STATE_MS then
+            move.humanoid_state(hum, 7)
         end
     end
+
+    pcall(function()
+        local ws = hum.WalkSpeed or hum.walk_speed
+        if ws and hum.WalkspeedCheck ~= nil then
+            hum.WalkspeedCheck = ws
+        end
+    end)
 end
 
-local function tick_spider(root, hum, speed, dt)
-    maybe_state(hum, 12)
+local function clear_swim_block()
+    -- WaterController.IsSwim also freezes fire (v127). Soft-clear when possible.
+    local lp = env.get_local_player()
+    local char = get_character(lp)
+    if not char then return end
+    local water = env.safe_call(function()
+        return char:FindFirstChild("WaterController")
+            or (char.find_first_child and char:find_first_child("WaterController"))
+    end)
+    if not water then return end
+    pcall(function()
+        if water.set_attribute then water:set_attribute("IsSwim", false)
+        elseif water.SetAttribute then water:SetAttribute("IsSwim", false)
+        end
+    end)
+end
 
-    local pos = move.read_pos(root)
-    if not pos then return end
+local function tick_fly(root, hum, dt)
+    if not hum_alive(hum) then return end
 
     local mx, my, mz = move.read_fly_input()
-    if my == 0 then my = 1 end
+    local speed = fly_speed()
 
-    move.drive_root(root, pos, mx, my, mz, speed, dt)
+    move.drive_root_velocity(root, mx, my, mz, speed, dt, {
+        blend = VEL_BLEND,
+        max_speed = speed * 1.08,
+        cancel_gravity = true,
+    })
+
+    -- Built-in shoot-while-fly: same grounded spoof as slowfall
+    keep_grounded_for_shoot(hum)
+    clear_swim_block()
 end
 
-local function tick_slowfall(root, dt)
-    local pos = move.read_pos(root)
-    if not pos then return end
-
-    local cap = settings.num("april_slowfall_speed", -5)
-    if cap > 0 then cap = -cap end
+local function tick_slowfall(root, hum, dt)
+    local raw = settings.num("april_slowfall_speed", 5)
+    if raw < 1 then raw = 1 end
+    local cap = -(1.5 + (raw * 0.28))
 
     local vx, vy, vz = move.read_velocity(root)
-    if vy >= cap then return end
+    if vy < cap then
+        local next_y = vy + (cap - vy) * math.min(1, dt * 10)
+        if next_y < cap then next_y = cap end
+        move.set_velocity(root, vx, next_y, vz)
+    end
 
-    move.set_velocity(root, vx, cap, vz)
-    move.set_position_only(root, pos.x, pos.y + cap * dt * 0.05, pos.z)
+    -- Shoot while jumping / falling bypass (core of this feature)
+    keep_grounded_for_shoot(hum)
+    clear_swim_block()
 end
 
 local function abort_active()
-    if active_mode == MODE_NONE then return end
-
-    local lp = env.get_local_player()
-    if lp then
-        local char = get_character(lp)
-        local hum = get_humanoid(lp)
-        if char and hum then
-            leave_mode(char, hum)
-        end
-    end
-
-    active_mode = MODE_NONE
+    fly_active = false
 end
 
 function M.tick(_dt)
@@ -186,37 +196,21 @@ function M.tick(_dt)
 
     local cid = char_id(char)
     if cid ~= tracked_char_id then
-        if active_mode ~= MODE_NONE then
-            leave_mode(char, hum)
-        end
-        active_mode = MODE_NONE
+        fly_active = false
         tracked_char_id = cid
+        last_ground_ms = 0
     end
 
-    local mode = resolve_mode()
+    local want_fly = settings.enabled(P_FLY)
 
-    if active_mode ~= mode then
-        if active_mode ~= MODE_NONE then
-            leave_mode(char, hum)
+    if want_fly then
+        fly_active = true
+        tick_fly(root, hum, dt)
+    else
+        fly_active = false
+        if settings.enabled(P_SLOWFALL) then
+            tick_slowfall(root, hum, dt)
         end
-        active_mode = mode
-        if mode == MODE_NOCLIP then
-            set_noclip(char, true)
-        end
-    end
-
-    if mode == MODE_NOCLIP then
-        tick_noclip(root, hum, settings.num("april_walk_noclip_speed", 32), dt)
-    elseif mode == MODE_FLY then
-        tick_fly(root, hum, settings.num("april_noclip_speed", 72), dt)
-    elseif mode == MODE_SPIDER then
-        tick_spider(root, hum, settings.num("april_spider_speed", 20), dt)
-    elseif noclip_on then
-        set_noclip(char, false)
-    end
-
-    if mode == MODE_NONE and settings.enabled(P_SLOWFALL) then
-        tick_slowfall(root, dt)
     end
 end
 

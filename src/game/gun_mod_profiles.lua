@@ -43,15 +43,18 @@ function M.build_mods_from_profile(profile)
     return mods
 end
 
+-- Neutral attachment-style mults (game uses 1 + Mult for speed/range/sway/spread/recoil,
+-- and delay *= 1 - FireRateMult). Only used when disabling gun mods / clearing apply.
+-- Do NOT merge these into active apply payloads — that stomps attachment FireRateMult etc.
 function M.build_reset_mods()
     return {
         RecoilMult = 0,
         AimSpreadMult = 0,
         HipSpreadMult = 0,
         SwayMult = 0,
-        FireRateMult = 1,
-        SpeedMult = 1,
-        RangeMult = 1,
+        FireRateMult = 0,
+        SpeedMult = 0,
+        RangeMult = 0,
     }
 end
 
@@ -80,14 +83,12 @@ function M.is_global_mode()
 end
 
 function M.build_mods_for_weapon(name)
-    local mods = M.build_reset_mods()
+    -- Only keys the profile actually enables. Writing FireRateMult=1 (or any default)
+    -- onto every GC table that has FireRateMult overwrites attachment FireRateMult
+    -- (Items.AttachmentStats) and breaks RPM when attachments are equipped.
     local profile = store.get(name)
-    if not profile then return mods end
-    local patched = M.build_mods_from_profile(profile)
-    for k, v in pairs(patched) do
-        mods[k] = v
-    end
-    return mods
+    if not profile then return {} end
+    return M.build_mods_from_profile(profile)
 end
 
 function M.build_mods_for_apply(held)

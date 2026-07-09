@@ -5,6 +5,7 @@ local manip_math = April.require("core.manip_math")
 local targeting = April.require("features.combat.targeting")
 local bullet_tp_ray = April.require("features.combat.bullet_tp_ray")
 local weapons = April.require("game.weapons")
+local ballistic = April.require("core.ballistic")
 
 local M = {}
 
@@ -44,6 +45,7 @@ function M.resolve_track(target, prefix, cx, cy)
     local camera = silent_ray.get_camera_origin()
     if not camera then return nil, nil, OFF_INFO end
 
+    -- Exact hitpart — no velocity lead (silent hook is instant).
     local aim = targeting.resolve_bone_world(target, targeting.bone_name(prefix), cx, cy)
     if not aim then return nil, nil, OFF_INFO end
 
@@ -51,14 +53,15 @@ function M.resolve_track(target, prefix, cx, cy)
     local manip_info = OFF_INFO
     local bullet_tp = settings.bool(prefix .. "bullet_tp", false)
     local wallbang = settings.bool(prefix .. "wallbang", false)
+    local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
 
     if bullet_tp then
         local head = targeting.bone_world(target, "Head") or aim
-        local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
         local mode_idx = settings.num(prefix .. "tp_ray_mode", 0)
         local mode_name = bullet_tp_ray.mode_name(mode_idx)
 
-        aim = bullet_tp_ray.predict_aim(target, head, camera, weapon) or head
+        -- Hitpart only — no movement prediction (hook is instant).
+        aim = bullet_tp_ray.hitpart_aim(head) or head
         track_origin = bullet_tp_ray.track_origin(camera, aim, mode_name) or aim
 
         manip_info = {
@@ -67,6 +70,8 @@ function M.resolve_track(target, prefix, cx, cy)
             radius = 0,
             tp_mode = mode_name,
             tp_path = bullet_tp_ray.build_path(mode_name, track_origin, aim, weapon),
+            use_curve = false,
+            weapon = weapon,
         }
     elseif settings.bool(prefix .. "bullet_manip", false) then
         local body = combat_origin.get_server_origin()
@@ -78,19 +83,34 @@ function M.resolve_track(target, prefix, cx, cy)
                 state = ev.state,
                 peek = ev.peek,
                 radius = ev.radius or max_r,
+                use_curve = true,
+                weapon = weapon,
             }
             if ev.state == "ready" and ev.peek then
                 track_origin = manip_math.peek_track_origin(ev.peek) or camera
             end
         else
-            manip_info = { state = "blocked", peek = nil, radius = max_r }
+            manip_info = { state = "blocked", peek = nil, radius = max_r, use_curve = true, weapon = weapon }
         end
 
         if wallbang then
             track_origin = pierce_origin(track_origin, aim) or track_origin
         end
-    elseif wallbang then
-        track_origin = pierce_origin(track_origin, aim) or track_origin
+    else
+        -- Default silent: fake weapon drop curve, still lands on hitpart.
+        local muzzle = combat_origin.get_muzzle_origin() or camera
+        local curve = ballistic.curve_for_weapon(muzzle, aim, weapon, 18)
+        manip_info = {
+            state = "curve",
+            peek = nil,
+            radius = 0,
+            use_curve = true,
+            weapon = weapon,
+            curve_path = curve and curve.path or nil,
+        }
+        if wallbang then
+            track_origin = pierce_origin(track_origin, aim) or track_origin
+        end
     end
 
     return track_origin, aim, manip_info

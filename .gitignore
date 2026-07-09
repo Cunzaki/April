@@ -30,3 +30,7 @@ April_meta.txt
 *.local
 .env
 .env.*
+
+# Local Fallen game dump (restored from history; do not commit)
+dump/
+

@@ -1,18 +1,19 @@
 local ballistic = April.require("core.ballistic")
 local combat_origin = April.require("game.combat_origin")
 local math_util = April.require("core.math_util")
-local weapons = April.require("game.weapons")
 
 local M = {}
 
+-- Prefer Direct/Snap — most consistent valids. Deep/Curve/Arch kept for visuals.
 M.RAY_MODES = { "Direct", "Snap", "Deep", "Curve", "Arch" }
 
+-- Tighter back offsets for Direct/Snap = hook closer to target = more valids.
 local BACK_STUDS = {
-    Direct = 3.5,
-    Snap = 1.75,
-    Deep = 6.0,
-    Curve = 3.5,
-    Arch = 3.5,
+    Direct = 2.25,
+    Snap = 1.15,
+    Deep = 5.5,
+    Curve = 2.75,
+    Arch = 2.75,
 }
 
 local function unit(dx, dy, dz)
@@ -23,6 +24,7 @@ local function unit(dx, dy, dz)
 end
 
 local function copy_pos(p)
+    if not p then return nil end
     return { x = p.x, y = p.y, z = p.z }
 end
 
@@ -42,18 +44,14 @@ function M.back_studs(mode_name)
     return BACK_STUDS[mode_name] or BACK_STUDS.Direct
 end
 
-function M.predict_aim(target, head, camera, weapon_name)
-    if not head then return nil end
-    local muzzle = combat_origin.get_muzzle_origin() or camera
-    if not muzzle then return copy_pos(head) end
+-- Exact hitpart — no velocity / drop lead (silent is instant).
+function M.hitpart_aim(head)
+    return copy_pos(head)
+end
 
-    local vel = { x = 0, y = 0, z = 0 }
-    if target and target.velocity and target.velocity.x ~= nil then
-        vel = target.velocity
-    end
-
-    return ballistic.predict_for_weapon(muzzle, head, vel, weapon_name)
-        or copy_pos(head)
+-- Kept for callers; intentionally ignores velocity (instant hook).
+function M.predict_aim(_target, head, _camera, _weapon_name)
+    return M.hitpart_aim(head)
 end
 
 function M.track_origin(camera, aim, mode_name)
@@ -65,8 +63,16 @@ function M.track_origin(camera, aim, mode_name)
     if len < 0.05 then return copy_pos(aim) end
 
     local back = M.back_studs(mode_name)
+
+    -- Snap: pull slightly toward camera along LOS for cleaner server ray.
+    if mode_name == "Snap" then
+        back = math.min(back, math.max(0.55, len * 0.08))
+    elseif mode_name == "Direct" then
+        back = math.min(back, math.max(0.85, len * 0.12))
+    end
+
     if back >= len - 0.35 then
-        back = math.max(0.75, len * 0.35)
+        back = math.max(0.55, len * 0.28)
     end
 
     return {
@@ -110,33 +116,9 @@ local function sample_curve(from, to, steps)
 end
 
 local function sample_arch(muzzle, aim, weapon_name, steps)
-    steps = steps or 20
-    if not muzzle or not aim then return {} end
-
-    local stats = April.require("game.combat_stats").get_effective_stats(weapon_name)
-    local speed = math.max(stats.speed or 950, 1)
-    local g = ballistic.gravity_accel(stats.gravity)
-
-    local dx, dy, dz = aim.x - muzzle.x, aim.y - muzzle.y, aim.z - muzzle.z
-    local horiz = math.sqrt(dx * dx + dz * dz)
-    local dist = math_util.distance3(dx, dy, dz)
-    local flight = dist / speed
-
-    local vx = dx / flight
-    local vy = (dy + 0.5 * g * flight * flight) / flight
-    local vz = dz / flight
-
-    local out = {}
-    for i = 0, steps do
-        local t = (i / steps) * flight
-        out[#out + 1] = {
-            x = muzzle.x + vx * t,
-            y = muzzle.y + vy * t - 0.5 * g * t * t,
-            z = muzzle.z + vz * t,
-        }
-    end
-    out[#out + 1] = copy_pos(aim)
-    return out
+    local curve = ballistic.curve_for_weapon(muzzle, aim, weapon_name, steps or 20)
+    if curve and curve.path then return curve.path end
+    return sample_line(muzzle, aim, steps or 14)
 end
 
 function M.build_path(mode_name, hook_origin, aim, weapon_name)

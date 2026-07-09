@@ -6,6 +6,7 @@ local image_cache = April.require("core.image_cache")
 local items = April.require("game.items")
 local player_gear = April.require("game.player_gear")
 local player_state = April.require("game.player_state")
+local combat_target = April.require("game.combat_target")
 local math_util = April.require("core.math_util")
 local text_util = April.require("core.text_util")
 
@@ -285,11 +286,18 @@ function M.register_menu()
     local T, _ = menu_util.group(G.VISUALS)
 
     menu.add_checkbox(T, G.VISUALS, P, "Target Gear", false)
-    menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Target FOV", 40, 400, 150, menu_util.parent(P))
     menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, menu_util.parent(P))
     menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, menu_util.parent(P))
+    menu.add_checkbox(T, G.VISUALS, P .. "_fallback_fov", "Fallback Crosshair FOV", false, menu_util.parent(P))
+    menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Fallback FOV", 40, 400, 150, menu_util.parent(P))
 
-    menu_util.bind_master(P, { P .. "_fov", P .. "_gear_size", P .. "_top" })
+    menu_util.bind_master(P, {
+        P .. "_gear_size", P .. "_top",
+        P .. "_fallback_fov", P .. "_fov",
+    })
+    menu_util.bind_when(function()
+        return settings.enabled(P) and settings.bool(P .. "_fallback_fov", false)
+    end, { P .. "_fov" }, { P, P .. "_fallback_fov" })
 end
 
 function M.refresh_target()
@@ -299,9 +307,13 @@ function M.refresh_target()
         return
     end
 
-    local fov = settings.num(P .. "_fov", 150)
     local gear_sz = settings.num(P .. "_gear_size", 48)
-    local target = find_crosshair_target(fov)
+
+    -- Prefer silent-aim lock; optional FOV fallback when no lock.
+    local target = combat_target.get()
+    if not target and settings.bool(P .. "_fallback_fov", false) then
+        target = find_crosshair_target(settings.num(P .. "_fov", 150))
+    end
 
     if not target or not player_state.is_combat_target(target) then
         M._target = nil

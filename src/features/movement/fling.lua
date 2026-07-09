@@ -11,10 +11,7 @@ local M = {}
 
 local P = "april_fling_enabled"
 local P_FOV = "april_fling_fov"
-local P_KEY = "april_fling_key"
-local P_KEY_MODE = "april_fling_key_mode"
 local P_DURATION = "april_fling_duration"
-local KEY_MODES = { "Toggle", "Hold" }
 
 local MAX_DIST = 300.0
 local FAR_RANGE = 40.0
@@ -28,10 +25,6 @@ local FLING_HIT_PARTS = { "HumanoidRootPart" }
 
 local function fling_duration()
     return settings.num(P_DURATION, 2)
-end
-
-local function key_is_hold()
-    return settings.combo_index(P_KEY_MODE, KEY_MODES, 0) == 1
 end
 
 local STATE_IDLE = 0
@@ -52,7 +45,6 @@ local saved_pos = nil
 local target_root = nil
 local target_player = nil
 local last_attach = nil
-local key_was_down = false
 
 local function now()
     if utility and utility.get_time then return utility.get_time() end
@@ -597,36 +589,24 @@ local function try_trigger()
     begin_fling(root, char, hum, tgt_player, tgt_root)
 end
 
-local function poll_key()
-    if not settings.enabled(P) then
-        key_was_down = false
-        return
-    end
-    if state ~= STATE_IDLE then return end
-    if not menu or not menu.get_key then return end
+-- Rising-edge trigger so Hold mode fires once per press, Toggle/Always once when enabled.
+local was_enabled = false
 
-    local key = menu.get_key(P_KEY) or 0
-    if key <= 0 then
-        key_was_down = false
-        return
-    end
-    if not input or not input.is_key_down then return end
-
-    local down = input.is_key_down(key)
-    if key_is_hold() then
-        if down then
-            try_trigger()
-        end
-    elseif down and not key_was_down then
+local function poll_enable()
+    local on = settings.enabled(P)
+    if on and not was_enabled then
         try_trigger()
     end
-    key_was_down = down
+    was_enabled = on
 end
 
 local function tick(_dt)
     if state == STATE_IDLE then
-        if not misc_gate.movement_allowed() then return end
-        poll_key()
+        if not misc_gate.movement_allowed() then
+            was_enabled = settings.enabled(P)
+            return
+        end
+        poll_enable()
         return
     end
 
@@ -661,17 +641,13 @@ end
 
 function M.register_menu()
     local G = menu_util.G
-    local T, _ = menu_util.group(G.MISC)
+    local T = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
-    menu.add_checkbox(T, G.MISC, P, "Fling", false)
+    menu_util.register_keybind(T, G.MISC, P, "Fling", false)
     menu.add_slider_int(T, G.MISC, P_FOV, "Fling FOV", 20, 600, 150, root)
     menu.add_slider_int(T, G.MISC, P_DURATION, "Fling Duration", 2, 10, 2, root)
-    menu.add_combo(T, G.MISC, P_KEY_MODE, "Fling Key Mode", KEY_MODES, 0, root)
-    if menu.add_hotkey then
-        menu.add_hotkey(T, G.MISC, P_KEY, "Fling Key", 0, root)
-    end
-    menu_util.bind_children(P, { P_FOV, P_DURATION, P_KEY_MODE, P_KEY })
+    menu_util.bind_children(P, { P_FOV, P_DURATION })
 end
 
 function M.install()
