@@ -313,7 +313,6 @@ function M.draw_oriented_box(box, col, thick)
 end
 
 function M.draw_entry_boxes(entry, col, thick)
-    if settings.enabled("april_brainrot_enabled") then return end
     if not entry or not entry.inst then return end
     if entry.box then
         M.draw_oriented_box(entry.box, col, thick)

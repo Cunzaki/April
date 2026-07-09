@@ -77,6 +77,7 @@ function M.register_menu()
     menu.add_checkbox(T, G.WORLD, "april_base_boxes", "Base 3D Boxes", false, { parent = P })
     menu.add_checkbox(T, G.WORLD, "april_base_show_name", "Base Show Name", true, { parent = P })
     menu.add_checkbox(T, G.WORLD, "april_base_show_distance", "Base Show Distance", false, { parent = P })
+    menu_util.gap(T, G.WORLD)
     menu.add_slider_int(T, G.WORLD, "april_base_range", "Base Range", 50, 500, 150, { parent = P })
 
     local child_ids = { "april_base_boxes", "april_base_show_name", "april_base_show_distance", "april_base_range" }

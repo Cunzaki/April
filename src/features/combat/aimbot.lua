@@ -22,6 +22,8 @@ local TARGET_SCAN_MS = 33
 
 local cached_track = { origin = nil, aim = nil, manip = { state = "off" }, tracking = false }
 local last_target_scan = 0
+local fire_was_down = false
+local shot_allowed = true
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -149,10 +151,11 @@ function M.register_menu()
         PREFIX .. "target_type", PREFIX .. "bone",
         PREFIX .. "filter_health", PREFIX .. "filter_visible", PREFIX .. "filter_team",
         PREFIX .. "target_players", PREFIX .. "target_npcs", PREFIX .. "target_npc_soldiers", PREFIX .. "target_npc_bosses",
-        PREFIX .. "max_dist", PREFIX .. "fov", PREFIX .. "sticky",
-        PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
-        PREFIX .. "wallbang", PREFIX .. "bullet_tp", PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
+        PREFIX .. "sticky", PREFIX .. "wallbang",
+        PREFIX .. "bullet_tp", PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
         PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
+        PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
+        PREFIX .. "hit_chance", PREFIX .. "max_dist", PREFIX .. "fov",
     })
 
     menu_util.bind_children(PREFIX .. "bullet_tp", {
@@ -161,6 +164,10 @@ function M.register_menu()
 
     menu_util.bind_children(PREFIX .. "bullet_manip", {
         PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
+    })
+
+    menu_util.bind_children(PREFIX .. "draw_fov", {
+        PREFIX .. "fov_style",
     })
 
     menu_util.bind_children(PREFIX .. "target_npcs", {
@@ -201,6 +208,8 @@ function M.update(_dt)
 
     if not active() then
         locked_target = nil
+        fire_was_down = false
+        shot_allowed = true
         silent_ray.stop()
         return
     end
@@ -225,8 +234,29 @@ function M.update(_dt)
         return
     end
 
-    local origin, aim, manip_info = silent_resolve.resolve_track(locked_target, PREFIX, cx, cy)
-    if not aim or not origin then
+    -- Hit chance rolls once per mouse-down (not every frame).
+    local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)
+    if firing and not fire_was_down then
+        local hit_chance = settings.num(PREFIX .. "hit_chance", 100)
+        if hit_chance >= 100 then
+            shot_allowed = true
+        else
+            local roll = math.random(1, 100)
+            shot_allowed = roll <= hit_chance
+        end
+    elseif not firing then
+        shot_allowed = true
+    end
+    fire_was_down = firing and true or false
+
+    if not shot_allowed then
+        -- Miss this click: stop tracking once, do not re-call native stop every frame.
+        silent_ray.stop()
+        return
+    end
+
+    local ok_resolve, origin, aim, manip_info = pcall(silent_resolve.resolve_track, locked_target, PREFIX, cx, cy)
+    if not ok_resolve or not aim or not origin then
         silent_ray.stop()
         return
     end
@@ -236,8 +266,9 @@ function M.update(_dt)
     cached_track.manip = manip_info or { state = "off" }
 
     local info = cached_track.manip
+    local ok_track = false
     if info.use_curve and silent_ray.track_curve then
-        cached_track.tracking = silent_ray.track_curve(origin, aim, info.weapon, SHOOT_VK) == true
+        ok_track = silent_ray.track_curve(origin, aim, info.weapon, SHOOT_VK) == true
         if silent_ray.last_curve then
             local curve = silent_ray.last_curve()
             if curve and curve.path then
@@ -245,8 +276,9 @@ function M.update(_dt)
             end
         end
     else
-        cached_track.tracking = silent_ray.track(origin, aim, SHOOT_VK) == true
+        ok_track = silent_ray.track(origin, aim, SHOOT_VK) == true
     end
+    cached_track.tracking = ok_track
 end
 
 function M.get_target()

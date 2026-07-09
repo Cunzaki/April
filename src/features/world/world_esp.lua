@@ -42,6 +42,7 @@ function M.register_menu()
     menu.add_checkbox(T, G.WORLD, "april_world_boxes", "Resource 3D Boxes", false, { parent = P })
     menu.add_checkbox(T, G.WORLD, "april_world_show_name", "Resource Show Name", true, { parent = P })
     menu.add_checkbox(T, G.WORLD, "april_world_show_distance", "Resource Show Distance", true, { parent = P })
+    menu_util.gap(T, G.WORLD)
     menu.add_slider_int(T, G.WORLD, "april_world_range", "Resource Range", 50, 2000, 500, { parent = P })
 
     local child_ids = { "april_world_boxes", "april_world_show_name", "april_world_show_distance", "april_world_range" }

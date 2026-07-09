@@ -124,7 +124,8 @@ function M.register_menu()
     menu_util.gap(T, G.MISC)
     menu_util.register_keybind(T, G.MISC, P, "Desync", false)
     menu.add_checkbox(T, G.MISC, "april_desync_autosend", "Desync Auto Send", false, root)
-    menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Desync Send Threshold", 0, 1, 0.3, root)
+    menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Desync Send Threshold", 0, 1, 0.3,
+        menu_util.parent("april_desync_autosend"))
     menu.add_checkbox(T, G.MISC, P_VIS, "Desync Visualize", false, menu_util.parent(P, {
         colorpicker = { 0.2, 0.85, 1, 0.9 },
     }))
@@ -132,10 +133,7 @@ function M.register_menu()
     menu_util.bind_children(P, {
         "april_desync_autosend", "april_desync_autosend_len", P_VIS,
     })
-
-    menu_util.bind_when(function()
-        return settings.enabled(P) and settings.enabled("april_desync_autosend")
-    end, { "april_desync_autosend_len" }, { P, "april_desync_autosend" })
+    menu_util.bind_children("april_desync_autosend", { "april_desync_autosend_len" })
 end
 
 function M.update(_dt)

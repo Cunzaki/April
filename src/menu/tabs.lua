@@ -15,13 +15,13 @@ M.FEATURE_ORDER = {
     "features.visuals.crosshair",
     "features.visuals.bullet_tracers",
     "features.visuals.hitmarkers",
-    "features.visuals.brainrot_esp",
     "features.world.world_esp",
     "features.world.loot_esp",
     "features.world.npc_esp",
     "features.world.base_esp",
     "features.radar.tactical_map",
     "features.radar.waypoints",
+    "features.utility.keybind_viewer",
     "features.utility.mod_checker",
     "features.combat.perfect_farm",
     "features.movement.exploits",
@@ -58,11 +58,6 @@ function M.register_all()
 
     pcall(function()
         local mod = April.require("features.utility.mod_checker")
-        if mod.init then mod.init() end
-    end)
-
-    pcall(function()
-        local mod = April.require("features.visuals.brainrot_esp")
         if mod.init then mod.init() end
     end)
 end

@@ -68,8 +68,13 @@ function M.stop()
     M._last_origin = nil
     M._last_target = nil
     M._last_curve = nil
+
+    local was_active = tracking or M._last_ok
     M._last_ok = false
     tracking = false
+
+    -- Avoid spamming native stop while already idle (hitchance miss / no target).
+    if not was_active then return end
     if not M.available() then return end
     pcall(raycast.stop_silent_tracking)
     if raycast.clear_silent_target then
@@ -135,7 +140,8 @@ function M.track(origin, aim_point, shoot_vk)
     M._last_origin = { x = ox, y = oy, z = oz }
     M._last_target = { x = ax, y = ay, z = az }
 
-    local ok = raycast.track_silent_target(origin_v, dir, key) == true
+    local ok_call, ok = pcall(raycast.track_silent_target, origin_v, dir, key)
+    ok = ok_call and ok == true
     M._last_ok = ok
     tracking = ok
     return ok
@@ -197,7 +203,8 @@ function M.track_curve(origin, hit_point, weapon_name, shoot_vk)
     M._last_origin = track_o
     M._last_target = { x = hx, y = hy, z = hz }
 
-    local ok = raycast.track_silent_target(origin_v, dir, key) == true
+    local ok_call, ok = pcall(raycast.track_silent_target, origin_v, dir, key)
+    ok = ok_call and ok == true
     M._last_ok = ok
     tracking = ok
     return ok

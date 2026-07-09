@@ -11,6 +11,7 @@ function M.register(spec)
     if not spec or not spec.id then return end
     registry[spec.id] = {
         id = spec.id,
+        label = spec.label or spec.id,
         mode_id = spec.mode_id or (spec.id .. "_mode"),
         key_id = spec.key_id or spec.id,
     }
@@ -18,6 +19,31 @@ end
 
 function M.is_registered(id)
     return registry[id] ~= nil
+end
+
+function M.get_label(id)
+    local e = registry[id]
+    return e and e.label or id
+end
+
+function M.list_ids()
+    local out = {}
+    for id in pairs(registry) do
+        out[#out + 1] = id
+    end
+    table.sort(out)
+    return out
+end
+
+function M.list_entries()
+    local out = {}
+    for id, e in pairs(registry) do
+        out[#out + 1] = e
+    end
+    table.sort(out, function(a, b)
+        return (a.label or a.id) < (b.label or b.id)
+    end)
+    return out
 end
 
 function M.get_key(id)

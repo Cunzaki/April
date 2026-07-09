@@ -166,10 +166,11 @@ function M.register_menu()
     local root = menu_util.parent(P)
 
     menu_util.register_keybind(T, G.MISC, P, "Farm Helper", false)
-    menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
     menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", true, root)
+    menu_util.gap(T, G.MISC)
+    menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
     menu.add_slider_int(T, G.MISC, P_SMOOTH, "Camera Smoothness", 1, 30, 8, root)
-    menu_util.bind_children(P, { P_RADIUS, P_SILENT, P_SMOOTH })
+    menu_util.bind_children(P, { P_SILENT, P_RADIUS, P_SMOOTH })
 end
 
 function M.update(_dt)

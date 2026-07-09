@@ -1,11 +1,11 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-09T09:03:11.722Z
+    Built: 2026-07-09T10:47:34.364Z
 ]]
 
 April = {
-    version = "3.64.0",
+    version = "3.65.5",
     debug = false,
     _mods = {},
     bundled = true,
@@ -421,6 +421,7 @@ function M.register(spec)
     if not spec or not spec.id then return end
     registry[spec.id] = {
         id = spec.id,
+        label = spec.label or spec.id,
         mode_id = spec.mode_id or (spec.id .. "_mode"),
         key_id = spec.key_id or spec.id,
     }
@@ -428,6 +429,31 @@ end
 
 function M.is_registered(id)
     return registry[id] ~= nil
+end
+
+function M.get_label(id)
+    local e = registry[id]
+    return e and e.label or id
+end
+
+function M.list_ids()
+    local out = {}
+    for id in pairs(registry) do
+        out[#out + 1] = id
+    end
+    table.sort(out)
+    return out
+end
+
+function M.list_entries()
+    local out = {}
+    for id, e in pairs(registry) do
+        out[#out + 1] = e
+    end
+    table.sort(out, function(a, b)
+        return (a.label or a.id) < (b.label or b.id)
+    end)
+    return out
 end
 
 function M.get_key(id)
@@ -501,7 +527,6 @@ end)()
 April._mods["core.draw_util"] = (function()
 local math_util = April.require("core.math_util")
 local text_util = April.require("core.text_util")
-local settings = April.require("core.settings")
 
 local M = {}
 
@@ -526,9 +551,6 @@ function M.text(x, y, text, col, size)
 end
 
 function M.box_esp(x, y, w, h, col, style)
-    if settings and settings.enabled and settings.enabled("april_brainrot_enabled") then
-        return
-    end
     if not draw then return end
     if style == 1 and draw.corner_box then
         draw.corner_box(x, y, w, h, col)
@@ -962,15 +984,6 @@ function M.item_png(asset_id)
     asset_id = digits(asset_id)
     if not asset_id then return nil end
     return M.CDN_BASE .. "/items/" .. asset_id .. ".png"
-end
-
-function M.tung_png()
-    return M.CDN_BASE .. "/tung.png"
-end
-
-function M.brainrot_png(file)
-    if not file or file == "" then return nil end
-    return M.CDN_BASE .. "/brainrot/" .. file .. ".png"
 end
 
 function M.mod_warning_png()
@@ -1445,7 +1458,6 @@ function M.draw_oriented_box(box, col, thick)
 end
 
 function M.draw_entry_boxes(entry, col, thick)
-    if settings.enabled("april_brainrot_enabled") then return end
     if not entry or not entry.inst then return end
     if entry.box then
         M.draw_oriented_box(entry.box, col, thick)
@@ -1950,6 +1962,7 @@ function M.register_keybind(T, G, id, label, default, extra)
 
     April.require("core.feature_bind").register({
         id = id,
+        label = label,
         mode_id = mode_id,
         key_id = id,
     })
@@ -2173,8 +2186,13 @@ function M.stop()
     M._last_origin = nil
     M._last_target = nil
     M._last_curve = nil
+
+    local was_active = tracking or M._last_ok
     M._last_ok = false
     tracking = false
+
+    -- Avoid spamming native stop while already idle (hitchance miss / no target).
+    if not was_active then return end
     if not M.available() then return end
     pcall(raycast.stop_silent_tracking)
     if raycast.clear_silent_target then
@@ -2240,7 +2258,8 @@ function M.track(origin, aim_point, shoot_vk)
     M._last_origin = { x = ox, y = oy, z = oz }
     M._last_target = { x = ax, y = ay, z = az }
 
-    local ok = raycast.track_silent_target(origin_v, dir, key) == true
+    local ok_call, ok = pcall(raycast.track_silent_target, origin_v, dir, key)
+    ok = ok_call and ok == true
     M._last_ok = ok
     tracking = ok
     return ok
@@ -2302,7 +2321,8 @@ function M.track_curve(origin, hit_point, weapon_name, shoot_vk)
     M._last_origin = track_o
     M._last_target = { x = hx, y = hy, z = hz }
 
-    local ok = raycast.track_silent_target(origin_v, dir, key) == true
+    local ok_call, ok = pcall(raycast.track_silent_target, origin_v, dir, key)
+    ok = ok_call and ok == true
     M._last_ok = ok
     tracking = ok
     return ok
@@ -3326,7 +3346,6 @@ local EXCLUDE = {
 
 local MENU_KEYS = {
     "april_esp_text_size",
-    "april_tung_esp_enabled", "april_tung_esp_max_dist",
         "april_target_overlay", "april_target_overlay_fov", "april_target_overlay_gear_size", "april_target_overlay_top",
         "april_target_overlay_fallback_fov",
     "april_crosshair_enabled", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
@@ -3336,19 +3355,22 @@ local MENU_KEYS = {
     "april_bullet_tracers_thick", "april_bullet_tracers_life",
     "april_hitmarkers", "april_hitmarkers_head", "april_hitmarkers_style",
     "april_hitmarkers_size", "april_hitmarkers_gap", "april_hitmarkers_life", "april_hitmarkers_thick",
-    "april_brainrot_enabled", "april_brainrot_enabled_mode", "april_brainrot_style", "april_brainrot_size",
     "april_silent_aim", "april_silent_aim_mode",
     "april_silent_target_type", "april_silent_bone",
     "april_silent_filter_health", "april_silent_filter_visible", "april_silent_filter_team",
     "april_silent_target_players", "april_silent_target_npcs", "april_silent_target_npc_soldiers", "april_silent_target_npc_bosses",
-    "april_silent_max_dist", "april_silent_fov", "april_silent_sticky",
-    "april_silent_wallbang", "april_silent_bullet_tp", "april_silent_tp_ray_mode", "april_silent_tp_ray_vis",
+    "april_silent_sticky", "april_silent_wallbang",
+    "april_silent_bullet_tp", "april_silent_tp_ray_mode", "april_silent_tp_ray_vis",
     "april_silent_bullet_manip",
     "april_silent_manip_dist", "april_silent_manip_status", "april_silent_manip_peek_vis",
     "april_silent_draw_fov", "april_silent_fov_style", "april_silent_target_line",
-    "april_gunmods_enabled", "april_gunmods_enabled_mode", "april_gm_mode", "april_gm_weapon_select", "april_gm_recoil", "april_gm_recoil_pct", "april_gm_spread", "april_gm_spread_pct",
+    "april_silent_hit_chance", "april_silent_max_dist", "april_silent_fov",
+    "april_gunmods_enabled", "april_gunmods_enabled_mode", "april_gm_mode", "april_gm_weapon_select",
+    "april_gm_recoil", "april_gm_recoil_pct", "april_gm_spread", "april_gm_spread_pct",
     "april_gm_sway", "april_gm_fire_rate", "april_gm_fire_rate_mult",
-    "april_gm_speed", "april_gm_speed_mult", "april_gm_range", "april_gm_range_mult",
+    "april_gm_speed", "april_gm_speed_mult",
+    "april_gm_range", "april_gm_range_mult",
+    "april_gm_double_tap",
     "april_farm_helper", "april_farm_helper_mode", "april_farm_radius", "april_farm_smooth",
     "april_farm_silent",
     "april_world_enabled", "april_world_enabled_mode", "april_stone_node", "april_metal_node", "april_phosphate_node",
@@ -3388,6 +3410,8 @@ local MENU_KEYS = {
     "april_bullet_manip_debug", "april_bullet_manip_console", "april_bullet_manip_vis",
     "april_bullet_manip_vis_style", "april_bullet_manip_vis_size",
     "april_bullet_manip_vis_link", "april_bullet_manip_vis_labels", "april_bullet_manip_vis_peek",
+    "april_keybinds_enabled", "april_keybinds_active_only", "april_keybinds_show_unbound", "april_keybinds_show_mode",
+    "april_keybinds_x", "april_keybinds_y", "april_keybinds_w",
     "april_mod_checker_enabled", "april_mod_checker_interval",
 }
 
@@ -3418,7 +3442,6 @@ local COLOR_KEYS = {
 
 local LEGACY_HOTKEY_TO_CHECKBOX = {
     april_crosshair_enabled_key = "april_crosshair_enabled",
-    april_brainrot_enabled_key = "april_brainrot_enabled",
     april_gunmods_enabled_key = "april_gunmods_enabled",
     april_farm_helper_key = "april_farm_helper",
     april_world_enabled_key = "april_world_enabled",
@@ -3435,7 +3458,6 @@ local LEGACY_HOTKEY_TO_CHECKBOX = {
 }
 
 local HOTKEY_KEYS = {
-    "april_brainrot_enabled",
     "april_gunmods_enabled",
     "april_farm_helper",
     "april_world_enabled",
@@ -3449,7 +3471,6 @@ local HOTKEY_KEYS = {
     "april_fling_enabled",
     "april_desync_enabled",
     "april_bullet_manip_enabled",
-    "april_tung_esp_enabled",
     "april_silent_aim",
 }
 
@@ -6518,6 +6539,7 @@ local DEFAULT = {
     speed_mult = 100,
     range = false,
     range_mult = 10,
+    double_tap = false,
 }
 
 local EDITOR_KEYS = {
@@ -6532,6 +6554,7 @@ local EDITOR_KEYS = {
     speed_mult = "april_gm_speed_mult",
     range = "april_gm_range",
     range_mult = "april_gm_range_mult",
+    double_tap = "april_gm_double_tap",
 }
 
 M._profiles = {}
@@ -6591,6 +6614,20 @@ function M.has_active_mods(weapon_name)
     if not profile then return false end
     return profile.recoil or profile.spread or profile.sway
         or profile.fire_rate or profile.speed or profile.range
+        or profile.double_tap
+end
+
+function M.has_gc_mods(weapon_name)
+    local profile = M.get(weapon_name)
+    if not profile then return false end
+    return profile.recoil or profile.spread or profile.sway
+        or profile.fire_rate or profile.speed or profile.range
+end
+
+function M.has_toolinfo_mods(weapon_name)
+    local profile = M.get(weapon_name)
+    if not profile then return false end
+    return profile.double_tap == true
 end
 
 function M.read_editor()
@@ -6752,6 +6789,13 @@ function M.build_mods_from_profile(profile)
     return mods
 end
 
+function M.build_toolinfo_opts(profile)
+    if not profile then
+        return { double_tap = false }
+    end
+    return { double_tap = profile.double_tap == true }
+end
+
 -- Neutral attachment-style mults (game uses 1 + Mult for speed/range/sway/spread/recoil,
 -- and delay *= 1 - FireRateMult). Only used when disabling gun mods / clearing apply.
 -- Do NOT merge these into active apply payloads — that stomps attachment FireRateMult etc.
@@ -6812,6 +6856,21 @@ function M.build_mods_for_apply(held)
         return M.build_mods_for_weapon(held)
     end
     return nil
+end
+
+function M.build_toolinfo_for_apply(held)
+    local profile
+    if M.is_global_mode() then
+        if not store.has_saved(M.GLOBAL_PROFILE_KEY) then return nil, nil end
+        profile = store.get(M.GLOBAL_PROFILE_KEY)
+        return M.build_toolinfo_opts(profile), nil -- nil weapon = all
+    end
+
+    if held and store.has_saved(held) then
+        profile = store.get(held)
+        return M.build_toolinfo_opts(profile), held
+    end
+    return nil, nil
 end
 
 function M.should_apply_for_held(held)
@@ -7994,55 +8053,6 @@ return M
 
 end)()
 
--- ── game/brainrot_catalog.lua ──
-April._mods["game.brainrot_catalog"] = (function()
-local asset_urls = April.require("game.asset_urls")
-
-local M = {}
-
-M.ENTRIES = {
-    { file = "tung_tung_sahur", name = "Tung Tung Sahur" },
-    { file = "tralalero_tralala", name = "Tralalero Tralala" },
-    { file = "brr_brr_patapim", name = "Brr Brr Patapim" },
-    { file = "orangutini", name = "Orangutini Ananasini" },
-    { file = "cappuccino_assassino", name = "Cappuccino Assassino" },
-    { file = "lirili_larila", name = "Lirili Larila" },
-    { file = "boneca_ambalabu", name = "Boneca Ambalabu" },
-    { file = "bombardiro_crocodilo", name = "Bombardiro Crocodilo" },
-    { file = "chimpanzini", name = "Chimpanzini Bananini" },
-    { file = "ta_ta_sahur", name = "Ta Ta Ta Sahur" },
-    { file = "tung_head", name = "Tung Tung Head" },
-    { file = "tung_clipart", name = "Tung Clipart" },
-    { file = "trippi_troppi", name = "Trippi Troppi" },
-    { file = "frigo_camelo", name = "Frigo Camelo" },
-    { file = "ballerina_cappuccina", name = "Ballerina Cappuccina" },
-    { file = "udin_din_din", name = "Udin Din Din Dun" },
-}
-
-function M.image_key(file)
-    return "brainrot_" .. (file or "")
-end
-
-function M.url(file)
-    return asset_urls.brainrot_png(file)
-end
-
-function M.combo_labels()
-    local out = {}
-    for _, entry in ipairs(M.ENTRIES) do
-        out[#out + 1] = entry.name
-    end
-    return out
-end
-
-function M.entry_at_index(idx)
-    return M.ENTRIES[(idx or 0) + 1]
-end
-
-return M
-
-end)()
-
 -- ── game/npcs.lua ──
 April._mods["game.npcs"] = (function()
 local env = April.require("core.env")
@@ -8828,10 +8838,167 @@ return M
 
 end)()
 
+-- ── game/toolinfo_weapon_mods.lua ──
+April._mods["game.toolinfo_weapon_mods"] = (function()
+-- Patch live ToolInfo Weapon fields (Double Tap / Burst).
+-- GC applygc only covers *Mult keys; Burst needs direct table writes.
+
+local bootstrap = April.require("game.bootstrap")
+
+local M = {}
+
+M._baseline = nil
+M._applied = false
+M._last_sig = nil
+
+local function deep_copy(v, seen)
+    if type(v) ~= "table" then return v end
+    seen = seen or {}
+    if seen[v] then return seen[v] end
+    local out = {}
+    seen[v] = out
+    for k, val in pairs(v) do
+        out[k] = deep_copy(val, seen)
+    end
+    return out
+end
+
+local function ensure_baseline(toolinfo)
+    if M._baseline then return true end
+    if type(toolinfo) ~= "table" then return false end
+    M._baseline = deep_copy(toolinfo)
+    return true
+end
+
+local function weapon_entry(toolinfo, name)
+    local entry = toolinfo[name]
+    if type(entry) ~= "table" then return nil end
+    return entry.Weapon
+end
+
+local function baseline_weapon(name)
+    if not M._baseline then return nil end
+    local entry = M._baseline[name]
+    if type(entry) ~= "table" then return nil end
+    return entry.Weapon
+end
+
+local function restore_weapon(live_w, old_w)
+    if not live_w or not old_w then return end
+    if old_w.Burst ~= nil then
+        live_w.Burst = old_w.Burst
+    end
+    if old_w.BurstRPM ~= nil then
+        live_w.BurstRPM = old_w.BurstRPM
+    end
+end
+
+local function apply_weapon(live_w, old_w, opts)
+    if not live_w then return false end
+    local changed = false
+
+    if opts.double_tap then
+        if live_w.Burst ~= nil or (old_w and old_w.Burst ~= nil) then
+            live_w.Burst = 2
+            live_w.BurstRPM = 10000
+            changed = true
+        end
+    elseif old_w then
+        if old_w.Burst ~= nil then live_w.Burst = old_w.Burst end
+        if old_w.BurstRPM ~= nil then live_w.BurstRPM = old_w.BurstRPM end
+    end
+
+    return changed
+end
+
+function M.invalidate()
+    M._baseline = nil
+    M._applied = false
+    M._last_sig = nil
+end
+
+function M.reset()
+    local toolinfo = bootstrap.get_module("ToolInfo")
+    if not toolinfo or not M._baseline then
+        M._applied = false
+        M._last_sig = nil
+        return false
+    end
+
+    for name, entry in pairs(toolinfo) do
+        if type(entry) == "table" and type(entry.Weapon) == "table" then
+            restore_weapon(entry.Weapon, baseline_weapon(name))
+        end
+    end
+
+    M._applied = false
+    M._last_sig = nil
+    return true
+end
+
+-- opts: { double_tap }
+-- weapon_name: nil = all weapons (global), string = that weapon only
+function M.apply(opts, weapon_name)
+    opts = opts or {}
+    local toolinfo = bootstrap.get_module("ToolInfo")
+    if not toolinfo then
+        return false, 0, "ToolInfo not ready"
+    end
+    if not ensure_baseline(toolinfo) then
+        return false, 0, "ToolInfo baseline failed"
+    end
+
+    local any = opts.double_tap == true
+    if not any then
+        if M._applied then
+            M.reset()
+        end
+        return true, 0, "no toolinfo mods"
+    end
+
+    local sig = table.concat({
+        opts.double_tap and "1" or "0",
+        tostring(weapon_name or "*"),
+    }, ":")
+
+    if sig == M._last_sig and M._applied then
+        return true, 0, "unchanged"
+    end
+
+    for name, entry in pairs(toolinfo) do
+        if type(entry) == "table" and type(entry.Weapon) == "table" then
+            restore_weapon(entry.Weapon, baseline_weapon(name))
+        end
+    end
+
+    local count = 0
+    if weapon_name then
+        local live_w = weapon_entry(toolinfo, weapon_name)
+        if apply_weapon(live_w, baseline_weapon(weapon_name), opts) then
+            count = 1
+        end
+    else
+        for name, entry in pairs(toolinfo) do
+            if type(entry) == "table" and type(entry.Weapon) == "table" then
+                if apply_weapon(entry.Weapon, baseline_weapon(name), opts) then
+                    count = count + 1
+                end
+            end
+        end
+    end
+
+    M._applied = count > 0 or any
+    M._last_sig = sig
+    return true, count, string.format("%d weapon(s) patched", count)
+end
+
+return M
+
+end)()
+
 -- ── features/combat/combat_menu.lua ──
 April._mods["features.combat.combat_menu"] = (function()
 local menu_util = April.require("core.menu_util")
-local esp_util = April.require("core.esp_util")
 
 local M = {}
 
@@ -8860,71 +9027,57 @@ function M.bone_from_index(idx)
     return M.BONE_MAP[label] or label
 end
 
-function M.register_targeting(T, G, prefix, parent_id, opts)
-    opts = opts or {}
-    local p = prefix
-    local root = menu_util.parent(parent_id)
-
-    menu.add_slider_int(T, G, p .. "fov", opts.fov_label or "FOV Radius (px)", 20, 600, opts.fov_default or 150, root)
-    menu.add_combo(T, G, p .. "bone", "Target Bone", esp_util.AIM_BONES, 0, root)
-    menu.add_combo(T, G, p .. "priority", "Priority", { "Distance", "Crosshair (FOV)" }, 1, root)
-    menu.add_checkbox(T, G, p .. "sticky", "Sticky Target", false, root)
-    menu.add_checkbox(T, G, p .. "visible", "Visibility Check", false, root)
-
-    if opts.smooth then
-        menu.add_slider_int(T, G, p .. "smooth", "Smoothing (frames)", 1, 100, 5, root)
-    end
-
-    menu.add_checkbox(T, G, p .. "draw_fov", "Draw FOV Circle", false, menu_util.parent(parent_id, { colorpicker = opts.fov_color or { 1, 1, 1, 1 } }))
-    menu.add_checkbox(T, G, p .. "fov_fill", "Fill FOV", false, root)
-    menu.add_checkbox(T, G, p .. "target_line", "Target Line", false, menu_util.parent(parent_id, { colorpicker = opts.line_color or { 1, 0.2, 0.2, 1 } }))
-end
-
 function M.register_silent_aim(T, G, prefix, parent_id, opts)
     opts = opts or {}
     local p = prefix
     local root = menu_util.parent(parent_id)
 
+    -- Combos / filters / targets (toggles together)
     menu.add_combo(T, G, p .. "target_type", "Target Type", { "Crosshair", "Distance" }, 0, root)
     menu.add_combo(T, G, p .. "bone", "Target Hitbox", M.SILENT_BONES, 0, root)
 
-    menu_util.gap(T, G)
-    menu_util.label(T, G, "Filters")
     menu.add_checkbox(T, G, p .. "filter_health", "Health Check", true, root)
     menu.add_checkbox(T, G, p .. "filter_visible", "Visible Only", false, root)
     menu.add_checkbox(T, G, p .. "filter_team", "Team Check", true, root)
 
-    menu_util.gap(T, G)
-    menu_util.label(T, G, "Targets")
     menu.add_checkbox(T, G, p .. "target_players", "Target Players", true, root)
     local npc_root = menu_util.parent(p .. "target_npcs")
     menu.add_checkbox(T, G, p .. "target_npcs", "Target NPCs", false, root)
     menu.add_checkbox(T, G, p .. "target_npc_soldiers", "NPC Soldiers", true, npc_root)
     menu.add_checkbox(T, G, p .. "target_npc_bosses", "NPC Bosses", true, npc_root)
 
-    menu_util.gap(T, G)
-    menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, root)
-    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 150, root)
     menu.add_checkbox(T, G, p .. "sticky", "Sticky Target", false, root)
+
     menu.add_checkbox(T, G, p .. "wallbang", "Wallbang", false, root)
     menu_util.label(T, G, "Wallbang: likely invalid until target is visible to you (server checks).")
+
     local tp_root = menu_util.parent(p .. "bullet_tp")
     menu.add_checkbox(T, G, p .. "bullet_tp", "Bullet TP", false, root)
     menu_util.label(T, G, "Bullet TP: likely invalid until target is visible to you (server checks).")
-    menu.add_combo(T, G, p .. "tp_ray_mode", "TP Ray Mode", { "Direct", "Snap", "Deep", "Curve", "Arch" }, 0, tp_root)
+    menu.add_combo(T, G, p .. "tp_ray_mode", "TP Ray Mode",
+        { "Direct", "Snap", "Deep", "Curve", "Arch" }, 0, tp_root)
     menu.add_checkbox(T, G, p .. "tp_ray_vis", "Visualize Ray Path", false, menu_util.parent(p .. "bullet_tp", {
         colorpicker = { 0.95, 0.45, 1, 0.9 },
     }))
-    menu.add_checkbox(T, G, p .. "bullet_manip", "Bullet Manipulation", false, root)
-    menu.add_slider_float(T, G, p .. "manip_dist", "Manip Distance", 0.1, 1, 1, "%.2f", root)
-    menu.add_checkbox(T, G, p .. "manip_status", "Manip Status Bar", false, root)
-    menu.add_checkbox(T, G, p .. "manip_peek_vis", "Manip Peek Visual", true, root)
 
+    local manip_root = menu_util.parent(p .. "bullet_manip")
+    menu.add_checkbox(T, G, p .. "bullet_manip", "Bullet Manipulation", false, root)
+    menu.add_slider_float(T, G, p .. "manip_dist", "Manip Distance", 0.1, 1, 1, "%.2f", manip_root)
+    menu.add_checkbox(T, G, p .. "manip_status", "Manip Status Bar", false, manip_root)
+    menu.add_checkbox(T, G, p .. "manip_peek_vis", "Manip Peek Visual", true, manip_root)
+
+    menu.add_checkbox(T, G, p .. "draw_fov", "Field Of View Circle", false,
+        menu_util.parent(parent_id, { colorpicker = opts.fov_color or { 0.55, 0.2, 1, 1 } }))
+    menu.add_combo(T, G, p .. "fov_style", "FOV Style", { "Outline", "Filled Circle" }, 1,
+        menu_util.parent(p .. "draw_fov"))
+    menu.add_checkbox(T, G, p .. "target_line", "Target Line", false,
+        menu_util.parent(parent_id, { colorpicker = opts.line_color or { 1, 0.25, 0.25, 1 } }))
+
+    -- Sliders at bottom (section-wide)
     menu_util.gap(T, G)
-    menu_util.label(T, G, "Visuals")
-    menu.add_checkbox(T, G, p .. "draw_fov", "Field Of View Circle", false, menu_util.parent(parent_id, { colorpicker = opts.fov_color or { 0.55, 0.2, 1, 1 } }))
-    menu.add_combo(T, G, p .. "fov_style", "FOV Style", { "Outline", "Filled Circle" }, 1, root)
-    menu.add_checkbox(T, G, p .. "target_line", "Target Line", false, menu_util.parent(parent_id, { colorpicker = opts.line_color or { 1, 0.25, 0.25, 1 } }))
+    menu.add_slider_int(T, G, p .. "hit_chance", "Hit Chance %", 1, 100, 100, root)
+    menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, root)
+    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 150, root)
 end
 
 return M
@@ -9154,18 +9307,22 @@ function M.closest_bone_world(target, cx, cy)
     if M.is_npc_target(target) then
         return npc_head_world(target)
     end
-    if target.get_bones_screen then
-        local bones = target:get_bones_screen()
-        if bones then
+    if target and target.get_bones_screen then
+        local ok, bones = pcall(function()
+            return target:get_bones_screen()
+        end)
+        if ok and type(bones) == "table" then
             local best_name, best_dist = nil, math.huge
             for name, entry in pairs(bones) do
-                local bx = entry.x or entry[1]
-                local by = entry.y or entry[2]
-                if bx and by then
-                    local d = math_util.screen_fov_dist(bx, by, cx, cy)
-                    if d < best_dist then
-                        best_dist = d
-                        best_name = name
+                if type(entry) == "table" and type(name) == "string" and name ~= "Closest" then
+                    local bx = entry.x or entry[1]
+                    local by = entry.y or entry[2]
+                    if type(bx) == "number" and type(by) == "number" then
+                        local d = math_util.screen_fov_dist(bx, by, cx, cy)
+                        if d < best_dist then
+                            best_dist = d
+                            best_name = name
+                        end
                     end
                 end
             end
@@ -9665,6 +9822,8 @@ local TARGET_SCAN_MS = 33
 
 local cached_track = { origin = nil, aim = nil, manip = { state = "off" }, tracking = false }
 local last_target_scan = 0
+local fire_was_down = false
+local shot_allowed = true
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -9792,10 +9951,11 @@ function M.register_menu()
         PREFIX .. "target_type", PREFIX .. "bone",
         PREFIX .. "filter_health", PREFIX .. "filter_visible", PREFIX .. "filter_team",
         PREFIX .. "target_players", PREFIX .. "target_npcs", PREFIX .. "target_npc_soldiers", PREFIX .. "target_npc_bosses",
-        PREFIX .. "max_dist", PREFIX .. "fov", PREFIX .. "sticky",
-        PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
-        PREFIX .. "wallbang", PREFIX .. "bullet_tp", PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
+        PREFIX .. "sticky", PREFIX .. "wallbang",
+        PREFIX .. "bullet_tp", PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
         PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
+        PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
+        PREFIX .. "hit_chance", PREFIX .. "max_dist", PREFIX .. "fov",
     })
 
     menu_util.bind_children(PREFIX .. "bullet_tp", {
@@ -9804,6 +9964,10 @@ function M.register_menu()
 
     menu_util.bind_children(PREFIX .. "bullet_manip", {
         PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
+    })
+
+    menu_util.bind_children(PREFIX .. "draw_fov", {
+        PREFIX .. "fov_style",
     })
 
     menu_util.bind_children(PREFIX .. "target_npcs", {
@@ -9844,6 +10008,8 @@ function M.update(_dt)
 
     if not active() then
         locked_target = nil
+        fire_was_down = false
+        shot_allowed = true
         silent_ray.stop()
         return
     end
@@ -9868,8 +10034,29 @@ function M.update(_dt)
         return
     end
 
-    local origin, aim, manip_info = silent_resolve.resolve_track(locked_target, PREFIX, cx, cy)
-    if not aim or not origin then
+    -- Hit chance rolls once per mouse-down (not every frame).
+    local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)
+    if firing and not fire_was_down then
+        local hit_chance = settings.num(PREFIX .. "hit_chance", 100)
+        if hit_chance >= 100 then
+            shot_allowed = true
+        else
+            local roll = math.random(1, 100)
+            shot_allowed = roll <= hit_chance
+        end
+    elseif not firing then
+        shot_allowed = true
+    end
+    fire_was_down = firing and true or false
+
+    if not shot_allowed then
+        -- Miss this click: stop tracking once, do not re-call native stop every frame.
+        silent_ray.stop()
+        return
+    end
+
+    local ok_resolve, origin, aim, manip_info = pcall(silent_resolve.resolve_track, locked_target, PREFIX, cx, cy)
+    if not ok_resolve or not aim or not origin then
         silent_ray.stop()
         return
     end
@@ -9879,8 +10066,9 @@ function M.update(_dt)
     cached_track.manip = manip_info or { state = "off" }
 
     local info = cached_track.manip
+    local ok_track = false
     if info.use_curve and silent_ray.track_curve then
-        cached_track.tracking = silent_ray.track_curve(origin, aim, info.weapon, SHOOT_VK) == true
+        ok_track = silent_ray.track_curve(origin, aim, info.weapon, SHOOT_VK) == true
         if silent_ray.last_curve then
             local curve = silent_ray.last_curve()
             if curve and curve.path then
@@ -9888,8 +10076,9 @@ function M.update(_dt)
             end
         end
     else
-        cached_track.tracking = silent_ray.track(origin, aim, SHOOT_VK) == true
+        ok_track = silent_ray.track(origin, aim, SHOOT_VK) == true
     end
+    cached_track.tracking = ok_track
 end
 
 function M.get_target()
@@ -10112,10 +10301,11 @@ function M.register_menu()
     local root = menu_util.parent(P)
 
     menu_util.register_keybind(T, G.MISC, P, "Farm Helper", false)
-    menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
     menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", true, root)
+    menu_util.gap(T, G.MISC)
+    menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
     menu.add_slider_int(T, G.MISC, P_SMOOTH, "Camera Smoothness", 1, 30, 8, root)
-    menu_util.bind_children(P, { P_RADIUS, P_SILENT, P_SMOOTH })
+    menu_util.bind_children(P, { P_SILENT, P_RADIUS, P_SMOOTH })
 end
 
 function M.update(_dt)
@@ -10192,6 +10382,7 @@ local menu_util = April.require("core.menu_util")
 local profiles = April.require("game.gun_mod_profiles")
 local store = April.require("game.weapon_profile_store")
 local gc = April.require("game.gc_weapon_mods")
+local toolinfo_mods = April.require("game.toolinfo_weapon_mods")
 local env = April.require("core.env")
 local notify = April.require("core.notify")
 
@@ -10287,6 +10478,7 @@ local function schedule_session_gc_refresh()
     M._force_apply = true
     M._gc_redo_at = tick_ms() + REJOIN_GC_DELAY_MS
     M._retry_until = tick_ms() + RETRY_MAX_MS
+    toolinfo_mods.invalidate()
 end
 
 local function weapon_names()
@@ -10339,6 +10531,14 @@ local function ensure_weapon_combo()
     load_selected_editor()
 end
 
+local function clear_all_mods()
+    local clear = build_clear_payload()
+    if clear then gc.apply_weapon(clear) end
+    toolinfo_mods.reset()
+    M._had_applied_mods = false
+    M._last_applied_keys = nil
+end
+
 function M.on_session_changed()
     schedule_session_gc_refresh()
 end
@@ -10360,23 +10560,31 @@ function M.register_menu()
     M._combo_ctx = { T = T, G = G.GUN_MODS, root = root }
     ensure_weapon_combo()
 
+    -- Toggles first (feature toggles together)
     menu_util.gap(T, G.GUN_MODS)
     menu.add_checkbox(T, G.GUN_MODS, "april_gm_recoil", "No Recoil", false, root)
-    menu.add_slider_int(T, G.GUN_MODS, "april_gm_recoil_pct", "Recoil Reduction %", 0, 100, 100, root)
+    menu.add_slider_int(T, G.GUN_MODS, "april_gm_recoil_pct", "Recoil Reduction %", 0, 100, 100,
+        menu_util.parent("april_gm_recoil"))
 
     menu.add_checkbox(T, G.GUN_MODS, "april_gm_spread", "No Spread", false, root)
-    menu.add_slider_int(T, G.GUN_MODS, "april_gm_spread_pct", "Spread Reduction %", 0, 100, 100, root)
+    menu.add_slider_int(T, G.GUN_MODS, "april_gm_spread_pct", "Spread Reduction %", 0, 100, 100,
+        menu_util.parent("april_gm_spread"))
 
     menu.add_checkbox(T, G.GUN_MODS, "april_gm_sway", "No Sway", false, root)
 
     menu.add_checkbox(T, G.GUN_MODS, "april_gm_fire_rate", "Fire Rate", false, root)
-    menu.add_slider_float(T, G.GUN_MODS, "april_gm_fire_rate_mult", "Fire Rate Multiplier", 1.0, 3.0, 1.5, "%.2f", root)
+    menu.add_slider_float(T, G.GUN_MODS, "april_gm_fire_rate_mult", "Fire Rate Multiplier", 1.0, 3.0, 1.5, "%.2f",
+        menu_util.parent("april_gm_fire_rate"))
 
     menu.add_checkbox(T, G.GUN_MODS, "april_gm_speed", "Bullet Speed", false, root)
-    menu.add_slider_int(T, G.GUN_MODS, "april_gm_speed_mult", "Speed Mult (100 = instant)", 0, 100, 100, root)
+    menu.add_slider_int(T, G.GUN_MODS, "april_gm_speed_mult", "Speed Mult", 1, 100, 100,
+        menu_util.parent("april_gm_speed"))
 
     menu.add_checkbox(T, G.GUN_MODS, "april_gm_range", "Range", false, root)
-    menu.add_slider_int(T, G.GUN_MODS, "april_gm_range_mult", "Range Mult", 1, 20, 10, root)
+    menu.add_slider_int(T, G.GUN_MODS, "april_gm_range_mult", "Range Mult", 1, 20, 10,
+        menu_util.parent("april_gm_range"))
+
+    menu.add_checkbox(T, G.GUN_MODS, "april_gm_double_tap", "Double Tap", false, root)
 
     menu_util.gap(T, G.GUN_MODS)
     menu_util.button(T, G.GUN_MODS, "april_gm_save", "Save Profile", function()
@@ -10389,6 +10597,9 @@ function M.register_menu()
         sync_held_display()
         local label = key == profiles.GLOBAL_PROFILE_KEY and "Global" or key
         notify.success("Saved profile: " .. label, 3500)
+        if settings.enabled(P) then
+            schedule_apply(200)
+        end
     end, P)
 
     menu_util.button(T, G.GUN_MODS, "april_gm_clear", "Clear Saved Profile", function()
@@ -10406,6 +10617,9 @@ function M.register_menu()
         sync_held_display()
         local label = key == profiles.GLOBAL_PROFILE_KEY and "Global" or key
         notify.info("Cleared profile: " .. label, 3500)
+        if settings.enabled(P) then
+            schedule_apply(200)
+        end
     end, P)
 
     menu_util.bind_children(P, {
@@ -10416,8 +10630,15 @@ function M.register_menu()
         "april_gm_fire_rate", "april_gm_fire_rate_mult",
         "april_gm_speed", "april_gm_speed_mult",
         "april_gm_range", "april_gm_range_mult",
+        "april_gm_double_tap",
         "april_gm_save", "april_gm_clear",
     })
+
+    menu_util.bind_children("april_gm_recoil", { "april_gm_recoil_pct" })
+    menu_util.bind_children("april_gm_spread", { "april_gm_spread_pct" })
+    menu_util.bind_children("april_gm_fire_rate", { "april_gm_fire_rate_mult" })
+    menu_util.bind_children("april_gm_speed", { "april_gm_speed_mult" })
+    menu_util.bind_children("april_gm_range", { "april_gm_range_mult" })
 
     settings.on_change("april_gm_weapon_select", function()
         load_selected_editor()
@@ -10425,6 +10646,9 @@ function M.register_menu()
 
     settings.on_change(profiles.MODE_ID, function()
         sync_held_display()
+        if settings.enabled(P) then
+            schedule_apply(200)
+        end
     end)
 
     settings.on_change(P, function()
@@ -10442,6 +10666,8 @@ function M.register_menu()
 end
 
 function M.reset_mods()
+    toolinfo_mods.reset()
+
     if not gc.available() then
         notify.info("Gun mods disabled", 3000)
         return true
@@ -10450,7 +10676,7 @@ function M.reset_mods()
     local mods = build_clear_payload()
     if not mods then
         M._had_applied_mods = false
-        notify.info("Gun mods cleared (nothing to reset)", 3000)
+        notify.info("Gun mods cleared", 3000)
         return true
     end
     local ok, count, msg = gc.apply_weapon(mods)
@@ -10472,10 +10698,16 @@ function M.try_apply(silent)
     local held = profiles.held_weapon_name()
     if not held then
         if M._had_applied_mods then
-            local clear = build_clear_payload()
-            if clear then gc.apply_weapon(clear) end
-            M._had_applied_mods = false
-            M._last_applied_keys = nil
+            clear_all_mods()
+        end
+        M._apply_dirty = false
+        M._force_apply = false
+        return false
+    end
+
+    if not profiles.should_apply_for_held(held) then
+        if M._had_applied_mods then
+            clear_all_mods()
         end
         M._apply_dirty = false
         M._force_apply = false
@@ -10483,12 +10715,13 @@ function M.try_apply(silent)
     end
 
     local mods = profiles.build_mods_for_apply(held)
-    if not mods or not next(mods) or not profiles.should_apply_for_held(held) then
+    local ti_opts, ti_weapon = profiles.build_toolinfo_for_apply(held)
+    local has_gc = mods and next(mods)
+    local has_ti = ti_opts and ti_opts.double_tap == true
+
+    if not has_gc and not has_ti then
         if M._had_applied_mods then
-            local clear = build_clear_payload()
-            if clear then gc.apply_weapon(clear) end
-            M._had_applied_mods = false
-            M._last_applied_keys = nil
+            clear_all_mods()
         end
         M._apply_dirty = false
         M._force_apply = false
@@ -10499,17 +10732,37 @@ function M.try_apply(silent)
         return true
     end
 
-    local ok, count, msg = gc.apply_weapon(mods)
+    local ok_gc, count, msg = true, 0, nil
+    if has_gc then
+        ok_gc, count, msg = gc.apply_weapon(mods)
+        if ok_gc then
+            remember_applied(mods)
+        end
+    else
+        -- Clear previous GC patches if profile no longer has GC keys
+        local clear = build_clear_payload()
+        if clear then gc.apply_weapon(clear) end
+        M._last_applied_keys = nil
+    end
+
+    local ok_ti = true
+    if has_ti then
+        ok_ti = toolinfo_mods.apply(ti_opts, ti_weapon)
+    else
+        toolinfo_mods.reset()
+    end
+
+    local ok = (not has_gc or ok_gc) and ok_ti
     if ok then
         M._had_applied_mods = true
-        remember_applied(mods)
         M._apply_dirty = false
         M._force_apply = false
         M._retry_until = 0
         if M._notify_next or not silent then
             M._notify_next = false
             local suffix = profiles.is_global_mode() and " (global)" or (" (" .. held .. ")")
-            notify.success("Gun mods applied" .. suffix .. ": " .. tostring(msg or (count .. " nodes")), 3500)
+            local detail = msg or (tostring(count) .. " nodes")
+            notify.success("Gun mods applied" .. suffix .. ": " .. tostring(detail), 3500)
         end
     else
         M._apply_dirty = true
@@ -10565,6 +10818,7 @@ function M.update(_dt)
         M._gc_redo_at = 0
         if in_match() then
             gc.refresh_cache()
+            toolinfo_mods.invalidate()
             M._apply_dirty = true
             M._force_apply = true
             M._defer_until = now
@@ -10591,90 +10845,16 @@ end
 
 function M.on_modules_ready()
     store.load()
+    toolinfo_mods.invalidate()
     ensure_weapon_combo()
     load_selected_editor()
     sync_held_display()
+    if settings.enabled(P) then
+        schedule_apply(400)
+    end
 end
 
 function M.draw() end
-
-return M
-
-end)()
-
--- ── features/visuals/player_esp.lua ──
-April._mods["features.visuals.player_esp"] = (function()
-local settings = April.require("core.settings")
-local cache = April.require("core.cache")
-local esp_util = April.require("core.esp_util")
-local player_state = April.require("game.player_state")
-local menu_util = April.require("core.menu_util")
-local image_cache = April.require("core.image_cache")
-local asset_urls = April.require("game.asset_urls")
-
-local M = {}
-local P = "april_tung_esp_enabled"
-local TUNG_KEY = "tung"
-
-local function draw_tung_box(x, y, w, h)
-    w = math.max(12, math.floor(w or 12))
-    h = math.max(12, math.floor(h or 12))
-    image_cache.begin_load(TUNG_KEY)
-    return image_cache.draw_fit(TUNG_KEY, x, y, w, h)
-end
-
-function M.register_menu()
-end
-
-function M.scan()
-    cache.players = {}
-    if not entity or not entity.get_players then return end
-    for _, p in ipairs(entity.get_players()) do
-        if p.is_valid and not p.is_local and player_state.is_combat_target(p) then
-            table.insert(cache.players, p)
-        end
-    end
-    cache.stats.last_player_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
-end
-
-function M.get_players()
-    if entity and entity.get_players then
-        return entity.get_players()
-    end
-    return cache.players
-end
-
-function M.init()
-    image_cache.ensure(TUNG_KEY, asset_urls.tung_png())
-end
-
-function M.update(_dt) end
-
-function M.draw()
-    if not settings.enabled(P) then return end
-
-    local max_dist = settings.num("april_tung_esp_max_dist", 1000)
-    local me = entity and entity.get_local_player and entity.get_local_player()
-
-    for _, p in ipairs(M.get_players()) do
-        if p.is_local or not player_state.is_combat_target(p) then goto continue end
-
-        if me and me.position and p.position then
-            local dx = p.position.x - me.position.x
-            local dy = p.position.y - me.position.y
-            local dz = p.position.z - me.position.z
-            local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-            if dist > max_dist then goto continue end
-        end
-
-        local b = p:get_bounds()
-        if b and b.valid and b.w > 0 and b.h > 0 then
-            draw_tung_box(b.x, b.y, b.w, b.h)
-        end
-
-        ::continue::
-    end
-end
 
 return M
 
@@ -10969,19 +11149,22 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.VISUALS)
 
+    local root = menu_util.parent(P)
+
     menu.add_checkbox(T, G.VISUALS, P, "Target Gear", false)
-    menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, menu_util.parent(P))
-    menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, menu_util.parent(P))
-    menu.add_checkbox(T, G.VISUALS, P .. "_fallback_fov", "Fallback Crosshair FOV", false, menu_util.parent(P))
-    menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Fallback FOV", 40, 400, 150, menu_util.parent(P))
+    menu.add_checkbox(T, G.VISUALS, P .. "_fallback_fov", "Fallback Crosshair FOV", false, root)
+    menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Fallback FOV", 40, 400, 150,
+        menu_util.parent(P .. "_fallback_fov"))
+
+    menu_util.gap(T, G.VISUALS)
+    menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, root)
+    menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, root)
 
     menu_util.bind_master(P, {
-        P .. "_gear_size", P .. "_top",
         P .. "_fallback_fov", P .. "_fov",
+        P .. "_gear_size", P .. "_top",
     })
-    menu_util.bind_when(function()
-        return settings.enabled(P) and settings.bool(P .. "_fallback_fov", false)
-    end, { P .. "_fov" }, { P, P .. "_fallback_fov" })
+    menu_util.bind_children(P .. "_fallback_fov", { P .. "_fov" })
 end
 
 function M.refresh_target()
@@ -11093,22 +11276,29 @@ local P = "april_crosshair_enabled"
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.VISUALS)
+    local root = menu_util.parent(P)
+
     menu.add_checkbox(T, G.VISUALS, P, "Custom Crosshair", false)
-    menu.add_combo(T, G.VISUALS, "april_crosshair_type", "Crosshair Type", { "Cross", "Circle", "Dot", "T-Shape" }, 0, { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_crosshair_size", "Crosshair Size", 1, 50, 10, { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_crosshair_gap", "Crosshair Gap", 0, 20, 5, { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_crosshair_thickness", "Crosshair Thickness", 1, 10, 2, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, "april_crosshair_color", "Crosshair Color", true, { parent = P, colorpicker = { 0, 1, 0, 1 } })
-    menu.add_checkbox(T, G.VISUALS, "april_crosshair_dot", "Center Dot", false, { parent = P, colorpicker = { 1, 1, 1, 1 } })
-    menu.add_checkbox(T, G.VISUALS, "april_crosshair_outline", "Outline", true, { parent = P, colorpicker = { 0, 0, 0, 1 } })
-    menu.add_checkbox(T, G.VISUALS, "april_crosshair_rainbow", "Rainbow Crosshair", false, { parent = P })
-    menu.add_slider_int(T, G.VISUALS, "april_crosshair_rainbow_speed", "Rainbow Speed", 1, 100, 10, { parent = P })
+    menu.add_combo(T, G.VISUALS, "april_crosshair_type", "Crosshair Type", { "Cross", "Circle", "Dot", "T-Shape" }, 0, root)
+    menu.add_checkbox(T, G.VISUALS, "april_crosshair_color", "Crosshair Color", true, menu_util.parent(P, { colorpicker = { 0, 1, 0, 1 } }))
+    menu.add_checkbox(T, G.VISUALS, "april_crosshair_dot", "Center Dot", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 1 } }))
+    menu.add_checkbox(T, G.VISUALS, "april_crosshair_outline", "Outline", true, menu_util.parent(P, { colorpicker = { 0, 0, 0, 1 } }))
+    menu.add_checkbox(T, G.VISUALS, "april_crosshair_rainbow", "Rainbow Crosshair", false, root)
+    menu.add_slider_int(T, G.VISUALS, "april_crosshair_rainbow_speed", "Rainbow Speed", 1, 100, 10,
+        menu_util.parent("april_crosshair_rainbow"))
+
+    menu_util.gap(T, G.VISUALS)
+    menu.add_slider_int(T, G.VISUALS, "april_crosshair_size", "Crosshair Size", 1, 50, 10, root)
+    menu.add_slider_int(T, G.VISUALS, "april_crosshair_gap", "Crosshair Gap", 0, 20, 5, root)
+    menu.add_slider_int(T, G.VISUALS, "april_crosshair_thickness", "Crosshair Thickness", 1, 10, 2, root)
 
     menu_util.bind_children(P, {
-        "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap", "april_crosshair_thickness",
+        "april_crosshair_type",
         "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
         "april_crosshair_rainbow", "april_crosshair_rainbow_speed",
+        "april_crosshair_size", "april_crosshair_gap", "april_crosshair_thickness",
     })
+    menu_util.bind_children("april_crosshair_rainbow", { "april_crosshair_rainbow_speed" })
 end
 
 local function crosshair_color()
@@ -11424,15 +11614,17 @@ function M.register_menu()
         colorpicker = { 1, 0.2, 0.2, 1 },
     })
     menu.add_combo(T, G.VISUALS, "april_hitmarkers_style", "Style", STYLES, 0, root)
+
+    menu_util.gap(T, G.VISUALS)
     menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_size", "Size", 4, 28, 10, root)
     menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_gap", "Gap", 0, 12, 3, root)
     menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_life", "Life (ms)", 80, 800, 280, root)
     menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_thick", "Thickness", 1, 4, 2, root)
 
     menu_util.bind_children(P, {
-        "april_hitmarkers_head",
-        "april_hitmarkers_style", "april_hitmarkers_size",
-        "april_hitmarkers_gap", "april_hitmarkers_life", "april_hitmarkers_thick",
+        "april_hitmarkers_head", "april_hitmarkers_style",
+        "april_hitmarkers_size", "april_hitmarkers_gap",
+        "april_hitmarkers_life", "april_hitmarkers_thick",
     })
 end
 
@@ -11529,182 +11721,6 @@ return M
 
 end)()
 
--- ── features/visuals/brainrot_esp.lua ──
-April._mods["features.visuals.brainrot_esp"] = (function()
-local settings = April.require("core.settings")
-local cache = April.require("core.cache")
-local env = April.require("core.env")
-local esp_util = April.require("core.esp_util")
-local esp_scan = April.require("game.esp_scan")
-local menu_util = April.require("core.menu_util")
-local image_cache = April.require("core.image_cache")
-local catalog = April.require("game.brainrot_catalog")
-
-local M = {}
-
-local P = "april_brainrot_enabled"
-local P_STYLE = "april_brainrot_style"
-local P_SIZE = "april_brainrot_size"
-
-local _active_key = nil
-
-local function labels()
-    return catalog.combo_labels()
-end
-
-local function selected_entry()
-    local idx = settings.combo_index(P_STYLE, labels(), 0)
-    return catalog.entry_at_index(idx)
-end
-
-local function active_key()
-    local entry = selected_entry()
-    if not entry then return nil end
-    return catalog.image_key(entry.file)
-end
-
-local function ensure_image(key, file)
-    if not key or not file then return end
-    image_cache.ensure(key, catalog.url(file))
-end
-
-local function draw_bounds(bounds)
-    if not bounds or not bounds.valid then return false end
-
-    local key = active_key()
-    if not key then return false end
-
-    local min_sz = settings.num(P_SIZE, 48)
-    local w = math.max(min_sz, math.floor(bounds.w or min_sz))
-    local h = math.max(min_sz, math.floor(bounds.h or min_sz))
-
-    image_cache.begin_load(key)
-    return image_cache.draw_fit(key, bounds.x, bounds.y, w, h)
-end
-
-local function draw_entry(entry)
-    if not entry then return end
-    if entry.inst and not env.is_valid(entry.inst) then return end
-    if entry.entity and entry.entity.is_alive == false then return end
-
-    local bounds = esp_util.entry_screen_bounds(entry)
-    if bounds then
-        draw_bounds(bounds)
-        return
-    end
-
-    local lx, ly, lz
-    if entry.lx then
-        lx, ly, lz = entry.lx, entry.ly, entry.lz
-    elseif entry.entity and entry.entity.position then
-        lx, ly, lz = entry.entity.position.x, entry.entity.position.y, entry.entity.position.z
-    else
-        lx, ly, lz = esp_scan.entry_coords(entry)
-    end
-
-    if lx then
-        draw_bounds(esp_util.point_screen_bounds(lx, ly, lz, settings.num(P_SIZE, 48)))
-    end
-end
-
-local function draw_cache_list(list)
-    for _, entry in ipairs(list or {}) do
-        draw_entry(entry)
-    end
-end
-
-local function draw_players()
-    if not entity or not entity.get_players then return end
-
-    for _, p in ipairs(entity.get_players()) do
-        if p.is_local then goto continue end
-
-        local bounds
-        if p.get_bounds then
-            bounds = p:get_bounds()
-        end
-
-        if bounds and bounds.valid and bounds.w > 0 and bounds.h > 0 then
-            draw_bounds(bounds)
-        elseif p.position then
-            draw_bounds(esp_util.point_screen_bounds(
-                p.position.x, p.position.y, p.position.z,
-                settings.num(P_SIZE, 64)
-            ))
-        end
-
-        ::continue::
-    end
-end
-
-local function draw_npcs()
-    for _, entry in ipairs(cache.npcs or {}) do
-        if entry.entity then
-            if entry.entity.is_alive == false then goto continue end
-            local bounds = entry.entity.get_bounds and entry.entity:get_bounds()
-            if bounds and bounds.valid then
-                draw_bounds(bounds)
-                goto continue
-            end
-        end
-        draw_entry(entry)
-        ::continue::
-    end
-end
-
-function M.register_menu()
-    local G = menu_util.G
-    local T, _ = menu_util.group(G.VISUALS)
-    local root = menu_util.parent(P)
-
-    menu_util.register_keybind(T, G.VISUALS, P, "Brainrot ESP", false)
-    menu.add_combo(T, G.VISUALS, P_STYLE, "Brainrot Character", labels(), 0, root)
-    menu.add_slider_int(T, G.VISUALS, P_SIZE, "Brainrot Min Box Size", 24, 160, 48, root)
-
-    menu_util.bind_children(P, { P_STYLE, P_SIZE })
-end
-
-function M.init()
-    for _, entry in ipairs(catalog.ENTRIES) do
-        ensure_image(catalog.image_key(entry.file), entry.file)
-    end
-end
-
-function M.update(_dt)
-    if not settings.enabled(P) then
-        _active_key = nil
-        return
-    end
-
-    local key = active_key()
-    if key ~= _active_key then
-        _active_key = key
-        local entry = selected_entry()
-        if entry then
-            ensure_image(key, entry.file)
-        end
-    end
-end
-
-function M.draw()
-    if not settings.enabled(P) then return end
-
-    local entry = selected_entry()
-    if entry then
-        ensure_image(active_key(), entry.file)
-    end
-
-    draw_cache_list(cache.world)
-    draw_cache_list(cache.loot)
-    draw_cache_list(cache.base)
-    draw_npcs()
-    draw_players()
-end
-
-return M
-
-end)()
-
 -- ── features/world/world_esp.lua ──
 April._mods["features.world.world_esp"] = (function()
 local settings = April.require("core.settings")
@@ -11751,6 +11767,7 @@ function M.register_menu()
     menu.add_checkbox(T, G.WORLD, "april_world_boxes", "Resource 3D Boxes", false, { parent = P })
     menu.add_checkbox(T, G.WORLD, "april_world_show_name", "Resource Show Name", true, { parent = P })
     menu.add_checkbox(T, G.WORLD, "april_world_show_distance", "Resource Show Distance", true, { parent = P })
+    menu_util.gap(T, G.WORLD)
     menu.add_slider_int(T, G.WORLD, "april_world_range", "Resource Range", 50, 2000, 500, { parent = P })
 
     local child_ids = { "april_world_boxes", "april_world_show_name", "april_world_show_distance", "april_world_range" }
@@ -12140,6 +12157,7 @@ function M.register_menu()
     menu.add_checkbox(T, G.WORLD, "april_loot_boxes", "Loot 3D Boxes", false, { parent = P })
     menu.add_checkbox(T, G.WORLD, "april_loot_show_name", "Loot Show Name", true, { parent = P })
     menu.add_checkbox(T, G.WORLD, "april_loot_show_distance", "Loot Show Distance", true, { parent = P })
+    menu_util.gap(T, G.WORLD)
     menu.add_slider_int(T, G.WORLD, "april_loot_range", "Loot Range", 50, 2000, 300, { parent = P })
 
     local child_ids = { "april_loot_boxes", "april_loot_show_name", "april_loot_show_distance", "april_loot_range" }
@@ -12314,6 +12332,7 @@ function M.register_menu()
     menu.add_checkbox(T, G.WORLD, "april_base_boxes", "Base 3D Boxes", false, { parent = P })
     menu.add_checkbox(T, G.WORLD, "april_base_show_name", "Base Show Name", true, { parent = P })
     menu.add_checkbox(T, G.WORLD, "april_base_show_distance", "Base Show Distance", false, { parent = P })
+    menu_util.gap(T, G.WORLD)
     menu.add_slider_int(T, G.WORLD, "april_base_range", "Base Range", 50, 500, 150, { parent = P })
 
     local child_ids = { "april_base_boxes", "april_base_show_name", "april_base_show_distance", "april_base_range" }
@@ -12533,6 +12552,8 @@ function M.register_menu()
     menu.add_checkbox(T, G.WORLD, "april_npc_offscreen", "Offscreen Arrows", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "NPC Show Name", true, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "NPC Show Distance", true, root)
+
+    menu_util.gap(T, G.WORLD)
     menu.add_slider_int(T, G.WORLD, "april_npc_range", "NPC Range", 50, 2000, 500, root)
 
     menu_util.bind_children(P, {
@@ -12872,7 +12893,6 @@ function M.register_menu()
         5,
         menu_util.parent("april_slowfall_enabled")
     )
-    menu_util.label(T, G.MISC, "Slowfall: includes shoot-while-jumping bypass")
 
     menu_util.bind_children("april_noclip_enabled", { "april_noclip_speed" })
     menu_util.bind_children("april_slowfall_enabled", { "april_slowfall_speed" })
@@ -13685,7 +13705,8 @@ function M.register_menu()
     menu_util.gap(T, G.MISC)
     menu_util.register_keybind(T, G.MISC, P, "Desync", false)
     menu.add_checkbox(T, G.MISC, "april_desync_autosend", "Desync Auto Send", false, root)
-    menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Desync Send Threshold", 0, 1, 0.3, root)
+    menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Desync Send Threshold", 0, 1, 0.3,
+        menu_util.parent("april_desync_autosend"))
     menu.add_checkbox(T, G.MISC, P_VIS, "Desync Visualize", false, menu_util.parent(P, {
         colorpicker = { 0.2, 0.85, 1, 0.9 },
     }))
@@ -13693,10 +13714,7 @@ function M.register_menu()
     menu_util.bind_children(P, {
         "april_desync_autosend", "april_desync_autosend_len", P_VIS,
     })
-
-    menu_util.bind_when(function()
-        return settings.enabled(P) and settings.enabled("april_desync_autosend")
-    end, { "april_desync_autosend_len" }, { P, "april_desync_autosend" })
+    menu_util.bind_children("april_desync_autosend", { "april_desync_autosend_len" })
 end
 
 function M.update(_dt)
@@ -14044,9 +14062,6 @@ function M.register_menu()
     local root = menu_util.parent(P)
 
     menu_util.register_keybind(T, G.RADAR, P, "Enable Radar", false, { key = 0x28 })
-    menu.add_slider_float(T, G.RADAR, "april_map_zoom", "Zoom Level", 0.05, 5.0, 1.0, "%.2f", root)
-    menu.add_slider_int(T, G.RADAR, "april_map_size", "Radar Size", 140, 420, 240, root)
-    menu.add_slider_int(T, G.RADAR, "april_map_icon_scale", "Blip Size", 2, 6, 3, root)
 
     menu.add_checkbox(T, G.RADAR, "april_map_show_players", "Players", true, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_npcs", "NPCs", false, root)
@@ -14054,6 +14069,7 @@ function M.register_menu()
     menu.add_checkbox(T, G.RADAR, "april_map_show_world", "Resources", true, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_base", "Base Parts", false, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_waypoints", "Waypoints", true, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_labels", "Radar Show Labels", false, root)
 
     menu.add_colorpicker(T, G.RADAR, "april_map_bg", "Background", theme.MAP_BG, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_grid", "Grid", theme.MAP_GRID, root)
@@ -14064,15 +14080,20 @@ function M.register_menu()
     menu.add_colorpicker(T, G.RADAR, "april_map_base_col", "Base", { 0.55, 0.55, 1, 1 }, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_wp_col", "Waypoints", theme.CYAN, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_local", "You", theme.CYAN, root)
-    menu.add_checkbox(T, G.RADAR, "april_map_labels", "Radar Show Labels", false, root)
+
+    menu_util.gap(T, G.RADAR)
+    menu.add_slider_float(T, G.RADAR, "april_map_zoom", "Zoom Level", 0.05, 5.0, 1.0, "%.2f", root)
+    menu.add_slider_int(T, G.RADAR, "april_map_size", "Radar Size", 140, 420, 240, root)
+    menu.add_slider_int(T, G.RADAR, "april_map_icon_scale", "Blip Size", 2, 6, 3, root)
 
     menu_util.bind_children(P, {
-        "april_map_zoom", "april_map_size", "april_map_icon_scale",
         "april_map_show_players", "april_map_show_npcs", "april_map_show_loot",
         "april_map_show_world", "april_map_show_base", "april_map_show_waypoints",
+        "april_map_labels",
         "april_map_bg", "april_map_grid", "april_map_player_col", "april_map_npc_col",
         "april_map_loot_col", "april_map_world_col", "april_map_base_col",
-        "april_map_wp_col", "april_map_local", "april_map_labels",
+        "april_map_wp_col", "april_map_local",
+        "april_map_zoom", "april_map_size", "april_map_icon_scale",
     })
 end
 
@@ -14178,6 +14199,210 @@ return M
 
 end)()
 
+-- ── features/utility/keybind_viewer.lua ──
+April._mods["features.utility.keybind_viewer"] = (function()
+local settings = April.require("core.settings")
+local menu_util = April.require("core.menu_util")
+local draw_util = April.require("core.draw_util")
+local theme = April.require("core.ui_theme")
+local feature_bind = April.require("core.feature_bind")
+
+local M = {}
+
+local P = "april_keybinds_enabled"
+
+-- Full Win32 VK map (printable + modifiers + OEM + media/nav).
+local VK_NAMES = {
+    [0x01] = "M1", [0x02] = "M2", [0x04] = "M3", [0x05] = "M4", [0x06] = "M5",
+    [0x08] = "Backspace", [0x09] = "Tab", [0x0C] = "Clear", [0x0D] = "Enter",
+    [0x10] = "Shift", [0x11] = "Ctrl", [0x12] = "Alt",
+    [0x13] = "Pause", [0x14] = "Caps", [0x1B] = "Esc",
+    [0x20] = "Space",
+    [0x21] = "PgUp", [0x22] = "PgDn", [0x23] = "End", [0x24] = "Home",
+    [0x25] = "Left", [0x26] = "Up", [0x27] = "Right", [0x28] = "Down",
+    [0x29] = "Select", [0x2A] = "Print", [0x2B] = "Execute",
+    [0x2C] = "PrtSc", [0x2D] = "Ins", [0x2E] = "Del", [0x2F] = "Help",
+    [0x30] = "0", [0x31] = "1", [0x32] = "2", [0x33] = "3", [0x34] = "4",
+    [0x35] = "5", [0x36] = "6", [0x37] = "7", [0x38] = "8", [0x39] = "9",
+    [0x41] = "A", [0x42] = "B", [0x43] = "C", [0x44] = "D", [0x45] = "E",
+    [0x46] = "F", [0x47] = "G", [0x48] = "H", [0x49] = "I", [0x4A] = "J",
+    [0x4B] = "K", [0x4C] = "L", [0x4D] = "M", [0x4E] = "N", [0x4F] = "O",
+    [0x50] = "P", [0x51] = "Q", [0x52] = "R", [0x53] = "S", [0x54] = "T",
+    [0x55] = "U", [0x56] = "V", [0x57] = "W", [0x58] = "X", [0x59] = "Y",
+    [0x5A] = "Z",
+    [0x5B] = "LWin", [0x5C] = "RWin", [0x5D] = "Apps",
+    [0x60] = "Num0", [0x61] = "Num1", [0x62] = "Num2", [0x63] = "Num3",
+    [0x64] = "Num4", [0x65] = "Num5", [0x66] = "Num6", [0x67] = "Num7",
+    [0x68] = "Num8", [0x69] = "Num9",
+    [0x6A] = "Num*", [0x6B] = "Num+", [0x6C] = "Separator",
+    [0x6D] = "Num-", [0x6E] = "Num.", [0x6F] = "Num/",
+    [0x70] = "F1", [0x71] = "F2", [0x72] = "F3", [0x73] = "F4",
+    [0x74] = "F5", [0x75] = "F6", [0x76] = "F7", [0x77] = "F8",
+    [0x78] = "F9", [0x79] = "F10", [0x7A] = "F11", [0x7B] = "F12",
+    [0x7C] = "F13", [0x7D] = "F14", [0x7E] = "F15", [0x7F] = "F16",
+    [0x80] = "F17", [0x81] = "F18", [0x82] = "F19", [0x83] = "F20",
+    [0x84] = "F21", [0x85] = "F22", [0x86] = "F23", [0x87] = "F24",
+    [0x90] = "NumLock", [0x91] = "Scroll",
+    [0xA0] = "LShift", [0xA1] = "RShift",
+    [0xA2] = "LCtrl", [0xA3] = "RCtrl",
+    [0xA4] = "LAlt", [0xA5] = "RAlt",
+    [0xA6] = "BrowserBack", [0xA7] = "BrowserForward",
+    [0xA8] = "BrowserRefresh", [0xA9] = "BrowserStop",
+    [0xAA] = "BrowserSearch", [0xAB] = "BrowserFav",
+    [0xAC] = "BrowserHome",
+    [0xAD] = "Mute", [0xAE] = "Vol-", [0xAF] = "Vol+",
+    [0xB0] = "NextTrack", [0xB1] = "PrevTrack",
+    [0xB2] = "StopMedia", [0xB3] = "PlayPause",
+    [0xB4] = "Mail", [0xB5] = "MediaSelect",
+    [0xB6] = "App1", [0xB7] = "App2",
+    -- OEM / punctuation (US layout labels)
+    [0xBA] = ";", [0xBB] = "=", [0xBC] = ",", [0xBD] = "-",
+    [0xBE] = ".", [0xBF] = "/", [0xC0] = "`",
+    [0xDB] = "[", [0xDC] = "\\", [0xDD] = "]", [0xDE] = "'",
+    [0xDF] = "OEM8", [0xE2] = "OEM102",
+}
+
+local function strip_enable_prefix(label)
+    if type(label) ~= "string" then return tostring(label or "?") end
+    label = label:gsub("^Enable%s+", "")
+    return label
+end
+
+local function vk_name(vk)
+    vk = tonumber(vk) or 0
+    if vk <= 0 then return "—" end
+
+    local named = VK_NAMES[vk]
+    if named then return named end
+
+    -- Printable ASCII range fallback
+    if vk >= 0x20 and vk <= 0x7E then
+        return string.char(vk)
+    end
+
+    return string.format("VK-%d", vk)
+end
+
+local function collect_rows()
+    local rows = {}
+    local only_active = settings.bool("april_keybinds_active_only", false)
+    local show_unbound = settings.bool("april_keybinds_show_unbound", true)
+    local show_mode = settings.bool("april_keybinds_show_mode", true)
+
+    for _, entry in ipairs(feature_bind.list_entries()) do
+        local id = entry.id
+        local key = feature_bind.get_key(id)
+        local active = feature_bind.active(id)
+        local hold = feature_bind.is_hold(id)
+
+        if key <= 0 and not show_unbound then
+            goto continue
+        end
+        if only_active and not active then
+            goto continue
+        end
+
+        rows[#rows + 1] = {
+            id = id,
+            label = strip_enable_prefix(entry.label or id),
+            key = vk_name(key),
+            mode = hold and "Hold" or "Toggle",
+            active = active,
+            show_mode = show_mode,
+        }
+
+        ::continue::
+    end
+
+    table.sort(rows, function(a, b)
+        if a.active ~= b.active then return a.active end
+        return a.label < b.label
+    end)
+
+    return rows
+end
+
+function M.register_menu()
+    local G = menu_util.G
+    local T = menu_util.group(G.MISC)
+    local root = menu_util.parent(P)
+
+    menu.add_checkbox(T, G.MISC, P, "Keybind Viewer", false)
+    menu.add_checkbox(T, G.MISC, "april_keybinds_active_only", "Only Show Active", false, root)
+    menu.add_checkbox(T, G.MISC, "april_keybinds_show_unbound", "Show Unbound", true, root)
+    menu.add_checkbox(T, G.MISC, "april_keybinds_show_mode", "Show Bind Mode", true, root)
+
+    menu_util.gap(T, G.MISC)
+    menu.add_slider_int(T, G.MISC, "april_keybinds_x", "Offset X", 0, 800, 16, root)
+    menu.add_slider_int(T, G.MISC, "april_keybinds_y", "Offset Y", 0, 800, 280, root)
+    menu.add_slider_int(T, G.MISC, "april_keybinds_w", "Width", 160, 420, 260, root)
+
+    menu_util.bind_children(P, {
+        "april_keybinds_active_only", "april_keybinds_show_unbound", "april_keybinds_show_mode",
+        "april_keybinds_x", "april_keybinds_y", "april_keybinds_w",
+    })
+end
+
+function M.update(_dt) end
+
+function M.draw()
+    if not settings.enabled(P) then return end
+    if not draw or not draw.text then return end
+
+    local sw, sh = draw_util.screen_size()
+    local panel_w = settings.num("april_keybinds_w", 260)
+    local ox = settings.num("april_keybinds_x", 16)
+    local oy = settings.num("april_keybinds_y", 280)
+    local x = sw - panel_w - ox
+    local y = math.floor(sh * 0.5) - 80 + (oy - 280)
+
+    local rows = collect_rows()
+    local pad = 10
+    local title_h = 22
+    local row_h = 18
+    local count = math.max(#rows, 1)
+    local height = title_h + count * row_h + 10
+
+    theme.draw_panel(x, y, panel_w, height, {
+        bg = theme.alpha(theme.BG, 0.88),
+        border = theme.alpha(theme.BORDER, 0.4),
+        accent = theme.CYAN,
+        accent_w = 2,
+        rounding = theme.ROUND,
+    })
+
+    draw_util.text(x + pad, y + 5, "Keybinds", theme.TEXT, 12)
+
+    local ry = y + title_h
+    if #rows == 0 then
+        draw_util.text(x + pad, ry, "No binds", theme.TEXT_MUTED, 11)
+        return
+    end
+
+    for i = 1, #rows do
+        local row = rows[i]
+        local name_col = row.active and theme.TEXT or theme.TEXT_MUTED
+        local key_col = row.active and theme.CYAN or theme.TEXT_DIM
+
+        local label = row.label
+        if #label > 16 then label = label:sub(1, 14) .. ".." end
+        draw_util.text(x + pad, ry, label, name_col, 11)
+
+        local right = row.key
+        if row.show_mode then
+            right = right .. " · " .. row.mode
+        end
+        local tw = theme.text_w(right, 11)
+        draw_util.text(x + panel_w - pad - tw, ry, right, key_col, 11)
+
+        ry = ry + row_h
+    end
+end
+
+return M
+
+end)()
+
 -- ── features/utility/mod_checker.lua ──
 April._mods["features.utility.mod_checker"] = (function()
 local settings = April.require("core.settings")
@@ -14271,6 +14496,7 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.MISC)
     menu.add_checkbox(T, G.MISC, P, "Mod Checker", false)
+    menu_util.gap(T, G.MISC)
     menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Mod Scan Interval (ms)", 1000, 10000, 2500, { parent = P })
     menu_util.bind_master(P, { "april_mod_checker_interval" })
 end
@@ -14683,13 +14909,13 @@ M.FEATURE_ORDER = {
     "features.visuals.crosshair",
     "features.visuals.bullet_tracers",
     "features.visuals.hitmarkers",
-    "features.visuals.brainrot_esp",
     "features.world.world_esp",
     "features.world.loot_esp",
     "features.world.npc_esp",
     "features.world.base_esp",
     "features.radar.tactical_map",
     "features.radar.waypoints",
+    "features.utility.keybind_viewer",
     "features.utility.mod_checker",
     "features.combat.perfect_farm",
     "features.movement.exploits",
@@ -14726,11 +14952,6 @@ function M.register_all()
 
     pcall(function()
         local mod = April.require("features.utility.mod_checker")
-        if mod.init then mod.init() end
-    end)
-
-    pcall(function()
-        local mod = April.require("features.visuals.brainrot_esp")
         if mod.init then mod.init() end
     end)
 end

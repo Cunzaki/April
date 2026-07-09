@@ -18,6 +18,7 @@ local DEFAULT = {
     speed_mult = 100,
     range = false,
     range_mult = 10,
+    double_tap = false,
 }
 
 local EDITOR_KEYS = {
@@ -32,6 +33,7 @@ local EDITOR_KEYS = {
     speed_mult = "april_gm_speed_mult",
     range = "april_gm_range",
     range_mult = "april_gm_range_mult",
+    double_tap = "april_gm_double_tap",
 }
 
 M._profiles = {}
@@ -91,6 +93,20 @@ function M.has_active_mods(weapon_name)
     if not profile then return false end
     return profile.recoil or profile.spread or profile.sway
         or profile.fire_rate or profile.speed or profile.range
+        or profile.double_tap
+end
+
+function M.has_gc_mods(weapon_name)
+    local profile = M.get(weapon_name)
+    if not profile then return false end
+    return profile.recoil or profile.spread or profile.sway
+        or profile.fire_rate or profile.speed or profile.range
+end
+
+function M.has_toolinfo_mods(weapon_name)
+    local profile = M.get(weapon_name)
+    if not profile then return false end
+    return profile.double_tap == true
 end
 
 function M.read_editor()

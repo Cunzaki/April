@@ -285,19 +285,22 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.VISUALS)
 
+    local root = menu_util.parent(P)
+
     menu.add_checkbox(T, G.VISUALS, P, "Target Gear", false)
-    menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, menu_util.parent(P))
-    menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, menu_util.parent(P))
-    menu.add_checkbox(T, G.VISUALS, P .. "_fallback_fov", "Fallback Crosshair FOV", false, menu_util.parent(P))
-    menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Fallback FOV", 40, 400, 150, menu_util.parent(P))
+    menu.add_checkbox(T, G.VISUALS, P .. "_fallback_fov", "Fallback Crosshair FOV", false, root)
+    menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Fallback FOV", 40, 400, 150,
+        menu_util.parent(P .. "_fallback_fov"))
+
+    menu_util.gap(T, G.VISUALS)
+    menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, root)
+    menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, root)
 
     menu_util.bind_master(P, {
-        P .. "_gear_size", P .. "_top",
         P .. "_fallback_fov", P .. "_fov",
+        P .. "_gear_size", P .. "_top",
     })
-    menu_util.bind_when(function()
-        return settings.enabled(P) and settings.bool(P .. "_fallback_fov", false)
-    end, { P .. "_fov" }, { P, P .. "_fallback_fov" })
+    menu_util.bind_children(P .. "_fallback_fov", { P .. "_fov" })
 end
 
 function M.refresh_target()

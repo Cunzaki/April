@@ -3,6 +3,7 @@ local menu_util = April.require("core.menu_util")
 local profiles = April.require("game.gun_mod_profiles")
 local store = April.require("game.weapon_profile_store")
 local gc = April.require("game.gc_weapon_mods")
+local toolinfo_mods = April.require("game.toolinfo_weapon_mods")
 local env = April.require("core.env")
 local notify = April.require("core.notify")
 
@@ -98,6 +99,7 @@ local function schedule_session_gc_refresh()
     M._force_apply = true
     M._gc_redo_at = tick_ms() + REJOIN_GC_DELAY_MS
     M._retry_until = tick_ms() + RETRY_MAX_MS
+    toolinfo_mods.invalidate()
 end
 
 local function weapon_names()
@@ -150,6 +152,14 @@ local function ensure_weapon_combo()
     load_selected_editor()
 end
 
+local function clear_all_mods()
+    local clear = build_clear_payload()
+    if clear then gc.apply_weapon(clear) end
+    toolinfo_mods.reset()
+    M._had_applied_mods = false
+    M._last_applied_keys = nil
+end
+
 function M.on_session_changed()
     schedule_session_gc_refresh()
 end
@@ -171,23 +181,31 @@ function M.register_menu()
     M._combo_ctx = { T = T, G = G.GUN_MODS, root = root }
     ensure_weapon_combo()
 
+    -- Toggles first (feature toggles together)
     menu_util.gap(T, G.GUN_MODS)
     menu.add_checkbox(T, G.GUN_MODS, "april_gm_recoil", "No Recoil", false, root)
-    menu.add_slider_int(T, G.GUN_MODS, "april_gm_recoil_pct", "Recoil Reduction %", 0, 100, 100, root)
+    menu.add_slider_int(T, G.GUN_MODS, "april_gm_recoil_pct", "Recoil Reduction %", 0, 100, 100,
+        menu_util.parent("april_gm_recoil"))
 
     menu.add_checkbox(T, G.GUN_MODS, "april_gm_spread", "No Spread", false, root)
-    menu.add_slider_int(T, G.GUN_MODS, "april_gm_spread_pct", "Spread Reduction %", 0, 100, 100, root)
+    menu.add_slider_int(T, G.GUN_MODS, "april_gm_spread_pct", "Spread Reduction %", 0, 100, 100,
+        menu_util.parent("april_gm_spread"))
 
     menu.add_checkbox(T, G.GUN_MODS, "april_gm_sway", "No Sway", false, root)
 
     menu.add_checkbox(T, G.GUN_MODS, "april_gm_fire_rate", "Fire Rate", false, root)
-    menu.add_slider_float(T, G.GUN_MODS, "april_gm_fire_rate_mult", "Fire Rate Multiplier", 1.0, 3.0, 1.5, "%.2f", root)
+    menu.add_slider_float(T, G.GUN_MODS, "april_gm_fire_rate_mult", "Fire Rate Multiplier", 1.0, 3.0, 1.5, "%.2f",
+        menu_util.parent("april_gm_fire_rate"))
 
     menu.add_checkbox(T, G.GUN_MODS, "april_gm_speed", "Bullet Speed", false, root)
-    menu.add_slider_int(T, G.GUN_MODS, "april_gm_speed_mult", "Speed Mult (100 = instant)", 0, 100, 100, root)
+    menu.add_slider_int(T, G.GUN_MODS, "april_gm_speed_mult", "Speed Mult", 1, 100, 100,
+        menu_util.parent("april_gm_speed"))
 
     menu.add_checkbox(T, G.GUN_MODS, "april_gm_range", "Range", false, root)
-    menu.add_slider_int(T, G.GUN_MODS, "april_gm_range_mult", "Range Mult", 1, 20, 10, root)
+    menu.add_slider_int(T, G.GUN_MODS, "april_gm_range_mult", "Range Mult", 1, 20, 10,
+        menu_util.parent("april_gm_range"))
+
+    menu.add_checkbox(T, G.GUN_MODS, "april_gm_double_tap", "Double Tap", false, root)
 
     menu_util.gap(T, G.GUN_MODS)
     menu_util.button(T, G.GUN_MODS, "april_gm_save", "Save Profile", function()
@@ -200,6 +218,9 @@ function M.register_menu()
         sync_held_display()
         local label = key == profiles.GLOBAL_PROFILE_KEY and "Global" or key
         notify.success("Saved profile: " .. label, 3500)
+        if settings.enabled(P) then
+            schedule_apply(200)
+        end
     end, P)
 
     menu_util.button(T, G.GUN_MODS, "april_gm_clear", "Clear Saved Profile", function()
@@ -217,6 +238,9 @@ function M.register_menu()
         sync_held_display()
         local label = key == profiles.GLOBAL_PROFILE_KEY and "Global" or key
         notify.info("Cleared profile: " .. label, 3500)
+        if settings.enabled(P) then
+            schedule_apply(200)
+        end
     end, P)
 
     menu_util.bind_children(P, {
@@ -227,8 +251,15 @@ function M.register_menu()
         "april_gm_fire_rate", "april_gm_fire_rate_mult",
         "april_gm_speed", "april_gm_speed_mult",
         "april_gm_range", "april_gm_range_mult",
+        "april_gm_double_tap",
         "april_gm_save", "april_gm_clear",
     })
+
+    menu_util.bind_children("april_gm_recoil", { "april_gm_recoil_pct" })
+    menu_util.bind_children("april_gm_spread", { "april_gm_spread_pct" })
+    menu_util.bind_children("april_gm_fire_rate", { "april_gm_fire_rate_mult" })
+    menu_util.bind_children("april_gm_speed", { "april_gm_speed_mult" })
+    menu_util.bind_children("april_gm_range", { "april_gm_range_mult" })
 
     settings.on_change("april_gm_weapon_select", function()
         load_selected_editor()
@@ -236,6 +267,9 @@ function M.register_menu()
 
     settings.on_change(profiles.MODE_ID, function()
         sync_held_display()
+        if settings.enabled(P) then
+            schedule_apply(200)
+        end
     end)
 
     settings.on_change(P, function()
@@ -253,6 +287,8 @@ function M.register_menu()
 end
 
 function M.reset_mods()
+    toolinfo_mods.reset()
+
     if not gc.available() then
         notify.info("Gun mods disabled", 3000)
         return true
@@ -261,7 +297,7 @@ function M.reset_mods()
     local mods = build_clear_payload()
     if not mods then
         M._had_applied_mods = false
-        notify.info("Gun mods cleared (nothing to reset)", 3000)
+        notify.info("Gun mods cleared", 3000)
         return true
     end
     local ok, count, msg = gc.apply_weapon(mods)
@@ -283,10 +319,16 @@ function M.try_apply(silent)
     local held = profiles.held_weapon_name()
     if not held then
         if M._had_applied_mods then
-            local clear = build_clear_payload()
-            if clear then gc.apply_weapon(clear) end
-            M._had_applied_mods = false
-            M._last_applied_keys = nil
+            clear_all_mods()
+        end
+        M._apply_dirty = false
+        M._force_apply = false
+        return false
+    end
+
+    if not profiles.should_apply_for_held(held) then
+        if M._had_applied_mods then
+            clear_all_mods()
         end
         M._apply_dirty = false
         M._force_apply = false
@@ -294,12 +336,13 @@ function M.try_apply(silent)
     end
 
     local mods = profiles.build_mods_for_apply(held)
-    if not mods or not next(mods) or not profiles.should_apply_for_held(held) then
+    local ti_opts, ti_weapon = profiles.build_toolinfo_for_apply(held)
+    local has_gc = mods and next(mods)
+    local has_ti = ti_opts and ti_opts.double_tap == true
+
+    if not has_gc and not has_ti then
         if M._had_applied_mods then
-            local clear = build_clear_payload()
-            if clear then gc.apply_weapon(clear) end
-            M._had_applied_mods = false
-            M._last_applied_keys = nil
+            clear_all_mods()
         end
         M._apply_dirty = false
         M._force_apply = false
@@ -310,17 +353,37 @@ function M.try_apply(silent)
         return true
     end
 
-    local ok, count, msg = gc.apply_weapon(mods)
+    local ok_gc, count, msg = true, 0, nil
+    if has_gc then
+        ok_gc, count, msg = gc.apply_weapon(mods)
+        if ok_gc then
+            remember_applied(mods)
+        end
+    else
+        -- Clear previous GC patches if profile no longer has GC keys
+        local clear = build_clear_payload()
+        if clear then gc.apply_weapon(clear) end
+        M._last_applied_keys = nil
+    end
+
+    local ok_ti = true
+    if has_ti then
+        ok_ti = toolinfo_mods.apply(ti_opts, ti_weapon)
+    else
+        toolinfo_mods.reset()
+    end
+
+    local ok = (not has_gc or ok_gc) and ok_ti
     if ok then
         M._had_applied_mods = true
-        remember_applied(mods)
         M._apply_dirty = false
         M._force_apply = false
         M._retry_until = 0
         if M._notify_next or not silent then
             M._notify_next = false
             local suffix = profiles.is_global_mode() and " (global)" or (" (" .. held .. ")")
-            notify.success("Gun mods applied" .. suffix .. ": " .. tostring(msg or (count .. " nodes")), 3500)
+            local detail = msg or (tostring(count) .. " nodes")
+            notify.success("Gun mods applied" .. suffix .. ": " .. tostring(detail), 3500)
         end
     else
         M._apply_dirty = true
@@ -376,6 +439,7 @@ function M.update(_dt)
         M._gc_redo_at = 0
         if in_match() then
             gc.refresh_cache()
+            toolinfo_mods.invalidate()
             M._apply_dirty = true
             M._force_apply = true
             M._defer_until = now
@@ -402,9 +466,13 @@ end
 
 function M.on_modules_ready()
     store.load()
+    toolinfo_mods.invalidate()
     ensure_weapon_combo()
     load_selected_editor()
     sync_held_display()
+    if settings.enabled(P) then
+        schedule_apply(400)
+    end
 end
 
 function M.draw() end

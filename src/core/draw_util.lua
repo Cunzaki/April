@@ -1,6 +1,5 @@
 local math_util = April.require("core.math_util")
 local text_util = April.require("core.text_util")
-local settings = April.require("core.settings")
 
 local M = {}
 
@@ -25,9 +24,6 @@ function M.text(x, y, text, col, size)
 end
 
 function M.box_esp(x, y, w, h, col, style)
-    if settings and settings.enabled and settings.enabled("april_brainrot_enabled") then
-        return
-    end
     if not draw then return end
     if style == 1 and draw.corner_box then
         draw.corner_box(x, y, w, h, col)

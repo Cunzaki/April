@@ -20,7 +20,6 @@ local EXCLUDE = {
 
 local MENU_KEYS = {
     "april_esp_text_size",
-    "april_tung_esp_enabled", "april_tung_esp_max_dist",
         "april_target_overlay", "april_target_overlay_fov", "april_target_overlay_gear_size", "april_target_overlay_top",
         "april_target_overlay_fallback_fov",
     "april_crosshair_enabled", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
@@ -30,19 +29,22 @@ local MENU_KEYS = {
     "april_bullet_tracers_thick", "april_bullet_tracers_life",
     "april_hitmarkers", "april_hitmarkers_head", "april_hitmarkers_style",
     "april_hitmarkers_size", "april_hitmarkers_gap", "april_hitmarkers_life", "april_hitmarkers_thick",
-    "april_brainrot_enabled", "april_brainrot_enabled_mode", "april_brainrot_style", "april_brainrot_size",
     "april_silent_aim", "april_silent_aim_mode",
     "april_silent_target_type", "april_silent_bone",
     "april_silent_filter_health", "april_silent_filter_visible", "april_silent_filter_team",
     "april_silent_target_players", "april_silent_target_npcs", "april_silent_target_npc_soldiers", "april_silent_target_npc_bosses",
-    "april_silent_max_dist", "april_silent_fov", "april_silent_sticky",
-    "april_silent_wallbang", "april_silent_bullet_tp", "april_silent_tp_ray_mode", "april_silent_tp_ray_vis",
+    "april_silent_sticky", "april_silent_wallbang",
+    "april_silent_bullet_tp", "april_silent_tp_ray_mode", "april_silent_tp_ray_vis",
     "april_silent_bullet_manip",
     "april_silent_manip_dist", "april_silent_manip_status", "april_silent_manip_peek_vis",
     "april_silent_draw_fov", "april_silent_fov_style", "april_silent_target_line",
-    "april_gunmods_enabled", "april_gunmods_enabled_mode", "april_gm_mode", "april_gm_weapon_select", "april_gm_recoil", "april_gm_recoil_pct", "april_gm_spread", "april_gm_spread_pct",
+    "april_silent_hit_chance", "april_silent_max_dist", "april_silent_fov",
+    "april_gunmods_enabled", "april_gunmods_enabled_mode", "april_gm_mode", "april_gm_weapon_select",
+    "april_gm_recoil", "april_gm_recoil_pct", "april_gm_spread", "april_gm_spread_pct",
     "april_gm_sway", "april_gm_fire_rate", "april_gm_fire_rate_mult",
-    "april_gm_speed", "april_gm_speed_mult", "april_gm_range", "april_gm_range_mult",
+    "april_gm_speed", "april_gm_speed_mult",
+    "april_gm_range", "april_gm_range_mult",
+    "april_gm_double_tap",
     "april_farm_helper", "april_farm_helper_mode", "april_farm_radius", "april_farm_smooth",
     "april_farm_silent",
     "april_world_enabled", "april_world_enabled_mode", "april_stone_node", "april_metal_node", "april_phosphate_node",
@@ -82,6 +84,8 @@ local MENU_KEYS = {
     "april_bullet_manip_debug", "april_bullet_manip_console", "april_bullet_manip_vis",
     "april_bullet_manip_vis_style", "april_bullet_manip_vis_size",
     "april_bullet_manip_vis_link", "april_bullet_manip_vis_labels", "april_bullet_manip_vis_peek",
+    "april_keybinds_enabled", "april_keybinds_active_only", "april_keybinds_show_unbound", "april_keybinds_show_mode",
+    "april_keybinds_x", "april_keybinds_y", "april_keybinds_w",
     "april_mod_checker_enabled", "april_mod_checker_interval",
 }
 
@@ -112,7 +116,6 @@ local COLOR_KEYS = {
 
 local LEGACY_HOTKEY_TO_CHECKBOX = {
     april_crosshair_enabled_key = "april_crosshair_enabled",
-    april_brainrot_enabled_key = "april_brainrot_enabled",
     april_gunmods_enabled_key = "april_gunmods_enabled",
     april_farm_helper_key = "april_farm_helper",
     april_world_enabled_key = "april_world_enabled",
@@ -129,7 +132,6 @@ local LEGACY_HOTKEY_TO_CHECKBOX = {
 }
 
 local HOTKEY_KEYS = {
-    "april_brainrot_enabled",
     "april_gunmods_enabled",
     "april_farm_helper",
     "april_world_enabled",
@@ -143,7 +145,6 @@ local HOTKEY_KEYS = {
     "april_fling_enabled",
     "april_desync_enabled",
     "april_bullet_manip_enabled",
-    "april_tung_esp_enabled",
     "april_silent_aim",
 }
 

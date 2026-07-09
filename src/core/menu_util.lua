@@ -256,6 +256,7 @@ function M.register_keybind(T, G, id, label, default, extra)
 
     April.require("core.feature_bind").register({
         id = id,
+        label = label,
         mode_id = mode_id,
         key_id = id,
     })

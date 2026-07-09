@@ -43,6 +43,13 @@ function M.build_mods_from_profile(profile)
     return mods
 end
 
+function M.build_toolinfo_opts(profile)
+    if not profile then
+        return { double_tap = false }
+    end
+    return { double_tap = profile.double_tap == true }
+end
+
 -- Neutral attachment-style mults (game uses 1 + Mult for speed/range/sway/spread/recoil,
 -- and delay *= 1 - FireRateMult). Only used when disabling gun mods / clearing apply.
 -- Do NOT merge these into active apply payloads — that stomps attachment FireRateMult etc.
@@ -103,6 +110,21 @@ function M.build_mods_for_apply(held)
         return M.build_mods_for_weapon(held)
     end
     return nil
+end
+
+function M.build_toolinfo_for_apply(held)
+    local profile
+    if M.is_global_mode() then
+        if not store.has_saved(M.GLOBAL_PROFILE_KEY) then return nil, nil end
+        profile = store.get(M.GLOBAL_PROFILE_KEY)
+        return M.build_toolinfo_opts(profile), nil -- nil weapon = all
+    end
+
+    if held and store.has_saved(held) then
+        profile = store.get(held)
+        return M.build_toolinfo_opts(profile), held
+    end
+    return nil, nil
 end
 
 function M.should_apply_for_held(held)

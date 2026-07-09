@@ -219,18 +219,22 @@ function M.closest_bone_world(target, cx, cy)
     if M.is_npc_target(target) then
         return npc_head_world(target)
     end
-    if target.get_bones_screen then
-        local bones = target:get_bones_screen()
-        if bones then
+    if target and target.get_bones_screen then
+        local ok, bones = pcall(function()
+            return target:get_bones_screen()
+        end)
+        if ok and type(bones) == "table" then
             local best_name, best_dist = nil, math.huge
             for name, entry in pairs(bones) do
-                local bx = entry.x or entry[1]
-                local by = entry.y or entry[2]
-                if bx and by then
-                    local d = math_util.screen_fov_dist(bx, by, cx, cy)
-                    if d < best_dist then
-                        best_dist = d
-                        best_name = name
+                if type(entry) == "table" and type(name) == "string" and name ~= "Closest" then
+                    local bx = entry.x or entry[1]
+                    local by = entry.y or entry[2]
+                    if type(bx) == "number" and type(by) == "number" then
+                        local d = math_util.screen_fov_dist(bx, by, cx, cy)
+                        if d < best_dist then
+                            best_dist = d
+                            best_name = name
+                        end
                     end
                 end
             end
