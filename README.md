@@ -42,7 +42,7 @@ Edit `src/`, rebuild, push `april.lua` to GitHub.
 | `assets/` | CDN images (`raw.githubusercontent.com/.../assets/`) |
 | `package.json` | `npm run build` |
 
-**Local only (gitignored):** `references/`, `RE/`, `Script 1.lua`, `node_modules/`
+**Local only (gitignored):** `dump/`, `RE/`, `node_modules/`
 
 ---
 
