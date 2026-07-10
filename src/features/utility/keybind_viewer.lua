@@ -3,10 +3,15 @@ local menu_util = April.require("core.menu_util")
 local draw_util = April.require("core.draw_util")
 local theme = April.require("core.ui_theme")
 local feature_bind = April.require("core.feature_bind")
+local panel_drag = April.require("core.panel_drag")
 
 local M = {}
 
 local P = "april_keybinds_enabled"
+local X_ID = "april_keybinds_x"
+local Y_ID = "april_keybinds_y"
+local W_ID = "april_keybinds_w"
+local PANEL_ID = "april_keybinds_panel"
 
 -- Full Win32 VK map (printable + modifiers + OEM + media/nav).
 local VK_NAMES = {
@@ -52,7 +57,6 @@ local VK_NAMES = {
     [0xB2] = "StopMedia", [0xB3] = "PlayPause",
     [0xB4] = "Mail", [0xB5] = "MediaSelect",
     [0xB6] = "App1", [0xB7] = "App2",
-    -- OEM / punctuation (US layout labels)
     [0xBA] = ";", [0xBB] = "=", [0xBC] = ",", [0xBD] = "-",
     [0xBE] = ".", [0xBF] = "/", [0xC0] = "`",
     [0xDB] = "[", [0xDC] = "\\", [0xDD] = "]", [0xDE] = "'",
@@ -72,7 +76,6 @@ local function vk_name(vk)
     local named = VK_NAMES[vk]
     if named then return named end
 
-    -- Printable ASCII range fallback
     if vk >= 0x20 and vk <= 0x7E then
         return string.char(vk)
     end
@@ -130,13 +133,14 @@ function M.register_menu()
     menu.add_checkbox(T, G.MISC, "april_keybinds_show_mode", "Show Bind Mode", true, root)
 
     menu_util.gap(T, G.MISC)
-    menu.add_slider_int(T, G.MISC, "april_keybinds_x", "Offset X", 0, 800, 16, root)
-    menu.add_slider_int(T, G.MISC, "april_keybinds_y", "Offset Y", 0, 800, 280, root)
-    menu.add_slider_int(T, G.MISC, "april_keybinds_w", "Width", 160, 420, 260, root)
+    menu_util.label(T, G.MISC, "Drag the panel title while Vector UI is open.")
+    menu.add_slider_int(T, G.MISC, X_ID, "Pos X", 0, 4000, 16, root)
+    menu.add_slider_int(T, G.MISC, Y_ID, "Pos Y", 0, 4000, 280, root)
+    menu.add_slider_int(T, G.MISC, W_ID, "Width", 160, 420, 260, root)
 
     menu_util.bind_children(P, {
         "april_keybinds_active_only", "april_keybinds_show_unbound", "april_keybinds_show_mode",
-        "april_keybinds_x", "april_keybinds_y", "april_keybinds_w",
+        X_ID, Y_ID, W_ID,
     })
 end
 
@@ -147,28 +151,34 @@ function M.draw()
     if not draw or not draw.text then return end
 
     local sw, sh = draw_util.screen_size()
-    local panel_w = settings.num("april_keybinds_w", 260)
-    local ox = settings.num("april_keybinds_x", 16)
-    local oy = settings.num("april_keybinds_y", 280)
-    local x = sw - panel_w - ox
-    local y = math.floor(sh * 0.5) - 80 + (oy - 280)
+    local panel_w = settings.num(W_ID, 260)
+    local x = settings.num(X_ID, 16)
+    local y = settings.num(Y_ID, 280)
 
     local rows = collect_rows()
     local pad = 10
-    local title_h = 22
+    local title_h = panel_drag.title_h()
     local row_h = 18
     local count = math.max(#rows, 1)
     local height = title_h + count * row_h + 10
 
+    local dragging
+    x, y, dragging = panel_drag.update(PANEL_ID, x, y, panel_w, height, X_ID, Y_ID, sw, sh)
+
+    local can_drag = panel_drag.menu_is_open()
     theme.draw_panel(x, y, panel_w, height, {
         bg = theme.alpha(theme.BG, 0.88),
-        border = theme.alpha(theme.BORDER, 0.4),
+        border = theme.alpha(theme.BORDER, (dragging or can_drag) and 0.7 or 0.4),
         accent = theme.CYAN,
         accent_w = 2,
         rounding = theme.ROUND,
     })
 
-    draw_util.text(x + pad, y + 5, "Keybinds", theme.TEXT, 12)
+    local title = "Keybinds"
+    if can_drag then
+        title = title .. "  · drag"
+    end
+    draw_util.text(x + pad, y + 5, title, theme.TEXT, 12)
 
     local ry = y + title_h
     if #rows == 0 then

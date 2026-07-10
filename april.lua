@@ -1,7 +1,7 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-09T10:47:34.364Z
+    Built: 2026-07-10T03:07:36.734Z
 ]]
 
 April = {
@@ -178,6 +178,27 @@ function M.clear_bucket(bucket)
     for k in pairs(bucket) do bucket[k] = nil end
 end
 
+-- Compact an array of ESP entries, dropping invalid instances. Keeps draw loops tight
+-- between workspace rescans without changing scan interval.
+function M.prune_invalid(list)
+    if not list or #list == 0 then return 0 end
+    local env = April.require("core.env")
+    local write = 1
+    for read = 1, #list do
+        local entry = list[read]
+        if entry and entry.inst and env.is_valid(entry.inst) then
+            if write ~= read then
+                list[write] = entry
+            end
+            write = write + 1
+        end
+    end
+    for i = write, #list do
+        list[i] = nil
+    end
+    return write - 1
+end
+
 return M
 
 end)()
@@ -199,6 +220,9 @@ function M.probe()
         raycast = _G.raycast ~= nil,
         fflag = _G.fflag ~= nil,
         memory = _G.memory ~= nil,
+        exploits_chams = _G.exploits ~= nil
+            and type(exploits.ApplyChamsToInstance) == "function"
+            and type(exploits.RevertChams) == "function",
         fallen_gc = type(refreshgc) == "function"
             and type(applygc) == "function"
             and type(getgc) == "function",
@@ -212,6 +236,7 @@ function M.summary(c)
     if c.menu then table.insert(parts, "menu") end
     if c.draw then table.insert(parts, "draw") end
     if c.fallen_gc then table.insert(parts, "gc-mods") end
+    if c.exploits_chams then table.insert(parts, "gpu-chams") end
     if c.getgc then table.insert(parts, "getgc") end
     return #parts > 0 and table.concat(parts, ", ") or "minimal"
 end
@@ -735,6 +760,8 @@ function M.role_accent(role)
     local r = role:lower()
     if r:find("founder") or r:find("developer") then return M.PURPLE end
     if r:find("moderator") then return M.RED end
+    if r:find("tester") then return M.ORANGE end
+    if r == "og" or r:find("contribution") then return M.CYAN end
     return M.CYAN
 end
 
@@ -955,6 +982,201 @@ function M.draw()
             target_y = target_y + box_h + gap
         end
     end
+end
+
+return M
+
+end)()
+
+-- ── core/panel_drag.lua ──
+April._mods["core.panel_drag"] = (function()
+-- Click-drag floating HUD panels while the Vector menu is open.
+-- Uses utility.get_mouse_pos + input.is_key_down(LMB). Positions write back
+-- via menu.set so config_store persists them.
+
+local settings = April.require("core.settings")
+
+local M = {}
+
+local LMB = 0x01
+local TITLE_H = 24
+
+local active_id = nil
+local grab_dx, grab_dy = 0, 0
+
+local frame = {
+    t = -1,
+    mx = nil,
+    my = nil,
+    down = false,
+    just_pressed = false,
+    open = false,
+}
+
+local menu_open_probed = false
+local menu_open_fn = nil
+local insert_toggle = false
+local insert_was_down = false
+local INSERT_VK = 0x2D
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function probe_menu_open()
+    if menu_open_probed then return menu_open_fn end
+    menu_open_probed = true
+
+    if not menu then
+        menu_open_fn = nil
+        return nil
+    end
+
+    local candidates = {
+        "is_open", "is_opened", "is_visible", "opened", "visible",
+        "IsOpen", "IsOpened", "IsVisible",
+    }
+    for i = 1, #candidates do
+        local fn = menu[candidates[i]]
+        if type(fn) == "function" then
+            menu_open_fn = function()
+                local ok, v = pcall(fn)
+                return ok and v == true
+            end
+            return menu_open_fn
+        end
+    end
+
+    if type(menu.open) == "boolean" or type(menu.opened) == "boolean" then
+        menu_open_fn = function()
+            return menu.open == true or menu.opened == true
+        end
+        return menu_open_fn
+    end
+
+    menu_open_fn = nil
+    return nil
+end
+
+local function track_insert_toggle()
+    local down = input and input.is_key_down and input.is_key_down(INSERT_VK) == true
+    if down and not insert_was_down then
+        insert_toggle = not insert_toggle
+    end
+    insert_was_down = down
+end
+
+local function mouse_pos()
+    if utility and utility.get_mouse_pos then
+        local ok, mx, my = pcall(utility.get_mouse_pos)
+        if ok and mx and my then return mx, my end
+    end
+    if input and input.get_mouse_pos then
+        local ok, mx, my = pcall(input.get_mouse_pos)
+        if ok and mx and my then return mx, my end
+    end
+    return nil, nil
+end
+
+local function sync_frame()
+    local now = tick_ms()
+    if frame.t == now then return end
+
+    local prev_down = frame.down
+    frame.t = now
+    frame.mx, frame.my = mouse_pos()
+    frame.down = input and input.is_key_down and input.is_key_down(LMB) == true
+    frame.just_pressed = frame.down and not prev_down
+
+    local fn = probe_menu_open()
+    if fn then
+        frame.open = fn()
+    else
+        track_insert_toggle()
+        frame.open = insert_toggle
+    end
+
+    if not frame.open and active_id then
+        active_id = nil
+    end
+end
+
+function M.menu_is_open()
+    sync_frame()
+    return frame.open == true
+end
+
+local function point_in(mx, my, x, y, w, h)
+    return mx >= x and my >= y and mx <= x + w and my <= y + h
+end
+
+local function clamp_pos(x, y, w, h, sw, sh)
+    w = math.max(40, w or 200)
+    h = math.max(24, h or 40)
+    sw = sw or 1920
+    sh = sh or 1080
+    x = math.floor(math.max(0, math.min(sw - w, x)))
+    y = math.floor(math.max(0, math.min(sh - h, y)))
+    return x, y
+end
+
+local function write_pos(x_id, y_id, x, y)
+    if menu and menu.set then
+        pcall(menu.set, x_id, x)
+        pcall(menu.set, y_id, y)
+    end
+end
+
+-- Call once per frame before drawing the panel.
+-- Returns x, y (possibly updated while dragging), and dragging bool.
+function M.update(id, x, y, w, h, x_id, y_id, sw, sh)
+    sync_frame()
+
+    x = tonumber(x) or 0
+    y = tonumber(y) or 0
+    w = tonumber(w) or 200
+    h = tonumber(h) or 40
+    x, y = clamp_pos(x, y, w, h, sw, sh)
+
+    local mx, my = frame.mx, frame.my
+    local dragging = false
+
+    if not frame.open or not mx then
+        if active_id == id then
+            active_id = nil
+        end
+        return x, y, false
+    end
+
+    if active_id == id then
+        if frame.down then
+            x = mx - grab_dx
+            y = my - grab_dy
+            x, y = clamp_pos(x, y, w, h, sw, sh)
+            write_pos(x_id, y_id, x, y)
+            dragging = true
+        else
+            write_pos(x_id, y_id, x, y)
+            active_id = nil
+        end
+    elseif frame.just_pressed and active_id == nil then
+        if point_in(mx, my, x, y, w, TITLE_H) then
+            active_id = id
+            grab_dx = mx - x
+            grab_dy = my - y
+            dragging = true
+        end
+    end
+
+    return x, y, dragging
+end
+
+function M.read_pos(x_id, y_id, default_x, default_y)
+    return settings.num(x_id, default_x or 16), settings.num(y_id, default_y or 72)
+end
+
+function M.title_h()
+    return TITLE_H
 end
 
 return M
@@ -1546,6 +1768,396 @@ function M.entry_screen_bounds(entry)
     end
 
     return nil
+end
+
+return M
+
+end)()
+
+-- ── core/gpu_chams.lua ──
+April._mods["core.gpu_chams"] = (function()
+-- GPU instance chams with a double-buffer applied set.
+--
+-- front (owner.applied) = addresses currently stamped by the engine
+-- back  (fresh collect) = addresses that SHOULD be chammed this tick (in-range only)
+--
+-- If back == front → no work (or only apply brand-new addrs).
+-- If any addr left back → RevertChams + re-apply ONLY back (all active owners).
+-- That is the "double buffer": never leave stale out-of-range instances chammed.
+--
+-- Range is fail-closed: without a local player position, collect applies nothing.
+
+local settings = April.require("core.settings")
+local env = April.require("core.env")
+
+local M = {}
+
+M.MODE_LABELS = { "Fill", "Wireframe", "Fill Glow", "Wireframe Glow" }
+M.COLOR_LABELS = { "Default", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan" }
+
+local PART_CLASSES = {
+    Part = true,
+    MeshPart = true,
+    WedgePart = true,
+    CornerWedgePart = true,
+    TrussPart = true,
+    UnionOperation = true,
+    NegateOperation = true,
+}
+
+local owners = {}
+local owner_order = {}
+local rebuild_busy = false
+local last_global_rebuild = 0
+local MIN_REBUILD_GAP_MS = 250
+
+function M.available()
+    return exploits ~= nil
+        and type(exploits.ApplyChamsToInstance) == "function"
+        and type(exploits.RevertChams) == "function"
+        and type(exploits.SetChamsMode) == "function"
+        and type(exploits.SetChamsColor) == "function"
+end
+
+function M.is_part(inst)
+    if not inst then return false end
+    local cn = inst.ClassName or inst.class_name
+    if PART_CLASSES[cn] then return true end
+    return env.safe_call(function()
+        if inst.is_a then return inst:is_a("BasePart") end
+        if inst.IsA then return inst:IsA("BasePart") end
+        return false
+    end) == true
+end
+
+function M.instance_addr(inst)
+    if not inst then return nil end
+    return inst.Address or inst.address
+end
+
+function M.color_visible_for_mode(mode)
+    mode = tonumber(mode) or 0
+    return mode == 2 or mode == 3
+end
+
+function M.mode_index(id, default)
+    return settings.combo_index(id, M.MODE_LABELS, default or 0)
+end
+
+function M.color_index(id, default)
+    return settings.combo_index(id, M.COLOR_LABELS, default or 0)
+end
+
+function M.multicombo_selected(id, index)
+    local t = settings.get(id)
+    if type(t) ~= "table" then return false end
+    local v = t[index]
+    return v == true or v == 1
+end
+
+function M.multicombo_defaults(count)
+    local out = {}
+    for i = 1, count do
+        out[i] = false
+    end
+    return out
+end
+
+local function now_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function push_style(mode, color)
+    pcall(function() exploits.SetChamsMode(mode or 0) end)
+    pcall(function() exploits.SetChamsColor(color or 0) end)
+end
+
+local function any_other_active(except_id)
+    for _, oid in ipairs(owner_order) do
+        local o = owners[oid]
+        if o and oid ~= except_id and o.is_active() then
+            return true
+        end
+    end
+    return false
+end
+
+local function sets_equal(a, b)
+    for k in pairs(a) do
+        if not b[k] then return false end
+    end
+    for k in pairs(b) do
+        if not a[k] then return false end
+    end
+    return true
+end
+
+local function has_removed(prev, fresh)
+    for addr in pairs(prev) do
+        if not fresh[addr] then return true end
+    end
+    return false
+end
+
+local function apply_one(inst, applied)
+    if not M.available() or not inst then return false end
+    if not M.is_part(inst) then return false end
+    local addr = M.instance_addr(inst)
+    if not addr then return false end
+    if applied[addr] then return true end
+    local ok, result = pcall(exploits.ApplyChamsToInstance, inst)
+    if ok and result then
+        applied[addr] = true
+        return true
+    end
+    return false
+end
+
+function M.cham_part(inst, applied)
+    return apply_one(inst, applied or {})
+end
+
+-- Prefer a single visual part per ESP entry (Main / HRP / first MeshPart).
+-- Cham'ing every descendant was heavy and made shared-mesh bleed worse.
+function M.cham_entry_part(entry, applied)
+    if not entry then return false end
+    local part = entry.main_part
+    if part and env.is_valid(part) and M.is_part(part) then
+        return apply_one(part, applied)
+    end
+    if entry.inst and env.is_valid(entry.inst) then
+        local esp_scan = April.require("game.esp_scan")
+        local main = esp_scan.find_main_part(entry.inst)
+        if main then
+            entry.main_part = main
+            return apply_one(main, applied)
+        end
+        -- Animals / odd models: first MeshPart descendant
+        local desc = env.safe_call(function()
+            if entry.inst.get_descendants then return entry.inst:get_descendants() end
+            return entry.inst:GetDescendants()
+        end) or {}
+        for _, d in ipairs(desc) do
+            if M.is_part(d) then
+                entry.main_part = d
+                return apply_one(d, applied)
+            end
+        end
+    end
+    return false
+end
+
+function M.cham_model_main(model, applied)
+    if not model then return false end
+    local esp_scan = April.require("game.esp_scan")
+    local main = esp_scan.find_main_part(model)
+    if main then return apply_one(main, applied) end
+    return apply_one(model, applied)
+end
+
+function M.cham_container_parts(container, applied, max_parts)
+    -- Kept for compatibility; prefer cham_entry_part for ESP.
+    max_parts = max_parts or 8
+    if not container then return 0 end
+    local n = 0
+    local main = April.require("game.esp_scan").find_main_part(container)
+    if main and apply_one(main, applied) then
+        n = n + 1
+    end
+    if n > 0 then return n end
+
+    local list = env.safe_call(function()
+        if container.get_descendants then return container:get_descendants() end
+        return container:GetDescendants()
+    end) or {}
+    for _, d in ipairs(list) do
+        if n >= max_parts then break end
+        if apply_one(d, applied) then n = n + 1 end
+    end
+    return n
+end
+
+function M.register_owner(id, opts)
+    opts = opts or {}
+    if not owners[id] then
+        owner_order[#owner_order + 1] = id
+    end
+    owners[id] = {
+        id = id,
+        applied = {}, -- front buffer
+        was_active = false,
+        is_active = opts.is_active or function() return false end,
+        style = opts.style or function() return 0, 0 end,
+        collect = opts.collect or function(_back) end,
+        last_rescan = 0,
+        rescan_ms = opts.rescan_ms or 500,
+    }
+    return owners[id]
+end
+
+function M.get_owner(id)
+    return owners[id]
+end
+
+local function apply_owner_into(owner, into)
+    if not owner or not owner.is_active() then return end
+    local mode, color = owner.style()
+    push_style(mode, color)
+    pcall(owner.collect, into)
+end
+
+function M.rebuild_all()
+    if not M.available() or rebuild_busy then return false end
+    local now = now_ms()
+    if last_global_rebuild ~= 0 and (now - last_global_rebuild) < MIN_REBUILD_GAP_MS then
+        return false
+    end
+    last_global_rebuild = now
+    rebuild_busy = true
+
+    pcall(function() exploits.RevertChams() end)
+
+    for _, id in ipairs(owner_order) do
+        local owner = owners[id]
+        if owner then
+            owner.applied = {}
+            owner.last_rescan = 0
+        end
+    end
+
+    for _, id in ipairs(owner_order) do
+        local owner = owners[id]
+        if owner and owner.is_active() then
+            local back = {}
+            apply_owner_into(owner, back)
+            owner.applied = back
+            owner.was_active = true
+        elseif owner then
+            owner.was_active = false
+        end
+    end
+
+    rebuild_busy = false
+    return true
+end
+
+function M.revert_all()
+    if not M.available() then return end
+    pcall(function() exploits.RevertChams() end)
+    last_global_rebuild = now_ms()
+    for _, id in ipairs(owner_order) do
+        local owner = owners[id]
+        if owner then
+            owner.applied = {}
+            owner.was_active = false
+            owner.last_rescan = 0
+        end
+    end
+end
+
+function M.clear_owner(id, rebuild_others)
+    local owner = owners[id]
+    if not owner then return end
+    local had = owner.was_active or next(owner.applied) ~= nil
+    owner.applied = {}
+    owner.was_active = false
+    owner.last_rescan = 0
+    if not had or rebuild_others == false then return end
+    if any_other_active(id) then
+        M.rebuild_all()
+    else
+        M.revert_all()
+    end
+end
+
+function M.refresh_owner_style(id)
+    local owner = owners[id]
+    if not owner then return end
+    if not owner.is_active() then
+        M.clear_owner(id)
+        return
+    end
+    -- Style change: must re-stamp; safest is full rebuild of active set.
+    M.rebuild_all()
+end
+
+function M.sync_owner(id, force)
+    if not M.available() or rebuild_busy then return end
+    local owner = owners[id]
+    if not owner then return end
+
+    if not owner.is_active() then
+        if owner.was_active or next(owner.applied) ~= nil then
+            M.clear_owner(id)
+        end
+        return
+    end
+
+    local now = now_ms()
+    if not force and owner.last_rescan ~= 0 and (now - owner.last_rescan) < owner.rescan_ms then
+        owner.was_active = true
+        return
+    end
+    owner.last_rescan = now
+    owner.was_active = true
+
+    -- Back buffer: what should be chammed right now (collectors must range-filter).
+    local back = {}
+    local mode, color = owner.style()
+    push_style(mode, color)
+    local ok = pcall(owner.collect, back)
+    if not ok then return end
+
+    local front = owner.applied
+
+    if sets_equal(front, back) then
+        return
+    end
+
+    if has_removed(front, back) or next(front) == nil then
+        -- Something left range / first populate after clear → swap buffers via rebuild.
+        -- Rebuild reapplies ALL active owners from scratch (correct multi-owner state).
+        owner.applied = {}
+        if not M.rebuild_all() then
+            -- Rate-limited: still track desired set; next tick will rebuild.
+            owner.applied = back
+        end
+        return
+    end
+
+    -- Only additions: stamp new addresses, no Revert needed.
+    for addr, _ in pairs(back) do
+        if not front[addr] then
+            pcall(exploits.ApplyChamsToInstance, addr)
+            front[addr] = true
+        end
+    end
+    owner.applied = front
+end
+
+function M.wire_style_controls(owner_id, mode_id, color_id)
+    if not menu or not menu.set_visible then return end
+
+    local function sync_color_vis()
+        local mode = M.mode_index(mode_id, 0)
+        pcall(menu.set_visible, color_id, M.color_visible_for_mode(mode))
+    end
+
+    settings.on_change(mode_id, function()
+        sync_color_vis()
+        M.refresh_owner_style(owner_id)
+    end)
+    settings.on_change(color_id, function()
+        M.refresh_owner_style(owner_id)
+    end)
+    sync_color_vis()
+end
+
+function M.add_mode_color_menu(T, G, parent_id, mode_id, color_id, mode_label, color_label)
+    local root = { parent = parent_id }
+    menu.add_combo(T, G, mode_id, mode_label or "Chams Mode", M.MODE_LABELS, 0, root)
+    menu.add_combo(T, G, color_id, color_label or "Chams Color", M.COLOR_LABELS, 0, root)
+    return mode_id, color_id
 end
 
 return M
@@ -2265,66 +2877,21 @@ function M.track(origin, aim_point, shoot_vk)
     return ok
 end
 
--- Fake ballistic curve for visuals / elevated hook origin.
--- Direction always points at hitpart so instant silent still connects.
--- Optional: pull track origin slightly up the arc so the ray is angled (looks arched).
+-- Drop-path visuals + instant silent to hitpart.
+-- Never elevate / aim-up the hook origin — MouseRaycast is instant; any vertical
+-- offset (especially bow arcs at range) makes the hooked ray miss.
 function M.track_curve(origin, hit_point, weapon_name, shoot_vk)
-    M._last_ok = false
-
-    if not hit_point then
-        return false
-    end
-
     origin = origin or M.get_camera_origin()
-    if not origin then
-        return false
-    end
-
-    if not M.ensure_hook() then
+    if not origin or not hit_point then
+        M._last_ok = false
+        M._last_curve = nil
         return false
     end
 
     local curve = ballistic.curve_for_weapon(origin, hit_point, weapon_name, 20)
+    local ok = M.track(origin, hit_point, shoot_vk)
+    -- track() clears _last_curve; restore after so visuals still have the path.
     M._last_curve = curve
-
-    local ox, oy, oz = unpack_pos(origin)
-    local hx, hy, hz = unpack_pos(hit_point)
-    if not ox or not hx then
-        return false
-    end
-
-    -- Elevate track origin ~25% along the ballistic arc (above LOS) so the
-    -- hooked ray is angled downward into the hitpart — fakes drop without missing.
-    local track_o = { x = ox, y = oy, z = oz }
-    if curve and curve.path and #curve.path >= 4 then
-        local mid = curve.path[math.max(2, math.floor(#curve.path * 0.25))]
-        if mid then
-            track_o = { x = mid.x, y = mid.y, z = mid.z }
-        end
-    end
-
-    local dx = hx - track_o.x
-    local dy = hy - track_o.y
-    local dz = hz - track_o.z
-    local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-    local dir
-    if dist < 0.001 then
-        dir = make_vec3(0, MOUSE_RAY_LEN * 0.01, 0)
-    else
-        local inv = 1 / dist
-        dir = make_vec3(dx * inv * MOUSE_RAY_LEN, dy * inv * MOUSE_RAY_LEN, dz * inv * MOUSE_RAY_LEN)
-    end
-
-    local origin_v = make_vec3(track_o.x, track_o.y, track_o.z)
-    local key = shoot_vk or 0x01
-
-    M._last_origin = track_o
-    M._last_target = { x = hx, y = hy, z = hz }
-
-    local ok_call, ok = pcall(raycast.track_silent_target, origin_v, dir, key)
-    ok = ok_call and ok == true
-    M._last_ok = ok
-    tracking = ok
     return ok
 end
 
@@ -3358,6 +3925,7 @@ local MENU_KEYS = {
     "april_silent_aim", "april_silent_aim_mode",
     "april_silent_target_type", "april_silent_bone",
     "april_silent_filter_health", "april_silent_filter_visible", "april_silent_filter_team",
+    "april_silent_filter_downed",
     "april_silent_target_players", "april_silent_target_npcs", "april_silent_target_npc_soldiers", "april_silent_target_npc_bosses",
     "april_silent_sticky", "april_silent_wallbang",
     "april_silent_bullet_tp", "april_silent_tp_ray_mode", "april_silent_tp_ray_vis",
@@ -3378,12 +3946,14 @@ local MENU_KEYS = {
     "april_raspberry_plant", "april_blueberry_plant", "april_wool_plant", "april_hemp_plant",
     "april_deer", "april_boar", "april_wolf",
     "april_world_boxes", "april_world_show_name", "april_world_show_distance", "april_world_range",
+    "april_world_chams", "april_world_chams_mode", "april_world_chams_color",
     "april_loot_enabled", "april_loot_enabled_mode", "april_dropped_item", "april_wooden_crate", "april_metal_crate",
     "april_steel_crate", "april_food_crate", "april_timed_crate", "april_care_package", "april_btr_crate",
     "april_body_bag", "april_sleeper", "april_trash_can", "april_oil_barrel",
     "april_small_egg", "april_medium_egg", "april_large_egg",
     "april_wooden_boat", "april_military_boat", "april_flycopter",
     "april_loot_boxes", "april_loot_show_name", "april_loot_show_distance", "april_loot_range",
+    "april_loot_chams", "april_loot_chams_mode", "april_loot_chams_color",
     "april_npc_enabled", "april_npc_enabled_mode", "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode",
     "april_npc_health", "april_npc_skeleton",
     "april_npc_offscreen", "april_npc_show_name", "april_npc_show_distance", "april_npc_range",
@@ -3395,6 +3965,7 @@ local MENU_KEYS = {
     "april_small_battery", "april_medium_battery", "april_large_battery",
     "april_solar_panel", "april_windmill",
     "april_base_boxes", "april_base_show_name", "april_base_show_distance", "april_base_range",
+    "april_base_chams", "april_base_chams_mode", "april_base_chams_color",
     "april_waypoints_enabled", "april_waypoints_enabled_mode", "april_wp_dist", "april_wp_beacon", "april_wp_beacon_h",
     "april_wp_draw", "april_wp_slot",
     "april_map_enabled", "april_map_enabled_mode", "april_map_zoom", "april_map_size", "april_map_icon_scale",
@@ -3413,6 +3984,7 @@ local MENU_KEYS = {
     "april_keybinds_enabled", "april_keybinds_active_only", "april_keybinds_show_unbound", "april_keybinds_show_mode",
     "april_keybinds_x", "april_keybinds_y", "april_keybinds_w",
     "april_mod_checker_enabled", "april_mod_checker_interval",
+    "april_mod_checker_x", "april_mod_checker_y",
 }
 
 local COLOR_KEYS = {
@@ -5996,6 +6568,130 @@ function M.is_ranged_weapon_name(name)
     return false
 end
 
+local function children_of(inst)
+    if not inst then return {} end
+    return env.safe_call(function()
+        if inst.get_children then return inst:get_children() end
+        return inst:GetChildren()
+    end) or {}
+end
+
+local function find_child(parent, name)
+    if not parent then return nil end
+    return env.safe_call(function()
+        return parent:find_first_child(name) or parent:FindFirstChild(name)
+    end)
+end
+
+local function pick_weapon_from_model(model)
+    if not model then return nil, nil end
+    local n = inst_name(model)
+    if n and M.is_weapon_name(n) then
+        return n, model
+    end
+    for _, child in ipairs(children_of(model)) do
+        local cn = inst_name(child)
+        if cn and M.is_weapon_name(cn) then
+            return cn, child
+        end
+        local class = child.ClassName or child.class_name
+        if class == "Model" and cn and M.is_ranged_weapon_name(cn) then
+            return cn, child
+        end
+    end
+    return nil, nil
+end
+
+local function find_held_in_viewmodels()
+    local ws = env.get_workspace()
+    if not ws then return nil end
+
+    -- Live VM under CurrentCamera (ViewmodelController)
+    local cam = env.safe_call(function()
+        return ws.CurrentCamera or ws.currentCamera
+            or (ws.FindFirstChild and ws:FindFirstChild("CurrentCamera"))
+    end)
+    if cam then
+        for _, child in ipairs(children_of(cam)) do
+            local class = child.ClassName or child.class_name
+            if class == "Model" then
+                local n, inst = pick_weapon_from_model(child)
+                if n then return n, inst end
+            end
+        end
+    end
+
+    -- Workspace.VFX.VMs.<Weapon>
+    local vfx = find_child(ws, "VFX")
+    local vms_live = vfx and find_child(vfx, "VMs")
+    if vms_live then
+        for _, child in ipairs(children_of(vms_live)) do
+            local n, inst = pick_weapon_from_model(child)
+            if n then return n, inst end
+        end
+    end
+
+    -- Legacy Workspace.Viewmodels.Viewmodel.<Weapon>
+    local vms = find_child(ws, "Viewmodels")
+    if vms then
+        for _, vm in ipairs(children_of(vms)) do
+            if inst_name(vm) == "Viewmodel" then
+                local n, inst = pick_weapon_from_model(vm)
+                if n then return n, inst end
+            end
+        end
+    end
+    return nil, nil
+end
+
+local function find_held_in_character(lp)
+    local char = lp and lp.character
+    if not char or not env.is_valid(char) then return nil, nil end
+
+    local fallback_tool = nil
+    for _, child in ipairs(env.safe_call(function() return char:get_children() end) or {}) do
+        local n = inst_name(child)
+        if n and M.is_weapon_name(n) then
+            return n, child
+        end
+        if is_tool(child) and n then
+            fallback_tool = fallback_tool or { name = n, inst = child }
+        end
+    end
+
+    if fallback_tool then
+        return fallback_tool.name, fallback_tool.inst
+    end
+    return nil, nil
+end
+
+local function read_tool_attributes(inst)
+    if not inst then return nil end
+    local speed, gravity
+    pcall(function()
+        if inst.GetAttribute then
+            speed = inst:GetAttribute("BulletSpeed") or inst:GetAttribute("MuzzleVelocity")
+            gravity = inst:GetAttribute("BulletGravity") or inst:GetAttribute("ProjectileGravity")
+        elseif inst.get_attribute then
+            speed = inst:get_attribute("BulletSpeed") or inst:get_attribute("MuzzleVelocity")
+            gravity = inst:get_attribute("BulletGravity") or inst:get_attribute("ProjectileGravity")
+        end
+    end)
+    if speed then
+        local grav = gravity
+        if not grav or grav <= 0 or grav > 2 then
+            grav = 0.55
+        end
+        return {
+            speed = speed,
+            gravity = grav,
+            name = inst_name(inst),
+            from_attributes = true,
+        }
+    end
+    return nil
+end
+
 function M.get_held_ranged_weapon_name()
     if not loaded then M.load() end
 
@@ -6014,20 +6710,10 @@ function M.get_held_ranged_weapon_name()
         end
     end
 
-    local ws = env.get_workspace()
-    if ws then
-        local vms = env.safe_call(function() return ws:find_first_child("Viewmodels") end)
-            or env.safe_call(function() return ws:FindFirstChild("Viewmodels") end)
-        if vms then
-            for _, vm in ipairs(env.safe_call(function() return vms:get_children() end) or {}) do
-                if inst_name(vm) == "Viewmodel" then
-                    for _, item in ipairs(env.safe_call(function() return vm:get_children() end) or {}) do
-                        local hit = pick(inst_name(item))
-                        if hit then return hit end
-                    end
-                end
-            end
-        end
+    local name = find_held_in_viewmodels()
+    if name then
+        local hit = pick(name)
+        if hit then return hit end
     end
 
     return pick(lp.tool_name)
@@ -6043,6 +6729,11 @@ end
 
 function M.is_bow_weapon_name(name)
     if not name then return false end
+    if not loaded then M.load() end
+    local entry = toolinfo[name]
+    if entry and entry.Weapon and entry.Weapon.IsBow then
+        return true
+    end
     local n = name:lower()
     return n:find("bow", 1, true) ~= nil
 end
@@ -6130,79 +6821,6 @@ function M.profile_weapon_names()
     return list
 end
 
-local function read_tool_attributes(inst)
-    if not inst then return nil end
-    local speed, gravity
-    pcall(function()
-        if inst.GetAttribute then
-            speed = inst:GetAttribute("BulletSpeed") or inst:GetAttribute("MuzzleVelocity")
-            gravity = inst:GetAttribute("BulletGravity") or inst:GetAttribute("ProjectileGravity")
-        elseif inst.get_attribute then
-            speed = inst:get_attribute("BulletSpeed") or inst:get_attribute("MuzzleVelocity")
-            gravity = inst:get_attribute("BulletGravity") or inst:get_attribute("ProjectileGravity")
-        end
-    end)
-    if speed then
-        local grav = gravity
-        if not grav or grav <= 0 or grav > 2 then
-            grav = 0.55
-        end
-        return {
-            speed = speed,
-            gravity = grav,
-            name = inst_name(inst),
-            from_attributes = true,
-        }
-    end
-    return nil
-end
-
-local function find_held_in_character(lp)
-    local char = lp and lp.character
-    if not char or not env.is_valid(char) then return nil, nil end
-
-    local fallback_tool = nil
-    for _, child in ipairs(env.safe_call(function() return char:get_children() end) or {}) do
-        local n = inst_name(child)
-        if n and M.is_weapon_name(n) then
-            return n, child
-        end
-        if is_tool(child) and n then
-            fallback_tool = fallback_tool or { name = n, inst = child }
-        end
-    end
-
-    if fallback_tool then
-        return fallback_tool.name, fallback_tool.inst
-    end
-    return nil, nil
-end
-
-local function find_held_in_viewmodels()
-    local ws = env.get_workspace()
-    if not ws then return nil end
-
-    local vms = env.safe_call(function() return ws:find_first_child("Viewmodels") end)
-        or env.safe_call(function() return ws:FindFirstChild("Viewmodels") end)
-    if not vms then return nil end
-
-    for _, vm in ipairs(env.safe_call(function() return vms:get_children() end) or {}) do
-        if inst_name(vm) == "Viewmodel" then
-            for _, item in ipairs(env.safe_call(function() return vm:get_children() end) or {}) do
-                local n = inst_name(item)
-                if n and M.is_weapon_name(n) then
-                    return n, item
-                end
-                local cn = item and (item.ClassName or item.class_name)
-                if cn == "Model" and n and M.is_weapon_name(n) then
-                    return n, item
-                end
-            end
-        end
-    end
-    return nil, nil
-end
-
 function M.get_held_weapon_name()
     rebuild_weapon_names()
 
@@ -6250,9 +6868,7 @@ function M.get_weapon_stats(name)
             gravity = entry.Bullet.Gravity or 0.55,
             name = name,
             from_toolinfo = true,
-            is_bow = (entry.Weapon and entry.Weapon.IsBow)
-                or name == "Wooden Bow"
-                or name == "Crossbow",
+            is_bow = M.is_bow_weapon_name(name),
         }
     end
 
@@ -6263,7 +6879,7 @@ function M.get_weapon_stats(name)
             gravity = fb.gravity,
             name = name,
             from_fallback = true,
-            is_bow = name == "Wooden Bow" or name == "Crossbow",
+            is_bow = M.is_bow_weapon_name(name),
         }
     end
 
@@ -7990,9 +8606,229 @@ return M
 
 end)()
 
+-- ── game/team_state.lua ──
+April._mods["game.team_state"] = (function()
+-- Official Fallen party teams (TeamNavigationController) + Roblox Team fallback.
+-- Dump: CharacterScripts.TeamNavigationController — InTeam / CanInvite attrs,
+-- FetchTeam returns userId list, teammates get TeamHighlight on character.
+
+local env = April.require("core.env")
+
+local M = {}
+
+local CACHE_MS = 250
+local cache = {
+    t = -1,
+    in_team = false,
+    members = {}, -- [userId] = true
+    member_list = {},
+}
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function find_child(parent, name)
+    if not parent then return nil end
+    return env.safe_call(function()
+        return parent:find_first_child(name) or parent:FindFirstChild(name)
+    end)
+end
+
+local function attr(inst, name)
+    if not inst then return nil end
+    return env.safe_call(function()
+        if inst.GetAttribute then return inst:GetAttribute(name) end
+        if inst.get_attribute then return inst:get_attribute(name) end
+        return nil
+    end)
+end
+
+local function local_character()
+    local lp = env.get_local_player()
+    if not lp then return nil end
+    local char = lp.character
+    if char and env.is_valid(char) then return char end
+    return nil
+end
+
+local function team_nav()
+    local char = local_character()
+    if not char then return nil end
+    local tnc = find_child(char, "TeamNavigationController")
+    if tnc and env.is_valid(tnc) then return tnc end
+    return nil
+end
+
+local function add_member(set, list, uid)
+    uid = tonumber(uid)
+    if not uid or uid == 0 or set[uid] then return end
+    set[uid] = true
+    list[#list + 1] = uid
+end
+
+local function members_from_fetch(tnc)
+    local fetch = find_child(tnc, "FetchTeam")
+    if not fetch then return nil end
+
+    local result = env.safe_call(function()
+        if fetch.Invoke then return fetch:Invoke() end
+        if fetch.invoke then return fetch:invoke() end
+        return nil
+    end)
+    if type(result) ~= "table" then return nil end
+
+    local set, list = {}, {}
+    for _, v in pairs(result) do
+        if v ~= "CantLeave" then
+            add_member(set, list, v)
+        end
+    end
+    return set, list
+end
+
+local function members_from_teamlist()
+    local lp = env.get_local_player()
+    if not lp then return nil end
+
+    local player = env.safe_call(function()
+        return game and game.local_player
+    end)
+    local pgui = player and find_child(player, "PlayerGui")
+    local main = pgui and find_child(pgui, "Main")
+    local team = main and find_child(main, "Team")
+    local list_frame = team and find_child(team, "TeamList")
+    if not list_frame then return nil end
+
+    -- Resolve Member* TextLabels → userIds via entity name match.
+    local labels = {}
+    for _, child in ipairs(env.safe_call(function()
+        if list_frame.get_children then return list_frame:get_children() end
+        return list_frame:GetChildren()
+    end) or {}) do
+        local n = child.Name or child.name
+        if n and tostring(n):find("Member", 1, true) then
+            local text = env.safe_call(function()
+                return child.Text or child.text
+            end)
+            if text and text ~= "" and text ~= "..." then
+                labels[#labels + 1] = text
+            end
+        end
+    end
+    if #labels == 0 then return nil end
+
+    local set, list = {}, {}
+    if not entity or not entity.get_players then return set, list end
+    for _, p in ipairs(entity.get_players()) do
+        local name = p.name
+        local disp = p.display_name
+        for i = 1, #labels do
+            local lab = labels[i]
+            if name == lab or disp == lab then
+                add_member(set, list, p.user_id)
+                break
+            end
+        end
+    end
+    return set, list
+end
+
+local function refresh()
+    local now = tick_ms()
+    if cache.t >= 0 and (now - cache.t) < CACHE_MS then
+        return
+    end
+    cache.t = now
+    cache.in_team = false
+    cache.members = {}
+    cache.member_list = {}
+
+    local tnc = team_nav()
+    if not tnc then return end
+
+    local in_team = attr(tnc, "InTeam")
+    cache.in_team = in_team == true
+
+    local set, list = members_from_fetch(tnc)
+    if not set then
+        set, list = members_from_teamlist()
+    end
+    if set then
+        cache.members = set
+        cache.member_list = list or {}
+        if next(set) then
+            cache.in_team = true
+        end
+    end
+end
+
+function M.invalidate()
+    cache.t = -1
+end
+
+function M.in_party()
+    refresh()
+    return cache.in_team == true
+end
+
+function M.party_members()
+    refresh()
+    return cache.members
+end
+
+function M.has_team_highlight(player)
+    if not player or not player.character then return false end
+    local char = player.character
+    if not env.is_valid(char) then return false end
+    local hl = find_child(char, "TeamHighlight")
+    return hl ~= nil and env.is_valid(hl)
+end
+
+function M.is_party_teammate(player)
+    if not player or player.is_local then return false end
+    refresh()
+
+    local uid = tonumber(player.user_id)
+    if uid and cache.members[uid] then
+        return true
+    end
+
+    -- Highlight is only cloned onto party mates by TeamNavigationController.
+    if cache.in_team and M.has_team_highlight(player) then
+        return true
+    end
+
+    return false
+end
+
+function M.same_roblox_team(player)
+    if not player then return false end
+    local lp = entity and entity.get_local_player and entity.get_local_player()
+    if not lp then return false end
+    if not lp.has_team or not player.has_team then return false end
+    if not lp.team or not player.team or lp.team == "" or player.team == "" then
+        return false
+    end
+    return lp.team == player.team
+end
+
+-- True if target should be skipped by team check (is ally).
+function M.is_teammate(player)
+    if not player or player.is_local then return true end
+    if M.is_party_teammate(player) then return true end
+    if M.same_roblox_team(player) then return true end
+    return false
+end
+
+return M
+
+end)()
+
 -- ── game/player_state.lua ──
 April._mods["game.player_state"] = (function()
 local env = April.require("core.env")
+local team_state = April.require("game.team_state")
 
 local M = {}
 
@@ -8029,24 +8865,35 @@ function M.is_combat_target(player)
     return true
 end
 
+-- Alive + HP > 0. Does NOT include downed (use passes_downed_check).
 function M.passes_health_check(player)
     if not player then return false end
     if not player.is_alive then return false end
-    if M.is_downed(player) then return false end
     if player.health and player.health <= 0 then return false end
     return true
 end
 
+-- idx: 0 = Skip Downed, 1 = Allow Downed, 2 = Only Downed
+function M.passes_downed_check(player, mode_idx)
+    if not player then return false end
+    mode_idx = tonumber(mode_idx) or 0
+    local downed = M.is_downed(player)
+
+    if mode_idx == 1 then
+        return true
+    end
+    if mode_idx == 2 then
+        return downed
+    end
+    -- Skip downed (default)
+    return not downed
+end
+
 function M.passes_team_check(player)
     if not player then return false end
-    if not entity or not entity.get_local_player then return true end
-
-    local lp = entity.get_local_player()
-    if not lp then return true end
-    if not lp.has_team or not player.has_team then return true end
-    if not lp.team or not player.team or lp.team == "" or player.team == "" then return true end
-
-    return lp.team ~= player.team
+    -- Official party (TeamNavigationController) + Roblox Team (arena).
+    -- Skip allies; everyone else is fair game. Solo / no team → allow.
+    return not team_state.is_teammate(player)
 end
 
 return M
@@ -8210,80 +9057,247 @@ end)()
 April._mods["game.mod_ids"] = (function()
 local M = {}
 
+-- Chunk Studios (1154360) staff ranks above Fan.
+-- Roles: OG, Game Tester, Game Moderator, Contribution, Developers,
+-- Lead Developer, Co-Founder, Founder. Excludes Guest / Member / Fan.
+-- Synced from groups.roblox.com on 2026-07-09.
 M.ROLES = {
-    [51281722] = "Game Moderator",
-    [7178750309] = "Game Moderator",
-    [113179883] = "Game Moderator",
-    [3122439095] = "Game Moderator",
-    [991290934] = "Game Moderator",
-    [3968854760] = "Game Moderator",
-    [81993536] = "Game Moderator",
-    [1004214871] = "Game Moderator",
-    [3034930770] = "Game Moderator",
-    [2364950171] = "Game Moderator",
-    [1528346843] = "Game Moderator",
-    [165053216] = "Game Moderator",
-    [1127954045] = "Game Moderator",
-    [3640120679] = "Game Moderator",
-    [602009251] = "Game Moderator",
-    [372791101] = "Game Moderator",
-    [1378169111] = "Game Moderator",
-    [3020799797] = "Game Moderator",
-    [2567998467] = "Game Moderator",
-    [4243907215] = "Game Moderator",
-    [353983652] = "Game Moderator",
-    [1406181681] = "Game Moderator",
-    [2229169589] = "Game Moderator",
-    [3004094651] = "Game Moderator",
-    [839333692] = "Game Moderator",
-    [979624578] = "Game Moderator",
-    [1478885961] = "Game Moderator",
-    [399754916] = "Game Moderator",
-    [1193091081] = "Game Moderator",
-    [4553863490] = "Game Moderator",
-    [4225513035] = "Game Moderator",
-    [41482597] = "Game Moderator",
-    [2924549627] = "Game Moderator",
-    [2732967856] = "Game Moderator",
-    [1937516999] = "Game Moderator",
-    [1374319325] = "Game Moderator",
-    [1058831985] = "Game Moderator",
-    [9621064456] = "Game Moderator",
-    [584370127] = "Game Moderator",
-    [813030262] = "Game Moderator",
-    [3470393585] = "Game Moderator",
-    [122915793] = "Game Moderator",
-    [1534692727] = "Game Moderator",
-    [7278178099] = "Game Moderator",
-    [8593140875] = "Game Moderator",
-    [2525997354] = "Game Moderator",
-    [3126891654] = "Game Moderator",
-    [1190967808] = "Game Moderator",
-    [833946684] = "Game Moderator",
-    [202751467] = "Game Moderator",
-    [510349404] = "Game Moderator",
-    [174212818] = "Contribution",
-    [25548179] = "Lead Developer",
-    [363101315] = "Lead Developer",
-    [47983795] = "Co-Founder",
-    [16681869] = "Founder",
 
-    [3544497889] = "Game Moderator",
-    [3739152618] = "Game Moderator",
-    [4252853044] = "Game Moderator",
-    [1500535353] = "Game Moderator",
-    [1116486172] = "Game Moderator",
-    [1304140224] = "Game Moderator",
-    [542183759] = "Game Moderator",
-    [2620215562] = "Game Moderator",
-    [1622256215] = "Game Moderator",
-    [2792072212] = "Game Moderator",
-    [3994092139] = "Game Moderator",
-    [914847610] = "Game Moderator",
-    [114812725] = "Game Moderator",
-    [1072151937] = "Game Moderator",
-    [1771300283] = "Game Moderator",
-    [1249478607] = "Game Moderator",
+    -- Founder
+    [16681869] = "Founder", -- neddleduck
+
+    -- Co-Founder
+    [47983795] = "Co-Founder", -- ChickenBagelz
+
+    -- Lead Developer
+    [25548179] = "Lead Developer", -- AsianAbrex
+    [363101315] = "Lead Developer", -- Warm_Vibes
+
+    -- Contribution
+    [174212818] = "Contribution", -- YTGonzo
+
+    -- Game Moderator
+    [584370127] = "Game Moderator", -- 1Newy1
+    [4243907215] = "Game Moderator", -- AaronElagant
+    [81993536] = "Game Moderator", -- aidenas2011
+    [979624578] = "Game Moderator", -- B_BEAMO
+    [602009251] = "Game Moderator", -- Bajoogies_XD
+    [2525997354] = "Game Moderator", -- BlackWhiteYT11
+    [1383415614] = "Game Moderator", -- Bryponfx
+    [2276999095] = "Game Moderator", -- CelebredKillerq
+    [3122439095] = "Game Moderator", -- chancerocke
+    [836836349] = "Game Moderator", -- didusha123
+    [1190967808] = "Game Moderator", -- djvdhshscshs
+    [2732967856] = "Game Moderator", -- DontTouchZGrass
+    [113179883] = "Game Moderator", -- DopeIlI
+    [3034930770] = "Game Moderator", -- Fan_hellrider
+    [1478885961] = "Game Moderator", -- fordjdj12
+    [833946684] = "Game Moderator", -- GamerGubbi
+    [4553863490] = "Game Moderator", -- giovannirv2
+    [1116486172] = "Game Moderator", -- Hakob_8w8
+    [8593140875] = "Game Moderator", -- HurbertTheP3r73rt
+    [2364950171] = "Game Moderator", -- ilovetowerbattle_9
+    [1374319325] = "Game Moderator", -- jostjohnyca
+    [3470393585] = "Game Moderator", -- k6ppo
+    [41482597] = "Game Moderator", -- kerub131
+    [51281722] = "Game Moderator", -- KittenBagelz
+    [1058831985] = "Game Moderator", -- krisidisi23
+    [510349404] = "Game Moderator", -- Kristian4209
+    [991290934] = "Game Moderator", -- Lexi34567812
+    [122915793] = "Game Moderator", -- LionTooth99999
+    [202751467] = "Game Moderator", -- lumbers2
+    [1937516999] = "Game Moderator", -- matheu09173
+    [839333692] = "Game Moderator", -- Matheus06532
+    [1004214871] = "Game Moderator", -- owner12310
+    [3968854760] = "Game Moderator", -- puferyba
+    [353983652] = "Game Moderator", -- Puhgee
+    [2924549627] = "Game Moderator", -- rashhhh2
+    [7178750309] = "Game Moderator", -- Rikumah
+    [399754916] = "Game Moderator", -- sirfluf
+    [7278178099] = "Game Moderator", -- thecarrotman513
+    [4225513035] = "Game Moderator", -- Waitwhatb40
+    [1193091081] = "Game Moderator", -- Weerdeeg
+    [1290522339] = "Game Moderator", -- Xonnik921
+
+    -- Game Tester
+    [3328476579] = "Game Tester", -- 657rikgf7t6r_deleted
+    [4751004788] = "Game Tester", -- Adopt_me21893
+    [405807238] = "Game Tester", -- AgentSwitchblade
+    [75983689] = "Game Tester", -- Agustinxd1
+    [566258203] = "Game Tester", -- aidaidaiai
+    [1783760731] = "Game Tester", -- AlcaponeRP1
+    [3122661168] = "Game Tester", -- anomic552
+    [187378148] = "Game Tester", -- AP600
+    [32819957] = "Game Tester", -- asthecar
+    [2270254503] = "Game Tester", -- AYOPEPOCHECK
+    [3307992031] = "Game Tester", -- BaconEater171
+    [4323168809] = "Game Tester", -- Bacspas3
+    [1679965910] = "Game Tester", -- banana_rama0man
+    [4129018777] = "Game Tester", -- BEAMEDBYU6
+    [388477413] = "Game Tester", -- belucka6
+    [71123508] = "Game Tester", -- BerserkerPhoenix
+    [272328715] = "Game Tester", -- blueduck6
+    [111282064] = "Game Tester", -- booboobooty310
+    [330341352] = "Game Tester", -- breezyytsub
+    [358770591] = "Game Tester", -- bude1134
+    [1423307474] = "Game Tester", -- bXxlegendxXd
+    [253299193] = "Game Tester", -- C4DooMB4
+    [3098351403] = "Game Tester", -- Ch3et000
+    [3629511297] = "Game Tester", -- Cheesyhub
+    [1062012113] = "Game Tester", -- CheNyooo
+    [149351059] = "Game Tester", -- ChrisKunoi
+    [528878616] = "Game Tester", -- christopher_mil
+    [39754447] = "Game Tester", -- convictvince
+    [1166315368] = "Game Tester", -- crevette2053
+    [92376478] = "Game Tester", -- dabossuSA
+    [81904325] = "Game Tester", -- danailg77
+    [47960346] = "Game Tester", -- darthcx
+    [1740725288] = "Game Tester", -- dayrampage
+    [88004813] = "Game Tester", -- dip348
+    [777957956] = "Game Tester", -- Dispure
+    [401977043] = "Game Tester", -- DrAgOnHeArTeD211
+    [66673673] = "Game Tester", -- DrippxyMichael
+    [319964782] = "Game Tester", -- duztrr
+    [1843191406] = "Game Tester", -- dzixjhs
+    [859559655] = "Game Tester", -- EggPlantWithSoup
+    [544673905] = "Game Tester", -- Emmanuel30_05
+    [964786827] = "Game Tester", -- erendu5454
+    [120558923] = "Game Tester", -- Excelinq
+    [528689869] = "Game Tester", -- FakeIsNotAllowed
+    [1988542987] = "Game Tester", -- FatBoi8901
+    [1112958760] = "Game Tester", -- fgteevsean12321
+    [30925626] = "Game Tester", -- FortisAegis
+    [209024298] = "Game Tester", -- freemonys
+    [296957574] = "Game Tester", -- gabito224
+    [4112832247] = "Game Tester", -- GAMMINGPRO9876
+    [1211266317] = "Game Tester", -- GirlsAreConfusing
+    [158711542] = "Game Tester", -- goochoo22
+    [2908991078] = "Game Tester", -- Graydog_111
+    [1369925187] = "Game Tester", -- HARIS21927
+    [30420315] = "Game Tester", -- Hawj915
+    [2411276967] = "Game Tester", -- hexxedVA
+    [596842880] = "Game Tester", -- heybebey
+    [369096190] = "Game Tester", -- hhhhhsha
+    [294520324] = "Game Tester", -- hi1343344
+    [354616370] = "Game Tester", -- hmmRaze
+    [152602534] = "Game Tester", -- Huys_ThePvpNoob
+    [5155592767] = "Game Tester", -- Iam2proud
+    [2736604977] = "Game Tester", -- IamGreat400
+    [744002430] = "Game Tester", -- il_rest
+    [1003354757] = "Game Tester", -- ilikemuffins143
+    [476384450] = "Game Tester", -- IlliteritWarden
+    [89357392] = "Game Tester", -- Inferno3745
+    [839169788] = "Game Tester", -- Itslettuce58976
+    [125119895] = "Game Tester", -- jamesblast07
+    [81244502] = "Game Tester", -- jhanix1
+    [19572046] = "Game Tester", -- jockinjack
+    [4818964581] = "Game Tester", -- Joex0fficial
+    [266587090] = "Game Tester", -- judgemylove
+    [113864715] = "Game Tester", -- justingamer20007
+    [1825000373] = "Game Tester", -- Jxrvo
+    [3129484805] = "Game Tester", -- kitcatIover
+    [147963748] = "Game Tester", -- kkmoney225
+    [943493706] = "Game Tester", -- knightgaming40
+    [720369995] = "Game Tester", -- kondraccky_805
+    [589240045] = "Game Tester", -- kyecooper199
+    [110703379] = "Game Tester", -- lavalthelion101
+    [121539737] = "Game Tester", -- ldryantran
+    [2793699387] = "Game Tester", -- LilSaltines
+    [462735927] = "Game Tester", -- ljh142
+    [207850384] = "Game Tester", -- LonelyDwayne
+    [54187785] = "Game Tester", -- LordVolta
+    [93490819] = "Game Tester", -- madwolfman567
+    [107643044] = "Game Tester", -- MaloniPepperoni
+    [4178829350] = "Game Tester", -- maniatako922
+    [1467807563] = "Game Tester", -- McJerry09
+    [15068817] = "Game Tester", -- millesy98
+    [1682565633] = "Game Tester", -- MXTHXIS
+    [1739291317] = "Game Tester", -- N1sshoku
+    [4169625678] = "Game Tester", -- Nag_Fatality
+    [3336944186] = "Game Tester", -- namcygd
+    [104802564] = "Game Tester", -- NoProfits
+    [471184676] = "Game Tester", -- NotReallyTeal
+    [1435261209] = "Game Tester", -- occss
+    [36681613] = "Game Tester", -- OofyBloxx
+    [173703440] = "Game Tester", -- pablothemix
+    [53147489] = "Game Tester", -- pickleman703
+    [105326410] = "Game Tester", -- PilotClassic
+    [1903573421] = "Game Tester", -- PointMelon
+    [1196539159] = "Game Tester", -- PrettylBoi
+    [32511642] = "Game Tester", -- PurpleWildcat_TV
+    [495196468] = "Game Tester", -- Q_rt0254
+    [47600679] = "Game Tester", -- qasd5234
+    [2007113987] = "Game Tester", -- Railzeur123
+    [651067419] = "Game Tester", -- RainZero14
+    [1430722279] = "Game Tester", -- Rand0m_dudd
+    [199995959] = "Game Tester", -- Rblizzard2
+    [53123109] = "Game Tester", -- ReggieMysticKush
+    [3144275918] = "Game Tester", -- rek_tf
+    [68032793] = "Game Tester", -- RetakeX
+    [701681929] = "Game Tester", -- ricepowertograin
+    [1487454844] = "Game Tester", -- RipperExistence
+    [136244389] = "Game Tester", -- rmfoshocmd
+    [2325994781] = "Game Tester", -- roblox_user_2325994781
+    [1651300462] = "Game Tester", -- RobyNeT212006
+    [769361337] = "Game Tester", -- Rovive_Academy
+    [2402742033] = "Game Tester", -- s4nt1ms_kruc
+    [92269758] = "Game Tester", -- Salad_Time
+    [1238641965] = "Game Tester", -- segantionelton
+    [2024926585] = "Game Tester", -- shadows_rin
+    [2618080172] = "Game Tester", -- shoetermcgavinn
+    [58895799] = "Game Tester", -- shorty8838
+    [129861303] = "Game Tester", -- Slightly_Vexed
+    [885074899] = "Game Tester", -- snooppuppy100
+    [506132522] = "Game Tester", -- soggoni0124
+    [601480881] = "Game Tester", -- solderdamon2
+    [51256414] = "Game Tester", -- Sovrigh
+    [2216129561] = "Game Tester", -- StEpSiS546
+    [111275810] = "Game Tester", -- SuddenBog2003
+    [75094576] = "Game Tester", -- superspeedymillien
+    [828629819] = "Game Tester", -- supremedisgrace
+    [302699989] = "Game Tester", -- talktodoves
+    [3156776755] = "Game Tester", -- tewibod123
+    [636711290] = "Game Tester", -- theDfizzle
+    [460894635] = "Game Tester", -- TheForgottenNoob665
+    [186496434] = "Game Tester", -- TheWingedGuest
+    [436367347] = "Game Tester", -- timascool
+    [122885852] = "Game Tester", -- TjTheBandit
+    [1854518141] = "Game Tester", -- ToeNae
+    [1238384774] = "Game Tester", -- universe_slayer3
+    [140188350] = "Game Tester", -- UTVoidDreemurr
+    [880282497] = "Game Tester", -- wardog6543211
+    [2774417571] = "Game Tester", -- wisn214
+    [35408811] = "Game Tester", -- wookey12
+    [865455244] = "Game Tester", -- xdkillers21
+    [1074469795] = "Game Tester", -- xRavageures
+    [143666227] = "Game Tester", -- xshadowb910
+    [193244642] = "Game Tester", -- xToxi
+    [370428947] = "Game Tester", -- XxAlphaSquadX
+    [410533487] = "Game Tester", -- Xxdeathuserx
+    [1919836380] = "Game Tester", -- xxxchrisbrofist
+    [2961878034] = "Game Tester", -- xxxtr1plex
+    [1317389983] = "Game Tester", -- Y0qh
+    [4520170314] = "Game Tester", -- YET_YTY
+    [385583913] = "Game Tester", -- yigido201
+    [3960654237] = "Game Tester", -- YuhImHimN
+    [25352140] = "Game Tester", -- Yumeissotuffandcute
+    [2277409973] = "Game Tester", -- zh00on
+
+    -- OG
+    [436380269] = "OG", -- acount51
+    [90699110] = "OG", -- Charlogo318
+    [135830651] = "OG", -- CustomChance
+    [519325044] = "OG", -- epicgamergup
+    [729090464] = "OG", -- erikunasX
+    [36681298] = "OG", -- ipatdress
+    [91044471] = "OG", -- jacobplayer555
+    [75090191] = "OG", -- Militarysoup98533
+    [97246381] = "OG", -- nimb1e
+    [227286903] = "OG", -- OnlySoap
+    [80659656] = "OG", -- pixxleatedderp
+    [676856598] = "OG", -- Spoopy_Birb
+    [41053073] = "OG", -- Ultramahsuperman102
+    [164058661] = "OG", -- Zeus24X
 }
 
 function M.role_for(user_id)
@@ -8554,6 +9568,8 @@ local PART_CLASSES = {
     Part = true,
     MeshPart = true,
     UnionOperation = true,
+    WedgePart = true,
+    CornerWedgePart = true,
 }
 
 function M.is_part(inst)
@@ -9039,6 +10055,8 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_checkbox(T, G, p .. "filter_health", "Health Check", true, root)
     menu.add_checkbox(T, G, p .. "filter_visible", "Visible Only", false, root)
     menu.add_checkbox(T, G, p .. "filter_team", "Team Check", true, root)
+    menu.add_combo(T, G, p .. "filter_downed", "Downed Check",
+        { "Skip Downed", "Allow Downed", "Only Downed" }, 0, root)
 
     menu.add_checkbox(T, G, p .. "target_players", "Target Players", true, root)
     local npc_root = menu_util.parent(p .. "target_npcs")
@@ -9233,6 +10251,10 @@ function M.passes_filters(target, prefix, aim, origin)
 
     if settings.bool(prefix .. "filter_health", true) then
         if not player_state.passes_health_check(target) then return false end
+    end
+
+    if not player_state.passes_downed_check(target, settings.num(prefix .. "filter_downed", 0)) then
+        return false
     end
 
     if settings.bool(prefix .. "filter_team", true) then
@@ -9773,7 +10795,8 @@ function M.resolve_track(target, prefix, cx, cy)
             track_origin = pierce_origin(track_origin, aim) or track_origin
         end
     else
-        -- Default silent: fake weapon drop curve, still lands on hitpart.
+        -- Default silent: hook camera→hitpart (instant). Drop curve is visual only
+        -- from muzzle using weapon Speed/Gravity — no aim-up / vertical prediction.
         local muzzle = combat_origin.get_muzzle_origin() or camera
         local curve = ballistic.curve_for_weapon(muzzle, aim, weapon, 18)
         manip_info = {
@@ -9784,6 +10807,7 @@ function M.resolve_track(target, prefix, cx, cy)
             weapon = weapon,
             curve_path = curve and curve.path or nil,
         }
+        track_origin = camera
         if wallbang then
             track_origin = pierce_origin(track_origin, aim) or track_origin
         end
@@ -9906,22 +10930,16 @@ local function draw_manip_peek(info)
 end
 
 local function draw_tp_ray_path(info)
-    if not info then return end
+    -- Only Bullet TP "Visualize Ray Path" — never auto-draw weapon drop curves
+    -- (those looked like a second target line on bows).
+    if not info or info.state ~= "tp" then return end
+    if not settings.bool(PREFIX .. "bullet_tp", false) then return end
+    if not settings.bool(PREFIX .. "tp_ray_vis", false) then return end
 
-    local path = info.tp_path or info.curve_path
+    local path = info.tp_path
     if not path or #path < 2 then return end
 
-    if info.state == "tp" then
-        if not settings.bool(PREFIX .. "bullet_tp", false) then return end
-        if not settings.bool(PREFIX .. "tp_ray_vis", false) then return end
-    elseif info.state ~= "curve" then
-        return
-    end
-
     local col = settings.color(PREFIX .. "tp_ray_vis", { 0.95, 0.45, 1, 0.9 })
-    if info.state == "curve" then
-        col = { 0.45, 0.85, 1, 0.45 }
-    end
     for i = 1, #path - 1 do
         local a, b = path[i], path[i + 1]
         esp_util.draw_world_line(a.x, a.y, a.z, b.x, b.y, b.z, col, 1.5)
@@ -9929,7 +10947,7 @@ local function draw_tp_ray_path(info)
 
     local hook = cached_track.origin
     local aim = cached_track.aim
-    if hook and aim and info.state == "tp" then
+    if hook and aim then
         desync_vis.draw_cross(hook.x, hook.y, hook.z, 0.45, { 1, 0.85, 0.2, 0.95 }, 2)
         desync_vis.draw_link(hook, aim, { col[1], col[2], col[3], 0.35 }, 1)
     end
@@ -9950,6 +10968,7 @@ function M.register_menu()
     menu_util.bind_children(P_MASTER, {
         PREFIX .. "target_type", PREFIX .. "bone",
         PREFIX .. "filter_health", PREFIX .. "filter_visible", PREFIX .. "filter_team",
+        PREFIX .. "filter_downed",
         PREFIX .. "target_players", PREFIX .. "target_npcs", PREFIX .. "target_npc_soldiers", PREFIX .. "target_npc_bosses",
         PREFIX .. "sticky", PREFIX .. "wallbang",
         PREFIX .. "bullet_tp", PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
@@ -10068,8 +11087,10 @@ function M.update(_dt)
     local info = cached_track.manip
     local ok_track = false
     if info.use_curve and silent_ray.track_curve then
+        -- Hook is always camera→hitpart (instant). Curve path from resolve is
+        -- muzzle→hitpart drop for visuals; only fill if resolve had none.
         ok_track = silent_ray.track_curve(origin, aim, info.weapon, SHOOT_VK) == true
-        if silent_ray.last_curve then
+        if not info.curve_path and silent_ray.last_curve then
             local curve = silent_ray.last_curve()
             if curve and curve.path then
                 info.curve_path = curve.path
@@ -11731,9 +12752,65 @@ local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
 local maps = April.require("game.esp_maps")
 local esp_scan = April.require("game.esp_scan")
+local gpu_chams = April.require("core.gpu_chams")
 
 local M = {}
 local P = "april_world_enabled"
+local CHAMS_ID = "april_world_chams"
+local CHAMS_MODE = "april_world_chams_mode"
+local CHAMS_COLOR = "april_world_chams_color"
+
+local function world_chams_labels()
+    local labels = {}
+    for i, t in ipairs(maps.WORLD_TOGGLES) do
+        labels[i] = t.label
+    end
+    return labels
+end
+
+local function world_chams_index_for(toggle_id)
+    for i, t in ipairs(maps.WORLD_TOGGLES) do
+        if t.id == toggle_id then return i end
+    end
+    return nil
+end
+
+local function world_chams_active()
+    if not gpu_chams.available() then return false end
+    if not settings.enabled(P) then return false end
+    for i = 1, #maps.WORLD_TOGGLES do
+        if gpu_chams.multicombo_selected(CHAMS_ID, i) then
+            return true
+        end
+    end
+    return false
+end
+
+local function collect_world_chams(applied)
+    local me = env.get_local_player()
+    local me_pos = me and me.position
+    if not me_pos then return end
+
+    local range = settings.num("april_world_range", 500)
+    local range_sq = range * range
+
+    for _, entry in ipairs(cache.world) do
+        if not env.is_valid(entry.inst) then goto continue end
+        local idx = world_chams_index_for(entry.toggle_id)
+        if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
+        if not settings.enabled(entry.toggle_id) then goto continue end
+
+        local lx, ly, lz = esp_scan.entry_coords(entry)
+        if not lx then goto continue end
+        local dx = lx - me_pos.x
+        local dy = ly - me_pos.y
+        local dz = lz - me_pos.z
+        if (dx * dx + dy * dy + dz * dz) > range_sq then goto continue end
+
+        gpu_chams.cham_entry_part(entry, applied)
+        ::continue::
+    end
+end
 
 M._static = {}
 M._dynamic = {}
@@ -11774,6 +12851,43 @@ function M.register_menu()
     for _, t in ipairs(maps.WORLD_TOGGLES) do
         child_ids[#child_ids + 1] = t.id
     end
+
+    if gpu_chams.available() then
+        local labels = world_chams_labels()
+        menu.add_multicombo(T, G.WORLD, CHAMS_ID, "Resource Chams", labels,
+            gpu_chams.multicombo_defaults(#labels), { parent = P })
+        gpu_chams.add_mode_color_menu(T, G.WORLD, P, CHAMS_MODE, CHAMS_COLOR,
+            "Resource Chams Mode", "Resource Chams Color")
+        child_ids[#child_ids + 1] = CHAMS_ID
+        child_ids[#child_ids + 1] = CHAMS_MODE
+        child_ids[#child_ids + 1] = CHAMS_COLOR
+
+        gpu_chams.register_owner("world", {
+            rescan_ms = 500,
+            is_active = world_chams_active,
+            style = function()
+                return gpu_chams.mode_index(CHAMS_MODE, 0), gpu_chams.color_index(CHAMS_COLOR, 0)
+            end,
+            collect = collect_world_chams,
+        })
+        gpu_chams.wire_style_controls("world", CHAMS_MODE, CHAMS_COLOR)
+        settings.on_change(CHAMS_ID, function()
+            gpu_chams.sync_owner("world", true)
+        end)
+        settings.on_change(P, function(v)
+            if v == true or v == 1 then
+                gpu_chams.sync_owner("world", true)
+            else
+                gpu_chams.clear_owner("world")
+            end
+        end)
+        for _, t in ipairs(maps.WORLD_TOGGLES) do
+            settings.on_change(t.id, function()
+                gpu_chams.sync_owner("world", true)
+            end)
+        end
+    end
+
     menu_util.bind_children(P, child_ids)
 end
 
@@ -11845,9 +12959,21 @@ function M.scan()
 end
 
 function M.update(_dt)
-    if not settings.enabled(P) then return end
-    if #M._dynamic > 0 and cache.should_refresh_positions() then
-        refresh_dynamic_positions(M._dynamic)
+    local world_on = settings.enabled(P)
+
+    if world_on then
+        if cache.should_refresh_positions() then
+            cache.prune_invalid(M._static)
+            cache.prune_invalid(M._dynamic)
+            rebuild_cache()
+            if #M._dynamic > 0 then
+                refresh_dynamic_positions(M._dynamic)
+            end
+        end
+    end
+
+    if gpu_chams.available() then
+        gpu_chams.sync_owner("world")
     end
 end
 
@@ -11921,9 +13047,13 @@ local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
 local maps = April.require("game.esp_maps")
 local esp_scan = April.require("game.esp_scan")
+local gpu_chams = April.require("core.gpu_chams")
 
 local M = {}
 local P = "april_loot_enabled"
+local CHAMS_ID = "april_loot_chams"
+local CHAMS_MODE = "april_loot_chams_mode"
+local CHAMS_COLOR = "april_loot_chams_color"
 
 M._static = {}
 M._drops = {}
@@ -11933,6 +13063,62 @@ local UNLIMITED_RANGE = {
     april_care_package = true,
     april_btr_crate = true,
 }
+
+local function loot_chams_labels()
+    local labels = {}
+    for i, t in ipairs(maps.LOOT_TOGGLES) do
+        labels[i] = t.label
+    end
+    return labels
+end
+
+local function loot_chams_index_for(toggle_id)
+    for i, t in ipairs(maps.LOOT_TOGGLES) do
+        if t.id == toggle_id then return i end
+    end
+    return nil
+end
+
+local function loot_chams_active()
+    if not gpu_chams.available() then return false end
+    if not settings.enabled(P) then return false end
+    for i = 1, #maps.LOOT_TOGGLES do
+        if gpu_chams.multicombo_selected(CHAMS_ID, i) then
+            return true
+        end
+    end
+    return false
+end
+
+local function collect_loot_chams(applied)
+    local me = env.get_local_player()
+    local me_pos = me and me.position
+    -- Fail closed: without local pos we must NOT cham the whole cache.
+    if not me_pos then return end
+
+    local range = settings.num("april_loot_range", 300)
+    local range_sq = range * range
+
+    for _, entry in ipairs(cache.loot) do
+        if not env.is_valid(entry.inst) then goto continue end
+        local idx = loot_chams_index_for(entry.toggle_id)
+        if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
+        if not settings.enabled(entry.toggle_id) then goto continue end
+
+        local lx, ly, lz = esp_scan.entry_coords(entry)
+        if not lx then goto continue end
+        if not UNLIMITED_RANGE[entry.toggle_id] then
+            local dx = lx - me_pos.x
+            local dy = ly - me_pos.y
+            local dz = lz - me_pos.z
+            if (dx * dx + dy * dy + dz * dz) > range_sq then goto continue end
+        end
+
+        -- One visual part per entry (instance Address) — not every MeshPart in the world.
+        gpu_chams.cham_entry_part(entry, applied)
+        ::continue::
+    end
+end
 
 local STATIC_SOURCES = {
     { kind = "root", key = "loners" },
@@ -12164,6 +13350,43 @@ function M.register_menu()
     for _, t in ipairs(maps.LOOT_TOGGLES) do
         child_ids[#child_ids + 1] = t.id
     end
+
+    if gpu_chams.available() then
+        local labels = loot_chams_labels()
+        menu.add_multicombo(T, G.WORLD, CHAMS_ID, "Loot Chams", labels,
+            gpu_chams.multicombo_defaults(#labels), { parent = P })
+        gpu_chams.add_mode_color_menu(T, G.WORLD, P, CHAMS_MODE, CHAMS_COLOR,
+            "Loot Chams Mode", "Loot Chams Color")
+        child_ids[#child_ids + 1] = CHAMS_ID
+        child_ids[#child_ids + 1] = CHAMS_MODE
+        child_ids[#child_ids + 1] = CHAMS_COLOR
+
+        gpu_chams.register_owner("loot", {
+            rescan_ms = 500,
+            is_active = loot_chams_active,
+            style = function()
+                return gpu_chams.mode_index(CHAMS_MODE, 0), gpu_chams.color_index(CHAMS_COLOR, 0)
+            end,
+            collect = collect_loot_chams,
+        })
+        gpu_chams.wire_style_controls("loot", CHAMS_MODE, CHAMS_COLOR)
+        settings.on_change(CHAMS_ID, function()
+            gpu_chams.sync_owner("loot", true)
+        end)
+        settings.on_change(P, function(v)
+            if v == true or v == 1 then
+                gpu_chams.sync_owner("loot", true)
+            else
+                gpu_chams.clear_owner("loot")
+            end
+        end)
+        for _, t in ipairs(maps.LOOT_TOGGLES) do
+            settings.on_change(t.id, function()
+                gpu_chams.sync_owner("loot", true)
+            end)
+        end
+    end
+
     menu_util.bind_children(P, child_ids)
 end
 
@@ -12186,9 +13409,22 @@ end
 
 function M.update(_dt)
     local map_loot = settings.enabled("april_map_enabled") and settings.enabled("april_map_show_loot")
-    if not settings.enabled(P) and not map_loot then return end
-    if #M._drops > 0 and cache.should_refresh_positions() then
-        refresh_dynamic_positions(M._drops)
+    local loot_on = settings.enabled(P)
+
+    if loot_on or map_loot then
+        if cache.should_refresh_positions() then
+            cache.prune_invalid(M._static)
+            cache.prune_invalid(M._drops)
+            rebuild_cache()
+            if #M._drops > 0 then
+                refresh_dynamic_positions(M._drops)
+            end
+        end
+    end
+
+    -- Always sync so disable / empty multicombo actually RevertChams.
+    if gpu_chams.available() then
+        gpu_chams.sync_owner("loot")
     end
 end
 
@@ -12264,9 +13500,65 @@ local maps = April.require("game.esp_maps")
 local turret_stats = April.require("game.turret_stats")
 local desync_vis = April.require("core.desync_vis")
 local esp_scan = April.require("game.esp_scan")
+local gpu_chams = April.require("core.gpu_chams")
 
 local M = {}
 local P = "april_base_enabled"
+local CHAMS_ID = "april_base_chams"
+local CHAMS_MODE = "april_base_chams_mode"
+local CHAMS_COLOR = "april_base_chams_color"
+
+local function base_chams_labels()
+    local labels = {}
+    for i, t in ipairs(maps.BASE_TOGGLES) do
+        labels[i] = t.label
+    end
+    return labels
+end
+
+local function base_chams_index_for(toggle_id)
+    for i, t in ipairs(maps.BASE_TOGGLES) do
+        if t.id == toggle_id then return i end
+    end
+    return nil
+end
+
+local function base_chams_active()
+    if not gpu_chams.available() then return false end
+    if not settings.enabled(P) then return false end
+    for i = 1, #maps.BASE_TOGGLES do
+        if gpu_chams.multicombo_selected(CHAMS_ID, i) then
+            return true
+        end
+    end
+    return false
+end
+
+local function collect_base_chams(applied)
+    local me = env.get_local_player()
+    local me_pos = me and me.position
+    if not me_pos then return end
+
+    local range = settings.num("april_base_range", 150)
+    local range_sq = range * range
+
+    for _, entry in ipairs(cache.base) do
+        if not env.is_valid(entry.inst) then goto continue end
+        local idx = base_chams_index_for(entry.toggle_id)
+        if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
+        if not settings.enabled(entry.toggle_id) then goto continue end
+
+        local lx, ly, lz = esp_scan.entry_coords(entry)
+        if not lx then goto continue end
+        local dx = lx - me_pos.x
+        local dy = ly - me_pos.y
+        local dz = lz - me_pos.z
+        if (dx * dx + dy * dy + dz * dz) > range_sq then goto continue end
+
+        gpu_chams.cham_entry_part(entry, applied)
+        ::continue::
+    end
+end
 
 local function append_base_entry(state, model, type_name, toggle_id)
     if not model or not env.is_valid(model) then return end
@@ -12342,6 +13634,43 @@ function M.register_menu()
             child_ids[#child_ids + 1] = t.ring_id
         end
     end
+
+    if gpu_chams.available() then
+        local labels = base_chams_labels()
+        menu.add_multicombo(T, G.WORLD, CHAMS_ID, "Base Chams", labels,
+            gpu_chams.multicombo_defaults(#labels), { parent = P })
+        gpu_chams.add_mode_color_menu(T, G.WORLD, P, CHAMS_MODE, CHAMS_COLOR,
+            "Base Chams Mode", "Base Chams Color")
+        child_ids[#child_ids + 1] = CHAMS_ID
+        child_ids[#child_ids + 1] = CHAMS_MODE
+        child_ids[#child_ids + 1] = CHAMS_COLOR
+
+        gpu_chams.register_owner("base", {
+            rescan_ms = 500,
+            is_active = base_chams_active,
+            style = function()
+                return gpu_chams.mode_index(CHAMS_MODE, 0), gpu_chams.color_index(CHAMS_COLOR, 0)
+            end,
+            collect = collect_base_chams,
+        })
+        gpu_chams.wire_style_controls("base", CHAMS_MODE, CHAMS_COLOR)
+        settings.on_change(CHAMS_ID, function()
+            gpu_chams.sync_owner("base", true)
+        end)
+        settings.on_change(P, function(v)
+            if v == true or v == 1 then
+                gpu_chams.sync_owner("base", true)
+            else
+                gpu_chams.clear_owner("base")
+            end
+        end)
+        for _, t in ipairs(maps.BASE_TOGGLES) do
+            settings.on_change(t.id, function()
+                gpu_chams.sync_owner("base", true)
+            end)
+        end
+    end
+
     menu_util.bind_children(P, child_ids)
 end
 
@@ -12437,7 +13766,15 @@ function M.scan()
     M.complete_scan(state)
 end
 
-function M.update(_dt) end
+function M.update(_dt)
+    if settings.enabled(P) and cache.should_refresh_positions() then
+        cache.prune_invalid(cache.base)
+    end
+
+    if gpu_chams.available() then
+        gpu_chams.sync_owner("base")
+    end
+end
 
 function M.draw()
     if not settings.enabled(P) then return end
@@ -12537,6 +13874,8 @@ local P = "april_npc_enabled"
 local POS_REFRESH_BATCH = 8
 
 M._pos_idx = 0
+M._draw_targets = {}
+M._draw_frame = -1
 
 function M.register_menu()
     local G = menu_util.G
@@ -12642,8 +13981,11 @@ local function refresh_npc_position(entry)
     return false
 end
 
-local function collect_draw_targets()
-    local out = {}
+local function collect_draw_targets(into)
+    local out = into or {}
+    for i = #out, 1, -1 do
+        out[i] = nil
+    end
     local seen = {}
 
     if entity and entity.get_players then
@@ -12669,6 +14011,7 @@ local function collect_draw_targets()
     end
 
     for _, entry in ipairs(cache.npcs or {}) do
+        if not entry or not entry.inst or not env.is_valid(entry.inst) then goto continue_scan end
         local addr = instance_addr(entry)
         if addr and seen[addr] then goto continue_scan end
         if addr then seen[addr] = true end
@@ -12677,6 +14020,15 @@ local function collect_draw_targets()
     end
 
     return out
+end
+
+local function frame_draw_targets()
+    local now = utility and utility.get_tick_count and utility.get_tick_count() or 0
+    if M._draw_frame == now then
+        return M._draw_targets
+    end
+    M._draw_frame = now
+    return collect_draw_targets(M._draw_targets)
 end
 
 local function screen_bounds(entry)
@@ -12731,9 +14083,17 @@ local function draw_npc_health(bounds, entry)
 end
 
 function M.update(_dt)
-    if not settings.enabled(P) then return end
+    if not settings.enabled(P) then
+        M._draw_targets = {}
+        M._draw_frame = -1
+        return
+    end
 
-    local list = collect_draw_targets()
+    if cache.should_refresh_positions() then
+        cache.prune_invalid(cache.npcs)
+    end
+
+    local list = frame_draw_targets()
     local n = #list
     if n == 0 then return end
 
@@ -12755,7 +14115,7 @@ function M.draw()
     local sw, sh = draw_util.screen_size()
     local cx, cy = sw * 0.5, sh * 0.5
 
-    for _, entry in ipairs(collect_draw_targets()) do
+    for _, entry in ipairs(frame_draw_targets()) do
         if not kind_enabled(entry.kind) then goto continue end
 
         if entry.entity then
@@ -12766,8 +14126,11 @@ function M.draw()
 
         local col = kind_color(entry.kind)
 
-        refresh_npc_position(entry)
         local lx, ly, lz = entry.lx, entry.ly, entry.lz
+        if not lx then
+            refresh_npc_position(entry)
+            lx, ly, lz = entry.lx, entry.ly, entry.lz
+        end
 
         if not lx and entry.entity and entry.entity.position then
             local pos = entry.entity.position
@@ -14206,10 +15569,15 @@ local menu_util = April.require("core.menu_util")
 local draw_util = April.require("core.draw_util")
 local theme = April.require("core.ui_theme")
 local feature_bind = April.require("core.feature_bind")
+local panel_drag = April.require("core.panel_drag")
 
 local M = {}
 
 local P = "april_keybinds_enabled"
+local X_ID = "april_keybinds_x"
+local Y_ID = "april_keybinds_y"
+local W_ID = "april_keybinds_w"
+local PANEL_ID = "april_keybinds_panel"
 
 -- Full Win32 VK map (printable + modifiers + OEM + media/nav).
 local VK_NAMES = {
@@ -14255,7 +15623,6 @@ local VK_NAMES = {
     [0xB2] = "StopMedia", [0xB3] = "PlayPause",
     [0xB4] = "Mail", [0xB5] = "MediaSelect",
     [0xB6] = "App1", [0xB7] = "App2",
-    -- OEM / punctuation (US layout labels)
     [0xBA] = ";", [0xBB] = "=", [0xBC] = ",", [0xBD] = "-",
     [0xBE] = ".", [0xBF] = "/", [0xC0] = "`",
     [0xDB] = "[", [0xDC] = "\\", [0xDD] = "]", [0xDE] = "'",
@@ -14275,7 +15642,6 @@ local function vk_name(vk)
     local named = VK_NAMES[vk]
     if named then return named end
 
-    -- Printable ASCII range fallback
     if vk >= 0x20 and vk <= 0x7E then
         return string.char(vk)
     end
@@ -14333,13 +15699,14 @@ function M.register_menu()
     menu.add_checkbox(T, G.MISC, "april_keybinds_show_mode", "Show Bind Mode", true, root)
 
     menu_util.gap(T, G.MISC)
-    menu.add_slider_int(T, G.MISC, "april_keybinds_x", "Offset X", 0, 800, 16, root)
-    menu.add_slider_int(T, G.MISC, "april_keybinds_y", "Offset Y", 0, 800, 280, root)
-    menu.add_slider_int(T, G.MISC, "april_keybinds_w", "Width", 160, 420, 260, root)
+    menu_util.label(T, G.MISC, "Drag the panel title while Vector UI is open.")
+    menu.add_slider_int(T, G.MISC, X_ID, "Pos X", 0, 4000, 16, root)
+    menu.add_slider_int(T, G.MISC, Y_ID, "Pos Y", 0, 4000, 280, root)
+    menu.add_slider_int(T, G.MISC, W_ID, "Width", 160, 420, 260, root)
 
     menu_util.bind_children(P, {
         "april_keybinds_active_only", "april_keybinds_show_unbound", "april_keybinds_show_mode",
-        "april_keybinds_x", "april_keybinds_y", "april_keybinds_w",
+        X_ID, Y_ID, W_ID,
     })
 end
 
@@ -14350,28 +15717,34 @@ function M.draw()
     if not draw or not draw.text then return end
 
     local sw, sh = draw_util.screen_size()
-    local panel_w = settings.num("april_keybinds_w", 260)
-    local ox = settings.num("april_keybinds_x", 16)
-    local oy = settings.num("april_keybinds_y", 280)
-    local x = sw - panel_w - ox
-    local y = math.floor(sh * 0.5) - 80 + (oy - 280)
+    local panel_w = settings.num(W_ID, 260)
+    local x = settings.num(X_ID, 16)
+    local y = settings.num(Y_ID, 280)
 
     local rows = collect_rows()
     local pad = 10
-    local title_h = 22
+    local title_h = panel_drag.title_h()
     local row_h = 18
     local count = math.max(#rows, 1)
     local height = title_h + count * row_h + 10
 
+    local dragging
+    x, y, dragging = panel_drag.update(PANEL_ID, x, y, panel_w, height, X_ID, Y_ID, sw, sh)
+
+    local can_drag = panel_drag.menu_is_open()
     theme.draw_panel(x, y, panel_w, height, {
         bg = theme.alpha(theme.BG, 0.88),
-        border = theme.alpha(theme.BORDER, 0.4),
+        border = theme.alpha(theme.BORDER, (dragging or can_drag) and 0.7 or 0.4),
         accent = theme.CYAN,
         accent_w = 2,
         rounding = theme.ROUND,
     })
 
-    draw_util.text(x + pad, y + 5, "Keybinds", theme.TEXT, 12)
+    local title = "Keybinds"
+    if can_drag then
+        title = title .. "  · drag"
+    end
+    draw_util.text(x + pad, y + 5, title, theme.TEXT, 12)
 
     local ry = y + title_h
     if #rows == 0 then
@@ -14415,9 +15788,13 @@ local esp_util = April.require("core.esp_util")
 local image_cache = April.require("core.image_cache")
 local asset_urls = April.require("game.asset_urls")
 local theme = April.require("core.ui_theme")
+local panel_drag = April.require("core.panel_drag")
 
 local M = {}
 local P = "april_mod_checker_enabled"
+local X_ID = "april_mod_checker_x"
+local Y_ID = "april_mod_checker_y"
+local PANEL_ID = "april_mod_checker_panel"
 local MOD_ICON_KEY = "mod_warning"
 local HEAD_OFFSET = 3.5
 
@@ -14495,10 +15872,14 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.MISC)
+    local root = menu_util.parent(P)
     menu.add_checkbox(T, G.MISC, P, "Mod Checker", false)
     menu_util.gap(T, G.MISC)
-    menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Mod Scan Interval (ms)", 1000, 10000, 2500, { parent = P })
-    menu_util.bind_master(P, { "april_mod_checker_interval" })
+    menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Mod Scan Interval (ms)", 1000, 10000, 2500, root)
+    menu_util.label(T, G.MISC, "Drag the panel title while Vector UI is open.")
+    menu.add_slider_int(T, G.MISC, X_ID, "Pos X", -1, 4000, -1, root)
+    menu.add_slider_int(T, G.MISC, Y_ID, "Pos Y", 0, 4000, 72, root)
+    menu_util.bind_master(P, { "april_mod_checker_interval", X_ID, Y_ID })
 end
 
 function M.init()
@@ -14695,18 +16076,18 @@ local function build_staff_rows()
     return rows
 end
 
-local function draw_staff_panel(x, y, width, rows)
+local function draw_staff_panel(x, y, width, rows, can_drag)
     if not draw or not draw.text then return end
 
     local pad = 10
-    local title_h = 24
+    local title_h = panel_drag.title_h()
     local row_h = 44
     local count = math.max(#rows, 1)
     local height = title_h + count * row_h + 6
 
     theme.draw_panel(x, y, width, height, {
         bg = theme.alpha(theme.BG, 0.90),
-        border = theme.alpha(theme.BORDER, 0.45),
+        border = theme.alpha(theme.BORDER, can_drag and 0.7 or 0.45),
         accent = theme.RED,
         accent_w = 2,
         rounding = theme.ROUND,
@@ -14715,6 +16096,9 @@ local function draw_staff_panel(x, y, width, rows)
     local title = "Staff In Lobby"
     if #rows > 1 then
         title = title .. " (" .. #rows .. ")"
+    end
+    if can_drag then
+        title = title .. "  · drag"
     end
     draw_util.text(x + pad, y + 6, title, theme.TEXT, 12)
 
@@ -14764,12 +16148,23 @@ function M.draw()
 
     M.reconcile_active()
 
-    local sw, _ = draw_util.screen_size()
+    local sw, sh = draw_util.screen_size()
     local panel_w = 260
-    local x = sw - panel_w - 16
-    local rows = build_staff_rows()
+    local default_x = math.max(0, sw - panel_w - 16)
+    local x = settings.num(X_ID, -1)
+    local y = settings.num(Y_ID, 72)
+    if x < 0 then
+        x = default_x
+    end
 
-    draw_staff_panel(x, 72, panel_w, rows)
+    local rows = build_staff_rows()
+    local count = math.max(#rows, 1)
+    local height = panel_drag.title_h() + count * 44 + 6
+    local can_drag = panel_drag.menu_is_open()
+    local dragging
+    x, y, dragging = panel_drag.update(PANEL_ID, x, y, panel_w, height, X_ID, Y_ID, sw, sh)
+
+    draw_staff_panel(x, y, panel_w, rows, can_drag or dragging)
 end
 
 return M

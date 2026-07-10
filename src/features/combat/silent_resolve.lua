@@ -97,7 +97,8 @@ function M.resolve_track(target, prefix, cx, cy)
             track_origin = pierce_origin(track_origin, aim) or track_origin
         end
     else
-        -- Default silent: fake weapon drop curve, still lands on hitpart.
+        -- Default silent: hook camera→hitpart (instant). Drop curve is visual only
+        -- from muzzle using weapon Speed/Gravity — no aim-up / vertical prediction.
         local muzzle = combat_origin.get_muzzle_origin() or camera
         local curve = ballistic.curve_for_weapon(muzzle, aim, weapon, 18)
         manip_info = {
@@ -108,6 +109,7 @@ function M.resolve_track(target, prefix, cx, cy)
             weapon = weapon,
             curve_path = curve and curve.path or nil,
         }
+        track_origin = camera
         if wallbang then
             track_origin = pierce_origin(track_origin, aim) or track_origin
         end

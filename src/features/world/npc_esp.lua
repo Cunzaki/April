@@ -11,6 +11,8 @@ local P = "april_npc_enabled"
 local POS_REFRESH_BATCH = 8
 
 M._pos_idx = 0
+M._draw_targets = {}
+M._draw_frame = -1
 
 function M.register_menu()
     local G = menu_util.G
@@ -116,8 +118,11 @@ local function refresh_npc_position(entry)
     return false
 end
 
-local function collect_draw_targets()
-    local out = {}
+local function collect_draw_targets(into)
+    local out = into or {}
+    for i = #out, 1, -1 do
+        out[i] = nil
+    end
     local seen = {}
 
     if entity and entity.get_players then
@@ -143,6 +148,7 @@ local function collect_draw_targets()
     end
 
     for _, entry in ipairs(cache.npcs or {}) do
+        if not entry or not entry.inst or not env.is_valid(entry.inst) then goto continue_scan end
         local addr = instance_addr(entry)
         if addr and seen[addr] then goto continue_scan end
         if addr then seen[addr] = true end
@@ -151,6 +157,15 @@ local function collect_draw_targets()
     end
 
     return out
+end
+
+local function frame_draw_targets()
+    local now = utility and utility.get_tick_count and utility.get_tick_count() or 0
+    if M._draw_frame == now then
+        return M._draw_targets
+    end
+    M._draw_frame = now
+    return collect_draw_targets(M._draw_targets)
 end
 
 local function screen_bounds(entry)
@@ -205,9 +220,17 @@ local function draw_npc_health(bounds, entry)
 end
 
 function M.update(_dt)
-    if not settings.enabled(P) then return end
+    if not settings.enabled(P) then
+        M._draw_targets = {}
+        M._draw_frame = -1
+        return
+    end
 
-    local list = collect_draw_targets()
+    if cache.should_refresh_positions() then
+        cache.prune_invalid(cache.npcs)
+    end
+
+    local list = frame_draw_targets()
     local n = #list
     if n == 0 then return end
 
@@ -229,7 +252,7 @@ function M.draw()
     local sw, sh = draw_util.screen_size()
     local cx, cy = sw * 0.5, sh * 0.5
 
-    for _, entry in ipairs(collect_draw_targets()) do
+    for _, entry in ipairs(frame_draw_targets()) do
         if not kind_enabled(entry.kind) then goto continue end
 
         if entry.entity then
@@ -240,8 +263,11 @@ function M.draw()
 
         local col = kind_color(entry.kind)
 
-        refresh_npc_position(entry)
         local lx, ly, lz = entry.lx, entry.ly, entry.lz
+        if not lx then
+            refresh_npc_position(entry)
+            lx, ly, lz = entry.lx, entry.ly, entry.lz
+        end
 
         if not lx and entry.entity and entry.entity.position then
             local pos = entry.entity.position

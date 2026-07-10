@@ -147,66 +147,21 @@ function M.track(origin, aim_point, shoot_vk)
     return ok
 end
 
--- Fake ballistic curve for visuals / elevated hook origin.
--- Direction always points at hitpart so instant silent still connects.
--- Optional: pull track origin slightly up the arc so the ray is angled (looks arched).
+-- Drop-path visuals + instant silent to hitpart.
+-- Never elevate / aim-up the hook origin — MouseRaycast is instant; any vertical
+-- offset (especially bow arcs at range) makes the hooked ray miss.
 function M.track_curve(origin, hit_point, weapon_name, shoot_vk)
-    M._last_ok = false
-
-    if not hit_point then
-        return false
-    end
-
     origin = origin or M.get_camera_origin()
-    if not origin then
-        return false
-    end
-
-    if not M.ensure_hook() then
+    if not origin or not hit_point then
+        M._last_ok = false
+        M._last_curve = nil
         return false
     end
 
     local curve = ballistic.curve_for_weapon(origin, hit_point, weapon_name, 20)
+    local ok = M.track(origin, hit_point, shoot_vk)
+    -- track() clears _last_curve; restore after so visuals still have the path.
     M._last_curve = curve
-
-    local ox, oy, oz = unpack_pos(origin)
-    local hx, hy, hz = unpack_pos(hit_point)
-    if not ox or not hx then
-        return false
-    end
-
-    -- Elevate track origin ~25% along the ballistic arc (above LOS) so the
-    -- hooked ray is angled downward into the hitpart — fakes drop without missing.
-    local track_o = { x = ox, y = oy, z = oz }
-    if curve and curve.path and #curve.path >= 4 then
-        local mid = curve.path[math.max(2, math.floor(#curve.path * 0.25))]
-        if mid then
-            track_o = { x = mid.x, y = mid.y, z = mid.z }
-        end
-    end
-
-    local dx = hx - track_o.x
-    local dy = hy - track_o.y
-    local dz = hz - track_o.z
-    local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-    local dir
-    if dist < 0.001 then
-        dir = make_vec3(0, MOUSE_RAY_LEN * 0.01, 0)
-    else
-        local inv = 1 / dist
-        dir = make_vec3(dx * inv * MOUSE_RAY_LEN, dy * inv * MOUSE_RAY_LEN, dz * inv * MOUSE_RAY_LEN)
-    end
-
-    local origin_v = make_vec3(track_o.x, track_o.y, track_o.z)
-    local key = shoot_vk or 0x01
-
-    M._last_origin = track_o
-    M._last_target = { x = hx, y = hy, z = hz }
-
-    local ok_call, ok = pcall(raycast.track_silent_target, origin_v, dir, key)
-    ok = ok_call and ok == true
-    M._last_ok = ok
-    tracking = ok
     return ok
 end
 

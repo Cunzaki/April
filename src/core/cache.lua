@@ -31,4 +31,25 @@ function M.clear_bucket(bucket)
     for k in pairs(bucket) do bucket[k] = nil end
 end
 
+-- Compact an array of ESP entries, dropping invalid instances. Keeps draw loops tight
+-- between workspace rescans without changing scan interval.
+function M.prune_invalid(list)
+    if not list or #list == 0 then return 0 end
+    local env = April.require("core.env")
+    local write = 1
+    for read = 1, #list do
+        local entry = list[read]
+        if entry and entry.inst and env.is_valid(entry.inst) then
+            if write ~= read then
+                list[write] = entry
+            end
+            write = write + 1
+        end
+    end
+    for i = write, #list do
+        list[i] = nil
+    end
+    return write - 1
+end
+
 return M

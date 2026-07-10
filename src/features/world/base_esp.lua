@@ -9,9 +9,65 @@ local maps = April.require("game.esp_maps")
 local turret_stats = April.require("game.turret_stats")
 local desync_vis = April.require("core.desync_vis")
 local esp_scan = April.require("game.esp_scan")
+local gpu_chams = April.require("core.gpu_chams")
 
 local M = {}
 local P = "april_base_enabled"
+local CHAMS_ID = "april_base_chams"
+local CHAMS_MODE = "april_base_chams_mode"
+local CHAMS_COLOR = "april_base_chams_color"
+
+local function base_chams_labels()
+    local labels = {}
+    for i, t in ipairs(maps.BASE_TOGGLES) do
+        labels[i] = t.label
+    end
+    return labels
+end
+
+local function base_chams_index_for(toggle_id)
+    for i, t in ipairs(maps.BASE_TOGGLES) do
+        if t.id == toggle_id then return i end
+    end
+    return nil
+end
+
+local function base_chams_active()
+    if not gpu_chams.available() then return false end
+    if not settings.enabled(P) then return false end
+    for i = 1, #maps.BASE_TOGGLES do
+        if gpu_chams.multicombo_selected(CHAMS_ID, i) then
+            return true
+        end
+    end
+    return false
+end
+
+local function collect_base_chams(applied)
+    local me = env.get_local_player()
+    local me_pos = me and me.position
+    if not me_pos then return end
+
+    local range = settings.num("april_base_range", 150)
+    local range_sq = range * range
+
+    for _, entry in ipairs(cache.base) do
+        if not env.is_valid(entry.inst) then goto continue end
+        local idx = base_chams_index_for(entry.toggle_id)
+        if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
+        if not settings.enabled(entry.toggle_id) then goto continue end
+
+        local lx, ly, lz = esp_scan.entry_coords(entry)
+        if not lx then goto continue end
+        local dx = lx - me_pos.x
+        local dy = ly - me_pos.y
+        local dz = lz - me_pos.z
+        if (dx * dx + dy * dy + dz * dz) > range_sq then goto continue end
+
+        gpu_chams.cham_entry_part(entry, applied)
+        ::continue::
+    end
+end
 
 local function append_base_entry(state, model, type_name, toggle_id)
     if not model or not env.is_valid(model) then return end
@@ -87,6 +143,43 @@ function M.register_menu()
             child_ids[#child_ids + 1] = t.ring_id
         end
     end
+
+    if gpu_chams.available() then
+        local labels = base_chams_labels()
+        menu.add_multicombo(T, G.WORLD, CHAMS_ID, "Base Chams", labels,
+            gpu_chams.multicombo_defaults(#labels), { parent = P })
+        gpu_chams.add_mode_color_menu(T, G.WORLD, P, CHAMS_MODE, CHAMS_COLOR,
+            "Base Chams Mode", "Base Chams Color")
+        child_ids[#child_ids + 1] = CHAMS_ID
+        child_ids[#child_ids + 1] = CHAMS_MODE
+        child_ids[#child_ids + 1] = CHAMS_COLOR
+
+        gpu_chams.register_owner("base", {
+            rescan_ms = 500,
+            is_active = base_chams_active,
+            style = function()
+                return gpu_chams.mode_index(CHAMS_MODE, 0), gpu_chams.color_index(CHAMS_COLOR, 0)
+            end,
+            collect = collect_base_chams,
+        })
+        gpu_chams.wire_style_controls("base", CHAMS_MODE, CHAMS_COLOR)
+        settings.on_change(CHAMS_ID, function()
+            gpu_chams.sync_owner("base", true)
+        end)
+        settings.on_change(P, function(v)
+            if v == true or v == 1 then
+                gpu_chams.sync_owner("base", true)
+            else
+                gpu_chams.clear_owner("base")
+            end
+        end)
+        for _, t in ipairs(maps.BASE_TOGGLES) do
+            settings.on_change(t.id, function()
+                gpu_chams.sync_owner("base", true)
+            end)
+        end
+    end
+
     menu_util.bind_children(P, child_ids)
 end
 
@@ -182,7 +275,15 @@ function M.scan()
     M.complete_scan(state)
 end
 
-function M.update(_dt) end
+function M.update(_dt)
+    if settings.enabled(P) and cache.should_refresh_positions() then
+        cache.prune_invalid(cache.base)
+    end
+
+    if gpu_chams.available() then
+        gpu_chams.sync_owner("base")
+    end
+end
 
 function M.draw()
     if not settings.enabled(P) then return end

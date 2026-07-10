@@ -106,22 +106,16 @@ local function draw_manip_peek(info)
 end
 
 local function draw_tp_ray_path(info)
-    if not info then return end
+    -- Only Bullet TP "Visualize Ray Path" — never auto-draw weapon drop curves
+    -- (those looked like a second target line on bows).
+    if not info or info.state ~= "tp" then return end
+    if not settings.bool(PREFIX .. "bullet_tp", false) then return end
+    if not settings.bool(PREFIX .. "tp_ray_vis", false) then return end
 
-    local path = info.tp_path or info.curve_path
+    local path = info.tp_path
     if not path or #path < 2 then return end
 
-    if info.state == "tp" then
-        if not settings.bool(PREFIX .. "bullet_tp", false) then return end
-        if not settings.bool(PREFIX .. "tp_ray_vis", false) then return end
-    elseif info.state ~= "curve" then
-        return
-    end
-
     local col = settings.color(PREFIX .. "tp_ray_vis", { 0.95, 0.45, 1, 0.9 })
-    if info.state == "curve" then
-        col = { 0.45, 0.85, 1, 0.45 }
-    end
     for i = 1, #path - 1 do
         local a, b = path[i], path[i + 1]
         esp_util.draw_world_line(a.x, a.y, a.z, b.x, b.y, b.z, col, 1.5)
@@ -129,7 +123,7 @@ local function draw_tp_ray_path(info)
 
     local hook = cached_track.origin
     local aim = cached_track.aim
-    if hook and aim and info.state == "tp" then
+    if hook and aim then
         desync_vis.draw_cross(hook.x, hook.y, hook.z, 0.45, { 1, 0.85, 0.2, 0.95 }, 2)
         desync_vis.draw_link(hook, aim, { col[1], col[2], col[3], 0.35 }, 1)
     end
@@ -150,6 +144,7 @@ function M.register_menu()
     menu_util.bind_children(P_MASTER, {
         PREFIX .. "target_type", PREFIX .. "bone",
         PREFIX .. "filter_health", PREFIX .. "filter_visible", PREFIX .. "filter_team",
+        PREFIX .. "filter_downed",
         PREFIX .. "target_players", PREFIX .. "target_npcs", PREFIX .. "target_npc_soldiers", PREFIX .. "target_npc_bosses",
         PREFIX .. "sticky", PREFIX .. "wallbang",
         PREFIX .. "bullet_tp", PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
@@ -268,8 +263,10 @@ function M.update(_dt)
     local info = cached_track.manip
     local ok_track = false
     if info.use_curve and silent_ray.track_curve then
+        -- Hook is always camera→hitpart (instant). Curve path from resolve is
+        -- muzzle→hitpart drop for visuals; only fill if resolve had none.
         ok_track = silent_ray.track_curve(origin, aim, info.weapon, SHOOT_VK) == true
-        if silent_ray.last_curve then
+        if not info.curve_path and silent_ray.last_curve then
             local curve = silent_ray.last_curve()
             if curve and curve.path then
                 info.curve_path = curve.path

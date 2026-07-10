@@ -114,6 +114,8 @@ function M.role_accent(role)
     local r = role:lower()
     if r:find("founder") or r:find("developer") then return M.PURPLE end
     if r:find("moderator") then return M.RED end
+    if r:find("tester") then return M.ORANGE end
+    if r == "og" or r:find("contribution") then return M.CYAN end
     return M.CYAN
 end
 

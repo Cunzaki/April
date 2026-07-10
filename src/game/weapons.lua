@@ -119,6 +119,130 @@ function M.is_ranged_weapon_name(name)
     return false
 end
 
+local function children_of(inst)
+    if not inst then return {} end
+    return env.safe_call(function()
+        if inst.get_children then return inst:get_children() end
+        return inst:GetChildren()
+    end) or {}
+end
+
+local function find_child(parent, name)
+    if not parent then return nil end
+    return env.safe_call(function()
+        return parent:find_first_child(name) or parent:FindFirstChild(name)
+    end)
+end
+
+local function pick_weapon_from_model(model)
+    if not model then return nil, nil end
+    local n = inst_name(model)
+    if n and M.is_weapon_name(n) then
+        return n, model
+    end
+    for _, child in ipairs(children_of(model)) do
+        local cn = inst_name(child)
+        if cn and M.is_weapon_name(cn) then
+            return cn, child
+        end
+        local class = child.ClassName or child.class_name
+        if class == "Model" and cn and M.is_ranged_weapon_name(cn) then
+            return cn, child
+        end
+    end
+    return nil, nil
+end
+
+local function find_held_in_viewmodels()
+    local ws = env.get_workspace()
+    if not ws then return nil end
+
+    -- Live VM under CurrentCamera (ViewmodelController)
+    local cam = env.safe_call(function()
+        return ws.CurrentCamera or ws.currentCamera
+            or (ws.FindFirstChild and ws:FindFirstChild("CurrentCamera"))
+    end)
+    if cam then
+        for _, child in ipairs(children_of(cam)) do
+            local class = child.ClassName or child.class_name
+            if class == "Model" then
+                local n, inst = pick_weapon_from_model(child)
+                if n then return n, inst end
+            end
+        end
+    end
+
+    -- Workspace.VFX.VMs.<Weapon>
+    local vfx = find_child(ws, "VFX")
+    local vms_live = vfx and find_child(vfx, "VMs")
+    if vms_live then
+        for _, child in ipairs(children_of(vms_live)) do
+            local n, inst = pick_weapon_from_model(child)
+            if n then return n, inst end
+        end
+    end
+
+    -- Legacy Workspace.Viewmodels.Viewmodel.<Weapon>
+    local vms = find_child(ws, "Viewmodels")
+    if vms then
+        for _, vm in ipairs(children_of(vms)) do
+            if inst_name(vm) == "Viewmodel" then
+                local n, inst = pick_weapon_from_model(vm)
+                if n then return n, inst end
+            end
+        end
+    end
+    return nil, nil
+end
+
+local function find_held_in_character(lp)
+    local char = lp and lp.character
+    if not char or not env.is_valid(char) then return nil, nil end
+
+    local fallback_tool = nil
+    for _, child in ipairs(env.safe_call(function() return char:get_children() end) or {}) do
+        local n = inst_name(child)
+        if n and M.is_weapon_name(n) then
+            return n, child
+        end
+        if is_tool(child) and n then
+            fallback_tool = fallback_tool or { name = n, inst = child }
+        end
+    end
+
+    if fallback_tool then
+        return fallback_tool.name, fallback_tool.inst
+    end
+    return nil, nil
+end
+
+local function read_tool_attributes(inst)
+    if not inst then return nil end
+    local speed, gravity
+    pcall(function()
+        if inst.GetAttribute then
+            speed = inst:GetAttribute("BulletSpeed") or inst:GetAttribute("MuzzleVelocity")
+            gravity = inst:GetAttribute("BulletGravity") or inst:GetAttribute("ProjectileGravity")
+        elseif inst.get_attribute then
+            speed = inst:get_attribute("BulletSpeed") or inst:get_attribute("MuzzleVelocity")
+            gravity = inst:get_attribute("BulletGravity") or inst:get_attribute("ProjectileGravity")
+        end
+    end)
+    if speed then
+        local grav = gravity
+        if not grav or grav <= 0 or grav > 2 then
+            grav = 0.55
+        end
+        return {
+            speed = speed,
+            gravity = grav,
+            name = inst_name(inst),
+            from_attributes = true,
+        }
+    end
+    return nil
+end
+
 function M.get_held_ranged_weapon_name()
     if not loaded then M.load() end
 
@@ -137,20 +261,10 @@ function M.get_held_ranged_weapon_name()
         end
     end
 
-    local ws = env.get_workspace()
-    if ws then
-        local vms = env.safe_call(function() return ws:find_first_child("Viewmodels") end)
-            or env.safe_call(function() return ws:FindFirstChild("Viewmodels") end)
-        if vms then
-            for _, vm in ipairs(env.safe_call(function() return vms:get_children() end) or {}) do
-                if inst_name(vm) == "Viewmodel" then
-                    for _, item in ipairs(env.safe_call(function() return vm:get_children() end) or {}) do
-                        local hit = pick(inst_name(item))
-                        if hit then return hit end
-                    end
-                end
-            end
-        end
+    local name = find_held_in_viewmodels()
+    if name then
+        local hit = pick(name)
+        if hit then return hit end
     end
 
     return pick(lp.tool_name)
@@ -166,6 +280,11 @@ end
 
 function M.is_bow_weapon_name(name)
     if not name then return false end
+    if not loaded then M.load() end
+    local entry = toolinfo[name]
+    if entry and entry.Weapon and entry.Weapon.IsBow then
+        return true
+    end
     local n = name:lower()
     return n:find("bow", 1, true) ~= nil
 end
@@ -253,79 +372,6 @@ function M.profile_weapon_names()
     return list
 end
 
-local function read_tool_attributes(inst)
-    if not inst then return nil end
-    local speed, gravity
-    pcall(function()
-        if inst.GetAttribute then
-            speed = inst:GetAttribute("BulletSpeed") or inst:GetAttribute("MuzzleVelocity")
-            gravity = inst:GetAttribute("BulletGravity") or inst:GetAttribute("ProjectileGravity")
-        elseif inst.get_attribute then
-            speed = inst:get_attribute("BulletSpeed") or inst:get_attribute("MuzzleVelocity")
-            gravity = inst:get_attribute("BulletGravity") or inst:get_attribute("ProjectileGravity")
-        end
-    end)
-    if speed then
-        local grav = gravity
-        if not grav or grav <= 0 or grav > 2 then
-            grav = 0.55
-        end
-        return {
-            speed = speed,
-            gravity = grav,
-            name = inst_name(inst),
-            from_attributes = true,
-        }
-    end
-    return nil
-end
-
-local function find_held_in_character(lp)
-    local char = lp and lp.character
-    if not char or not env.is_valid(char) then return nil, nil end
-
-    local fallback_tool = nil
-    for _, child in ipairs(env.safe_call(function() return char:get_children() end) or {}) do
-        local n = inst_name(child)
-        if n and M.is_weapon_name(n) then
-            return n, child
-        end
-        if is_tool(child) and n then
-            fallback_tool = fallback_tool or { name = n, inst = child }
-        end
-    end
-
-    if fallback_tool then
-        return fallback_tool.name, fallback_tool.inst
-    end
-    return nil, nil
-end
-
-local function find_held_in_viewmodels()
-    local ws = env.get_workspace()
-    if not ws then return nil end
-
-    local vms = env.safe_call(function() return ws:find_first_child("Viewmodels") end)
-        or env.safe_call(function() return ws:FindFirstChild("Viewmodels") end)
-    if not vms then return nil end
-
-    for _, vm in ipairs(env.safe_call(function() return vms:get_children() end) or {}) do
-        if inst_name(vm) == "Viewmodel" then
-            for _, item in ipairs(env.safe_call(function() return vm:get_children() end) or {}) do
-                local n = inst_name(item)
-                if n and M.is_weapon_name(n) then
-                    return n, item
-                end
-                local cn = item and (item.ClassName or item.class_name)
-                if cn == "Model" and n and M.is_weapon_name(n) then
-                    return n, item
-                end
-            end
-        end
-    end
-    return nil, nil
-end
-
 function M.get_held_weapon_name()
     rebuild_weapon_names()
 
@@ -373,9 +419,7 @@ function M.get_weapon_stats(name)
             gravity = entry.Bullet.Gravity or 0.55,
             name = name,
             from_toolinfo = true,
-            is_bow = (entry.Weapon and entry.Weapon.IsBow)
-                or name == "Wooden Bow"
-                or name == "Crossbow",
+            is_bow = M.is_bow_weapon_name(name),
         }
     end
 
@@ -386,7 +430,7 @@ function M.get_weapon_stats(name)
             gravity = fb.gravity,
             name = name,
             from_fallback = true,
-            is_bow = name == "Wooden Bow" or name == "Crossbow",
+            is_bow = M.is_bow_weapon_name(name),
         }
     end
 

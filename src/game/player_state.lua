@@ -1,4 +1,5 @@
 local env = April.require("core.env")
+local team_state = April.require("game.team_state")
 
 local M = {}
 
@@ -35,24 +36,35 @@ function M.is_combat_target(player)
     return true
 end
 
+-- Alive + HP > 0. Does NOT include downed (use passes_downed_check).
 function M.passes_health_check(player)
     if not player then return false end
     if not player.is_alive then return false end
-    if M.is_downed(player) then return false end
     if player.health and player.health <= 0 then return false end
     return true
 end
 
+-- idx: 0 = Skip Downed, 1 = Allow Downed, 2 = Only Downed
+function M.passes_downed_check(player, mode_idx)
+    if not player then return false end
+    mode_idx = tonumber(mode_idx) or 0
+    local downed = M.is_downed(player)
+
+    if mode_idx == 1 then
+        return true
+    end
+    if mode_idx == 2 then
+        return downed
+    end
+    -- Skip downed (default)
+    return not downed
+end
+
 function M.passes_team_check(player)
     if not player then return false end
-    if not entity or not entity.get_local_player then return true end
-
-    local lp = entity.get_local_player()
-    if not lp then return true end
-    if not lp.has_team or not player.has_team then return true end
-    if not lp.team or not player.team or lp.team == "" or player.team == "" then return true end
-
-    return lp.team ~= player.team
+    -- Official party (TeamNavigationController) + Roblox Team (arena).
+    -- Skip allies; everyone else is fair game. Solo / no team → allow.
+    return not team_state.is_teammate(player)
 end
 
 return M

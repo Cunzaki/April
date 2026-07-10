@@ -8,9 +8,13 @@ local esp_util = April.require("core.esp_util")
 local image_cache = April.require("core.image_cache")
 local asset_urls = April.require("game.asset_urls")
 local theme = April.require("core.ui_theme")
+local panel_drag = April.require("core.panel_drag")
 
 local M = {}
 local P = "april_mod_checker_enabled"
+local X_ID = "april_mod_checker_x"
+local Y_ID = "april_mod_checker_y"
+local PANEL_ID = "april_mod_checker_panel"
 local MOD_ICON_KEY = "mod_warning"
 local HEAD_OFFSET = 3.5
 
@@ -88,10 +92,14 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.MISC)
+    local root = menu_util.parent(P)
     menu.add_checkbox(T, G.MISC, P, "Mod Checker", false)
     menu_util.gap(T, G.MISC)
-    menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Mod Scan Interval (ms)", 1000, 10000, 2500, { parent = P })
-    menu_util.bind_master(P, { "april_mod_checker_interval" })
+    menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Mod Scan Interval (ms)", 1000, 10000, 2500, root)
+    menu_util.label(T, G.MISC, "Drag the panel title while Vector UI is open.")
+    menu.add_slider_int(T, G.MISC, X_ID, "Pos X", -1, 4000, -1, root)
+    menu.add_slider_int(T, G.MISC, Y_ID, "Pos Y", 0, 4000, 72, root)
+    menu_util.bind_master(P, { "april_mod_checker_interval", X_ID, Y_ID })
 end
 
 function M.init()
@@ -288,18 +296,18 @@ local function build_staff_rows()
     return rows
 end
 
-local function draw_staff_panel(x, y, width, rows)
+local function draw_staff_panel(x, y, width, rows, can_drag)
     if not draw or not draw.text then return end
 
     local pad = 10
-    local title_h = 24
+    local title_h = panel_drag.title_h()
     local row_h = 44
     local count = math.max(#rows, 1)
     local height = title_h + count * row_h + 6
 
     theme.draw_panel(x, y, width, height, {
         bg = theme.alpha(theme.BG, 0.90),
-        border = theme.alpha(theme.BORDER, 0.45),
+        border = theme.alpha(theme.BORDER, can_drag and 0.7 or 0.45),
         accent = theme.RED,
         accent_w = 2,
         rounding = theme.ROUND,
@@ -308,6 +316,9 @@ local function draw_staff_panel(x, y, width, rows)
     local title = "Staff In Lobby"
     if #rows > 1 then
         title = title .. " (" .. #rows .. ")"
+    end
+    if can_drag then
+        title = title .. "  · drag"
     end
     draw_util.text(x + pad, y + 6, title, theme.TEXT, 12)
 
@@ -357,12 +368,23 @@ function M.draw()
 
     M.reconcile_active()
 
-    local sw, _ = draw_util.screen_size()
+    local sw, sh = draw_util.screen_size()
     local panel_w = 260
-    local x = sw - panel_w - 16
-    local rows = build_staff_rows()
+    local default_x = math.max(0, sw - panel_w - 16)
+    local x = settings.num(X_ID, -1)
+    local y = settings.num(Y_ID, 72)
+    if x < 0 then
+        x = default_x
+    end
 
-    draw_staff_panel(x, 72, panel_w, rows)
+    local rows = build_staff_rows()
+    local count = math.max(#rows, 1)
+    local height = panel_drag.title_h() + count * 44 + 6
+    local can_drag = panel_drag.menu_is_open()
+    local dragging
+    x, y, dragging = panel_drag.update(PANEL_ID, x, y, panel_w, height, X_ID, Y_ID, sw, sh)
+
+    draw_staff_panel(x, y, panel_w, rows, can_drag or dragging)
 end
 
 return M

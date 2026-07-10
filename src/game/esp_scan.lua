@@ -6,6 +6,8 @@ local PART_CLASSES = {
     Part = true,
     MeshPart = true,
     UnionOperation = true,
+    WedgePart = true,
+    CornerWedgePart = true,
 }
 
 function M.is_part(inst)

@@ -16,6 +16,7 @@
 | Checkbox keybind modes | Right-click key → **Always / Hold / Toggle** | Use `settings.enabled(id)` — no custom Hold/Toggle combos |
 | `raycast.is_visible` | Checks parts **and terrain** | Targeting visibility filter |
 | `raycast.is_player_visible` | Cached per-player visibility (~16 ms) | Preferred over per-frame `is_visible` loops |
+| GPU instance chams | `exploits.ApplyChamsToInstance` / mode+color setters (not on GitBook yet) | Loot/resource/base ESP chams via `core/gpu_chams.lua` |
 
 ---
 
@@ -37,7 +38,8 @@
 | 12 | [Raycast API](#12-raycast-api) | Visibility + silent hook |
 | 13 | [Memory API](#13-memory-api) | Raw address reads/writes |
 | 14 | [FFlag API](#14-fflag-api) | Roblox fast flags |
-| 15 | [April notes](#15-april-project-notes) | Fallen-specific conventions |
+| 15 | [Exploits API — GPU chams](#15-exploits-api--gpu-chams) | Native GPU instance chams (pre-docs) |
+| 16 | [April notes](#16-april-project-notes) | Fallen-specific conventions |
 
 ---
 
@@ -73,6 +75,7 @@ All examples below use `snake_case`.
 | `raycast` | Cached player visibility + live ray tests + silent hook |
 | `memory` | Raw process memory read/write |
 | `fflag` | Roblox Fast Flag read/write |
+| `exploits` | Native exploit helpers — **GPU instance chams** (see §15) |
 | `Vector3` | 3D vector constructor |
 | `print` | Script console output |
 
@@ -914,7 +917,126 @@ fflag.reset_all()
 
 ---
 
-## 15. April project notes
+## 15. Exploits API — GPU chams
+
+> **Status:** Working in current Vector builds (`exploits.*`) but **not published on the GitBook yet**.  
+> Documented from a verified Node Chams sample so April can implement correctly. Prefer this over `draw.chams_player` when you need mesh/instance chams (nodes, loot, viewmodels, etc.).
+
+Unlike `draw.chams_player` (2D/overlay player hulls drawn every frame), these chams are applied to **live BasePart / MeshPart instances** and rendered by the engine/GPU overlay.
+
+### Global / capability
+
+```lua
+if not (exploits and exploits.ApplyChamsToInstance) then
+    -- build too old — fall back or hide UI
+    return
+end
+```
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `exploits.GetChamsMode` | `()` → `number` | Current chams mode index |
+| `exploits.SetChamsMode` | `(mode)` | Set global mode used by subsequent applies |
+| `exploits.GetChamsColor` | `()` → `number` | Current chams color index |
+| `exploits.SetChamsColor` | `(color)` | Set global color used by subsequent applies |
+| `exploits.ApplyChamsToInstance` | `(inst \| address)` → `bool` | Apply current mode/color to a part (or re-apply by `Address`) |
+| `exploits.RevertChams` | `()` | Clear **all** applied GPU chams |
+
+### Mode & color indices
+
+Combos should use these exact label lists (zero-based indices):
+
+| Mode index | Label |
+|------------|-------|
+| `0` | Fill |
+| `1` | Wireframe |
+| `2` | Fill Glow |
+| `3` | Wireframe Glow |
+
+| Color index | Label |
+|-------------|-------|
+| `0` | Default |
+| `1` | Red |
+| `2` | Green |
+| `3` | Yellow |
+| `4` | Blue |
+| `5` | Magenta |
+| `6` | Cyan |
+
+**Color visibility rule (from sample):** show the color combo only for glow modes:
+
+```lua
+menu.set_visible("my_chams_color", mode == 2 or mode == 3)
+```
+
+### Apply / track / rescan pattern
+
+```lua
+local PART_CLASSES = {
+    Part = true, MeshPart = true, WedgePart = true, CornerWedgePart = true,
+    TrussPart = true, UnionOperation = true, NegateOperation = true,
+}
+
+local applied = {} -- [Address] = true
+
+local function cham_instance(inst)
+    if not inst then return end
+    local addr = inst.Address
+    if addr and applied[addr] then return end
+    if exploits.ApplyChamsToInstance(inst) then
+        if addr then applied[addr] = true end
+    end
+end
+
+-- Prefer the model's Main part when present
+local main = node:FindFirstChild("Main")
+if main and PART_CLASSES[main.ClassName] then
+    cham_instance(main)
+end
+
+-- After mode/color change, re-stamp every known address:
+for addr in pairs(applied) do
+    exploits.ApplyChamsToInstance(addr)
+end
+
+-- On disable:
+exploits.RevertChams()
+applied = {}
+```
+
+### Important behaviours
+
+| Rule | Why |
+|------|-----|
+| **Mode/color are global** | `SetChamsMode` / `SetChamsColor` affect every subsequent apply. Different owners (loot vs arms) need: set style → apply that bucket → set style → apply next bucket. |
+| **`RevertChams` is all-or-nothing** | Disabling one feature must rebuild remaining owners (revert → re-apply). |
+| **Track by `inst.Address`** | Dedupes rescans; `ApplyChamsToInstance(addr)` refreshes style without holding the instance. |
+| **Rescan on an interval** | New world props / viewmodels appear over time (`thread.create(scan, 3000)`). |
+| **Only part-like classes** | Skip Models/Folders — cham `Main` or MeshPart/Part descendants. |
+| **Not the same as `draw.chams_player`** | Player ESP overlay vs GPU mesh chams on arbitrary instances. |
+
+### April wiring
+
+| Module | Role |
+|--------|------|
+| `core/gpu_chams.lua` | Capability check, double-buffer apply, owner rebuild |
+| `features/world/*_esp.lua` | Multicombo “Chams types” + mode/color under Loot / Resource / Base |
+```
+
+Menu shape:
+
+```lua
+-- Under Loot / Resource / Base master:
+menu.add_multicombo(T, G, "april_loot_chams", "Loot Chams", labels, defaults, parent)
+menu.add_combo(T, G, "april_loot_chams_mode", "Loot Chams Mode", MODES, 0, parent)
+menu.add_combo(T, G, "april_loot_chams_color", "Loot Chams Color", COLORS, 0, parent)
+```
+
+**Double-buffer (April):** each owner keeps a front set (currently applied addresses) and builds a back set (in-range only) every rescan. If anything left the back set → `RevertChams` + re-apply only the back set. Collectors **fail closed** without local player position (never cham the full cache). Prefer one visual part per ESP entry (`cham_entry_part`) so shared MeshIds don’t light up every copy in the world.
+
+---
+
+## 16. April project notes
 
 ### Build & layout
 
@@ -942,6 +1064,7 @@ fflag.reset_all()
 | `core/runservice.lua` | RunService gate + Heartbeat sim hooks |
 | `core/misc_gate.lua` | Thin wrapper → `runservice.movement_allowed()` |
 | `core/silent_ray.lua` | Silent hook + `track_silent_target` |
+| `core/gpu_chams.lua` | `exploits` GPU instance chams owners (loot/world/base) |
 | `game/gc_weapon_mods.lua` | `refreshgc` → `getgc` → `applygc` |
 | `features/combat/aimbot.lua` | Bullet prediction + silent ray vis |
 | `features/combat/targeting.lua` | Target selection + `is_player_visible` filter |
@@ -992,6 +1115,7 @@ features/combat/aimbot.lua
 | Inf Fly | `runservice.on_sim` + `raycast.cast` downward |
 | Silent aim | `track_silent_target(cam, dir, 0x01)` |
 | Periodic GC | `thread.create(fn, 100)` |
+| GPU instance chams | `exploits.ApplyChamsToInstance` via `core/gpu_chams` |
 | Movement gate | `runservice.movement_allowed()` |
 | Load item icon | `draw.load_image(url)` once, `draw.image(..., 255,255,255,255)` |
 | FPS unlock | `fflag.set_value("TaskSchedulerTargetFps", 9999)` |

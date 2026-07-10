@@ -7,9 +7,13 @@ local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
 local maps = April.require("game.esp_maps")
 local esp_scan = April.require("game.esp_scan")
+local gpu_chams = April.require("core.gpu_chams")
 
 local M = {}
 local P = "april_loot_enabled"
+local CHAMS_ID = "april_loot_chams"
+local CHAMS_MODE = "april_loot_chams_mode"
+local CHAMS_COLOR = "april_loot_chams_color"
 
 M._static = {}
 M._drops = {}
@@ -19,6 +23,62 @@ local UNLIMITED_RANGE = {
     april_care_package = true,
     april_btr_crate = true,
 }
+
+local function loot_chams_labels()
+    local labels = {}
+    for i, t in ipairs(maps.LOOT_TOGGLES) do
+        labels[i] = t.label
+    end
+    return labels
+end
+
+local function loot_chams_index_for(toggle_id)
+    for i, t in ipairs(maps.LOOT_TOGGLES) do
+        if t.id == toggle_id then return i end
+    end
+    return nil
+end
+
+local function loot_chams_active()
+    if not gpu_chams.available() then return false end
+    if not settings.enabled(P) then return false end
+    for i = 1, #maps.LOOT_TOGGLES do
+        if gpu_chams.multicombo_selected(CHAMS_ID, i) then
+            return true
+        end
+    end
+    return false
+end
+
+local function collect_loot_chams(applied)
+    local me = env.get_local_player()
+    local me_pos = me and me.position
+    -- Fail closed: without local pos we must NOT cham the whole cache.
+    if not me_pos then return end
+
+    local range = settings.num("april_loot_range", 300)
+    local range_sq = range * range
+
+    for _, entry in ipairs(cache.loot) do
+        if not env.is_valid(entry.inst) then goto continue end
+        local idx = loot_chams_index_for(entry.toggle_id)
+        if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
+        if not settings.enabled(entry.toggle_id) then goto continue end
+
+        local lx, ly, lz = esp_scan.entry_coords(entry)
+        if not lx then goto continue end
+        if not UNLIMITED_RANGE[entry.toggle_id] then
+            local dx = lx - me_pos.x
+            local dy = ly - me_pos.y
+            local dz = lz - me_pos.z
+            if (dx * dx + dy * dy + dz * dz) > range_sq then goto continue end
+        end
+
+        -- One visual part per entry (instance Address) — not every MeshPart in the world.
+        gpu_chams.cham_entry_part(entry, applied)
+        ::continue::
+    end
+end
 
 local STATIC_SOURCES = {
     { kind = "root", key = "loners" },
@@ -250,6 +310,43 @@ function M.register_menu()
     for _, t in ipairs(maps.LOOT_TOGGLES) do
         child_ids[#child_ids + 1] = t.id
     end
+
+    if gpu_chams.available() then
+        local labels = loot_chams_labels()
+        menu.add_multicombo(T, G.WORLD, CHAMS_ID, "Loot Chams", labels,
+            gpu_chams.multicombo_defaults(#labels), { parent = P })
+        gpu_chams.add_mode_color_menu(T, G.WORLD, P, CHAMS_MODE, CHAMS_COLOR,
+            "Loot Chams Mode", "Loot Chams Color")
+        child_ids[#child_ids + 1] = CHAMS_ID
+        child_ids[#child_ids + 1] = CHAMS_MODE
+        child_ids[#child_ids + 1] = CHAMS_COLOR
+
+        gpu_chams.register_owner("loot", {
+            rescan_ms = 500,
+            is_active = loot_chams_active,
+            style = function()
+                return gpu_chams.mode_index(CHAMS_MODE, 0), gpu_chams.color_index(CHAMS_COLOR, 0)
+            end,
+            collect = collect_loot_chams,
+        })
+        gpu_chams.wire_style_controls("loot", CHAMS_MODE, CHAMS_COLOR)
+        settings.on_change(CHAMS_ID, function()
+            gpu_chams.sync_owner("loot", true)
+        end)
+        settings.on_change(P, function(v)
+            if v == true or v == 1 then
+                gpu_chams.sync_owner("loot", true)
+            else
+                gpu_chams.clear_owner("loot")
+            end
+        end)
+        for _, t in ipairs(maps.LOOT_TOGGLES) do
+            settings.on_change(t.id, function()
+                gpu_chams.sync_owner("loot", true)
+            end)
+        end
+    end
+
     menu_util.bind_children(P, child_ids)
 end
 
@@ -272,9 +369,22 @@ end
 
 function M.update(_dt)
     local map_loot = settings.enabled("april_map_enabled") and settings.enabled("april_map_show_loot")
-    if not settings.enabled(P) and not map_loot then return end
-    if #M._drops > 0 and cache.should_refresh_positions() then
-        refresh_dynamic_positions(M._drops)
+    local loot_on = settings.enabled(P)
+
+    if loot_on or map_loot then
+        if cache.should_refresh_positions() then
+            cache.prune_invalid(M._static)
+            cache.prune_invalid(M._drops)
+            rebuild_cache()
+            if #M._drops > 0 then
+                refresh_dynamic_positions(M._drops)
+            end
+        end
+    end
+
+    -- Always sync so disable / empty multicombo actually RevertChams.
+    if gpu_chams.available() then
+        gpu_chams.sync_owner("loot")
     end
 end
 

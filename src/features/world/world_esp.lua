@@ -6,9 +6,65 @@ local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
 local maps = April.require("game.esp_maps")
 local esp_scan = April.require("game.esp_scan")
+local gpu_chams = April.require("core.gpu_chams")
 
 local M = {}
 local P = "april_world_enabled"
+local CHAMS_ID = "april_world_chams"
+local CHAMS_MODE = "april_world_chams_mode"
+local CHAMS_COLOR = "april_world_chams_color"
+
+local function world_chams_labels()
+    local labels = {}
+    for i, t in ipairs(maps.WORLD_TOGGLES) do
+        labels[i] = t.label
+    end
+    return labels
+end
+
+local function world_chams_index_for(toggle_id)
+    for i, t in ipairs(maps.WORLD_TOGGLES) do
+        if t.id == toggle_id then return i end
+    end
+    return nil
+end
+
+local function world_chams_active()
+    if not gpu_chams.available() then return false end
+    if not settings.enabled(P) then return false end
+    for i = 1, #maps.WORLD_TOGGLES do
+        if gpu_chams.multicombo_selected(CHAMS_ID, i) then
+            return true
+        end
+    end
+    return false
+end
+
+local function collect_world_chams(applied)
+    local me = env.get_local_player()
+    local me_pos = me and me.position
+    if not me_pos then return end
+
+    local range = settings.num("april_world_range", 500)
+    local range_sq = range * range
+
+    for _, entry in ipairs(cache.world) do
+        if not env.is_valid(entry.inst) then goto continue end
+        local idx = world_chams_index_for(entry.toggle_id)
+        if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
+        if not settings.enabled(entry.toggle_id) then goto continue end
+
+        local lx, ly, lz = esp_scan.entry_coords(entry)
+        if not lx then goto continue end
+        local dx = lx - me_pos.x
+        local dy = ly - me_pos.y
+        local dz = lz - me_pos.z
+        if (dx * dx + dy * dy + dz * dz) > range_sq then goto continue end
+
+        gpu_chams.cham_entry_part(entry, applied)
+        ::continue::
+    end
+end
 
 M._static = {}
 M._dynamic = {}
@@ -49,6 +105,43 @@ function M.register_menu()
     for _, t in ipairs(maps.WORLD_TOGGLES) do
         child_ids[#child_ids + 1] = t.id
     end
+
+    if gpu_chams.available() then
+        local labels = world_chams_labels()
+        menu.add_multicombo(T, G.WORLD, CHAMS_ID, "Resource Chams", labels,
+            gpu_chams.multicombo_defaults(#labels), { parent = P })
+        gpu_chams.add_mode_color_menu(T, G.WORLD, P, CHAMS_MODE, CHAMS_COLOR,
+            "Resource Chams Mode", "Resource Chams Color")
+        child_ids[#child_ids + 1] = CHAMS_ID
+        child_ids[#child_ids + 1] = CHAMS_MODE
+        child_ids[#child_ids + 1] = CHAMS_COLOR
+
+        gpu_chams.register_owner("world", {
+            rescan_ms = 500,
+            is_active = world_chams_active,
+            style = function()
+                return gpu_chams.mode_index(CHAMS_MODE, 0), gpu_chams.color_index(CHAMS_COLOR, 0)
+            end,
+            collect = collect_world_chams,
+        })
+        gpu_chams.wire_style_controls("world", CHAMS_MODE, CHAMS_COLOR)
+        settings.on_change(CHAMS_ID, function()
+            gpu_chams.sync_owner("world", true)
+        end)
+        settings.on_change(P, function(v)
+            if v == true or v == 1 then
+                gpu_chams.sync_owner("world", true)
+            else
+                gpu_chams.clear_owner("world")
+            end
+        end)
+        for _, t in ipairs(maps.WORLD_TOGGLES) do
+            settings.on_change(t.id, function()
+                gpu_chams.sync_owner("world", true)
+            end)
+        end
+    end
+
     menu_util.bind_children(P, child_ids)
 end
 
@@ -120,9 +213,21 @@ function M.scan()
 end
 
 function M.update(_dt)
-    if not settings.enabled(P) then return end
-    if #M._dynamic > 0 and cache.should_refresh_positions() then
-        refresh_dynamic_positions(M._dynamic)
+    local world_on = settings.enabled(P)
+
+    if world_on then
+        if cache.should_refresh_positions() then
+            cache.prune_invalid(M._static)
+            cache.prune_invalid(M._dynamic)
+            rebuild_cache()
+            if #M._dynamic > 0 then
+                refresh_dynamic_positions(M._dynamic)
+            end
+        end
+    end
+
+    if gpu_chams.available() then
+        gpu_chams.sync_owner("world")
     end
 end
 

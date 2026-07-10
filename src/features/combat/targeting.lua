@@ -147,6 +147,10 @@ function M.passes_filters(target, prefix, aim, origin)
         if not player_state.passes_health_check(target) then return false end
     end
 
+    if not player_state.passes_downed_check(target, settings.num(prefix .. "filter_downed", 0)) then
+        return false
+    end
+
     if settings.bool(prefix .. "filter_team", true) then
         if not player_state.passes_team_check(target) then return false end
     end

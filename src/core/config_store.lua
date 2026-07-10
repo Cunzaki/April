@@ -32,6 +32,7 @@ local MENU_KEYS = {
     "april_silent_aim", "april_silent_aim_mode",
     "april_silent_target_type", "april_silent_bone",
     "april_silent_filter_health", "april_silent_filter_visible", "april_silent_filter_team",
+    "april_silent_filter_downed",
     "april_silent_target_players", "april_silent_target_npcs", "april_silent_target_npc_soldiers", "april_silent_target_npc_bosses",
     "april_silent_sticky", "april_silent_wallbang",
     "april_silent_bullet_tp", "april_silent_tp_ray_mode", "april_silent_tp_ray_vis",
@@ -52,12 +53,14 @@ local MENU_KEYS = {
     "april_raspberry_plant", "april_blueberry_plant", "april_wool_plant", "april_hemp_plant",
     "april_deer", "april_boar", "april_wolf",
     "april_world_boxes", "april_world_show_name", "april_world_show_distance", "april_world_range",
+    "april_world_chams", "april_world_chams_mode", "april_world_chams_color",
     "april_loot_enabled", "april_loot_enabled_mode", "april_dropped_item", "april_wooden_crate", "april_metal_crate",
     "april_steel_crate", "april_food_crate", "april_timed_crate", "april_care_package", "april_btr_crate",
     "april_body_bag", "april_sleeper", "april_trash_can", "april_oil_barrel",
     "april_small_egg", "april_medium_egg", "april_large_egg",
     "april_wooden_boat", "april_military_boat", "april_flycopter",
     "april_loot_boxes", "april_loot_show_name", "april_loot_show_distance", "april_loot_range",
+    "april_loot_chams", "april_loot_chams_mode", "april_loot_chams_color",
     "april_npc_enabled", "april_npc_enabled_mode", "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode",
     "april_npc_health", "april_npc_skeleton",
     "april_npc_offscreen", "april_npc_show_name", "april_npc_show_distance", "april_npc_range",
@@ -69,6 +72,7 @@ local MENU_KEYS = {
     "april_small_battery", "april_medium_battery", "april_large_battery",
     "april_solar_panel", "april_windmill",
     "april_base_boxes", "april_base_show_name", "april_base_show_distance", "april_base_range",
+    "april_base_chams", "april_base_chams_mode", "april_base_chams_color",
     "april_waypoints_enabled", "april_waypoints_enabled_mode", "april_wp_dist", "april_wp_beacon", "april_wp_beacon_h",
     "april_wp_draw", "april_wp_slot",
     "april_map_enabled", "april_map_enabled_mode", "april_map_zoom", "april_map_size", "april_map_icon_scale",
@@ -87,6 +91,7 @@ local MENU_KEYS = {
     "april_keybinds_enabled", "april_keybinds_active_only", "april_keybinds_show_unbound", "april_keybinds_show_mode",
     "april_keybinds_x", "april_keybinds_y", "april_keybinds_w",
     "april_mod_checker_enabled", "april_mod_checker_interval",
+    "april_mod_checker_x", "april_mod_checker_y",
 }
 
 local COLOR_KEYS = {

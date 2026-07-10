@@ -39,6 +39,8 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_checkbox(T, G, p .. "filter_health", "Health Check", true, root)
     menu.add_checkbox(T, G, p .. "filter_visible", "Visible Only", false, root)
     menu.add_checkbox(T, G, p .. "filter_team", "Team Check", true, root)
+    menu.add_combo(T, G, p .. "filter_downed", "Downed Check",
+        { "Skip Downed", "Allow Downed", "Only Downed" }, 0, root)
 
     menu.add_checkbox(T, G, p .. "target_players", "Target Players", true, root)
     local npc_root = menu_util.parent(p .. "target_npcs")

@@ -13,6 +13,9 @@ function M.probe()
         raycast = _G.raycast ~= nil,
         fflag = _G.fflag ~= nil,
         memory = _G.memory ~= nil,
+        exploits_chams = _G.exploits ~= nil
+            and type(exploits.ApplyChamsToInstance) == "function"
+            and type(exploits.RevertChams) == "function",
         fallen_gc = type(refreshgc) == "function"
             and type(applygc) == "function"
             and type(getgc) == "function",
@@ -26,6 +29,7 @@ function M.summary(c)
     if c.menu then table.insert(parts, "menu") end
     if c.draw then table.insert(parts, "draw") end
     if c.fallen_gc then table.insert(parts, "gc-mods") end
+    if c.exploits_chams then table.insert(parts, "gpu-chams") end
     if c.getgc then table.insert(parts, "getgc") end
     return #parts > 0 and table.concat(parts, ", ") or "minimal"
 end
