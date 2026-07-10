@@ -6,6 +6,7 @@ local combat_menu = April.require("features.combat.combat_menu")
 local math_util = April.require("core.math_util")
 local esp_util = April.require("core.esp_util")
 local player_state = April.require("game.player_state")
+local silent_whitelist = April.require("features.combat.silent_whitelist")
 local cache = April.require("core.cache")
 local npcs = April.require("game.npcs")
 local env = April.require("core.env")
@@ -130,8 +131,9 @@ function M.target_priority_crosshair(prefix)
     return idx == 0
 end
 
-function M.passes_filters(target, prefix, aim, origin)
+function M.passes_filters(target, prefix, aim, origin, opts)
     if not target then return false end
+    opts = opts or {}
 
     if M.is_npc_target(target) then
         if settings.bool(prefix .. "filter_health", true) and not M.is_npc_alive(target) then
@@ -141,6 +143,10 @@ function M.passes_filters(target, prefix, aim, origin)
             return false
         end
         return true
+    end
+
+    if not opts.ignore_whitelist and silent_whitelist.should_skip(target) then
+        return false
     end
 
     if settings.bool(prefix .. "filter_health", true) then
@@ -331,7 +337,7 @@ function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
     return M.predict_point(origin, base, target, weapons.cached_held_ranged())
 end
 
-function M.is_target_valid(target, prefix, cx, cy, fov_px)
+function M.is_target_valid(target, prefix, cx, cy, fov_px, opts)
     if not M.is_aim_target(target) then return false end
 
     local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
@@ -341,7 +347,7 @@ function M.is_target_valid(target, prefix, cx, cy, fov_px)
     local base = M.resolve_bone_world(target, bone == "Closest" and "Head" or bone, cx, cy)
     if not base then return false end
 
-    if not M.passes_filters(target, prefix, base, origin) then return false end
+    if not M.passes_filters(target, prefix, base, origin, opts) then return false end
 
     local sx, sy, on_screen = w2s(base.x, base.y, base.z)
     if not on_screen then return false end
@@ -350,7 +356,7 @@ function M.is_target_valid(target, prefix, cx, cy, fov_px)
     return fov_dist <= fov_px
 end
 
-local function consider_target(target, prefix, screen_bone, use_fov, fov_px, origin, filter_visible, cx, cy, best, best_score)
+local function consider_target(target, prefix, screen_bone, use_fov, fov_px, origin, filter_visible, cx, cy, best, best_score, opts)
     if not M.within_max_distance(target, origin, prefix) then
         return best, best_score
     end
@@ -363,7 +369,7 @@ local function consider_target(target, prefix, screen_bone, use_fov, fov_px, ori
     if filter_visible and not passes_visibility(target, base, origin) then
         return best, best_score
     end
-    if not M.passes_filters(target, prefix, base, origin) then
+    if not M.passes_filters(target, prefix, base, origin, opts) then
         return best, best_score
     end
 
@@ -390,7 +396,8 @@ local function consider_target(target, prefix, screen_bone, use_fov, fov_px, ori
     return best, best_score
 end
 
-function M.find_target(cx, cy, fov_px, prefix)
+function M.find_target(cx, cy, fov_px, prefix, opts)
+    opts = opts or {}
     local bone = M.bone_name(prefix)
     local screen_bone = bone == "Closest" and "Head" or bone
     local use_fov = M.target_priority_crosshair(prefix)
@@ -404,7 +411,7 @@ function M.find_target(cx, cy, fov_px, prefix)
         for _, p in ipairs(entity.get_players()) do
             if player_state.is_combat_target(p) then
                 best, best_score = consider_target(
-                    p, prefix, screen_bone, use_fov, fov_px, origin, filter_visible, cx, cy, best, best_score
+                    p, prefix, screen_bone, use_fov, fov_px, origin, filter_visible, cx, cy, best, best_score, opts
                 )
             end
         end
@@ -424,7 +431,7 @@ function M.find_target(cx, cy, fov_px, prefix)
                     lz = entry.lz,
                 }
                 best, best_score = consider_target(
-                    npc_target, prefix, screen_bone, use_fov, fov_px, origin, filter_visible, cx, cy, best, best_score
+                    npc_target, prefix, screen_bone, use_fov, fov_px, origin, filter_visible, cx, cy, best, best_score, opts
                 )
             end
         end

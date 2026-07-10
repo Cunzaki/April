@@ -3,7 +3,6 @@ local menu_util = April.require("core.menu_util")
 local draw_util = April.require("core.draw_util")
 local theme = April.require("core.ui_theme")
 local feature_bind = April.require("core.feature_bind")
-local panel_drag = April.require("core.panel_drag")
 
 local M = {}
 
@@ -11,7 +10,8 @@ local P = "april_keybinds_enabled"
 local X_ID = "april_keybinds_x"
 local Y_ID = "april_keybinds_y"
 local W_ID = "april_keybinds_w"
-local PANEL_ID = "april_keybinds_panel"
+
+local TITLE_H = 22
 
 -- Full Win32 VK map (printable + modifiers + OEM + media/nav).
 local VK_NAMES = {
@@ -122,21 +122,29 @@ local function collect_rows()
     return rows
 end
 
+local function clamp_layout(x, y, w, sw, sh)
+    w = math.max(160, math.min(480, math.floor(w or 260)))
+    x = math.max(0, math.min(math.max(0, sw - w), math.floor(x or 0)))
+    y = math.max(0, math.min(math.max(0, sh - 40), math.floor(y or 0)))
+    return x, y, w
+end
+
 function M.register_menu()
     local G = menu_util.G
     local T = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
     menu.add_checkbox(T, G.MISC, P, "Keybind Viewer", false)
+
+    menu_util.section(T, G.MISC, "Display")
     menu.add_checkbox(T, G.MISC, "april_keybinds_active_only", "Only Show Active", false, root)
     menu.add_checkbox(T, G.MISC, "april_keybinds_show_unbound", "Show Unbound", true, root)
     menu.add_checkbox(T, G.MISC, "april_keybinds_show_mode", "Show Bind Mode", true, root)
 
-    menu_util.gap(T, G.MISC)
-    menu_util.label(T, G.MISC, "Drag the panel title while Vector UI is open.")
-    menu.add_slider_int(T, G.MISC, X_ID, "Pos X", 0, 4000, 16, root)
-    menu.add_slider_int(T, G.MISC, Y_ID, "Pos Y", 0, 4000, 280, root)
-    menu.add_slider_int(T, G.MISC, W_ID, "Width", 160, 420, 260, root)
+    menu_util.section(T, G.MISC, "Layout")
+    menu.add_slider_int(T, G.MISC, X_ID, "Position X", 0, 1920, 16, root)
+    menu.add_slider_int(T, G.MISC, Y_ID, "Position Y", 0, 1080, 280, root)
+    menu.add_slider_int(T, G.MISC, W_ID, "Panel Width", 160, 480, 260, root)
 
     menu_util.bind_children(P, {
         "april_keybinds_active_only", "april_keybinds_show_unbound", "april_keybinds_show_mode",
@@ -151,40 +159,36 @@ function M.draw()
     if not draw or not draw.text then return end
 
     local sw, sh = draw_util.screen_size()
-    local panel_w = settings.num(W_ID, 260)
-    local x = settings.num(X_ID, 16)
-    local y = settings.num(Y_ID, 280)
+    local x, y, panel_w = clamp_layout(
+        settings.num(X_ID, 16),
+        settings.num(Y_ID, 280),
+        settings.num(W_ID, 260),
+        sw, sh
+    )
 
     local rows = collect_rows()
     local pad = 10
-    local title_h = panel_drag.title_h()
     local row_h = 18
     local count = math.max(#rows, 1)
-    local height = title_h + count * row_h + 10
+    local height = TITLE_H + count * row_h + 10
 
-    local dragging
-    x, y, dragging = panel_drag.update(PANEL_ID, x, y, panel_w, height, X_ID, Y_ID, sw, sh)
-
-    local can_drag = panel_drag.menu_is_open()
     theme.draw_panel(x, y, panel_w, height, {
         bg = theme.alpha(theme.BG, 0.88),
-        border = theme.alpha(theme.BORDER, (dragging or can_drag) and 0.7 or 0.4),
+        border = theme.alpha(theme.BORDER, 0.4),
         accent = theme.CYAN,
         accent_w = 2,
         rounding = theme.ROUND,
     })
 
-    local title = "Keybinds"
-    if can_drag then
-        title = title .. "  · drag"
-    end
-    draw_util.text(x + pad, y + 5, title, theme.TEXT, 12)
+    draw_util.text(x + pad, y + 5, "Keybinds", theme.TEXT, 12)
 
-    local ry = y + title_h
+    local ry = y + TITLE_H
     if #rows == 0 then
         draw_util.text(x + pad, ry, "No binds", theme.TEXT_MUTED, 11)
         return
     end
+
+    local max_label = math.max(8, math.floor((panel_w - pad * 2) * 0.55 / 7))
 
     for i = 1, #rows do
         local row = rows[i]
@@ -192,7 +196,7 @@ function M.draw()
         local key_col = row.active and theme.CYAN or theme.TEXT_DIM
 
         local label = row.label
-        if #label > 16 then label = label:sub(1, 14) .. ".." end
+        if #label > max_label then label = label:sub(1, math.max(1, max_label - 2)) .. ".." end
         draw_util.text(x + pad, ry, label, name_col, 11)
 
         local right = row.key

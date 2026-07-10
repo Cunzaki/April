@@ -147,21 +147,26 @@ function M.track(origin, aim_point, shoot_vk)
     return ok
 end
 
--- Drop-path visuals + instant silent to hitpart.
--- Never elevate / aim-up the hook origin — MouseRaycast is instant; any vertical
--- offset (especially bow arcs at range) makes the hooked ray miss.
-function M.track_curve(origin, hit_point, weapon_name, shoot_vk)
+-- Ballistic silent: origin = muzzle/peek, aim_point = far along launch_dir.
+-- Curve rebuilt muzzle→hitpart so path always ends on selected hitpart.
+function M.track_curve(origin, aim_point, weapon_name, shoot_vk, hitpart)
     origin = origin or M.get_camera_origin()
-    if not origin or not hit_point then
+    if not origin or not aim_point then
         M._last_ok = false
         M._last_curve = nil
         return false
     end
 
-    local curve = ballistic.curve_for_weapon(origin, hit_point, weapon_name, 20)
-    local ok = M.track(origin, hit_point, shoot_vk)
-    -- track() clears _last_curve; restore after so visuals still have the path.
+    local hit = hitpart or aim_point
+    local curve = ballistic.curve_for_weapon(origin, hit, weapon_name, 24)
+    if curve and curve.aim_far then
+        aim_point = curve.aim_far
+    end
+
+    local ok = M.track(origin, aim_point, shoot_vk)
     M._last_curve = curve
+    -- Keep visual/debug target on the actual hitpart, not the far aim point.
+    M._last_target = { x = hit.x, y = hit.y, z = hit.z }
     return ok
 end
 

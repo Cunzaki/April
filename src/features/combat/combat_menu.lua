@@ -32,7 +32,6 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     local p = prefix
     local root = menu_util.parent(parent_id)
 
-    -- Combos / filters / targets (toggles together)
     menu.add_combo(T, G, p .. "target_type", "Target Type", { "Crosshair", "Distance" }, 0, root)
     menu.add_combo(T, G, p .. "bone", "Target Hitbox", M.SILENT_BONES, 0, root)
 
@@ -41,6 +40,15 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_checkbox(T, G, p .. "filter_team", "Team Check", true, root)
     menu.add_combo(T, G, p .. "filter_downed", "Downed Check",
         { "Skip Downed", "Allow Downed", "Only Downed" }, 0, root)
+    menu.add_checkbox(T, G, p .. "filter_whitelist", "Whitelist Filter", false, root)
+    menu.add_input(T, G, p .. "whitelist_ids", "Whitelist IDs", "")
+    if menu and menu.set_visible then
+        pcall(menu.set_visible, p .. "whitelist_ids", false)
+    end
+    menu.add_button(T, G, p .. "whitelist_clear", "Clear Whitelist", function()
+        local wl = April.require("features.combat.silent_whitelist")
+        if wl and wl.clear then wl.clear() end
+    end)
 
     menu.add_checkbox(T, G, p .. "target_players", "Target Players", true, root)
     local npc_root = menu_util.parent(p .. "target_npcs")
@@ -49,13 +57,10 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_checkbox(T, G, p .. "target_npc_bosses", "NPC Bosses", true, npc_root)
 
     menu.add_checkbox(T, G, p .. "sticky", "Sticky Target", false, root)
-
     menu.add_checkbox(T, G, p .. "wallbang", "Wallbang", false, root)
-    menu_util.label(T, G, "Wallbang: likely invalid until target is visible to you (server checks).")
 
     local tp_root = menu_util.parent(p .. "bullet_tp")
     menu.add_checkbox(T, G, p .. "bullet_tp", "Bullet TP", false, root)
-    menu_util.label(T, G, "Bullet TP: likely invalid until target is visible to you (server checks).")
     menu.add_combo(T, G, p .. "tp_ray_mode", "TP Ray Mode",
         { "Direct", "Snap", "Deep", "Curve", "Arch" }, 0, tp_root)
     menu.add_checkbox(T, G, p .. "tp_ray_vis", "Visualize Ray Path", false, menu_util.parent(p .. "bullet_tp", {
@@ -75,7 +80,10 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_checkbox(T, G, p .. "target_line", "Target Line", false,
         menu_util.parent(parent_id, { colorpicker = opts.line_color or { 1, 0.25, 0.25, 1 } }))
 
-    -- Sliders at bottom (section-wide)
+    menu_util.gap(T, G)
+    menu_util.label(T, G,
+        "Notes: Wallbang/Bullet TP need LOS for server valids. Whitelist = middle-click target (saves in config). Bows use drop arc to hitpart.")
+
     menu_util.gap(T, G)
     menu.add_slider_int(T, G, p .. "hit_chance", "Hit Chance %", 1, 100, 100, root)
     menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, root)

@@ -1,7 +1,7 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-10T03:07:36.734Z
+    Built: 2026-07-10T03:51:43.684Z
 ]]
 
 April = {
@@ -982,201 +982,6 @@ function M.draw()
             target_y = target_y + box_h + gap
         end
     end
-end
-
-return M
-
-end)()
-
--- ── core/panel_drag.lua ──
-April._mods["core.panel_drag"] = (function()
--- Click-drag floating HUD panels while the Vector menu is open.
--- Uses utility.get_mouse_pos + input.is_key_down(LMB). Positions write back
--- via menu.set so config_store persists them.
-
-local settings = April.require("core.settings")
-
-local M = {}
-
-local LMB = 0x01
-local TITLE_H = 24
-
-local active_id = nil
-local grab_dx, grab_dy = 0, 0
-
-local frame = {
-    t = -1,
-    mx = nil,
-    my = nil,
-    down = false,
-    just_pressed = false,
-    open = false,
-}
-
-local menu_open_probed = false
-local menu_open_fn = nil
-local insert_toggle = false
-local insert_was_down = false
-local INSERT_VK = 0x2D
-
-local function tick_ms()
-    return utility and utility.get_tick_count and utility.get_tick_count() or 0
-end
-
-local function probe_menu_open()
-    if menu_open_probed then return menu_open_fn end
-    menu_open_probed = true
-
-    if not menu then
-        menu_open_fn = nil
-        return nil
-    end
-
-    local candidates = {
-        "is_open", "is_opened", "is_visible", "opened", "visible",
-        "IsOpen", "IsOpened", "IsVisible",
-    }
-    for i = 1, #candidates do
-        local fn = menu[candidates[i]]
-        if type(fn) == "function" then
-            menu_open_fn = function()
-                local ok, v = pcall(fn)
-                return ok and v == true
-            end
-            return menu_open_fn
-        end
-    end
-
-    if type(menu.open) == "boolean" or type(menu.opened) == "boolean" then
-        menu_open_fn = function()
-            return menu.open == true or menu.opened == true
-        end
-        return menu_open_fn
-    end
-
-    menu_open_fn = nil
-    return nil
-end
-
-local function track_insert_toggle()
-    local down = input and input.is_key_down and input.is_key_down(INSERT_VK) == true
-    if down and not insert_was_down then
-        insert_toggle = not insert_toggle
-    end
-    insert_was_down = down
-end
-
-local function mouse_pos()
-    if utility and utility.get_mouse_pos then
-        local ok, mx, my = pcall(utility.get_mouse_pos)
-        if ok and mx and my then return mx, my end
-    end
-    if input and input.get_mouse_pos then
-        local ok, mx, my = pcall(input.get_mouse_pos)
-        if ok and mx and my then return mx, my end
-    end
-    return nil, nil
-end
-
-local function sync_frame()
-    local now = tick_ms()
-    if frame.t == now then return end
-
-    local prev_down = frame.down
-    frame.t = now
-    frame.mx, frame.my = mouse_pos()
-    frame.down = input and input.is_key_down and input.is_key_down(LMB) == true
-    frame.just_pressed = frame.down and not prev_down
-
-    local fn = probe_menu_open()
-    if fn then
-        frame.open = fn()
-    else
-        track_insert_toggle()
-        frame.open = insert_toggle
-    end
-
-    if not frame.open and active_id then
-        active_id = nil
-    end
-end
-
-function M.menu_is_open()
-    sync_frame()
-    return frame.open == true
-end
-
-local function point_in(mx, my, x, y, w, h)
-    return mx >= x and my >= y and mx <= x + w and my <= y + h
-end
-
-local function clamp_pos(x, y, w, h, sw, sh)
-    w = math.max(40, w or 200)
-    h = math.max(24, h or 40)
-    sw = sw or 1920
-    sh = sh or 1080
-    x = math.floor(math.max(0, math.min(sw - w, x)))
-    y = math.floor(math.max(0, math.min(sh - h, y)))
-    return x, y
-end
-
-local function write_pos(x_id, y_id, x, y)
-    if menu and menu.set then
-        pcall(menu.set, x_id, x)
-        pcall(menu.set, y_id, y)
-    end
-end
-
--- Call once per frame before drawing the panel.
--- Returns x, y (possibly updated while dragging), and dragging bool.
-function M.update(id, x, y, w, h, x_id, y_id, sw, sh)
-    sync_frame()
-
-    x = tonumber(x) or 0
-    y = tonumber(y) or 0
-    w = tonumber(w) or 200
-    h = tonumber(h) or 40
-    x, y = clamp_pos(x, y, w, h, sw, sh)
-
-    local mx, my = frame.mx, frame.my
-    local dragging = false
-
-    if not frame.open or not mx then
-        if active_id == id then
-            active_id = nil
-        end
-        return x, y, false
-    end
-
-    if active_id == id then
-        if frame.down then
-            x = mx - grab_dx
-            y = my - grab_dy
-            x, y = clamp_pos(x, y, w, h, sw, sh)
-            write_pos(x_id, y_id, x, y)
-            dragging = true
-        else
-            write_pos(x_id, y_id, x, y)
-            active_id = nil
-        end
-    elseif frame.just_pressed and active_id == nil then
-        if point_in(mx, my, x, y, w, TITLE_H) then
-            active_id = id
-            grab_dx = mx - x
-            grab_dy = my - y
-            dragging = true
-        end
-    end
-
-    return x, y, dragging
-end
-
-function M.read_pos(x_id, y_id, default_x, default_y)
-    return settings.num(x_id, default_x or 16), settings.num(y_id, default_y or 72)
-end
-
-function M.title_h()
-    return TITLE_H
 end
 
 return M
@@ -2605,7 +2410,7 @@ local function combat_stats_mod()
 end
 
 function M.gravity_accel(gravity_mult)
-    -- Fallen: Gravity field is a multiplier on workspace gravity (CreateProjectile).
+    -- Fallen CreateProjectile: v -= (0, 196.2 * Gravity, 0) * dt
     if not gravity_mult or gravity_mult <= 0 then
         return ROBLOX_GRAV * 0.55
     end
@@ -2661,11 +2466,64 @@ function M.predict_for_weapon(origin, position, velocity, weapon_name)
     return M.calculate_target_position(stats.speed, stats.gravity, velocity, position, origin)
 end
 
--- Ballistic arc that still lands exactly on hitpart (no target velocity lead).
--- Returns sample points + initial launch direction for silent ray faking.
+-- Solve flight time so |v0| == speed with v0 = (hit - origin + 0.5*g*t^2*up) / t.
+-- Matches CreateProjectile: Direction.Unit * Speed, then gravity 196.2*Gravity per second.
+local function solve_flight_time(dx, dy, dz, speed, g)
+    local dist = math_util.distance3(dx, dy, dz)
+    if dist < 0.05 then return 0.001 end
+
+    local s2 = speed * speed
+    local horiz2 = dx * dx + dz * dz
+
+    -- |offset/t + (0, 0.5*g*t, 0)|^2 = s^2
+    -- → (g^2/4)*t^4 + (g*dy - s^2)*t^2 + (horiz2+dy^2) = 0
+    local a = (g * g) * 0.25
+    local b = g * dy - s2
+    local c = horiz2 + dy * dy
+
+    local t = nil
+    if a > 1e-8 then
+        local disc = b * b - 4 * a * c
+        if disc >= 0 then
+            local sq = math.sqrt(disc)
+            local u1 = (-b - sq) / (2 * a)
+            local u2 = (-b + sq) / (2 * a)
+            local best = nil
+            for _, u in ipairs({ u1, u2 }) do
+                if u and u > 1e-6 then
+                    local cand = math.sqrt(u)
+                    if not best or cand < best then
+                        best = cand
+                    end
+                end
+            end
+            t = best
+        end
+    end
+
+    -- Fallback: flat-time iterate (always works, slightly less exact |v0|).
+    if not t then
+        t = dist / speed
+        for _ = 1, 10 do
+            local vx = dx / t
+            local vy = (dy + 0.5 * g * t * t) / t
+            local vz = dz / t
+            local sp = math.sqrt(vx * vx + vy * vy + vz * vz)
+            if sp < 1e-6 then break end
+            t = t * (sp / speed)
+            if t < 0.001 then t = 0.001 end
+        end
+    end
+
+    return math.max(t, 0.001)
+end
+
+-- Ballistic arc that lands exactly on hitpart.
+-- launch_dir is the unit Direction the game should fire (aim-up under gravity).
+-- aim_far is a far world point along that launch so MouseRaycast → muzzle LookVector matches.
 function M.curve_to_hit(origin, hit, bullet_speed, bullet_gravity, steps)
     if not origin or not hit then return nil end
-    steps = steps or 18
+    steps = steps or 24
 
     local ox, oy, oz = vec3(origin)
     local hx, hy, hz = vec3(hit)
@@ -2675,6 +2533,8 @@ function M.curve_to_hit(origin, hit, bullet_speed, bullet_gravity, steps)
         return {
             path = { { x = ox, y = oy, z = oz }, { x = hx, y = hy, z = hz } },
             aim = { x = hx, y = hy, z = hz },
+            aim_far = { x = hx, y = hy, z = hz },
+            hit = { x = hx, y = hy, z = hz },
             launch_dir = { x = 0, y = 1, z = 0 },
             flight = 0,
         }
@@ -2682,13 +2542,33 @@ function M.curve_to_hit(origin, hit, bullet_speed, bullet_gravity, steps)
 
     local speed = math.max(bullet_speed or 950, 1)
     local g = M.gravity_accel(bullet_gravity)
-    local flight = dist / speed
-    if flight < 0.001 then flight = 0.001 end
+    local flight = solve_flight_time(dx, dy, dz, speed, g)
 
-    -- Launch velocity that reaches hit under gravity (classic ballistic aim-up).
     local vx = dx / flight
     local vy = (dy + 0.5 * g * flight * flight) / flight
     local vz = dz / flight
+
+    -- Game clamps to Direction.Unit * Speed — normalize then scale.
+    local lm = math.sqrt(vx * vx + vy * vy + vz * vz)
+    local launch_dir
+    if lm > 0.001 then
+        launch_dir = { x = vx / lm, y = vy / lm, z = vz / lm }
+        vx, vy, vz = launch_dir.x * speed, launch_dir.y * speed, launch_dir.z * speed
+    else
+        launch_dir = { x = dx / dist, y = dy / dist, z = dz / dist }
+        vx, vy, vz = launch_dir.x * speed, launch_dir.y * speed, launch_dir.z * speed
+    end
+
+    -- Re-solve flight with exact |v0|=speed so path endpoint stays on hitpart.
+    flight = solve_flight_time(dx, dy, dz, speed, g)
+    vx = dx / flight
+    vy = (dy + 0.5 * g * flight * flight) / flight
+    vz = dz / flight
+    lm = math.sqrt(vx * vx + vy * vy + vz * vz)
+    if lm > 0.001 then
+        launch_dir = { x = vx / lm, y = vy / lm, z = vz / lm }
+        vx, vy, vz = launch_dir.x * speed, launch_dir.y * speed, launch_dir.z * speed
+    end
 
     local path = {}
     for i = 0, steps do
@@ -2699,17 +2579,20 @@ function M.curve_to_hit(origin, hit, bullet_speed, bullet_gravity, steps)
             z = oz + vz * t,
         }
     end
-    -- Guarantee exact endpoint on hitpart
     path[#path + 1] = { x = hx, y = hy, z = hz }
 
-    local lm = math.sqrt(vx * vx + vy * vy + vz * vz)
-    local launch_dir = lm > 0.001
-        and { x = vx / lm, y = vy / lm, z = vz / lm }
-        or { x = dx / dist, y = dy / dist, z = dz / dist }
+    local far = math.max(dist * 2, 800)
+    local aim_far = {
+        x = ox + launch_dir.x * far,
+        y = oy + launch_dir.y * far,
+        z = oz + launch_dir.z * far,
+    }
 
     return {
         path = path,
         aim = { x = hx, y = hy, z = hz },
+        aim_far = aim_far,
+        hit = { x = hx, y = hy, z = hz },
         launch_dir = launch_dir,
         flight = flight,
         speed = speed,
@@ -2720,6 +2603,13 @@ end
 function M.curve_for_weapon(origin, hit, weapon_name, steps)
     local stats = combat_stats_mod().get_effective_stats(weapon_name)
     return M.curve_to_hit(origin, hit, stats.speed, stats.gravity, steps)
+end
+
+-- Far aim point for silent MouseRaycast so muzzle→point LookVector == launch_dir.
+function M.silent_aim_point(muzzle, hit, weapon_name)
+    local curve = M.curve_for_weapon(muzzle, hit, weapon_name, 24)
+    if not curve then return hit, nil end
+    return curve.aim_far or hit, curve
 end
 
 return M
@@ -2877,21 +2767,26 @@ function M.track(origin, aim_point, shoot_vk)
     return ok
 end
 
--- Drop-path visuals + instant silent to hitpart.
--- Never elevate / aim-up the hook origin — MouseRaycast is instant; any vertical
--- offset (especially bow arcs at range) makes the hooked ray miss.
-function M.track_curve(origin, hit_point, weapon_name, shoot_vk)
+-- Ballistic silent: origin = muzzle/peek, aim_point = far along launch_dir.
+-- Curve rebuilt muzzle→hitpart so path always ends on selected hitpart.
+function M.track_curve(origin, aim_point, weapon_name, shoot_vk, hitpart)
     origin = origin or M.get_camera_origin()
-    if not origin or not hit_point then
+    if not origin or not aim_point then
         M._last_ok = false
         M._last_curve = nil
         return false
     end
 
-    local curve = ballistic.curve_for_weapon(origin, hit_point, weapon_name, 20)
-    local ok = M.track(origin, hit_point, shoot_vk)
-    -- track() clears _last_curve; restore after so visuals still have the path.
+    local hit = hitpart or aim_point
+    local curve = ballistic.curve_for_weapon(origin, hit, weapon_name, 24)
+    if curve and curve.aim_far then
+        aim_point = curve.aim_far
+    end
+
+    local ok = M.track(origin, aim_point, shoot_vk)
     M._last_curve = curve
+    -- Keep visual/debug target on the actual hitpart, not the far aim point.
+    M._last_target = { x = hit.x, y = hit.y, z = hit.z }
     return ok
 end
 
@@ -3925,7 +3820,7 @@ local MENU_KEYS = {
     "april_silent_aim", "april_silent_aim_mode",
     "april_silent_target_type", "april_silent_bone",
     "april_silent_filter_health", "april_silent_filter_visible", "april_silent_filter_team",
-    "april_silent_filter_downed",
+    "april_silent_filter_downed", "april_silent_filter_whitelist", "april_silent_whitelist_ids",
     "april_silent_target_players", "april_silent_target_npcs", "april_silent_target_npc_soldiers", "april_silent_target_npc_bosses",
     "april_silent_sticky", "april_silent_wallbang",
     "april_silent_bullet_tp", "april_silent_tp_ray_mode", "april_silent_tp_ray_vis",
@@ -3984,7 +3879,7 @@ local MENU_KEYS = {
     "april_keybinds_enabled", "april_keybinds_active_only", "april_keybinds_show_unbound", "april_keybinds_show_mode",
     "april_keybinds_x", "april_keybinds_y", "april_keybinds_w",
     "april_mod_checker_enabled", "april_mod_checker_interval",
-    "april_mod_checker_x", "april_mod_checker_y",
+    "april_mod_checker_x", "april_mod_checker_y", "april_mod_checker_w",
 }
 
 local COLOR_KEYS = {
@@ -10012,6 +9907,148 @@ return M
 
 end)()
 
+-- ── features/combat/silent_whitelist.lua ──
+April._mods["features.combat.silent_whitelist"] = (function()
+-- Silent-aim player whitelist (middle-click toggle). Persists via menu input string.
+
+local settings = April.require("core.settings")
+local notify = April.require("core.notify")
+
+local M = {}
+
+local IDS_KEY = "april_silent_whitelist_ids"
+local FILTER_KEY = "april_silent_filter_whitelist"
+local MMB = 0x04
+
+local was_down = false
+local cache = { t = -1, set = {} }
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function parse_ids(raw)
+    local set = {}
+    if type(raw) ~= "string" or raw == "" then return set end
+    for part in raw:gmatch("[^,]+") do
+        local id = tonumber((part:match("^%s*(.-)%s*$")))
+        if id and id > 0 then
+            set[id] = true
+        end
+    end
+    return set
+end
+
+local function serialize_ids(set)
+    local list = {}
+    for id in pairs(set) do
+        list[#list + 1] = id
+    end
+    table.sort(list)
+    local parts = {}
+    for i = 1, #list do
+        parts[i] = tostring(list[i])
+    end
+    return table.concat(parts, ",")
+end
+
+local function read_set()
+    local now = tick_ms()
+    if cache.t == now then return cache.set end
+    cache.t = now
+    local raw = ""
+    if menu and menu.get then
+        local ok, v = pcall(menu.get, IDS_KEY)
+        if ok and type(v) == "string" then raw = v end
+    end
+    if raw == "" then
+        raw = tostring(settings.get(IDS_KEY) or "")
+    end
+    cache.set = parse_ids(raw)
+    return cache.set
+end
+
+local function write_set(set)
+    cache.set = set
+    cache.t = tick_ms()
+    local s = serialize_ids(set)
+    if menu and menu.set then
+        pcall(menu.set, IDS_KEY, s)
+    end
+end
+
+function M.count()
+    local n = 0
+    for _ in pairs(read_set()) do
+        n = n + 1
+    end
+    return n
+end
+
+function M.is_whitelisted(player)
+    if not player then return false end
+    local uid = tonumber(player.user_id)
+    if not uid or uid == 0 then return false end
+    return read_set()[uid] == true
+end
+
+function M.toggle_player(player)
+    if not player or player.is_local then return false, nil end
+    local uid = tonumber(player.user_id)
+    if not uid or uid == 0 then return false, nil end
+
+    local set = read_set()
+    local name = player.display_name or player.name or tostring(uid)
+    local added
+    if set[uid] then
+        set[uid] = nil
+        added = false
+        notify.warning("WL − " .. name, 2500)
+    else
+        set[uid] = true
+        added = true
+        notify.success("WL + " .. name, 2500)
+    end
+    write_set(set)
+    return true, added
+end
+
+function M.clear()
+    write_set({})
+    notify.warning("Whitelist cleared", 2000)
+end
+
+function M.enabled()
+    return settings.bool(FILTER_KEY, false)
+end
+
+-- Skip target when whitelist filter is on and they are listed.
+function M.should_skip(player)
+    if not M.enabled() then return false end
+    return M.is_whitelisted(player)
+end
+
+function M.tick(current_target)
+    if not M.enabled() then
+        was_down = false
+        return
+    end
+
+    local down = input and input.is_key_down and input.is_key_down(MMB) == true
+    local pressed = down and not was_down
+    was_down = down
+
+    if not pressed then return end
+    if not current_target then return end
+    if current_target.is_npc or current_target._npc then return end
+
+    M.toggle_player(current_target)
+end
+
+return M
+
+end)()
+
 -- ── features/combat/combat_menu.lua ──
 April._mods["features.combat.combat_menu"] = (function()
 local menu_util = April.require("core.menu_util")
@@ -10048,7 +10085,6 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     local p = prefix
     local root = menu_util.parent(parent_id)
 
-    -- Combos / filters / targets (toggles together)
     menu.add_combo(T, G, p .. "target_type", "Target Type", { "Crosshair", "Distance" }, 0, root)
     menu.add_combo(T, G, p .. "bone", "Target Hitbox", M.SILENT_BONES, 0, root)
 
@@ -10057,6 +10093,15 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_checkbox(T, G, p .. "filter_team", "Team Check", true, root)
     menu.add_combo(T, G, p .. "filter_downed", "Downed Check",
         { "Skip Downed", "Allow Downed", "Only Downed" }, 0, root)
+    menu.add_checkbox(T, G, p .. "filter_whitelist", "Whitelist Filter", false, root)
+    menu.add_input(T, G, p .. "whitelist_ids", "Whitelist IDs", "")
+    if menu and menu.set_visible then
+        pcall(menu.set_visible, p .. "whitelist_ids", false)
+    end
+    menu.add_button(T, G, p .. "whitelist_clear", "Clear Whitelist", function()
+        local wl = April.require("features.combat.silent_whitelist")
+        if wl and wl.clear then wl.clear() end
+    end)
 
     menu.add_checkbox(T, G, p .. "target_players", "Target Players", true, root)
     local npc_root = menu_util.parent(p .. "target_npcs")
@@ -10065,13 +10110,10 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_checkbox(T, G, p .. "target_npc_bosses", "NPC Bosses", true, npc_root)
 
     menu.add_checkbox(T, G, p .. "sticky", "Sticky Target", false, root)
-
     menu.add_checkbox(T, G, p .. "wallbang", "Wallbang", false, root)
-    menu_util.label(T, G, "Wallbang: likely invalid until target is visible to you (server checks).")
 
     local tp_root = menu_util.parent(p .. "bullet_tp")
     menu.add_checkbox(T, G, p .. "bullet_tp", "Bullet TP", false, root)
-    menu_util.label(T, G, "Bullet TP: likely invalid until target is visible to you (server checks).")
     menu.add_combo(T, G, p .. "tp_ray_mode", "TP Ray Mode",
         { "Direct", "Snap", "Deep", "Curve", "Arch" }, 0, tp_root)
     menu.add_checkbox(T, G, p .. "tp_ray_vis", "Visualize Ray Path", false, menu_util.parent(p .. "bullet_tp", {
@@ -10091,7 +10133,10 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_checkbox(T, G, p .. "target_line", "Target Line", false,
         menu_util.parent(parent_id, { colorpicker = opts.line_color or { 1, 0.25, 0.25, 1 } }))
 
-    -- Sliders at bottom (section-wide)
+    menu_util.gap(T, G)
+    menu_util.label(T, G,
+        "Notes: Wallbang/Bullet TP need LOS for server valids. Whitelist = middle-click target (saves in config). Bows use drop arc to hitpart.")
+
     menu_util.gap(T, G)
     menu.add_slider_int(T, G, p .. "hit_chance", "Hit Chance %", 1, 100, 100, root)
     menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, root)
@@ -10112,6 +10157,7 @@ local combat_menu = April.require("features.combat.combat_menu")
 local math_util = April.require("core.math_util")
 local esp_util = April.require("core.esp_util")
 local player_state = April.require("game.player_state")
+local silent_whitelist = April.require("features.combat.silent_whitelist")
 local cache = April.require("core.cache")
 local npcs = April.require("game.npcs")
 local env = April.require("core.env")
@@ -10236,8 +10282,9 @@ function M.target_priority_crosshair(prefix)
     return idx == 0
 end
 
-function M.passes_filters(target, prefix, aim, origin)
+function M.passes_filters(target, prefix, aim, origin, opts)
     if not target then return false end
+    opts = opts or {}
 
     if M.is_npc_target(target) then
         if settings.bool(prefix .. "filter_health", true) and not M.is_npc_alive(target) then
@@ -10247,6 +10294,10 @@ function M.passes_filters(target, prefix, aim, origin)
             return false
         end
         return true
+    end
+
+    if not opts.ignore_whitelist and silent_whitelist.should_skip(target) then
+        return false
     end
 
     if settings.bool(prefix .. "filter_health", true) then
@@ -10437,7 +10488,7 @@ function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
     return M.predict_point(origin, base, target, weapons.cached_held_ranged())
 end
 
-function M.is_target_valid(target, prefix, cx, cy, fov_px)
+function M.is_target_valid(target, prefix, cx, cy, fov_px, opts)
     if not M.is_aim_target(target) then return false end
 
     local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
@@ -10447,7 +10498,7 @@ function M.is_target_valid(target, prefix, cx, cy, fov_px)
     local base = M.resolve_bone_world(target, bone == "Closest" and "Head" or bone, cx, cy)
     if not base then return false end
 
-    if not M.passes_filters(target, prefix, base, origin) then return false end
+    if not M.passes_filters(target, prefix, base, origin, opts) then return false end
 
     local sx, sy, on_screen = w2s(base.x, base.y, base.z)
     if not on_screen then return false end
@@ -10456,7 +10507,7 @@ function M.is_target_valid(target, prefix, cx, cy, fov_px)
     return fov_dist <= fov_px
 end
 
-local function consider_target(target, prefix, screen_bone, use_fov, fov_px, origin, filter_visible, cx, cy, best, best_score)
+local function consider_target(target, prefix, screen_bone, use_fov, fov_px, origin, filter_visible, cx, cy, best, best_score, opts)
     if not M.within_max_distance(target, origin, prefix) then
         return best, best_score
     end
@@ -10469,7 +10520,7 @@ local function consider_target(target, prefix, screen_bone, use_fov, fov_px, ori
     if filter_visible and not passes_visibility(target, base, origin) then
         return best, best_score
     end
-    if not M.passes_filters(target, prefix, base, origin) then
+    if not M.passes_filters(target, prefix, base, origin, opts) then
         return best, best_score
     end
 
@@ -10496,7 +10547,8 @@ local function consider_target(target, prefix, screen_bone, use_fov, fov_px, ori
     return best, best_score
 end
 
-function M.find_target(cx, cy, fov_px, prefix)
+function M.find_target(cx, cy, fov_px, prefix, opts)
+    opts = opts or {}
     local bone = M.bone_name(prefix)
     local screen_bone = bone == "Closest" and "Head" or bone
     local use_fov = M.target_priority_crosshair(prefix)
@@ -10510,7 +10562,7 @@ function M.find_target(cx, cy, fov_px, prefix)
         for _, p in ipairs(entity.get_players()) do
             if player_state.is_combat_target(p) then
                 best, best_score = consider_target(
-                    p, prefix, screen_bone, use_fov, fov_px, origin, filter_visible, cx, cy, best, best_score
+                    p, prefix, screen_bone, use_fov, fov_px, origin, filter_visible, cx, cy, best, best_score, opts
                 )
             end
         end
@@ -10530,7 +10582,7 @@ function M.find_target(cx, cy, fov_px, prefix)
                     lz = entry.lz,
                 }
                 best, best_score = consider_target(
-                    npc_target, prefix, screen_bone, use_fov, fov_px, origin, filter_visible, cx, cy, best, best_score
+                    npc_target, prefix, screen_bone, use_fov, fov_px, origin, filter_visible, cx, cy, best, best_score, opts
                 )
             end
         end
@@ -10737,83 +10789,95 @@ local function pierce_origin(from, to)
     }
 end
 
+-- Fire origin for ballistic solve (muzzle preferred). Silent hook still uses camera.
+local function fire_origin(camera)
+    return combat_origin.get_muzzle_origin() or camera
+end
+
+-- Ballistic launch aim: MouseRaycast point so muzzle LookVector = launch_dir,
+-- projectile arc (Speed/Gravity) lands on hitpart.
+-- Track origin must be the fire/muzzle point so (aim_far - origin).Unit == launch_dir.
+local function apply_drop_aim(track_origin, hitpart, weapon, state, extra)
+    local muzzle = fire_origin(track_origin)
+    local aim_far, curve = ballistic.silent_aim_point(muzzle, hitpart, weapon)
+    local info = {
+        state = state or "curve",
+        peek = extra and extra.peek or nil,
+        radius = extra and extra.radius or 0,
+        use_curve = true,
+        weapon = weapon,
+        hitpart = hitpart,
+        curve_path = curve and curve.path or nil,
+        launch_dir = curve and curve.launch_dir or nil,
+    }
+    return muzzle, aim_far or hitpart, info
+end
+
 function M.resolve_track(target, prefix, cx, cy)
     if not target then return nil, nil, OFF_INFO end
 
     local camera = silent_ray.get_camera_origin()
     if not camera then return nil, nil, OFF_INFO end
 
-    -- Exact hitpart — no velocity lead (silent hook is instant).
-    local aim = targeting.resolve_bone_world(target, targeting.bone_name(prefix), cx, cy)
-    if not aim then return nil, nil, OFF_INFO end
+    local hitpart = targeting.resolve_bone_world(target, targeting.bone_name(prefix), cx, cy)
+    if not hitpart then return nil, nil, OFF_INFO end
 
     local track_origin = camera
-    local manip_info = OFF_INFO
-    local bullet_tp = settings.bool(prefix .. "bullet_tp", false)
     local wallbang = settings.bool(prefix .. "wallbang", false)
     local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
 
-    if bullet_tp then
-        local head = targeting.bone_world(target, "Head") or aim
+    if settings.bool(prefix .. "bullet_tp", false) then
+        local head = targeting.bone_world(target, "Head") or hitpart
         local mode_idx = settings.num(prefix .. "tp_ray_mode", 0)
         local mode_name = bullet_tp_ray.mode_name(mode_idx)
 
-        -- Hitpart only — no movement prediction (hook is instant).
-        aim = bullet_tp_ray.hitpart_aim(head) or head
-        track_origin = bullet_tp_ray.track_origin(camera, aim, mode_name) or aim
+        hitpart = bullet_tp_ray.hitpart_aim(head) or head
+        track_origin = bullet_tp_ray.track_origin(camera, hitpart, mode_name) or hitpart
 
-        manip_info = {
+        return track_origin, hitpart, {
             state = "tp",
             peek = nil,
             radius = 0,
             tp_mode = mode_name,
-            tp_path = bullet_tp_ray.build_path(mode_name, track_origin, aim, weapon),
+            tp_path = bullet_tp_ray.build_path(mode_name, track_origin, hitpart, weapon),
             use_curve = false,
             weapon = weapon,
+            hitpart = hitpart,
         }
-    elseif settings.bool(prefix .. "bullet_manip", false) then
-        local body = combat_origin.get_server_origin()
-        local max_r = manip_math.clamp_radius(settings.num(prefix .. "manip_dist", 1))
-
-        if body then
-            local ev = manip_math.evaluate_manipulation(body, aim, { max_radius = max_r })
-            manip_info = {
-                state = ev.state,
-                peek = ev.peek,
-                radius = ev.radius or max_r,
-                use_curve = true,
-                weapon = weapon,
-            }
-            if ev.state == "ready" and ev.peek then
-                track_origin = manip_math.peek_track_origin(ev.peek) or camera
-            end
-        else
-            manip_info = { state = "blocked", peek = nil, radius = max_r, use_curve = true, weapon = weapon }
-        end
-
-        if wallbang then
-            track_origin = pierce_origin(track_origin, aim) or track_origin
-        end
-    else
-        -- Default silent: hook camera→hitpart (instant). Drop curve is visual only
-        -- from muzzle using weapon Speed/Gravity — no aim-up / vertical prediction.
-        local muzzle = combat_origin.get_muzzle_origin() or camera
-        local curve = ballistic.curve_for_weapon(muzzle, aim, weapon, 18)
-        manip_info = {
-            state = "curve",
-            peek = nil,
-            radius = 0,
-            use_curve = true,
-            weapon = weapon,
-            curve_path = curve and curve.path or nil,
-        }
-        track_origin = camera
-        if wallbang then
-            track_origin = pierce_origin(track_origin, aim) or track_origin
-        end
     end
 
-    return track_origin, aim, manip_info
+    if settings.bool(prefix .. "bullet_manip", false) then
+        local body = combat_origin.get_server_origin()
+        local max_r = manip_math.clamp_radius(settings.num(prefix .. "manip_dist", 1))
+        local extra = { radius = max_r }
+        local fire = fire_origin(camera)
+
+        if body then
+            local ev = manip_math.evaluate_manipulation(body, hitpart, { max_radius = max_r })
+            extra.state = ev.state
+            extra.peek = ev.peek
+            extra.radius = ev.radius or max_r
+            if ev.state == "ready" and ev.peek then
+                fire = manip_math.peek_track_origin(ev.peek) or fire
+            end
+        else
+            extra.state = "blocked"
+        end
+
+        if wallbang then
+            fire = pierce_origin(fire, hitpart) or fire
+        end
+
+        local origin, aim_far, info = apply_drop_aim(fire, hitpart, weapon, extra.state or "blocked", extra)
+        return origin, aim_far, info
+    end
+
+    -- Default silent: muzzle → ballistic launch (arc lands on hitpart).
+    local fire = fire_origin(camera)
+    if wallbang then
+        fire = pierce_origin(fire, hitpart) or fire
+    end
+    return apply_drop_aim(fire, hitpart, weapon, "curve", nil)
 end
 
 return M
@@ -10832,6 +10896,7 @@ local menu_util = April.require("core.menu_util")
 local combat_menu = April.require("features.combat.combat_menu")
 local silent_ray = April.require("core.silent_ray")
 local silent_resolve = April.require("features.combat.silent_resolve")
+local silent_whitelist = April.require("features.combat.silent_whitelist")
 local manip_math = April.require("core.manip_math")
 local desync_vis = April.require("core.desync_vis")
 local theme = April.require("core.ui_theme")
@@ -10968,7 +11033,8 @@ function M.register_menu()
     menu_util.bind_children(P_MASTER, {
         PREFIX .. "target_type", PREFIX .. "bone",
         PREFIX .. "filter_health", PREFIX .. "filter_visible", PREFIX .. "filter_team",
-        PREFIX .. "filter_downed",
+        PREFIX .. "filter_downed", PREFIX .. "filter_whitelist", PREFIX .. "whitelist_ids",
+        PREFIX .. "whitelist_clear",
         PREFIX .. "target_players", PREFIX .. "target_npcs", PREFIX .. "target_npc_soldiers", PREFIX .. "target_npc_bosses",
         PREFIX .. "sticky", PREFIX .. "wallbang",
         PREFIX .. "bullet_tp", PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
@@ -11048,6 +11114,13 @@ function M.update(_dt)
 
     update_target(cx, cy, fov)
 
+    -- Middle-click toggles whitelist on current / FOV target (even if filtered out later).
+    local wl_target = locked_target
+    if not wl_target or not targeting.is_aim_target(wl_target) then
+        wl_target = targeting.find_target(cx, cy, fov, PREFIX, { ignore_whitelist = true })
+    end
+    silent_whitelist.tick(wl_target)
+
     if not locked_target or not targeting.is_aim_target(locked_target) then
         silent_ray.stop()
         return
@@ -11087,9 +11160,10 @@ function M.update(_dt)
     local info = cached_track.manip
     local ok_track = false
     if info.use_curve and silent_ray.track_curve then
-        -- Hook is always camera→hitpart (instant). Curve path from resolve is
-        -- muzzle→hitpart drop for visuals; only fill if resolve had none.
-        ok_track = silent_ray.track_curve(origin, aim, info.weapon, SHOOT_VK) == true
+        -- Aim along ballistic launch (aim_far); arc lands on hitpart.
+        ok_track = silent_ray.track_curve(
+            origin, aim, info.weapon, SHOOT_VK, info.hitpart or aim
+        ) == true
         if not info.curve_path and silent_ray.last_curve then
             local curve = silent_ray.last_curve()
             if curve and curve.path then
@@ -15569,7 +15643,6 @@ local menu_util = April.require("core.menu_util")
 local draw_util = April.require("core.draw_util")
 local theme = April.require("core.ui_theme")
 local feature_bind = April.require("core.feature_bind")
-local panel_drag = April.require("core.panel_drag")
 
 local M = {}
 
@@ -15577,7 +15650,8 @@ local P = "april_keybinds_enabled"
 local X_ID = "april_keybinds_x"
 local Y_ID = "april_keybinds_y"
 local W_ID = "april_keybinds_w"
-local PANEL_ID = "april_keybinds_panel"
+
+local TITLE_H = 22
 
 -- Full Win32 VK map (printable + modifiers + OEM + media/nav).
 local VK_NAMES = {
@@ -15688,21 +15762,29 @@ local function collect_rows()
     return rows
 end
 
+local function clamp_layout(x, y, w, sw, sh)
+    w = math.max(160, math.min(480, math.floor(w or 260)))
+    x = math.max(0, math.min(math.max(0, sw - w), math.floor(x or 0)))
+    y = math.max(0, math.min(math.max(0, sh - 40), math.floor(y or 0)))
+    return x, y, w
+end
+
 function M.register_menu()
     local G = menu_util.G
     local T = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
     menu.add_checkbox(T, G.MISC, P, "Keybind Viewer", false)
+
+    menu_util.section(T, G.MISC, "Display")
     menu.add_checkbox(T, G.MISC, "april_keybinds_active_only", "Only Show Active", false, root)
     menu.add_checkbox(T, G.MISC, "april_keybinds_show_unbound", "Show Unbound", true, root)
     menu.add_checkbox(T, G.MISC, "april_keybinds_show_mode", "Show Bind Mode", true, root)
 
-    menu_util.gap(T, G.MISC)
-    menu_util.label(T, G.MISC, "Drag the panel title while Vector UI is open.")
-    menu.add_slider_int(T, G.MISC, X_ID, "Pos X", 0, 4000, 16, root)
-    menu.add_slider_int(T, G.MISC, Y_ID, "Pos Y", 0, 4000, 280, root)
-    menu.add_slider_int(T, G.MISC, W_ID, "Width", 160, 420, 260, root)
+    menu_util.section(T, G.MISC, "Layout")
+    menu.add_slider_int(T, G.MISC, X_ID, "Position X", 0, 1920, 16, root)
+    menu.add_slider_int(T, G.MISC, Y_ID, "Position Y", 0, 1080, 280, root)
+    menu.add_slider_int(T, G.MISC, W_ID, "Panel Width", 160, 480, 260, root)
 
     menu_util.bind_children(P, {
         "april_keybinds_active_only", "april_keybinds_show_unbound", "april_keybinds_show_mode",
@@ -15717,40 +15799,36 @@ function M.draw()
     if not draw or not draw.text then return end
 
     local sw, sh = draw_util.screen_size()
-    local panel_w = settings.num(W_ID, 260)
-    local x = settings.num(X_ID, 16)
-    local y = settings.num(Y_ID, 280)
+    local x, y, panel_w = clamp_layout(
+        settings.num(X_ID, 16),
+        settings.num(Y_ID, 280),
+        settings.num(W_ID, 260),
+        sw, sh
+    )
 
     local rows = collect_rows()
     local pad = 10
-    local title_h = panel_drag.title_h()
     local row_h = 18
     local count = math.max(#rows, 1)
-    local height = title_h + count * row_h + 10
+    local height = TITLE_H + count * row_h + 10
 
-    local dragging
-    x, y, dragging = panel_drag.update(PANEL_ID, x, y, panel_w, height, X_ID, Y_ID, sw, sh)
-
-    local can_drag = panel_drag.menu_is_open()
     theme.draw_panel(x, y, panel_w, height, {
         bg = theme.alpha(theme.BG, 0.88),
-        border = theme.alpha(theme.BORDER, (dragging or can_drag) and 0.7 or 0.4),
+        border = theme.alpha(theme.BORDER, 0.4),
         accent = theme.CYAN,
         accent_w = 2,
         rounding = theme.ROUND,
     })
 
-    local title = "Keybinds"
-    if can_drag then
-        title = title .. "  · drag"
-    end
-    draw_util.text(x + pad, y + 5, title, theme.TEXT, 12)
+    draw_util.text(x + pad, y + 5, "Keybinds", theme.TEXT, 12)
 
-    local ry = y + title_h
+    local ry = y + TITLE_H
     if #rows == 0 then
         draw_util.text(x + pad, ry, "No binds", theme.TEXT_MUTED, 11)
         return
     end
+
+    local max_label = math.max(8, math.floor((panel_w - pad * 2) * 0.55 / 7))
 
     for i = 1, #rows do
         local row = rows[i]
@@ -15758,7 +15836,7 @@ function M.draw()
         local key_col = row.active and theme.CYAN or theme.TEXT_DIM
 
         local label = row.label
-        if #label > 16 then label = label:sub(1, 14) .. ".." end
+        if #label > max_label then label = label:sub(1, math.max(1, max_label - 2)) .. ".." end
         draw_util.text(x + pad, ry, label, name_col, 11)
 
         local right = row.key
@@ -15788,15 +15866,15 @@ local esp_util = April.require("core.esp_util")
 local image_cache = April.require("core.image_cache")
 local asset_urls = April.require("game.asset_urls")
 local theme = April.require("core.ui_theme")
-local panel_drag = April.require("core.panel_drag")
 
 local M = {}
 local P = "april_mod_checker_enabled"
 local X_ID = "april_mod_checker_x"
 local Y_ID = "april_mod_checker_y"
-local PANEL_ID = "april_mod_checker_panel"
+local W_ID = "april_mod_checker_w"
 local MOD_ICON_KEY = "mod_warning"
 local HEAD_OFFSET = 3.5
+local TITLE_H = 24
 
 local seen = {}
 local active = {}
@@ -15873,13 +15951,20 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
+
     menu.add_checkbox(T, G.MISC, P, "Mod Checker", false)
-    menu_util.gap(T, G.MISC)
-    menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Mod Scan Interval (ms)", 1000, 10000, 2500, root)
-    menu_util.label(T, G.MISC, "Drag the panel title while Vector UI is open.")
-    menu.add_slider_int(T, G.MISC, X_ID, "Pos X", -1, 4000, -1, root)
-    menu.add_slider_int(T, G.MISC, Y_ID, "Pos Y", 0, 4000, 72, root)
-    menu_util.bind_master(P, { "april_mod_checker_interval", X_ID, Y_ID })
+
+    menu_util.section(T, G.MISC, "Scan")
+    menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Scan Interval (ms)", 1000, 10000, 2500, root)
+
+    menu_util.section(T, G.MISC, "Layout")
+    menu.add_slider_int(T, G.MISC, X_ID, "Position X", 0, 1920, 1600, root)
+    menu.add_slider_int(T, G.MISC, Y_ID, "Position Y", 0, 1080, 72, root)
+    menu.add_slider_int(T, G.MISC, W_ID, "Panel Width", 180, 420, 260, root)
+
+    menu_util.bind_master(P, {
+        "april_mod_checker_interval", X_ID, Y_ID, W_ID,
+    })
 end
 
 function M.init()
@@ -16076,18 +16161,24 @@ local function build_staff_rows()
     return rows
 end
 
-local function draw_staff_panel(x, y, width, rows, can_drag)
+local function clamp_layout(x, y, w, sw, sh)
+    w = math.max(180, math.min(420, math.floor(w or 260)))
+    x = math.max(0, math.min(math.max(0, sw - w), math.floor(x or 0)))
+    y = math.max(0, math.min(math.max(0, sh - 40), math.floor(y or 0)))
+    return x, y, w
+end
+
+local function draw_staff_panel(x, y, width, rows)
     if not draw or not draw.text then return end
 
     local pad = 10
-    local title_h = panel_drag.title_h()
     local row_h = 44
     local count = math.max(#rows, 1)
-    local height = title_h + count * row_h + 6
+    local height = TITLE_H + count * row_h + 6
 
     theme.draw_panel(x, y, width, height, {
         bg = theme.alpha(theme.BG, 0.90),
-        border = theme.alpha(theme.BORDER, can_drag and 0.7 or 0.45),
+        border = theme.alpha(theme.BORDER, 0.45),
         accent = theme.RED,
         accent_w = 2,
         rounding = theme.ROUND,
@@ -16097,12 +16188,9 @@ local function draw_staff_panel(x, y, width, rows, can_drag)
     if #rows > 1 then
         title = title .. " (" .. #rows .. ")"
     end
-    if can_drag then
-        title = title .. "  · drag"
-    end
     draw_util.text(x + pad, y + 6, title, theme.TEXT, 12)
 
-    local div_y = y + title_h
+    local div_y = y + TITLE_H
     if draw.line then
         draw.line(x + pad, div_y, x + width - pad, div_y, theme.alpha(theme.BORDER, 0.55), 1)
     end
@@ -16112,6 +16200,8 @@ local function draw_staff_panel(x, y, width, rows, can_drag)
         draw.text(x + pad + 12, ry, "No staff detected", theme.TEXT_MUTED, 11)
         return
     end
+
+    local max_name = math.max(10, math.floor((width - pad * 2 - 12) / 7))
 
     for i = 1, #rows do
         local row = rows[i]
@@ -16126,11 +16216,11 @@ local function draw_staff_panel(x, y, width, rows, can_drag)
         end
 
         local name = row.name or "?"
-        if #name > 20 then name = name:sub(1, 18) .. ".." end
+        if #name > max_name then name = name:sub(1, math.max(1, max_name - 2)) .. ".." end
         draw.text(x + pad + 12, ry, name, theme.TEXT, 13)
 
         local role = row.role or "Staff"
-        if #role > 24 then role = role:sub(1, 22) .. ".." end
+        if #role > max_name then role = role:sub(1, math.max(1, max_name - 2)) .. ".." end
         draw.text(x + pad + 12, ry + 15, role, accent, 11)
 
         if row.meta and row.meta ~= "" then
@@ -16149,22 +16239,14 @@ function M.draw()
     M.reconcile_active()
 
     local sw, sh = draw_util.screen_size()
-    local panel_w = 260
-    local default_x = math.max(0, sw - panel_w - 16)
-    local x = settings.num(X_ID, -1)
-    local y = settings.num(Y_ID, 72)
-    if x < 0 then
-        x = default_x
-    end
+    local x, y, panel_w = clamp_layout(
+        settings.num(X_ID, 1600),
+        settings.num(Y_ID, 72),
+        settings.num(W_ID, 260),
+        sw, sh
+    )
 
-    local rows = build_staff_rows()
-    local count = math.max(#rows, 1)
-    local height = panel_drag.title_h() + count * 44 + 6
-    local can_drag = panel_drag.menu_is_open()
-    local dragging
-    x, y, dragging = panel_drag.update(PANEL_ID, x, y, panel_w, height, X_ID, Y_ID, sw, sh)
-
-    draw_staff_panel(x, y, panel_w, rows, can_drag or dragging)
+    draw_staff_panel(x, y, panel_w, build_staff_rows())
 end
 
 return M

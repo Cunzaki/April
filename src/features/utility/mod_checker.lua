@@ -8,15 +8,15 @@ local esp_util = April.require("core.esp_util")
 local image_cache = April.require("core.image_cache")
 local asset_urls = April.require("game.asset_urls")
 local theme = April.require("core.ui_theme")
-local panel_drag = April.require("core.panel_drag")
 
 local M = {}
 local P = "april_mod_checker_enabled"
 local X_ID = "april_mod_checker_x"
 local Y_ID = "april_mod_checker_y"
-local PANEL_ID = "april_mod_checker_panel"
+local W_ID = "april_mod_checker_w"
 local MOD_ICON_KEY = "mod_warning"
 local HEAD_OFFSET = 3.5
+local TITLE_H = 24
 
 local seen = {}
 local active = {}
@@ -93,13 +93,20 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
+
     menu.add_checkbox(T, G.MISC, P, "Mod Checker", false)
-    menu_util.gap(T, G.MISC)
-    menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Mod Scan Interval (ms)", 1000, 10000, 2500, root)
-    menu_util.label(T, G.MISC, "Drag the panel title while Vector UI is open.")
-    menu.add_slider_int(T, G.MISC, X_ID, "Pos X", -1, 4000, -1, root)
-    menu.add_slider_int(T, G.MISC, Y_ID, "Pos Y", 0, 4000, 72, root)
-    menu_util.bind_master(P, { "april_mod_checker_interval", X_ID, Y_ID })
+
+    menu_util.section(T, G.MISC, "Scan")
+    menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Scan Interval (ms)", 1000, 10000, 2500, root)
+
+    menu_util.section(T, G.MISC, "Layout")
+    menu.add_slider_int(T, G.MISC, X_ID, "Position X", 0, 1920, 1600, root)
+    menu.add_slider_int(T, G.MISC, Y_ID, "Position Y", 0, 1080, 72, root)
+    menu.add_slider_int(T, G.MISC, W_ID, "Panel Width", 180, 420, 260, root)
+
+    menu_util.bind_master(P, {
+        "april_mod_checker_interval", X_ID, Y_ID, W_ID,
+    })
 end
 
 function M.init()
@@ -296,18 +303,24 @@ local function build_staff_rows()
     return rows
 end
 
-local function draw_staff_panel(x, y, width, rows, can_drag)
+local function clamp_layout(x, y, w, sw, sh)
+    w = math.max(180, math.min(420, math.floor(w or 260)))
+    x = math.max(0, math.min(math.max(0, sw - w), math.floor(x or 0)))
+    y = math.max(0, math.min(math.max(0, sh - 40), math.floor(y or 0)))
+    return x, y, w
+end
+
+local function draw_staff_panel(x, y, width, rows)
     if not draw or not draw.text then return end
 
     local pad = 10
-    local title_h = panel_drag.title_h()
     local row_h = 44
     local count = math.max(#rows, 1)
-    local height = title_h + count * row_h + 6
+    local height = TITLE_H + count * row_h + 6
 
     theme.draw_panel(x, y, width, height, {
         bg = theme.alpha(theme.BG, 0.90),
-        border = theme.alpha(theme.BORDER, can_drag and 0.7 or 0.45),
+        border = theme.alpha(theme.BORDER, 0.45),
         accent = theme.RED,
         accent_w = 2,
         rounding = theme.ROUND,
@@ -317,12 +330,9 @@ local function draw_staff_panel(x, y, width, rows, can_drag)
     if #rows > 1 then
         title = title .. " (" .. #rows .. ")"
     end
-    if can_drag then
-        title = title .. "  · drag"
-    end
     draw_util.text(x + pad, y + 6, title, theme.TEXT, 12)
 
-    local div_y = y + title_h
+    local div_y = y + TITLE_H
     if draw.line then
         draw.line(x + pad, div_y, x + width - pad, div_y, theme.alpha(theme.BORDER, 0.55), 1)
     end
@@ -332,6 +342,8 @@ local function draw_staff_panel(x, y, width, rows, can_drag)
         draw.text(x + pad + 12, ry, "No staff detected", theme.TEXT_MUTED, 11)
         return
     end
+
+    local max_name = math.max(10, math.floor((width - pad * 2 - 12) / 7))
 
     for i = 1, #rows do
         local row = rows[i]
@@ -346,11 +358,11 @@ local function draw_staff_panel(x, y, width, rows, can_drag)
         end
 
         local name = row.name or "?"
-        if #name > 20 then name = name:sub(1, 18) .. ".." end
+        if #name > max_name then name = name:sub(1, math.max(1, max_name - 2)) .. ".." end
         draw.text(x + pad + 12, ry, name, theme.TEXT, 13)
 
         local role = row.role or "Staff"
-        if #role > 24 then role = role:sub(1, 22) .. ".." end
+        if #role > max_name then role = role:sub(1, math.max(1, max_name - 2)) .. ".." end
         draw.text(x + pad + 12, ry + 15, role, accent, 11)
 
         if row.meta and row.meta ~= "" then
@@ -369,22 +381,14 @@ function M.draw()
     M.reconcile_active()
 
     local sw, sh = draw_util.screen_size()
-    local panel_w = 260
-    local default_x = math.max(0, sw - panel_w - 16)
-    local x = settings.num(X_ID, -1)
-    local y = settings.num(Y_ID, 72)
-    if x < 0 then
-        x = default_x
-    end
+    local x, y, panel_w = clamp_layout(
+        settings.num(X_ID, 1600),
+        settings.num(Y_ID, 72),
+        settings.num(W_ID, 260),
+        sw, sh
+    )
 
-    local rows = build_staff_rows()
-    local count = math.max(#rows, 1)
-    local height = panel_drag.title_h() + count * 44 + 6
-    local can_drag = panel_drag.menu_is_open()
-    local dragging
-    x, y, dragging = panel_drag.update(PANEL_ID, x, y, panel_w, height, X_ID, Y_ID, sw, sh)
-
-    draw_staff_panel(x, y, panel_w, rows, can_drag or dragging)
+    draw_staff_panel(x, y, panel_w, build_staff_rows())
 end
 
 return M

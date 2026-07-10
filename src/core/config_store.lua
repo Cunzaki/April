@@ -32,7 +32,7 @@ local MENU_KEYS = {
     "april_silent_aim", "april_silent_aim_mode",
     "april_silent_target_type", "april_silent_bone",
     "april_silent_filter_health", "april_silent_filter_visible", "april_silent_filter_team",
-    "april_silent_filter_downed",
+    "april_silent_filter_downed", "april_silent_filter_whitelist", "april_silent_whitelist_ids",
     "april_silent_target_players", "april_silent_target_npcs", "april_silent_target_npc_soldiers", "april_silent_target_npc_bosses",
     "april_silent_sticky", "april_silent_wallbang",
     "april_silent_bullet_tp", "april_silent_tp_ray_mode", "april_silent_tp_ray_vis",
@@ -91,7 +91,7 @@ local MENU_KEYS = {
     "april_keybinds_enabled", "april_keybinds_active_only", "april_keybinds_show_unbound", "april_keybinds_show_mode",
     "april_keybinds_x", "april_keybinds_y", "april_keybinds_w",
     "april_mod_checker_enabled", "april_mod_checker_interval",
-    "april_mod_checker_x", "april_mod_checker_y",
+    "april_mod_checker_x", "april_mod_checker_y", "april_mod_checker_w",
 }
 
 local COLOR_KEYS = {

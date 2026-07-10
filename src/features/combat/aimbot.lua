@@ -8,6 +8,7 @@ local menu_util = April.require("core.menu_util")
 local combat_menu = April.require("features.combat.combat_menu")
 local silent_ray = April.require("core.silent_ray")
 local silent_resolve = April.require("features.combat.silent_resolve")
+local silent_whitelist = April.require("features.combat.silent_whitelist")
 local manip_math = April.require("core.manip_math")
 local desync_vis = April.require("core.desync_vis")
 local theme = April.require("core.ui_theme")
@@ -144,7 +145,8 @@ function M.register_menu()
     menu_util.bind_children(P_MASTER, {
         PREFIX .. "target_type", PREFIX .. "bone",
         PREFIX .. "filter_health", PREFIX .. "filter_visible", PREFIX .. "filter_team",
-        PREFIX .. "filter_downed",
+        PREFIX .. "filter_downed", PREFIX .. "filter_whitelist", PREFIX .. "whitelist_ids",
+        PREFIX .. "whitelist_clear",
         PREFIX .. "target_players", PREFIX .. "target_npcs", PREFIX .. "target_npc_soldiers", PREFIX .. "target_npc_bosses",
         PREFIX .. "sticky", PREFIX .. "wallbang",
         PREFIX .. "bullet_tp", PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
@@ -224,6 +226,13 @@ function M.update(_dt)
 
     update_target(cx, cy, fov)
 
+    -- Middle-click toggles whitelist on current / FOV target (even if filtered out later).
+    local wl_target = locked_target
+    if not wl_target or not targeting.is_aim_target(wl_target) then
+        wl_target = targeting.find_target(cx, cy, fov, PREFIX, { ignore_whitelist = true })
+    end
+    silent_whitelist.tick(wl_target)
+
     if not locked_target or not targeting.is_aim_target(locked_target) then
         silent_ray.stop()
         return
@@ -263,9 +272,10 @@ function M.update(_dt)
     local info = cached_track.manip
     local ok_track = false
     if info.use_curve and silent_ray.track_curve then
-        -- Hook is always camera→hitpart (instant). Curve path from resolve is
-        -- muzzle→hitpart drop for visuals; only fill if resolve had none.
-        ok_track = silent_ray.track_curve(origin, aim, info.weapon, SHOOT_VK) == true
+        -- Aim along ballistic launch (aim_far); arc lands on hitpart.
+        ok_track = silent_ray.track_curve(
+            origin, aim, info.weapon, SHOOT_VK, info.hitpart or aim
+        ) == true
         if not info.curve_path and silent_ray.last_curve then
             local curve = silent_ray.last_curve()
             if curve and curve.path then
