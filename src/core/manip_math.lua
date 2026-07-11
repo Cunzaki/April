@@ -4,6 +4,7 @@ local EYE_OFFSET_Y = 2.5
 local DEFAULT_STEPS = 16
 local MIN_RADIUS = 0.1
 local MAX_RADIUS = 1
+local MAX_EXTEND_RADIUS = 8
 
 function M.eye_offset_y()
     return EYE_OFFSET_Y
@@ -13,6 +14,13 @@ function M.clamp_radius(radius)
     radius = tonumber(radius) or 1
     if radius < MIN_RADIUS then return MIN_RADIUS end
     if radius > MAX_RADIUS then return MAX_RADIUS end
+    return math.floor(radius * 100 + 0.5) / 100
+end
+
+function M.clamp_extend_radius(radius)
+    radius = tonumber(radius) or MAX_EXTEND_RADIUS
+    if radius < MIN_RADIUS then return MIN_RADIUS end
+    if radius > MAX_EXTEND_RADIUS then return MAX_EXTEND_RADIUS end
     return math.floor(radius * 100 + 0.5) / 100
 end
 
@@ -29,17 +37,41 @@ function M.is_visible_from_pos(origin, target)
     return M.is_visible_from(origin.x, origin.y, origin.z, target.x, target.y, target.z)
 end
 
-local function search_peek(origin, target_pos, max_radius, steps)
-    max_radius = M.clamp_radius(max_radius)
-    steps = steps or DEFAULT_STEPS
-
+local function search_ring(origin, target_pos, radius, steps)
     for i = 0, steps - 1 do
         local angle = (i / steps) * math.pi * 2
-        local cx = origin.x + math.cos(angle) * max_radius
+        local cx = origin.x + math.cos(angle) * radius
         local cy = origin.y
-        local cz = origin.z + math.sin(angle) * max_radius
+        local cz = origin.z + math.sin(angle) * radius
         if M.is_visible_from(cx, cy, cz, target_pos.x, target_pos.y, target_pos.z) then
-            return { x = cx, y = cy, z = cz }, max_radius
+            return { x = cx, y = cy, z = cz }, radius
+        end
+    end
+    return nil, radius
+end
+
+local function search_peek(origin, target_pos, max_radius, steps, extend)
+    steps = steps or DEFAULT_STEPS
+
+    if not extend then
+        max_radius = M.clamp_radius(max_radius)
+        return search_ring(origin, target_pos, max_radius, steps)
+    end
+
+    max_radius = M.clamp_extend_radius(max_radius)
+    -- Prefer nearer peeks first (1 → … → max), matching divine multi-radius search.
+    local radii = {}
+    local r = 1
+    while r < max_radius - 0.05 do
+        radii[#radii + 1] = r
+        r = r + 1
+    end
+    radii[#radii + 1] = max_radius
+
+    for _, radius in ipairs(radii) do
+        local peek = search_ring(origin, target_pos, radius, steps)
+        if peek then
+            return peek, radius
         end
     end
 
@@ -48,21 +80,23 @@ end
 
 function M.evaluate_manipulation(origin, target_pos, opts)
     opts = opts or {}
+    local extend = opts.extend == true
+    local clamp = extend and M.clamp_extend_radius or M.clamp_radius
 
     if not origin or not target_pos then
-        return { state = "blocked", peek = nil, radius = M.clamp_radius(opts.max_radius) }
+        return { state = "blocked", peek = nil, radius = clamp(opts.max_radius) }
     end
 
     if M.is_visible_from_pos(origin, target_pos) then
-        return { state = "direct", peek = nil, radius = M.clamp_radius(opts.max_radius) }
+        return { state = "direct", peek = nil, radius = clamp(opts.max_radius) }
     end
 
-    local peek, radius = search_peek(origin, target_pos, opts.max_radius, opts.steps)
+    local peek, radius = search_peek(origin, target_pos, opts.max_radius, opts.steps, extend)
     if peek then
         return { state = "ready", peek = peek, radius = radius }
     end
 
-    return { state = "blocked", peek = nil, radius = M.clamp_radius(opts.max_radius) }
+    return { state = "blocked", peek = nil, radius = clamp(opts.max_radius) }
 end
 
 function M.find_manipulation_position(origin, target_pos, opts)

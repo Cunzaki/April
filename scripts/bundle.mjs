@@ -72,9 +72,12 @@ const ORDER = [
   "features/combat/targeting.lua",
   "features/combat/bullet_tp_ray.lua",
   "features/combat/silent_resolve.lua",
+  "features/combat/manip_extend.lua",
   "features/combat/aimbot.lua",
   "features/combat/perfect_farm.lua",
   "features/combat/gun_mods.lua",
+  "features/utility/mod_checker.lua",
+  "features/visuals/player_esp.lua",
   "features/visuals/target_overlay.lua",
   "features/visuals/crosshair.lua",
   "features/visuals/bullet_tracers.lua",
@@ -89,7 +92,7 @@ const ORDER = [
   "features/radar/waypoints.lua",
   "features/radar/tactical_map.lua",
   "features/utility/keybind_viewer.lua",
-  "features/utility/mod_checker.lua",
+  "features/utility/anti_afk.lua",
   "features/utility/config.lua",
   "menu/tabs.lua",
   "app.lua",
@@ -102,7 +105,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.65.5",
+    version = "3.66.0",
     debug = false,
     _mods = {},
     bundled = true,

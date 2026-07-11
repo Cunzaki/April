@@ -6,7 +6,8 @@ local notify = April.require("core.notify")
 local M = {}
 
 local IDS_KEY = "april_silent_whitelist_ids"
-local FILTER_KEY = "april_silent_filter_whitelist"
+local FILTERS_KEY = "april_silent_filters"
+local FILTER_WHITELIST_IDX = 5
 local MMB = 0x04
 
 local was_down = false
@@ -108,7 +109,7 @@ function M.clear()
 end
 
 function M.enabled()
-    return settings.bool(FILTER_KEY, false)
+    return settings.multi(FILTERS_KEY, FILTER_WHITELIST_IDX, false)
 end
 
 -- Skip target when whitelist filter is on and they are listed.

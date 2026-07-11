@@ -11,6 +11,7 @@ M._menu_registered = false
 M.FEATURE_ORDER = {
     "features.combat.aimbot",
     "features.combat.gun_mods",
+    "features.visuals.player_esp",
     "features.visuals.target_overlay",
     "features.visuals.crosshair",
     "features.visuals.bullet_tracers",
@@ -23,6 +24,7 @@ M.FEATURE_ORDER = {
     "features.radar.waypoints",
     "features.utility.keybind_viewer",
     "features.utility.mod_checker",
+    "features.utility.anti_afk",
     "features.combat.perfect_farm",
     "features.movement.exploits",
     "features.movement.fling",

@@ -36,6 +36,33 @@ function M.num(id, default)
     return tonumber(M.get(id, default)) or default or 0
 end
 
+local function as_bool(v, default)
+    if v == nil then
+        return default == true
+    end
+    if v == true or v == 1 or v == "1" or v == "true" or v == "True" then
+        return true
+    end
+    if v == false or v == 0 or v == "0" or v == "false" or v == "False" then
+        return false
+    end
+    return default == true
+end
+
+-- Multicombo slot (1-based). Accepts bool / 0|1 / "0"|"1"|"true"|"false".
+function M.multi(id, index, default)
+    local t = M.get(id)
+    if type(t) ~= "table" then
+        return default == true
+    end
+    -- Prefer 1-based; some builds expose 0-based arrays.
+    local v = t[index]
+    if v == nil and index >= 1 then
+        v = t[index - 1]
+    end
+    return as_bool(v, default)
+end
+
 function M.combo_index(id, labels, default)
     default = default or 0
     local v = M.get(id, default)

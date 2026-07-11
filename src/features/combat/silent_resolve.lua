@@ -73,7 +73,7 @@ function M.resolve_track(target, prefix, cx, cy)
     if not hitpart then return nil, nil, OFF_INFO end
 
     local track_origin = camera
-    local wallbang = settings.bool(prefix .. "wallbang", false)
+    local wallbang = settings.multi(prefix .. "options", 2, false)
     local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
 
     if settings.bool(prefix .. "bullet_tp", false) then
@@ -103,7 +103,19 @@ function M.resolve_track(target, prefix, cx, cy)
         local fire = fire_origin(camera)
 
         if body then
-            local ev = manip_math.evaluate_manipulation(body, hitpart, { max_radius = max_r })
+            local ev
+            if settings.bool(prefix .. "manip_extend", false) then
+                -- Extend: search up to 8 studs for physical/desync peek; keep 1-stud as fallback.
+                local ext_r = manip_math.clamp_extend_radius(settings.num(prefix .. "manip_extend_dist", 8))
+                ev = manip_math.evaluate_manipulation(body, hitpart, { max_radius = ext_r, extend = true })
+                if ev.state ~= "ready" then
+                    ev = manip_math.evaluate_manipulation(body, hitpart, { max_radius = max_r })
+                else
+                    extra.extend = true
+                end
+            else
+                ev = manip_math.evaluate_manipulation(body, hitpart, { max_radius = max_r })
+            end
             extra.state = ev.state
             extra.peek = ev.peek
             extra.radius = ev.radius or max_r

@@ -23,9 +23,9 @@ function M.register_menu()
     menu.add_checkbox(T, G.WORLD, "april_npc_soldiers", "Soldiers", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, menu_util.parent(P, { colorpicker = { 1, 0.5, 0.1, 1 } }))
     menu.add_combo(T, G.WORLD, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 0, root)
-    menu.add_checkbox(T, G.WORLD, "april_npc_health", "Health Bar", false, root)
-    menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_offscreen", "Offscreen Arrows", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_health", "NPC Health Bar", false, root)
+    menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "NPC Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_offscreen", "NPC Offscreen Arrows", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "NPC Show Name", true, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "NPC Show Distance", true, root)
 
@@ -249,8 +249,6 @@ function M.draw()
     local text_size = esp_util.text_size()
     local me = env.get_local_player()
     local me_pos = me and me.position
-    local sw, sh = draw_util.screen_size()
-    local cx, cy = sw * 0.5, sh * 0.5
 
     for _, entry in ipairs(frame_draw_targets()) do
         if not kind_enabled(entry.kind) then goto continue end
@@ -294,7 +292,7 @@ function M.draw()
             local sx, sy, vis = esp_util.w2s(lx, ly, lz)
             if not vis then
                 if settings.bool("april_npc_offscreen", false) then
-                    esp_util.draw_offscreen_arrow(cx, cy, sx, sy, col, 12)
+                    esp_util.draw_offscreen_to(lx, ly, lz, col, 12)
                 end
                 goto continue
             end

@@ -18,7 +18,7 @@ function M.register_menu()
     menu.add_checkbox(T, G.RADAR, "april_wp_beacon", "Beacon Pillar", false, root)
     menu.add_slider_int(T, G.RADAR, "april_wp_beacon_h", "Beacon Height", 20, 200, 90, menu_util.parent("april_wp_beacon"))
     menu.add_checkbox(T, G.RADAR, "april_wp_draw", "Draw Markers", false, menu_util.parent(P, { colorpicker = { 0.2, 1, 0.8, 1 } }))
-    menu.add_slider_int(T, G.RADAR, "april_wp_slot", "Active Slot", 1, 5, 1, root)
+    menu.add_slider_int(T, G.RADAR, "april_wp_slot", "Waypoint Active Slot", 1, 5, 1, root)
 
     menu_util.button(T, G.RADAR, "april_wp_set", "Set Active Waypoint", function()
         local slot = settings.num("april_wp_slot", 1)

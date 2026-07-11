@@ -9,6 +9,7 @@ local combat_menu = April.require("features.combat.combat_menu")
 local silent_ray = April.require("core.silent_ray")
 local silent_resolve = April.require("features.combat.silent_resolve")
 local silent_whitelist = April.require("features.combat.silent_whitelist")
+local manip_extend = April.require("features.combat.manip_extend")
 local manip_math = April.require("core.manip_math")
 local desync_vis = April.require("core.desync_vis")
 local theme = April.require("core.ui_theme")
@@ -144,13 +145,12 @@ function M.register_menu()
 
     menu_util.bind_children(P_MASTER, {
         PREFIX .. "target_type", PREFIX .. "bone",
-        PREFIX .. "filter_health", PREFIX .. "filter_visible", PREFIX .. "filter_team",
-        PREFIX .. "filter_downed", PREFIX .. "filter_whitelist", PREFIX .. "whitelist_ids",
-        PREFIX .. "whitelist_clear",
-        PREFIX .. "target_players", PREFIX .. "target_npcs", PREFIX .. "target_npc_soldiers", PREFIX .. "target_npc_bosses",
-        PREFIX .. "sticky", PREFIX .. "wallbang",
+        PREFIX .. "filters",
+        PREFIX .. "whitelist_ids", PREFIX .. "whitelist_clear",
+        PREFIX .. "targets", PREFIX .. "options",
         PREFIX .. "bullet_tp", PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
-        PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
+        PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_extend", PREFIX .. "manip_extend_dist",
+        PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
         PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
         PREFIX .. "hit_chance", PREFIX .. "max_dist", PREFIX .. "fov",
     })
@@ -160,15 +160,16 @@ function M.register_menu()
     })
 
     menu_util.bind_children(PREFIX .. "bullet_manip", {
-        PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
+        PREFIX .. "manip_dist", PREFIX .. "manip_extend", PREFIX .. "manip_extend_dist",
+        PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
+    })
+
+    menu_util.bind_children(PREFIX .. "manip_extend", {
+        PREFIX .. "manip_extend_dist",
     })
 
     menu_util.bind_children(PREFIX .. "draw_fov", {
         PREFIX .. "fov_style",
-    })
-
-    menu_util.bind_children(PREFIX .. "target_npcs", {
-        PREFIX .. "target_npc_soldiers", PREFIX .. "target_npc_bosses",
     })
 end
 
@@ -177,7 +178,7 @@ local function active()
 end
 
 local function update_target(cx, cy, fov)
-    local sticky = settings.bool(PREFIX .. "sticky", false)
+    local sticky = settings.multi(PREFIX .. "options", 1, false)
     local now = tick_ms()
 
     if sticky and locked_target then
@@ -208,6 +209,7 @@ function M.update(_dt)
         fire_was_down = false
         shot_allowed = true
         silent_ray.stop()
+        manip_extend.reset()
         return
     end
 
@@ -215,6 +217,7 @@ function M.update(_dt)
 
     if not holding_weapon() then
         silent_ray.stop()
+        manip_extend.reset()
         return
     end
 
@@ -235,8 +238,12 @@ function M.update(_dt)
 
     if not locked_target or not targeting.is_aim_target(locked_target) then
         silent_ray.stop()
+        manip_extend.reset()
         return
     end
+
+    -- Extend: desync + physical peek up to 8 studs (1-stud silent manip stays separate).
+    manip_extend.update(locked_target, PREFIX)
 
     -- Hit chance rolls once per mouse-down (not every frame).
     local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)

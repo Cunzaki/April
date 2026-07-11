@@ -1,11 +1,11 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-10T03:51:43.684Z
+    Built: 2026-07-10T15:16:16.622Z
 ]]
 
 April = {
-    version = "3.65.5",
+    version = "3.66.0",
     debug = false,
     _mods = {},
     bundled = true,
@@ -380,6 +380,33 @@ function M.num(id, default)
     return tonumber(M.get(id, default)) or default or 0
 end
 
+local function as_bool(v, default)
+    if v == nil then
+        return default == true
+    end
+    if v == true or v == 1 or v == "1" or v == "true" or v == "True" then
+        return true
+    end
+    if v == false or v == 0 or v == "0" or v == "false" or v == "False" then
+        return false
+    end
+    return default == true
+end
+
+-- Multicombo slot (1-based). Accepts bool / 0|1 / "0"|"1"|"true"|"false".
+function M.multi(id, index, default)
+    local t = M.get(id)
+    if type(t) ~= "table" then
+        return default == true
+    end
+    -- Prefer 1-based; some builds expose 0-based arrays.
+    local v = t[index]
+    if v == nil and index >= 1 then
+        v = t[index - 1]
+    end
+    return as_bool(v, default)
+end
+
 function M.combo_index(id, labels, default)
     default = default or 0
     local v = M.get(id, default)
@@ -566,6 +593,19 @@ function M.text_centered(x, y, text, col, size)
     draw.text(x - tw * 0.5, y, text, col, size or 14)
 end
 
+-- Stronger silhouette for far ESP (extra soft shadow under auto outline).
+function M.text_centered_strong(x, y, text, col, size)
+    if not draw or not draw.text or not draw.get_text_size then return end
+    text = text_util.sanitize(text)
+    size = size or 14
+    local tw = draw.get_text_size(text, size)
+    local tx = x - tw * 0.5
+    local a = (col and col[4]) or 1
+    local shadow = { 0, 0, 0, a * 0.55 }
+    draw.text(tx + 1, y + 1, text, shadow, size)
+    draw.text(tx, y, text, col, size)
+end
+
 function M.text_outlined(x, y, text, col, size)
     if not draw or not draw.text then return end
     draw.text(x, y, text_util.sanitize(text), col, size or 14)
@@ -586,9 +626,55 @@ function M.box_esp(x, y, w, h, col, style)
     end
 end
 
+-- Soft outer box + crisp inner for readability at any range.
+function M.box_esp_nice(x, y, w, h, col, style)
+    if not draw then return end
+    local a = (col and col[4]) or 1
+    local outer = { 0, 0, 0, a * 0.7 }
+    if style == 1 and draw.corner_box then
+        draw.corner_box(x - 1, y - 1, w + 2, h + 2, outer)
+        draw.corner_box(x, y, w, h, col)
+        return
+    end
+    if draw.box then
+        draw.box(x - 1, y - 1, w + 2, h + 2, outer, 0, 0)
+        draw.box(x, y, w, h, col, 0, style or 0)
+    end
+end
+
 function M.health_bar(x, y, h, hp, max_hp)
     if not draw or not draw.health_bar then return end
     draw.health_bar(x, y, h, hp, max_hp)
+end
+
+-- Custom vertical HP bar that scales with box height (readable far away).
+function M.health_bar_nice(x, y, h, hp, max_hp, bar_w)
+    if not draw or not hp or not max_hp or max_hp <= 0 then return end
+    h = math.max(8, h)
+    bar_w = math.max(3, bar_w or math.floor(h * 0.07 + 0.5))
+    local pct = math_util.clamp(hp / max_hp, 0, 1)
+    local fill_h = math.max(1, h * pct)
+
+    if draw.rect_filled then
+        draw.rect_filled(x, y, bar_w, h, { 0, 0, 0, 0.55 }, 1)
+        -- green → yellow → red
+        local r, g, b
+        if pct > 0.5 then
+            local t = (pct - 0.5) * 2
+            r, g, b = 1 - t, 1, 0.25
+        else
+            local t = pct * 2
+            r, g, b = 1, t, 0.2
+        end
+        draw.rect_filled(x, y + (h - fill_h), bar_w, fill_h, { r, g, b, 0.95 }, 1)
+    elseif draw.health_bar then
+        draw.health_bar(x + bar_w, y, h, hp, max_hp)
+        return bar_w
+    end
+    if draw.rect then
+        draw.rect(x, y, bar_w, h, { 0, 0, 0, 0.85 }, 1, 1)
+    end
+    return bar_w
 end
 
 function M.line(x1, y1, x2, y2, col, thick)
@@ -1259,8 +1345,9 @@ function M.model_screen_bounds(model)
     if not env.is_valid(model) then return nil end
 
     local part_names = {
-        "Head", "HumanoidRootPart", "UpperTorso", "LowerTorso",
-        "LeftFoot", "RightFoot", "Left Leg", "Right Leg",
+        "Head", "HumanoidRootPart", "UpperTorso", "LowerTorso", "Torso",
+        "LeftFoot", "RightFoot", "LeftHand", "RightHand",
+        "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg",
     }
 
     local min_x, min_y, max_x, max_y
@@ -1290,7 +1377,70 @@ function M.model_screen_bounds(model)
 
     local w = math.max(8, max_x - min_x)
     local h = math.max(12, max_y - min_y)
-    return { x = min_x, y = min_y, w = w, h = h, valid = true }
+    -- Pad so boxes don't hug the mesh too tightly.
+    local pad_x = math.max(2, w * 0.12)
+    local pad_y = math.max(2, h * 0.06)
+    return {
+        x = min_x - pad_x,
+        y = min_y - pad_y,
+        w = w + pad_x * 2,
+        h = h + pad_y * 2,
+        valid = true,
+    }
+end
+
+-- Build screen AABB from entity bone projections (best far-range box).
+function M.bones_screen_bounds(player)
+    if not player or not player.get_bones_screen then return nil end
+    local bones = player:get_bones_screen()
+    if not bones then return nil end
+
+    local min_x, min_y, max_x, max_y
+    local any = false
+    for _, pt in pairs(bones) do
+        if pt then
+            local x = pt.x or pt[1]
+            local y = pt.y or pt[2]
+            if x and y then
+                any = true
+                min_x = min_x and math.min(min_x, x) or x
+                min_y = min_y and math.min(min_y, y) or y
+                max_x = max_x and math.max(max_x, x) or x
+                max_y = max_y and math.max(max_y, y) or y
+            end
+        end
+    end
+    if not any then return nil end
+
+    local w = math.max(4, max_x - min_x)
+    local h = math.max(6, max_y - min_y)
+    local pad_x = math.max(2, w * 0.14)
+    local pad_y = math.max(2, h * 0.06)
+    return {
+        x = min_x - pad_x,
+        y = min_y - pad_y,
+        w = w + pad_x * 2,
+        h = h + pad_y * 2,
+        valid = true,
+    }
+end
+
+-- Keep far targets readable: never let the box collapse to a speck.
+function M.ensure_min_bounds(b, min_w, min_h)
+    if not b or not b.valid then return b end
+    min_w = min_w or 22
+    min_h = min_h or 40
+    local cx = b.x + b.w * 0.5
+    local cy = b.y + b.h * 0.5
+    if b.w < min_w then
+        b.w = min_w
+        b.x = cx - min_w * 0.5
+    end
+    if b.h < min_h then
+        b.h = min_h
+        b.y = cy - min_h * 0.5
+    end
+    return b
 end
 
 function M.draw_model_skeleton(model, col, thick)
@@ -1380,6 +1530,55 @@ function M.draw_offscreen_arrow(cx, cy, tx, ty, col, size)
         draw_util.line(px, py, px - dx * 8 + lx * 6, py - dy * 8 + ly * 6, col, 2)
         draw_util.line(px, py, px - dx * 8 - lx * 6, py - dy * 8 - ly * 6, col, 2)
     end
+end
+
+-- Clamp a world point to the screen edge and draw an arrow pointing at it.
+-- Returns true if an arrow was drawn (target off-screen / outside margin).
+function M.draw_offscreen_to(wx, wy, wz, col, size, margin)
+    local sw, sh = draw_util.screen_size()
+    if not sw or sw < 1 or not sh or sh < 1 then return false end
+
+    local cx, cy = sw * 0.5, sh * 0.5
+    margin = margin or 28
+    size = size or 14
+
+    local sx, sy, on = M.w2s(wx, wy, wz)
+    sx = tonumber(sx) or cx
+    sy = tonumber(sy) or cy
+
+    if on and sx >= margin and sy >= margin and sx <= (sw - margin) and sy <= (sh - margin) then
+        return false
+    end
+
+    local dx, dy = sx - cx, sy - cy
+    -- Behind / degenerate projection: aim from look direction if available.
+    if (dx * dx + dy * dy) < 1 then
+        if camera and camera.get_look_vector then
+            local look = camera.get_look_vector()
+            if look then
+                dx = look.x or look.X or 0
+                dy = -(look.y or look.Y or 0)
+            end
+        end
+        if (dx * dx + dy * dy) < 0.0001 then
+            dx, dy = 0, -1
+        end
+    end
+
+    local len = math.sqrt(dx * dx + dy * dy)
+    dx, dy = dx / len, dy / len
+
+    -- Ray from center → edge of inset rect.
+    local hw = (sw * 0.5) - margin
+    local hh = (sh * 0.5) - margin
+    local scale_x = (math.abs(dx) > 1e-6) and (hw / math.abs(dx)) or 1e9
+    local scale_y = (math.abs(dy) > 1e-6) and (hh / math.abs(dy)) or 1e9
+    local scale = math.min(scale_x, scale_y)
+    local ex = cx + dx * scale
+    local ey = cy + dy * scale
+
+    M.draw_offscreen_arrow(cx, cy, ex, ey, col, size)
+    return true
 end
 
 local BOX_EDGES = {
@@ -1654,10 +1853,7 @@ function M.color_index(id, default)
 end
 
 function M.multicombo_selected(id, index)
-    local t = settings.get(id)
-    if type(t) ~= "table" then return false end
-    local v = t[index]
-    return v == true or v == 1
+    return settings.multi(id, index, false)
 end
 
 function M.multicombo_defaults(count)
@@ -1711,7 +1907,8 @@ local function apply_one(inst, applied)
     if not addr then return false end
     if applied[addr] then return true end
     local ok, result = pcall(exploits.ApplyChamsToInstance, inst)
-    if ok and result then
+    -- Some builds return nil on success; only treat explicit false as failure.
+    if ok and result ~= false then
         applied[addr] = true
         return true
     end
@@ -1720,6 +1917,61 @@ end
 
 function M.cham_part(inst, applied)
     return apply_one(inst, applied or {})
+end
+
+-- Fallen R15: body MeshParts + nested armor copies under skin Models (dump).
+local PLAYER_CHAM_NAMES = {
+    Head = true, UpperTorso = true, LowerTorso = true, Torso = true,
+    LeftUpperArm = true, RightUpperArm = true, LeftLowerArm = true, RightLowerArm = true,
+    LeftHand = true, RightHand = true,
+    LeftUpperLeg = true, RightUpperLeg = true, LeftLowerLeg = true, RightLowerLeg = true,
+    LeftFoot = true, RightFoot = true,
+    Armor = true, -- clothing layer MeshParts under Default/Abibas models
+}
+
+local PLAYER_CHAM_SKIP = {
+    HumanoidRootPart = true,
+    CollisionPart = true,
+}
+
+function M.cham_player_character(char, applied)
+    if not char or not env.is_valid(char) then return 0 end
+    applied = applied or {}
+
+    local list = env.safe_call(function()
+        if char.get_descendants then return char:get_descendants() end
+        return char:GetDescendants()
+    end) or {}
+
+    local n = 0
+    for i = 1, #list do
+        local inst = list[i]
+        local name = inst and (inst.Name or inst.name)
+        if name and PLAYER_CHAM_NAMES[name] and not PLAYER_CHAM_SKIP[name] then
+            if apply_one(inst, applied) then
+                n = n + 1
+            end
+        end
+    end
+
+    -- Fallback: direct children only (some builds omit nested descendants).
+    if n == 0 then
+        local kids = env.safe_call(function()
+            if char.get_children then return char:get_children() end
+            return char:GetChildren()
+        end) or {}
+        for i = 1, #kids do
+            local inst = kids[i]
+            local name = inst and (inst.Name or inst.name)
+            if name and PLAYER_CHAM_NAMES[name] and not PLAYER_CHAM_SKIP[name] then
+                if apply_one(inst, applied) then
+                    n = n + 1
+                end
+            end
+        end
+    end
+
+    return n
 end
 
 -- Prefer a single visual part per ESP entry (Main / HRP / first MeshPart).
@@ -2901,6 +3153,7 @@ local EYE_OFFSET_Y = 2.5
 local DEFAULT_STEPS = 16
 local MIN_RADIUS = 0.1
 local MAX_RADIUS = 1
+local MAX_EXTEND_RADIUS = 8
 
 function M.eye_offset_y()
     return EYE_OFFSET_Y
@@ -2910,6 +3163,13 @@ function M.clamp_radius(radius)
     radius = tonumber(radius) or 1
     if radius < MIN_RADIUS then return MIN_RADIUS end
     if radius > MAX_RADIUS then return MAX_RADIUS end
+    return math.floor(radius * 100 + 0.5) / 100
+end
+
+function M.clamp_extend_radius(radius)
+    radius = tonumber(radius) or MAX_EXTEND_RADIUS
+    if radius < MIN_RADIUS then return MIN_RADIUS end
+    if radius > MAX_EXTEND_RADIUS then return MAX_EXTEND_RADIUS end
     return math.floor(radius * 100 + 0.5) / 100
 end
 
@@ -2926,17 +3186,41 @@ function M.is_visible_from_pos(origin, target)
     return M.is_visible_from(origin.x, origin.y, origin.z, target.x, target.y, target.z)
 end
 
-local function search_peek(origin, target_pos, max_radius, steps)
-    max_radius = M.clamp_radius(max_radius)
-    steps = steps or DEFAULT_STEPS
-
+local function search_ring(origin, target_pos, radius, steps)
     for i = 0, steps - 1 do
         local angle = (i / steps) * math.pi * 2
-        local cx = origin.x + math.cos(angle) * max_radius
+        local cx = origin.x + math.cos(angle) * radius
         local cy = origin.y
-        local cz = origin.z + math.sin(angle) * max_radius
+        local cz = origin.z + math.sin(angle) * radius
         if M.is_visible_from(cx, cy, cz, target_pos.x, target_pos.y, target_pos.z) then
-            return { x = cx, y = cy, z = cz }, max_radius
+            return { x = cx, y = cy, z = cz }, radius
+        end
+    end
+    return nil, radius
+end
+
+local function search_peek(origin, target_pos, max_radius, steps, extend)
+    steps = steps or DEFAULT_STEPS
+
+    if not extend then
+        max_radius = M.clamp_radius(max_radius)
+        return search_ring(origin, target_pos, max_radius, steps)
+    end
+
+    max_radius = M.clamp_extend_radius(max_radius)
+    -- Prefer nearer peeks first (1 → … → max), matching divine multi-radius search.
+    local radii = {}
+    local r = 1
+    while r < max_radius - 0.05 do
+        radii[#radii + 1] = r
+        r = r + 1
+    end
+    radii[#radii + 1] = max_radius
+
+    for _, radius in ipairs(radii) do
+        local peek = search_ring(origin, target_pos, radius, steps)
+        if peek then
+            return peek, radius
         end
     end
 
@@ -2945,21 +3229,23 @@ end
 
 function M.evaluate_manipulation(origin, target_pos, opts)
     opts = opts or {}
+    local extend = opts.extend == true
+    local clamp = extend and M.clamp_extend_radius or M.clamp_radius
 
     if not origin or not target_pos then
-        return { state = "blocked", peek = nil, radius = M.clamp_radius(opts.max_radius) }
+        return { state = "blocked", peek = nil, radius = clamp(opts.max_radius) }
     end
 
     if M.is_visible_from_pos(origin, target_pos) then
-        return { state = "direct", peek = nil, radius = M.clamp_radius(opts.max_radius) }
+        return { state = "direct", peek = nil, radius = clamp(opts.max_radius) }
     end
 
-    local peek, radius = search_peek(origin, target_pos, opts.max_radius, opts.steps)
+    local peek, radius = search_peek(origin, target_pos, opts.max_radius, opts.steps, extend)
     if peek then
         return { state = "ready", peek = peek, radius = radius }
     end
 
-    return { state = "blocked", peek = nil, radius = M.clamp_radius(opts.max_radius) }
+    return { state = "blocked", peek = nil, radius = clamp(opts.max_radius) }
 end
 
 function M.find_manipulation_position(origin, target_pos, opts)
@@ -3116,6 +3402,15 @@ function M.apply_movement_only()
     pcall(fflag_mem.refresh)
     fflag_mem.set_int("S2PhysicsSenderRate", 0)
     fflag_mem.set_int("PhysicsSenderMaxBandwidthBps", 0)
+    fflag_mem.set_int("DataSenderRate", 60)
+end
+
+-- Divine-style extend choke: bandwidth -9999 before physical peek move.
+function M.apply_extend()
+    active_count = active_count + 1
+    pcall(fflag_mem.refresh)
+    fflag_mem.set_int("S2PhysicsSenderRate", 0)
+    fflag_mem.set_int("PhysicsSenderMaxBandwidthBps", -9999)
     fflag_mem.set_int("DataSenderRate", 60)
 end
 
@@ -3808,6 +4103,15 @@ local EXCLUDE = {
 
 local MENU_KEYS = {
     "april_esp_text_size",
+    "april_player_enabled", "april_player_enabled_mode",
+    "april_player_box_mode",
+    "april_player_health", "april_player_skeleton", "april_player_offscreen",
+    "april_player_show_name", "april_player_show_distance",
+    "april_player_show_weapon", "april_player_health_text",
+    "april_player_clan_tag", "april_player_clan_color",
+    "april_player_esp_filters", "april_player_esp_flags",
+    "april_player_chams", "april_player_chams_mode", "april_player_chams_color",
+    "april_player_range",
         "april_target_overlay", "april_target_overlay_fov", "april_target_overlay_gear_size", "april_target_overlay_top",
         "april_target_overlay_fallback_fov",
     "april_crosshair_enabled", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
@@ -3819,13 +4123,12 @@ local MENU_KEYS = {
     "april_hitmarkers_size", "april_hitmarkers_gap", "april_hitmarkers_life", "april_hitmarkers_thick",
     "april_silent_aim", "april_silent_aim_mode",
     "april_silent_target_type", "april_silent_bone",
-    "april_silent_filter_health", "april_silent_filter_visible", "april_silent_filter_team",
-    "april_silent_filter_downed", "april_silent_filter_whitelist", "april_silent_whitelist_ids",
-    "april_silent_target_players", "april_silent_target_npcs", "april_silent_target_npc_soldiers", "april_silent_target_npc_bosses",
-    "april_silent_sticky", "april_silent_wallbang",
+    "april_silent_filters", "april_silent_whitelist_ids",
+    "april_silent_targets", "april_silent_options",
     "april_silent_bullet_tp", "april_silent_tp_ray_mode", "april_silent_tp_ray_vis",
     "april_silent_bullet_manip",
-    "april_silent_manip_dist", "april_silent_manip_status", "april_silent_manip_peek_vis",
+    "april_silent_manip_dist", "april_silent_manip_extend", "april_silent_manip_extend_dist",
+    "april_silent_manip_status", "april_silent_manip_peek_vis",
     "april_silent_draw_fov", "april_silent_fov_style", "april_silent_target_line",
     "april_silent_hit_chance", "april_silent_max_dist", "april_silent_fov",
     "april_gunmods_enabled", "april_gunmods_enabled_mode", "april_gm_mode", "april_gm_weapon_select",
@@ -3852,6 +4155,7 @@ local MENU_KEYS = {
     "april_npc_enabled", "april_npc_enabled_mode", "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode",
     "april_npc_health", "april_npc_skeleton",
     "april_npc_offscreen", "april_npc_show_name", "april_npc_show_distance", "april_npc_range",
+    "april_anti_afk",
     "april_base_enabled", "april_base_enabled_mode", "april_base_cabinet", "april_storage_cabinet", "april_small_box", "april_large_box",
     "april_sleeping_bag", "april_auto_turret", "april_auto_turret_ring", "april_shotgun_turret", "april_shotgun_turret_ring",
     "april_wooden_door", "april_wooden_double_door", "april_salvaged_door", "april_metal_door",
@@ -3887,6 +4191,7 @@ local COLOR_KEYS = {
     "april_bullet_tracers", "april_bullet_tracers_color2",
     "april_hitmarkers", "april_hitmarkers_head",
     "april_silent_aim", "april_silent_draw_fov", "april_silent_target_line", "april_silent_tp_ray_vis",
+    "april_player_enabled",
     "april_stone_node", "april_metal_node", "april_phosphate_node", "april_corn_plant", "april_tomato_plant",
     "april_pumpkin_plant", "april_lemon_plant", "april_raspberry_plant", "april_blueberry_plant",
     "april_wool_plant", "april_hemp_plant", "april_deer", "april_boar", "april_wolf",
@@ -3939,6 +4244,7 @@ local HOTKEY_KEYS = {
     "april_desync_enabled",
     "april_bullet_manip_enabled",
     "april_silent_aim",
+    "april_player_enabled",
 }
 
 function M.get_config_path(name)
@@ -3958,8 +4264,34 @@ local function serialize_value(v)
     if t == "string" then return v end
     if t == "table" then
         local parts = {}
-        for i = 1, #v do
-            parts[i] = tostring(v[i])
+        local n = #v
+        -- 0-based arrays from some menu builds
+        if n == 0 and v[0] ~= nil then
+            local i = 0
+            while v[i] ~= nil do
+                local item = v[i]
+                if type(item) == "boolean" then
+                    parts[#parts + 1] = item and "1" or "0"
+                elseif item == 1 or item == "1" or item == true then
+                    parts[#parts + 1] = "1"
+                else
+                    parts[#parts + 1] = "0"
+                end
+                i = i + 1
+            end
+            return table.concat(parts, ",")
+        end
+        for i = 1, n do
+            local item = v[i]
+            if type(item) == "boolean" then
+                parts[i] = item and "1" or "0"
+            elseif item == 1 or item == "1" or item == true or item == "true" then
+                parts[i] = "1"
+            elseif type(item) == "number" then
+                parts[i] = tostring(item)
+            else
+                parts[i] = "0"
+            end
         end
         return table.concat(parts, ",")
     end
@@ -3970,11 +4302,18 @@ local function parse_value(raw)
     if raw == "true" then return true end
     if raw == "false" then return false end
     local n = tonumber(raw)
-    if n then return n end
+    if n and not raw:find(",") then return n end
     if raw:find(",") then
         local out = {}
         for part in raw:gmatch("[^,]+") do
-            table.insert(out, tonumber(part) or part)
+            part = part:match("^%s*(.-)%s*$") or part
+            if part == "true" or part == "1" then
+                out[#out + 1] = true
+            elseif part == "false" or part == "0" then
+                out[#out + 1] = false
+            else
+                out[#out + 1] = tonumber(part) or part
+            end
         end
         return out
     end
@@ -8727,30 +9066,173 @@ local team_state = April.require("game.team_state")
 
 local M = {}
 
-function M.is_downed(player)
-    if not player then return false end
-
-    local hum = player.humanoid
-    if not hum and player.character then
-        hum = env.safe_call(function()
-            if player.character.FindFirstChildOfClass then
-                return player.character:FindFirstChildOfClass("Humanoid")
-            end
-            return player.character:FindFirstChild("Humanoid")
-        end)
-    end
-    if not hum then return false end
-
-    local down = env.safe_call(function()
-        if hum.GetAttribute then
-            return hum:GetAttribute("Downed")
-        end
-        if hum.get_attribute then
-            return hum:get_attribute("Downed")
-        end
+local function inst_attr(inst, key)
+    if not inst then return nil end
+    -- Prefer snake_case (Vector); PascalCase second — a failing GetAttribute must not block get_attribute.
+    local v = env.safe_call(function()
+        if inst.get_attribute then return inst:get_attribute(key) end
         return nil
     end)
+    if v ~= nil then return v end
+    return env.safe_call(function()
+        if inst.GetAttribute then return inst:GetAttribute(key) end
+        return nil
+    end)
+end
 
+local function players_children()
+    if not game or not game.players then return {} end
+    return env.safe_call(function()
+        if game.players.get_children then return game.players:get_children() end
+        return game.players:GetChildren()
+    end) or {}
+end
+
+function M.resolve_player_inst(player)
+    if not player then return nil end
+    if player.player and env.is_valid(player.player) then
+        return player.player
+    end
+
+    local uid = tonumber(player.user_id)
+    local want_name = player.name
+    local kids = players_children()
+    for i = 1, #kids do
+        local pl = kids[i]
+        if env.is_valid(pl) then
+            local id = tonumber(pl.UserId or pl.user_id)
+            if uid and id and id == uid then
+                return pl
+            end
+        end
+    end
+    if want_name then
+        for i = 1, #kids do
+            local pl = kids[i]
+            if env.is_valid(pl) then
+                local n = pl.Name or pl.name
+                local dn = pl.DisplayName or pl.display_name
+                if n == want_name or dn == want_name then
+                    return pl
+                end
+            end
+        end
+    end
+    return nil
+end
+
+function M.player_attr(player, key)
+    return inst_attr(M.resolve_player_inst(player), key)
+end
+
+function M.char_attr(player, key)
+    if not player or not player.character or not env.is_valid(player.character) then
+        return nil
+    end
+    return inst_attr(player.character, key)
+end
+
+function M.humanoid_attr(player, key)
+    if not player then return nil end
+    local hum = player.humanoid
+    if not hum and player.character and env.is_valid(player.character) then
+        local char = player.character
+        hum = env.safe_call(function()
+            if char.find_first_child_of_class then
+                return char:find_first_child_of_class("Humanoid")
+            end
+            if char.FindFirstChildOfClass then
+                return char:FindFirstChildOfClass("Humanoid")
+            end
+            return char:FindFirstChild("Humanoid") or char:find_first_child("Humanoid")
+        end)
+    end
+    if not hum or not env.is_valid(hum) then return nil end
+    return inst_attr(hum, key)
+end
+
+function M.is_safezone(player)
+    return M.player_attr(player, "SafeZone") == true
+end
+
+function M.is_vip(player)
+    return M.player_attr(player, "VIP") == true
+end
+
+-- ChatController staff tags (Owner / Admin / Mod).
+function M.staff_tag(player)
+    if M.player_attr(player, "HideTag") == true then return nil end
+    if M.player_attr(player, "Owner") == true then return "OWNER" end
+    if M.player_attr(player, "Admin") == true then return "ADMIN" end
+    if M.player_attr(player, "Mod") == true then return "MOD" end
+    return nil
+end
+
+function M.is_reviving(player)
+    if M.humanoid_attr(player, "Reviving") == true then return true end
+    if M.char_attr(player, "Reviving") == true then return true end
+    return false
+end
+
+local function normalize_clan_tag(tag)
+    if tag == nil or tag == false then return nil end
+    if type(tag) == "string" then
+        tag = tag:match("^%s*(.-)%s*$") or tag
+        if tag == "" then return nil end
+        return tag
+    end
+    if type(tag) == "number" then
+        return tostring(tag)
+    end
+    local s = tostring(tag)
+    if s == "" or s == "nil" or s == "false" or s == "true" then return nil end
+    return s
+end
+
+function M.clan_tag(player)
+    local tag = normalize_clan_tag(M.player_attr(player, "ClanTag"))
+    if tag then return tag end
+    tag = normalize_clan_tag(M.char_attr(player, "ClanTag"))
+    if tag then return tag end
+    return nil
+end
+
+local function parse_color3(c)
+    if not c then return nil end
+    if type(c) == "table" and c[1] and c[2] and c[3] and not (c.R or c.r) then
+        local r, g, b = c[1], c[2], c[3]
+        if r > 1 or g > 1 or b > 1 then r, g, b = r / 255, g / 255, b / 255 end
+        return { r, g, b, c[4] or 1 }
+    end
+
+    local r = c.R or c.r
+    local g = c.G or c.g
+    local b = c.B or c.b
+    if r == nil or g == nil or b == nil then
+        -- Some builds expose Color3 only via tostring / components.
+        r = env.safe_call(function() return c.R end) or env.safe_call(function() return c.r end)
+        g = env.safe_call(function() return c.G end) or env.safe_call(function() return c.g end)
+        b = env.safe_call(function() return c.B end) or env.safe_call(function() return c.b end)
+    end
+    if r == nil or g == nil or b == nil then return nil end
+    r, g, b = tonumber(r), tonumber(g), tonumber(b)
+    if not r or not g or not b then return nil end
+    -- ClanData uses 0–255 channels in places; attribute Color3 is 0–1.
+    if r > 1 or g > 1 or b > 1 then
+        r, g, b = r / 255, g / 255, b / 255
+    end
+    return { r, g, b, 1 }
+end
+
+function M.clan_color(player)
+    local c = M.player_attr(player, "ClanColor")
+    if not c then c = M.char_attr(player, "ClanColor") end
+    return parse_color3(c)
+end
+
+function M.is_downed(player)
+    if not player then return false end
+    local down = M.humanoid_attr(player, "Downed")
     return down == true
 end
 
@@ -8760,7 +9242,6 @@ function M.is_combat_target(player)
     return true
 end
 
--- Alive + HP > 0. Does NOT include downed (use passes_downed_check).
 function M.passes_health_check(player)
     if not player then return false end
     if not player.is_alive then return false end
@@ -8768,27 +9249,25 @@ function M.passes_health_check(player)
     return true
 end
 
--- idx: 0 = Skip Downed, 1 = Allow Downed, 2 = Only Downed
-function M.passes_downed_check(player, mode_idx)
+function M.passes_team_check(player)
     if not player then return false end
-    mode_idx = tonumber(mode_idx) or 0
-    local downed = M.is_downed(player)
+    return not team_state.is_teammate(player)
+end
 
-    if mode_idx == 1 then
-        return true
-    end
-    if mode_idx == 2 then
-        return downed
-    end
-    -- Skip downed (default)
+-- mode: 0 = skip downed, 1 = allow, 2 = only downed
+function M.passes_downed_check(player, mode)
+    if not player then return false end
+    mode = tonumber(mode) or 0
+    local downed = M.is_downed(player)
+    if mode == 1 then return true end
+    if mode == 2 then return downed end
     return not downed
 end
 
-function M.passes_team_check(player)
+function M.passes_safezone_check(player, skip_safezone)
     if not player then return false end
-    -- Official party (TeamNavigationController) + Roblox Team (arena).
-    -- Skip allies; everyone else is fair game. Solo / no team → allow.
-    return not team_state.is_teammate(player)
+    if not skip_safezone then return true end
+    return not M.is_safezone(player)
 end
 
 return M
@@ -9917,7 +10396,8 @@ local notify = April.require("core.notify")
 local M = {}
 
 local IDS_KEY = "april_silent_whitelist_ids"
-local FILTER_KEY = "april_silent_filter_whitelist"
+local FILTERS_KEY = "april_silent_filters"
+local FILTER_WHITELIST_IDX = 5
 local MMB = 0x04
 
 local was_down = false
@@ -10019,7 +10499,7 @@ function M.clear()
 end
 
 function M.enabled()
-    return settings.bool(FILTER_KEY, false)
+    return settings.multi(FILTERS_KEY, FILTER_WHITELIST_IDX, false)
 end
 
 -- Skip target when whitelist filter is on and they are listed.
@@ -10052,6 +10532,7 @@ end)()
 -- ── features/combat/combat_menu.lua ──
 April._mods["features.combat.combat_menu"] = (function()
 local menu_util = April.require("core.menu_util")
+local settings = April.require("core.settings")
 
 local M = {}
 
@@ -10075,25 +10556,65 @@ M.BONE_MAP = {
     ["Closest"] = "Closest",
 }
 
+-- april_silent_filters indices (1-based)
+M.FILTER_HEALTH = 1
+M.FILTER_VISIBLE = 2
+M.FILTER_TEAM = 3
+M.FILTER_SAFEZONE = 4
+M.FILTER_WHITELIST = 5
+M.FILTER_SKIP_DOWNED = 6
+M.FILTER_ONLY_DOWNED = 7
+
+-- april_silent_targets
+M.TARGET_PLAYERS = 1
+M.TARGET_NPCS = 2
+M.TARGET_NPC_SOLDIERS = 3
+M.TARGET_NPC_BOSSES = 4
+
+-- april_silent_options
+M.OPT_STICKY = 1
+M.OPT_WALLBANG = 2
+
 function M.bone_from_index(idx)
     local label = M.SILENT_BONES[(idx or 0) + 1] or "Head"
     return M.BONE_MAP[label] or label
 end
 
+-- 0 = skip, 1 = allow, 2 = only (matches player_state.passes_downed_check)
+function M.downed_mode_from_filters(prefix)
+    local filters = (prefix or "april_silent_") .. "filters"
+    if settings.multi(filters, M.FILTER_ONLY_DOWNED, false) then
+        return 2
+    end
+    if settings.multi(filters, M.FILTER_SKIP_DOWNED, true) then
+        return 0
+    end
+    return 1
+end
+
 function M.register_silent_aim(T, G, prefix, parent_id, opts)
     opts = opts or {}
     local p = prefix
-    local root = menu_util.parent(parent_id)
+    -- Fresh { parent = ... } per widget — sharing one opts table blanks multicombo lists.
 
-    menu.add_combo(T, G, p .. "target_type", "Target Type", { "Crosshair", "Distance" }, 0, root)
-    menu.add_combo(T, G, p .. "bone", "Target Hitbox", M.SILENT_BONES, 0, root)
+    menu.add_combo(T, G, p .. "target_type", "Target Type", { "Crosshair", "Distance" }, 0,
+        { parent = parent_id })
+    menu.add_combo(T, G, p .. "bone", "Hitbox", M.SILENT_BONES, 0, { parent = parent_id })
 
-    menu.add_checkbox(T, G, p .. "filter_health", "Health Check", true, root)
-    menu.add_checkbox(T, G, p .. "filter_visible", "Visible Only", false, root)
-    menu.add_checkbox(T, G, p .. "filter_team", "Team Check", true, root)
-    menu.add_combo(T, G, p .. "filter_downed", "Downed Check",
-        { "Skip Downed", "Allow Downed", "Only Downed" }, 0, root)
-    menu.add_checkbox(T, G, p .. "filter_whitelist", "Whitelist Filter", false, root)
+    -- All toggle filters in one multicombo (API: menu.get → {bool,...})
+    menu.add_multicombo(T, G, p .. "filters", "Aim Filters", {
+        "Health Check",
+        "Visible Only",
+        "Team Check",
+        "Skip Safezone",
+        "Whitelist",
+        "Skip Downed",
+        "Only Downed",
+    }, { false, false, false, false, false, false, false }, { parent = parent_id })
+    if menu and menu.set then
+        pcall(menu.set, p .. "filters", { true, false, true, true, false, true, false })
+    end
+
     menu.add_input(T, G, p .. "whitelist_ids", "Whitelist IDs", "")
     if menu and menu.set_visible then
         pcall(menu.set_visible, p .. "whitelist_ids", false)
@@ -10103,17 +10624,19 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
         if wl and wl.clear then wl.clear() end
     end)
 
-    menu.add_checkbox(T, G, p .. "target_players", "Target Players", true, root)
-    local npc_root = menu_util.parent(p .. "target_npcs")
-    menu.add_checkbox(T, G, p .. "target_npcs", "Target NPCs", false, root)
-    menu.add_checkbox(T, G, p .. "target_npc_soldiers", "NPC Soldiers", true, npc_root)
-    menu.add_checkbox(T, G, p .. "target_npc_bosses", "NPC Bosses", true, npc_root)
+    menu.add_multicombo(T, G, p .. "targets", "Aim Targets", {
+        "Players", "NPCs", "NPC Soldiers", "NPC Bosses",
+    }, { false, false, false, false }, { parent = parent_id })
+    if menu and menu.set then
+        pcall(menu.set, p .. "targets", { true, false, true, true })
+    end
 
-    menu.add_checkbox(T, G, p .. "sticky", "Sticky Target", false, root)
-    menu.add_checkbox(T, G, p .. "wallbang", "Wallbang", false, root)
+    menu.add_multicombo(T, G, p .. "options", "Aim Options", {
+        "Sticky Target", "Wallbang",
+    }, { false, false }, { parent = parent_id })
 
     local tp_root = menu_util.parent(p .. "bullet_tp")
-    menu.add_checkbox(T, G, p .. "bullet_tp", "Bullet TP", false, root)
+    menu.add_checkbox(T, G, p .. "bullet_tp", "Bullet TP", false, { parent = parent_id })
     menu.add_combo(T, G, p .. "tp_ray_mode", "TP Ray Mode",
         { "Direct", "Snap", "Deep", "Curve", "Arch" }, 0, tp_root)
     menu.add_checkbox(T, G, p .. "tp_ray_vis", "Visualize Ray Path", false, menu_util.parent(p .. "bullet_tp", {
@@ -10121,26 +10644,24 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     }))
 
     local manip_root = menu_util.parent(p .. "bullet_manip")
-    menu.add_checkbox(T, G, p .. "bullet_manip", "Bullet Manipulation", false, root)
+    menu.add_checkbox(T, G, p .. "bullet_manip", "Silent Bullet Manip", false, { parent = parent_id })
     menu.add_slider_float(T, G, p .. "manip_dist", "Manip Distance", 0.1, 1, 1, "%.2f", manip_root)
+    menu.add_checkbox(T, G, p .. "manip_extend", "Extend", false, manip_root)
+    menu.add_slider_float(T, G, p .. "manip_extend_dist", "Extend Distance", 1, 8, 8, "%.1f",
+        menu_util.parent(p .. "manip_extend"))
     menu.add_checkbox(T, G, p .. "manip_status", "Manip Status Bar", false, manip_root)
     menu.add_checkbox(T, G, p .. "manip_peek_vis", "Manip Peek Visual", true, manip_root)
 
-    menu.add_checkbox(T, G, p .. "draw_fov", "Field Of View Circle", false,
+    menu.add_checkbox(T, G, p .. "draw_fov", "FOV Circle", false,
         menu_util.parent(parent_id, { colorpicker = opts.fov_color or { 0.55, 0.2, 1, 1 } }))
     menu.add_combo(T, G, p .. "fov_style", "FOV Style", { "Outline", "Filled Circle" }, 1,
         menu_util.parent(p .. "draw_fov"))
     menu.add_checkbox(T, G, p .. "target_line", "Target Line", false,
         menu_util.parent(parent_id, { colorpicker = opts.line_color or { 1, 0.25, 0.25, 1 } }))
 
-    menu_util.gap(T, G)
-    menu_util.label(T, G,
-        "Notes: Wallbang/Bullet TP need LOS for server valids. Whitelist = middle-click target (saves in config). Bows use drop arc to hitpart.")
-
-    menu_util.gap(T, G)
-    menu.add_slider_int(T, G, p .. "hit_chance", "Hit Chance %", 1, 100, 100, root)
-    menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, root)
-    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 150, root)
+    menu.add_slider_int(T, G, p .. "hit_chance", "Hit Chance %", 1, 100, 100, { parent = parent_id })
+    menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, { parent = parent_id })
+    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 150, { parent = parent_id })
 end
 
 return M
@@ -10175,14 +10696,15 @@ function M.is_npc_target(target)
 end
 
 local function npc_enabled(entry, prefix)
-    if not settings.bool(prefix .. "target_npcs", false) then
+    local targets = prefix .. "targets"
+    if not settings.multi(targets, 2, false) then
         return false
     end
     if entry.kind == "soldier" then
-        return settings.bool(prefix .. "target_npc_soldiers", true)
+        return settings.multi(targets, 3, true)
     end
     if entry.kind == "boss" then
-        return settings.bool(prefix .. "target_npc_bosses", true)
+        return settings.multi(targets, 4, true)
     end
     return false
 end
@@ -10287,10 +10809,10 @@ function M.passes_filters(target, prefix, aim, origin, opts)
     opts = opts or {}
 
     if M.is_npc_target(target) then
-        if settings.bool(prefix .. "filter_health", true) and not M.is_npc_alive(target) then
+        if settings.multi(prefix .. "filters", 1, true) and not M.is_npc_alive(target) then
             return false
         end
-        if settings.bool(prefix .. "filter_visible", false) and not passes_visibility(target, aim, origin) then
+        if settings.multi(prefix .. "filters", 2, false) and not passes_visibility(target, aim, origin) then
             return false
         end
         return true
@@ -10300,19 +10822,23 @@ function M.passes_filters(target, prefix, aim, origin, opts)
         return false
     end
 
-    if settings.bool(prefix .. "filter_health", true) then
+    if settings.multi(prefix .. "filters", 1, true) then
         if not player_state.passes_health_check(target) then return false end
     end
 
-    if not player_state.passes_downed_check(target, settings.num(prefix .. "filter_downed", 0)) then
+    if not player_state.passes_downed_check(target, combat_menu.downed_mode_from_filters(prefix)) then
         return false
     end
 
-    if settings.bool(prefix .. "filter_team", true) then
+    if settings.multi(prefix .. "filters", 3, true) then
         if not player_state.passes_team_check(target) then return false end
     end
 
-    if settings.bool(prefix .. "filter_visible", false) then
+    if settings.multi(prefix .. "filters", 4, true) then
+        if not player_state.passes_safezone_check(target, true) then return false end
+    end
+
+    if settings.multi(prefix .. "filters", 2, false) then
         if not passes_visibility(target, aim, origin) then return false end
     end
 
@@ -10554,9 +11080,9 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
     local use_fov = M.target_priority_crosshair(prefix)
     local best, best_score = nil, use_fov and fov_px or math.huge
     local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
-    local filter_visible = settings.bool(prefix .. "filter_visible", false)
-    local target_players = settings.bool(prefix .. "target_players", true)
-    local target_npcs = settings.bool(prefix .. "target_npcs", false)
+    local filter_visible = settings.multi(prefix .. "filters", 2, false)
+    local target_players = settings.multi(prefix .. "targets", 1, true)
+    local target_npcs = settings.multi(prefix .. "targets", 2, false)
 
     if target_players and entity and entity.get_players then
         for _, p in ipairs(entity.get_players()) do
@@ -10823,7 +11349,7 @@ function M.resolve_track(target, prefix, cx, cy)
     if not hitpart then return nil, nil, OFF_INFO end
 
     local track_origin = camera
-    local wallbang = settings.bool(prefix .. "wallbang", false)
+    local wallbang = settings.multi(prefix .. "options", 2, false)
     local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
 
     if settings.bool(prefix .. "bullet_tp", false) then
@@ -10853,7 +11379,19 @@ function M.resolve_track(target, prefix, cx, cy)
         local fire = fire_origin(camera)
 
         if body then
-            local ev = manip_math.evaluate_manipulation(body, hitpart, { max_radius = max_r })
+            local ev
+            if settings.bool(prefix .. "manip_extend", false) then
+                -- Extend: search up to 8 studs for physical/desync peek; keep 1-stud as fallback.
+                local ext_r = manip_math.clamp_extend_radius(settings.num(prefix .. "manip_extend_dist", 8))
+                ev = manip_math.evaluate_manipulation(body, hitpart, { max_radius = ext_r, extend = true })
+                if ev.state ~= "ready" then
+                    ev = manip_math.evaluate_manipulation(body, hitpart, { max_radius = max_r })
+                else
+                    extra.extend = true
+                end
+            else
+                ev = manip_math.evaluate_manipulation(body, hitpart, { max_radius = max_r })
+            end
             extra.state = ev.state
             extra.peek = ev.peek
             extra.radius = ev.radius or max_r
@@ -10884,6 +11422,147 @@ return M
 
 end)()
 
+-- ── features/combat/manip_extend.lua ──
+April._mods["features.combat.manip_extend"] = (function()
+-- Physical manip extend: keep 1-stud silent peek math, but when Extend is on
+-- search up to 8 studs, desync (bandwidth choke), move local HRP to peek, then
+-- restore + undesync when manip ends — same pattern as divine rbxcli.
+
+local settings = April.require("core.settings")
+local env = April.require("core.env")
+local manip_math = April.require("core.manip_math")
+local packet_desync = April.require("core.packet_desync")
+local cframe_move = April.require("core.cframe_move")
+local combat_origin = April.require("game.combat_origin")
+local targeting = April.require("features.combat.targeting")
+local misc_gate = April.require("core.misc_gate")
+
+local M = {}
+
+local PREFIX = "april_silent_"
+local active = false
+local og_pos = nil
+local peek_pos = nil
+local desync_on = false
+
+local function get_root()
+    local lp = env.get_local_player()
+    if not lp then return nil end
+    local char = lp.character or (game and game.local_player and game.local_player.character)
+    if not char then return nil end
+    return env.safe_call(function()
+        if char.find_first_child then return char:find_first_child("HumanoidRootPart") end
+        return char:FindFirstChild("HumanoidRootPart")
+    end)
+end
+
+local function set_root(root, pos)
+    if not root or not pos then return end
+    cframe_move.set_position(root, pos.x, pos.y, pos.z)
+    if part and part.set_velocity then
+        pcall(part.set_velocity, root, 0, 0, 0)
+    end
+end
+
+local function apply_desync(on)
+    if on and not desync_on then
+        packet_desync.apply_extend()
+        desync_on = true
+    elseif not on and desync_on then
+        packet_desync.release()
+        desync_on = false
+    end
+end
+
+function M.reset()
+    if active and og_pos then
+        local root = get_root()
+        if root then set_root(root, og_pos) end
+    end
+    apply_desync(false)
+    active = false
+    og_pos = nil
+    peek_pos = nil
+end
+
+function M.is_active()
+    return active
+end
+
+function M.update(target, prefix)
+    prefix = prefix or PREFIX
+
+    if not misc_gate.movement_allowed() then
+        M.reset()
+        return
+    end
+
+    local manip_on = settings.bool(prefix .. "bullet_manip", false)
+    local extend_on = settings.bool(prefix .. "manip_extend", false)
+    if not manip_on or not extend_on or not target then
+        M.reset()
+        return
+    end
+
+    local root = get_root()
+    if not root then
+        M.reset()
+        return
+    end
+
+    local body = combat_origin.get_server_origin()
+    if not body then
+        -- Fall back to current root while not yet desynced.
+        body = cframe_move.read_pos(root)
+    end
+    if not body then
+        M.reset()
+        return
+    end
+
+    local hitpart = targeting.bone_world(target, targeting.bone_name(prefix))
+        or (target.head_position and {
+            x = target.head_position.x,
+            y = target.head_position.y,
+            z = target.head_position.z,
+        })
+    if not hitpart then
+        M.reset()
+        return
+    end
+
+    local max_r = manip_math.clamp_extend_radius(settings.num(prefix .. "manip_extend_dist", 8))
+    local origin = og_pos or body
+    local ev = manip_math.evaluate_manipulation(origin, hitpart, {
+        max_radius = max_r,
+        extend = true,
+    })
+
+    if ev.state == "direct" then
+        -- Already have LOS from origin — no need to stay extended.
+        M.reset()
+        return
+    end
+
+    if ev.state ~= "ready" or not ev.peek then
+        M.reset()
+        return
+    end
+
+    if not active then
+        og_pos = { x = body.x, y = body.y, z = body.z }
+        apply_desync(true)
+        active = true
+    end
+
+    peek_pos = ev.peek
+    set_root(root, peek_pos)
+end
+
+return M
+
+end)()
+
 -- ── features/combat/aimbot.lua ──
 April._mods["features.combat.aimbot"] = (function()
 local settings = April.require("core.settings")
@@ -10897,6 +11576,7 @@ local combat_menu = April.require("features.combat.combat_menu")
 local silent_ray = April.require("core.silent_ray")
 local silent_resolve = April.require("features.combat.silent_resolve")
 local silent_whitelist = April.require("features.combat.silent_whitelist")
+local manip_extend = April.require("features.combat.manip_extend")
 local manip_math = April.require("core.manip_math")
 local desync_vis = April.require("core.desync_vis")
 local theme = April.require("core.ui_theme")
@@ -11032,13 +11712,12 @@ function M.register_menu()
 
     menu_util.bind_children(P_MASTER, {
         PREFIX .. "target_type", PREFIX .. "bone",
-        PREFIX .. "filter_health", PREFIX .. "filter_visible", PREFIX .. "filter_team",
-        PREFIX .. "filter_downed", PREFIX .. "filter_whitelist", PREFIX .. "whitelist_ids",
-        PREFIX .. "whitelist_clear",
-        PREFIX .. "target_players", PREFIX .. "target_npcs", PREFIX .. "target_npc_soldiers", PREFIX .. "target_npc_bosses",
-        PREFIX .. "sticky", PREFIX .. "wallbang",
+        PREFIX .. "filters",
+        PREFIX .. "whitelist_ids", PREFIX .. "whitelist_clear",
+        PREFIX .. "targets", PREFIX .. "options",
         PREFIX .. "bullet_tp", PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
-        PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
+        PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_extend", PREFIX .. "manip_extend_dist",
+        PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
         PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
         PREFIX .. "hit_chance", PREFIX .. "max_dist", PREFIX .. "fov",
     })
@@ -11048,15 +11727,16 @@ function M.register_menu()
     })
 
     menu_util.bind_children(PREFIX .. "bullet_manip", {
-        PREFIX .. "manip_dist", PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
+        PREFIX .. "manip_dist", PREFIX .. "manip_extend", PREFIX .. "manip_extend_dist",
+        PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
+    })
+
+    menu_util.bind_children(PREFIX .. "manip_extend", {
+        PREFIX .. "manip_extend_dist",
     })
 
     menu_util.bind_children(PREFIX .. "draw_fov", {
         PREFIX .. "fov_style",
-    })
-
-    menu_util.bind_children(PREFIX .. "target_npcs", {
-        PREFIX .. "target_npc_soldiers", PREFIX .. "target_npc_bosses",
     })
 end
 
@@ -11065,7 +11745,7 @@ local function active()
 end
 
 local function update_target(cx, cy, fov)
-    local sticky = settings.bool(PREFIX .. "sticky", false)
+    local sticky = settings.multi(PREFIX .. "options", 1, false)
     local now = tick_ms()
 
     if sticky and locked_target then
@@ -11096,6 +11776,7 @@ function M.update(_dt)
         fire_was_down = false
         shot_allowed = true
         silent_ray.stop()
+        manip_extend.reset()
         return
     end
 
@@ -11103,6 +11784,7 @@ function M.update(_dt)
 
     if not holding_weapon() then
         silent_ray.stop()
+        manip_extend.reset()
         return
     end
 
@@ -11123,8 +11805,12 @@ function M.update(_dt)
 
     if not locked_target or not targeting.is_aim_target(locked_target) then
         silent_ray.stop()
+        manip_extend.reset()
         return
     end
+
+    -- Extend: desync + physical peek up to 8 studs (1-stud silent manip stays separate).
+    manip_extend.update(locked_target, PREFIX)
 
     -- Hit chance rolls once per mouse-down (not every frame).
     local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)
@@ -11675,7 +12361,7 @@ function M.register_menu()
     menu.add_slider_int(T, G.GUN_MODS, "april_gm_speed_mult", "Speed Mult", 1, 100, 100,
         menu_util.parent("april_gm_speed"))
 
-    menu.add_checkbox(T, G.GUN_MODS, "april_gm_range", "Range", false, root)
+    menu.add_checkbox(T, G.GUN_MODS, "april_gm_range", "Gun Range", false, root)
     menu.add_slider_int(T, G.GUN_MODS, "april_gm_range_mult", "Range Mult", 1, 20, 10,
         menu_util.parent("april_gm_range"))
 
@@ -11950,6 +12636,815 @@ function M.on_modules_ready()
 end
 
 function M.draw() end
+
+return M
+
+end)()
+
+-- ── features/utility/mod_checker.lua ──
+April._mods["features.utility.mod_checker"] = (function()
+local settings = April.require("core.settings")
+local notify = April.require("core.notify")
+local mod_ids = April.require("game.mod_ids")
+local menu_util = April.require("core.menu_util")
+local draw_util = April.require("core.draw_util")
+local env = April.require("core.env")
+local esp_util = April.require("core.esp_util")
+local image_cache = April.require("core.image_cache")
+local asset_urls = April.require("game.asset_urls")
+local theme = April.require("core.ui_theme")
+
+local M = {}
+local P = "april_mod_checker_enabled"
+local X_ID = "april_mod_checker_x"
+local Y_ID = "april_mod_checker_y"
+local W_ID = "april_mod_checker_w"
+local MOD_ICON_KEY = "mod_warning"
+local HEAD_OFFSET = 3.5
+local TITLE_H = 24
+
+local seen = {}
+local active = {}
+local last_scan = -1
+local SCAN_MS = 2500
+M._session = nil
+M._was_enabled = false
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function session_id()
+    if not game then return "none" end
+    local pid = game.place_id or 0
+    local ws = game.workspace
+    local ws_addr = (ws and (ws.Address or ws.address)) or 0
+    return pid .. ":" .. ws_addr
+end
+
+function M.reset_state()
+    seen = {}
+    active = {}
+    last_scan = -1
+end
+
+function M.tick_session()
+    local sid = session_id()
+    if M._session == nil then
+        M._session = sid
+        last_scan = -1
+        return
+    end
+    if sid ~= M._session then
+        M._session = sid
+        M.reset_state()
+    end
+end
+
+local function player_label(p)
+    if not p then return "Unknown" end
+    if p.display_name and p.display_name ~= "" then return p.display_name end
+    return p.name or "Unknown"
+end
+
+local function format_duration(ms)
+    ms = math.max(0, ms or 0)
+    local sec = math.floor(ms / 1000)
+    if sec < 60 then return sec .. "s" end
+    local min = math.floor(sec / 60)
+    sec = sec % 60
+    if min < 60 then return string.format("%dm %02ds", min, sec) end
+    local hr = math.floor(min / 60)
+    min = min % 60
+    return string.format("%dh %02dm", hr, min)
+end
+
+local function head_world_pos(p)
+    if p.head_position then
+        local hp = p.head_position
+        if type(hp) == "table" then
+            if hp.x then return hp.x, hp.y + HEAD_OFFSET, hp.z end
+            return hp[1], (hp[2] or 0) + HEAD_OFFSET, hp[3]
+        end
+    end
+    if p.position then
+        local pos = p.position
+        return pos.x, pos.y + HEAD_OFFSET + 1.5, pos.z
+    end
+    return nil
+end
+
+function M.register_menu()
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.MISC)
+    local root = menu_util.parent(P)
+
+    menu.add_checkbox(T, G.MISC, P, "Mod Checker", false)
+
+    menu_util.section(T, G.MISC, "Mod Checker Scan")
+    menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Scan Interval (ms)", 1000, 10000, 2500, root)
+
+    menu_util.section(T, G.MISC, "Mod Panel Layout")
+    menu.add_slider_int(T, G.MISC, X_ID, "Mod Panel Pos X", 0, 1920, 1600, root)
+    menu.add_slider_int(T, G.MISC, Y_ID, "Mod Panel Pos Y", 0, 1080, 72, root)
+    menu.add_slider_int(T, G.MISC, W_ID, "Mod Panel Width", 180, 420, 260, root)
+
+    menu_util.bind_master(P, {
+        "april_mod_checker_interval", X_ID, Y_ID, W_ID,
+    })
+end
+
+function M.init()
+    image_cache.ensure(MOD_ICON_KEY, asset_urls.mod_warning_png())
+    last_scan = -1
+end
+
+function M.track_player(p, role)
+    local uid = p.user_id
+    if not uid or uid == 0 then return end
+
+    local now = tick_ms()
+    if not active[uid] then
+        active[uid] = {
+            uid = uid,
+            label = player_label(p),
+            username = p.name or "?",
+            role = role,
+            first_seen = now,
+        }
+    else
+        local entry = active[uid]
+        entry.label = player_label(p)
+        entry.username = p.name or entry.username
+        entry.role = role
+    end
+end
+
+function M.check_player(p)
+    if not settings.enabled(P) then return end
+    if not p or p.is_local then return end
+
+    local uid = p.user_id
+    if not uid or uid == 0 then return end
+
+    local role = mod_ids.role_for(uid)
+    if not role then return end
+
+    M.track_player(p, role)
+
+    if seen[uid] then return end
+    seen[uid] = true
+    local label = player_label(p)
+    notify.warning(string.format("MOD: %s (%s) - %s", label, p.name or "?", role), 6000)
+end
+
+function M.reconcile_active()
+    if not entity or not entity.get_players then return end
+
+    local players = entity.get_players()
+    if #players == 0 then return end
+
+    local present = {}
+    for _, p in ipairs(players) do
+        if p.is_local then goto continue end
+        local uid = p.user_id
+        if not uid or uid == 0 then goto continue end
+
+        local role = mod_ids.role_for(uid)
+        if role then
+            present[uid] = true
+            M.track_player(p, role)
+        end
+
+        ::continue::
+    end
+
+    for uid in pairs(active) do
+        if not present[uid] then
+            active[uid] = nil
+            seen[uid] = nil
+        end
+    end
+end
+
+function M.scan_all()
+    if not settings.enabled(P) then return end
+    M.reconcile_active()
+
+    for _, p in ipairs(entity and entity.get_players and entity.get_players() or {}) do
+        M.check_player(p)
+    end
+end
+
+function M.on_player_added(p)
+    M.check_player(p)
+end
+
+function M.on_player_removed(p)
+    if not p then return end
+    local uid = p.user_id
+    if uid and uid ~= 0 then
+        seen[uid] = nil
+        active[uid] = nil
+    end
+end
+
+function M.is_staff(player)
+    if not player then return false end
+    local uid = player.user_id
+    if not uid or uid == 0 then return false end
+    if active[uid] then return true end
+    return mod_ids.role_for(uid) ~= nil
+end
+
+function M.update(_dt)
+    M.tick_session()
+
+    if not settings.enabled(P) then
+        if M._was_enabled then M.reset_state() end
+        M._was_enabled = false
+        return
+    end
+    M._was_enabled = true
+
+    local now = tick_ms()
+    local interval = settings.num("april_mod_checker_interval", SCAN_MS)
+    if last_scan < 0 or (now - last_scan) >= interval then
+        last_scan = now
+        M.scan_all()
+    end
+end
+
+function M.draw_mod_markers()
+    if not settings.enabled(P) then return end
+    if not entity or not entity.get_players then return end
+
+    for _, p in ipairs(entity.get_players()) do
+        if p.is_local then goto continue end
+
+        local uid = p.user_id
+        if not uid or uid == 0 then goto continue end
+        if not mod_ids.role_for(uid) then goto continue end
+
+        local wx, wy, wz = head_world_pos(p)
+        if not wx then goto continue end
+
+        local sx, sy, vis = esp_util.w2s(wx, wy, wz)
+        if not vis then goto continue end
+
+        theme.draw_mod_marker(sx, sy, image_cache, MOD_ICON_KEY)
+
+        ::continue::
+    end
+end
+
+local function build_staff_rows()
+    local rows = {}
+    local me = env.get_local_player()
+    local now = tick_ms()
+
+    if not entity or not entity.get_players then return rows end
+
+    for _, p in ipairs(entity.get_players()) do
+        if p.is_local then goto continue end
+
+        local uid = p.user_id
+        if not uid or uid == 0 then goto continue end
+
+        local role = mod_ids.role_for(uid)
+        if not role then goto continue end
+
+        M.track_player(p, role)
+        local entry = active[uid]
+        if not entry then goto continue end
+
+        local dist = nil
+        if me and me.position and p.position then
+            local dx = p.position.x - me.position.x
+            local dy = p.position.y - me.position.y
+            local dz = p.position.z - me.position.z
+            dist = math.floor(math.sqrt(dx * dx + dy * dy + dz * dz))
+        end
+
+        local meta = format_duration(now - (entry.first_seen or now))
+        if dist then
+            meta = meta .. "  |  " .. dist .. "m"
+        end
+
+        rows[#rows + 1] = {
+            name = entry.label or entry.username or "Unknown",
+            role = role,
+            meta = meta,
+            first_seen = entry.first_seen or now,
+        }
+
+        ::continue::
+    end
+
+    table.sort(rows, function(a, b)
+        return (a.first_seen or 0) < (b.first_seen or 0)
+    end)
+
+    return rows
+end
+
+local function clamp_layout(x, y, w, sw, sh)
+    w = math.max(180, math.min(420, math.floor(w or 260)))
+    x = math.max(0, math.min(math.max(0, sw - w), math.floor(x or 0)))
+    y = math.max(0, math.min(math.max(0, sh - 40), math.floor(y or 0)))
+    return x, y, w
+end
+
+local function draw_staff_panel(x, y, width, rows)
+    if not draw or not draw.text then return end
+
+    local pad = 10
+    local row_h = 44
+    local count = math.max(#rows, 1)
+    local height = TITLE_H + count * row_h + 6
+
+    theme.draw_panel(x, y, width, height, {
+        bg = theme.alpha(theme.BG, 0.90),
+        border = theme.alpha(theme.BORDER, 0.45),
+        accent = theme.RED,
+        accent_w = 2,
+        rounding = theme.ROUND,
+    })
+
+    local title = "Staff In Lobby"
+    if #rows > 1 then
+        title = title .. " (" .. #rows .. ")"
+    end
+    draw_util.text(x + pad, y + 6, title, theme.TEXT, 12)
+
+    local div_y = y + TITLE_H
+    if draw.line then
+        draw.line(x + pad, div_y, x + width - pad, div_y, theme.alpha(theme.BORDER, 0.55), 1)
+    end
+
+    local ry = div_y + 6
+    if #rows == 0 then
+        draw.text(x + pad + 12, ry, "No staff detected", theme.TEXT_MUTED, 11)
+        return
+    end
+
+    local max_name = math.max(10, math.floor((width - pad * 2 - 12) / 7))
+
+    for i = 1, #rows do
+        local row = rows[i]
+        local accent = row.accent or theme.role_accent(row.role)
+
+        if i > 1 and draw.line then
+            draw.line(x + pad, ry - 4, x + width - pad, ry - 4, theme.alpha(theme.BORDER, 0.22), 1)
+        end
+
+        if draw.circle_filled then
+            draw.circle_filled(x + pad + 3, ry + 7, 3, accent, 8)
+        end
+
+        local name = row.name or "?"
+        if #name > max_name then name = name:sub(1, math.max(1, max_name - 2)) .. ".." end
+        draw.text(x + pad + 12, ry, name, theme.TEXT, 13)
+
+        local role = row.role or "Staff"
+        if #role > max_name then role = role:sub(1, math.max(1, max_name - 2)) .. ".." end
+        draw.text(x + pad + 12, ry + 15, role, accent, 11)
+
+        if row.meta and row.meta ~= "" then
+            draw.text(x + pad + 12, ry + 28, row.meta, theme.TEXT_MUTED, 10)
+        end
+
+        ry = ry + row_h
+    end
+end
+
+function M.draw()
+    M.draw_mod_markers()
+
+    if not settings.enabled(P) then return end
+
+    M.reconcile_active()
+
+    local sw, sh = draw_util.screen_size()
+    local x, y, panel_w = clamp_layout(
+        settings.num(X_ID, 1600),
+        settings.num(Y_ID, 72),
+        settings.num(W_ID, 260),
+        sw, sh
+    )
+
+    draw_staff_panel(x, y, panel_w, build_staff_rows())
+end
+
+return M
+
+end)()
+
+-- ── features/visuals/player_esp.lua ──
+April._mods["features.visuals.player_esp"] = (function()
+local settings = April.require("core.settings")
+local env = April.require("core.env")
+local draw_util = April.require("core.draw_util")
+local esp_util = April.require("core.esp_util")
+local menu_util = April.require("core.menu_util")
+local gpu_chams = April.require("core.gpu_chams")
+local player_state = April.require("game.player_state")
+local npcs = April.require("game.npcs")
+local mod_checker = April.require("features.utility.mod_checker")
+local mod_ids = April.require("game.mod_ids")
+local theme = April.require("core.ui_theme")
+
+local M = {}
+local P = "april_player_enabled"
+local CHAMS = "april_player_chams"
+local CHAMS_MODE = "april_player_chams_mode"
+local CHAMS_COLOR = "april_player_chams_color"
+local FILTERS = "april_player_esp_filters"
+local FLAGS = "april_player_esp_flags"
+
+local ID_HEALTH = "april_player_health"
+local ID_SKELETON = "april_player_skeleton"
+local ID_OFFSCREEN = "april_player_offscreen"
+local ID_NAME = "april_player_show_name"
+local ID_DIST = "april_player_show_distance"
+local ID_WEAPON = "april_player_show_weapon"
+local ID_HP_TEXT = "april_player_health_text"
+local ID_CLAN = "april_player_clan_tag"
+local ID_CLAN_COLOR = "april_player_clan_color"
+local ID_BOX = "april_player_box_mode"
+local ID_RANGE = "april_player_range"
+
+-- Filters
+local F_TEAM, F_SAFEZONE, F_SKIP_DOWNED = 1, 2, 3
+-- Status flags (draw-only tags — not clan)
+local FL_DOWNED, FL_SAFEZONE, FL_VIP, FL_STAFF, FL_REVIVING = 1, 2, 3, 4, 5
+
+local MUTED = { 0.82, 0.84, 0.88, 0.92 }
+local FLAG_COLS = {
+    VIP = { 1, 0.78, 0.15, 1 },
+    SZ = { 0.35, 0.85, 1, 1 },
+    DOWN = { 1, 0.35, 0.35, 1 },
+    OWNER = { 0, 0.62, 1, 1 },
+    ADMIN = { 1, 0.4, 0.05, 1 },
+    MOD = { 1, 0.33, 0.33, 1 },
+    STAFF = { 1, 0.33, 0.33, 1 },
+    REVIVE = { 0.45, 1, 0.55, 1 },
+}
+
+local function default_color()
+    return settings.color(P, { 1, 0.35, 0.35, 1 })
+end
+
+local function resolve_color(p)
+    if mod_checker.is_staff(p) then
+        return theme.role_accent(mod_ids.role_for(p.user_id))
+    end
+    if settings.bool(ID_CLAN_COLOR, false) then
+        local cc = player_state.clan_color(p)
+        if cc then return cc end
+    end
+    return default_color()
+end
+
+local function players_chams_active()
+    if not gpu_chams.available() then return false end
+    if not settings.enabled(P) then return false end
+    return settings.bool(CHAMS, false)
+end
+
+local function filter_opts()
+    local downed = 1 -- allow
+    if settings.multi(FILTERS, F_SKIP_DOWNED, true) then
+        downed = 0
+    end
+    return {
+        team = settings.multi(FILTERS, F_TEAM, true),
+        skip_sz = settings.multi(FILTERS, F_SAFEZONE, true),
+        downed = downed,
+    }
+end
+
+local function passes_player_filters(p, opts)
+    if not player_state.is_combat_target(p) then return false end
+    if npcs.kind(p.name) then return false end
+    if p.is_workspace_entity or (p.user_id or 0) == 0 then return false end
+    if opts.team and not player_state.passes_team_check(p) then return false end
+    if not player_state.passes_downed_check(p, opts.downed) then return false end
+    if not player_state.passes_safezone_check(p, opts.skip_sz) then return false end
+    return true
+end
+
+local function collect_player_chams(applied)
+    local me = env.get_local_player()
+    local me_pos = me and me.position
+    if not me_pos then return end
+
+    local range = settings.num(ID_RANGE, 500)
+    local range_sq = range * range
+    local opts = filter_opts()
+    if not entity or not entity.get_players then return end
+
+    for _, p in ipairs(entity.get_players()) do
+        if not passes_player_filters(p, opts) then goto continue end
+
+        local pos = p.position or p.head_position
+        if pos then
+            local dx = (pos.x or 0) - me_pos.x
+            local dy = (pos.y or 0) - me_pos.y
+            local dz = (pos.z or 0) - me_pos.z
+            if (dx * dx + dy * dy + dz * dz) > range_sq then goto continue end
+        end
+
+        local char = p.character
+        if not char or not env.is_valid(char) then goto continue end
+        gpu_chams.cham_player_character(char, applied)
+
+        ::continue::
+    end
+end
+
+local function set_multi_defaults(id, values)
+    if menu and menu.set then
+        pcall(menu.set, id, values)
+    end
+end
+
+function M.register_menu()
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.VISUALS)
+
+    menu_util.register_keybind(T, G.VISUALS, P, "Player ESP", false, {
+        colorpicker = { 1, 0.35, 0.35, 1 },
+    })
+
+    menu.add_combo(T, G.VISUALS, ID_BOX, "Player Box", { "None", "2D", "Corner" }, 1, { parent = P })
+
+    menu.add_checkbox(T, G.VISUALS, ID_HEALTH, "Player Health Bar", true, { parent = P })
+    menu.add_checkbox(T, G.VISUALS, ID_SKELETON, "Player Skeleton", false,
+        menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.92 } }))
+    menu.add_checkbox(T, G.VISUALS, ID_OFFSCREEN, "Player Offscreen Arrows", false,
+        menu_util.parent(P, { colorpicker = { 1, 0.35, 0.35, 1 } }))
+    menu.add_checkbox(T, G.VISUALS, ID_NAME, "Player Name", true, { parent = P })
+    menu.add_checkbox(T, G.VISUALS, ID_CLAN, "Player Clan Tag", true, { parent = P })
+    menu.add_checkbox(T, G.VISUALS, ID_CLAN_COLOR, "Player Color By Clan", false, { parent = P })
+    menu.add_checkbox(T, G.VISUALS, ID_DIST, "Player Distance", true, { parent = P })
+    menu.add_checkbox(T, G.VISUALS, ID_WEAPON, "Player Weapon", false, { parent = P })
+    menu.add_checkbox(T, G.VISUALS, ID_HP_TEXT, "Player Health Text", false, { parent = P })
+
+    menu.add_multicombo(T, G.VISUALS, FILTERS, "ESP Filters", {
+        "Team Check", "Skip Safezone", "Skip Downed",
+    }, { false, false, false }, { parent = P })
+    set_multi_defaults(FILTERS, { true, true, true })
+
+    -- Dump-backed status tags (ChatController + StateAssetController).
+    menu.add_multicombo(T, G.VISUALS, FLAGS, "ESP Flags", {
+        "Downed", "Safezone", "VIP", "Staff", "Reviving",
+    }, { false, false, false, false, false }, { parent = P })
+    set_multi_defaults(FLAGS, { true, true, true, true, true })
+
+    if gpu_chams.available() then
+        menu.add_checkbox(T, G.VISUALS, CHAMS, "Player Engine Chams", false, { parent = P })
+        gpu_chams.add_mode_color_menu(T, G.VISUALS, P, CHAMS_MODE, CHAMS_COLOR,
+            "Player Chams Mode", "Player Chams Color")
+    end
+
+    menu.add_slider_int(T, G.VISUALS, ID_RANGE, "Player Range", 50, 2000, 500, { parent = P })
+    menu_util.gap(T, G.VISUALS)
+
+    local children = {
+        ID_BOX, ID_HEALTH, ID_SKELETON, ID_OFFSCREEN,
+        ID_NAME, ID_CLAN, ID_CLAN_COLOR, ID_DIST, ID_WEAPON, ID_HP_TEXT,
+        FILTERS, FLAGS, ID_RANGE,
+    }
+    if gpu_chams.available() then
+        children[#children + 1] = CHAMS
+        children[#children + 1] = CHAMS_MODE
+        children[#children + 1] = CHAMS_COLOR
+    end
+    menu_util.bind_children(P, children)
+
+    if gpu_chams.available() then
+        gpu_chams.register_owner("players", {
+            rescan_ms = 450,
+            is_active = players_chams_active,
+            style = function()
+                return gpu_chams.mode_index(CHAMS_MODE, 0), gpu_chams.color_index(CHAMS_COLOR, 0)
+            end,
+            collect = collect_player_chams,
+        })
+        gpu_chams.wire_style_controls("players", CHAMS_MODE, CHAMS_COLOR)
+        local function resync()
+            if players_chams_active() then
+                gpu_chams.sync_owner("players", true)
+            else
+                gpu_chams.clear_owner("players")
+            end
+        end
+        settings.on_change(CHAMS, resync)
+        settings.on_change(P, resync)
+        settings.on_change(FILTERS, resync)
+    end
+end
+
+local function collect_flags(p)
+    local out = {}
+    if settings.multi(FLAGS, FL_VIP, true) and player_state.is_vip(p) then
+        out[#out + 1] = { text = "VIP", col = FLAG_COLS.VIP }
+    end
+    if settings.multi(FLAGS, FL_SAFEZONE, true) and player_state.is_safezone(p) then
+        out[#out + 1] = { text = "SZ", col = FLAG_COLS.SZ }
+    end
+    if settings.multi(FLAGS, FL_DOWNED, true) and player_state.is_downed(p) then
+        out[#out + 1] = { text = "DOWN", col = FLAG_COLS.DOWN }
+    end
+    if settings.multi(FLAGS, FL_STAFF, true) then
+        local tag = player_state.staff_tag(p)
+        if tag then
+            out[#out + 1] = { text = tag, col = FLAG_COLS[tag] or FLAG_COLS.STAFF }
+        elseif mod_checker.is_staff(p) then
+            out[#out + 1] = { text = "STAFF", col = FLAG_COLS.STAFF }
+        end
+    end
+    if settings.multi(FLAGS, FL_REVIVING, true) and player_state.is_reviving(p) then
+        out[#out + 1] = { text = "REVIVE", col = FLAG_COLS.REVIVE }
+    end
+    return out
+end
+
+local function screen_bounds(p)
+    -- Prefer engine bounds when they look like a real body (not a speck / not inflated).
+    if p.get_bounds then
+        local gb = p:get_bounds()
+        if gb and gb.valid and gb.w >= 4 and gb.h >= 8 then
+            return { x = gb.x, y = gb.y, w = gb.w, h = gb.h, valid = true }
+        end
+    end
+
+    local b = esp_util.bones_screen_bounds(p)
+    if b and b.valid and b.w >= 3 and b.h >= 6 then
+        return b
+    end
+
+    if p.character then
+        return esp_util.model_screen_bounds(p.character)
+    end
+    return nil
+end
+
+function M.update(_dt)
+    if not settings.enabled(P) then
+        if gpu_chams.available() then
+            gpu_chams.sync_owner("players")
+        end
+        return
+    end
+    if gpu_chams.available() then
+        gpu_chams.sync_owner("players")
+    end
+end
+
+function M.draw()
+    if not settings.enabled(P) then return end
+    if not entity or not entity.get_players then return end
+
+    local range = settings.num(ID_RANGE, 500)
+    local range_sq = range * range
+    local box_mode = settings.num(ID_BOX, 1)
+    local me = env.get_local_player()
+    local me_pos = me and me.position
+    local opts = filter_opts()
+
+    local show_health = settings.bool(ID_HEALTH, true)
+    local show_skel = settings.bool(ID_SKELETON, false)
+    local show_off = settings.bool(ID_OFFSCREEN, false)
+    local show_name = settings.bool(ID_NAME, true)
+    local show_clan = settings.bool(ID_CLAN, true)
+    local show_dist = settings.bool(ID_DIST, true)
+    local show_wpn = settings.bool(ID_WEAPON, false)
+    local show_hp_text = settings.bool(ID_HP_TEXT, false)
+
+    local skel_col = settings.color(ID_SKELETON, { 1, 1, 1, 0.92 })
+    local off_col = settings.color(ID_OFFSCREEN, { 1, 0.35, 0.35, 1 })
+
+    for _, p in ipairs(entity.get_players()) do
+        if not passes_player_filters(p, opts) then goto continue end
+
+        local pos = p.head_position or p.position
+        if not pos then goto continue end
+
+        local dist = 0
+        if me_pos then
+            local dx = (pos.x or 0) - me_pos.x
+            local dy = (pos.y or 0) - me_pos.y
+            local dz = (pos.z or 0) - me_pos.z
+            local dist_sq = dx * dx + dy * dy + dz * dz
+            if dist_sq > range_sq then goto continue end
+            dist = math.sqrt(dist_sq)
+        end
+
+        local col = resolve_color(p)
+        local bounds = screen_bounds(p)
+
+        if not bounds or not bounds.valid then
+            if show_off then
+                local arrow_col = settings.bool(ID_CLAN_COLOR, false) and (player_state.clan_color(p) or off_col) or off_col
+                esp_util.draw_offscreen_to(pos.x, pos.y, pos.z, arrow_col, 12)
+            end
+            goto continue
+        end
+
+        local ts = esp_util.text_size()
+        if dist > 250 then
+            ts = math.max(11, ts - 1)
+        end
+
+        local cx = bounds.x + bounds.w * 0.5
+        local box_ok = bounds.w >= 6 and bounds.h >= 10
+
+        -- Top (above box): clan → name → flags → weapon/hp
+        local top = {}
+        if show_clan then
+            local tag = player_state.clan_tag(p)
+            if tag then
+                top[#top + 1] = { text = "[" .. tag .. "]", col = player_state.clan_color(p) or col }
+            end
+        end
+        if show_name then
+            top[#top + 1] = { text = p.name or "?", col = col }
+        end
+        local flags = collect_flags(p)
+        if #flags > 0 then
+            local parts = {}
+            for i = 1, #flags do
+                parts[#parts + 1] = flags[i].text
+            end
+            top[#top + 1] = {
+                text = "[" .. table.concat(parts, "][") .. "]",
+                col = (#flags == 1) and flags[1].col or MUTED,
+            }
+        end
+        if show_wpn then
+            local wpn = p.tool_name or p.weapon
+            if wpn and wpn ~= "" then
+                top[#top + 1] = { text = tostring(wpn), col = MUTED }
+            end
+        end
+        if show_hp_text and p.health and p.max_health then
+            top[#top + 1] = {
+                text = string.format("%d/%d", math.floor(p.health + 0.5), math.floor(p.max_health + 0.5)),
+                col = MUTED,
+            }
+        end
+
+        if #top > 0 then
+            local ty = bounds.y - 4 - (#top * (ts + 1))
+            for i = 1, #top do
+                draw_util.text_centered(cx, ty + (i - 1) * (ts + 1), top[i].text, top[i].col, ts)
+            end
+        end
+
+        if box_ok then
+            if box_mode == 1 then
+                draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 0)
+            elseif box_mode == 2 then
+                draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 1)
+            end
+
+            if show_health then
+                local hp, max_hp = p.health, p.max_health
+                if hp and max_hp and max_hp > 0 then
+                    if draw and draw.health_bar then
+                        draw.health_bar(bounds.x - 5, bounds.y, bounds.h, hp, max_hp)
+                    else
+                        draw_util.health_bar_nice(bounds.x - 5, bounds.y, bounds.h, hp, max_hp, 3)
+                    end
+                end
+            end
+        end
+
+        if show_skel then
+            local sc = settings.bool(ID_CLAN_COLOR, false) and (player_state.clan_color(p) or skel_col) or skel_col
+            if p.get_bones_screen then
+                esp_util.draw_player_skeleton(p, sc, 1)
+            elseif p.character then
+                esp_util.draw_model_skeleton(p.character, sc, 1)
+            end
+        end
+
+        -- Bottom (under box): distance
+        if show_dist then
+            draw_util.text_centered(
+                cx,
+                bounds.y + bounds.h + 3,
+                string.format("%dm", math.floor(dist + 0.5)),
+                MUTED,
+                ts
+            )
+        end
+
+        ::continue::
+    end
+end
 
 return M
 
@@ -12377,7 +13872,7 @@ function M.register_menu()
     menu.add_combo(T, G.VISUALS, "april_crosshair_type", "Crosshair Type", { "Cross", "Circle", "Dot", "T-Shape" }, 0, root)
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_color", "Crosshair Color", true, menu_util.parent(P, { colorpicker = { 0, 1, 0, 1 } }))
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_dot", "Center Dot", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 1 } }))
-    menu.add_checkbox(T, G.VISUALS, "april_crosshair_outline", "Outline", true, menu_util.parent(P, { colorpicker = { 0, 0, 0, 1 } }))
+    menu.add_checkbox(T, G.VISUALS, "april_crosshair_outline", "Crosshair Outline", true, menu_util.parent(P, { colorpicker = { 0, 0, 0, 1 } }))
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_rainbow", "Rainbow Crosshair", false, root)
     menu.add_slider_int(T, G.VISUALS, "april_crosshair_rainbow_speed", "Rainbow Speed", 1, 100, 10,
         menu_util.parent("april_crosshair_rainbow"))
@@ -12518,8 +14013,8 @@ function M.register_menu()
     })
     menu.add_colorpicker(T, G.VISUALS, "april_bullet_tracers_color2", "Tracer Glow",
         { 1, 0.25, 0.35, 0.55 }, root)
-    menu.add_slider_int(T, G.VISUALS, "april_bullet_tracers_thick", "Thickness", 1, 6, 2, root)
-    menu.add_slider_int(T, G.VISUALS, "april_bullet_tracers_life", "Life (ms)", 100, 1500, 450, root)
+    menu.add_slider_int(T, G.VISUALS, "april_bullet_tracers_thick", "Tracer Thickness", 1, 6, 2, root)
+    menu.add_slider_int(T, G.VISUALS, "april_bullet_tracers_life", "Tracer Life (ms)", 100, 1500, 450, root)
 
     menu_util.bind_children(P, {
         "april_bullet_tracers_color2",
@@ -12708,13 +14203,13 @@ function M.register_menu()
         parent = P,
         colorpicker = { 1, 0.2, 0.2, 1 },
     })
-    menu.add_combo(T, G.VISUALS, "april_hitmarkers_style", "Style", STYLES, 0, root)
+    menu.add_combo(T, G.VISUALS, "april_hitmarkers_style", "Hitmarker Style", STYLES, 0, root)
 
     menu_util.gap(T, G.VISUALS)
-    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_size", "Size", 4, 28, 10, root)
-    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_gap", "Gap", 0, 12, 3, root)
-    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_life", "Life (ms)", 80, 800, 280, root)
-    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_thick", "Thickness", 1, 4, 2, root)
+    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_size", "Hitmarker Size", 4, 28, 10, root)
+    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_gap", "Hitmarker Gap", 0, 12, 3, root)
+    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_life", "Hitmarker Life (ms)", 80, 800, 280, root)
+    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_thick", "Hitmarker Thickness", 1, 4, 2, root)
 
     menu_util.bind_children(P, {
         "april_hitmarkers_head", "april_hitmarkers_style",
@@ -13960,9 +15455,9 @@ function M.register_menu()
     menu.add_checkbox(T, G.WORLD, "april_npc_soldiers", "Soldiers", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, menu_util.parent(P, { colorpicker = { 1, 0.5, 0.1, 1 } }))
     menu.add_combo(T, G.WORLD, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 0, root)
-    menu.add_checkbox(T, G.WORLD, "april_npc_health", "Health Bar", false, root)
-    menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_offscreen", "Offscreen Arrows", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_health", "NPC Health Bar", false, root)
+    menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "NPC Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_offscreen", "NPC Offscreen Arrows", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "NPC Show Name", true, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "NPC Show Distance", true, root)
 
@@ -14186,8 +15681,6 @@ function M.draw()
     local text_size = esp_util.text_size()
     local me = env.get_local_player()
     local me_pos = me and me.position
-    local sw, sh = draw_util.screen_size()
-    local cx, cy = sw * 0.5, sh * 0.5
 
     for _, entry in ipairs(frame_draw_targets()) do
         if not kind_enabled(entry.kind) then goto continue end
@@ -14231,7 +15724,7 @@ function M.draw()
             local sx, sy, vis = esp_util.w2s(lx, ly, lz)
             if not vis then
                 if settings.bool("april_npc_offscreen", false) then
-                    esp_util.draw_offscreen_arrow(cx, cy, sx, sy, col, 12)
+                    esp_util.draw_offscreen_to(lx, ly, lz, col, 12)
                 end
                 goto continue
             end
@@ -15229,7 +16722,7 @@ function M.register_menu()
     menu.add_checkbox(T, G.RADAR, "april_wp_beacon", "Beacon Pillar", false, root)
     menu.add_slider_int(T, G.RADAR, "april_wp_beacon_h", "Beacon Height", 20, 200, 90, menu_util.parent("april_wp_beacon"))
     menu.add_checkbox(T, G.RADAR, "april_wp_draw", "Draw Markers", false, menu_util.parent(P, { colorpicker = { 0.2, 1, 0.8, 1 } }))
-    menu.add_slider_int(T, G.RADAR, "april_wp_slot", "Active Slot", 1, 5, 1, root)
+    menu.add_slider_int(T, G.RADAR, "april_wp_slot", "Waypoint Active Slot", 1, 5, 1, root)
 
     menu_util.button(T, G.RADAR, "april_wp_set", "Set Active Waypoint", function()
         local slot = settings.num("april_wp_slot", 1)
@@ -15500,28 +16993,28 @@ function M.register_menu()
 
     menu_util.register_keybind(T, G.RADAR, P, "Enable Radar", false, { key = 0x28 })
 
-    menu.add_checkbox(T, G.RADAR, "april_map_show_players", "Players", true, root)
-    menu.add_checkbox(T, G.RADAR, "april_map_show_npcs", "NPCs", false, root)
-    menu.add_checkbox(T, G.RADAR, "april_map_show_loot", "Loot", true, root)
-    menu.add_checkbox(T, G.RADAR, "april_map_show_world", "Resources", true, root)
-    menu.add_checkbox(T, G.RADAR, "april_map_show_base", "Base Parts", false, root)
-    menu.add_checkbox(T, G.RADAR, "april_map_show_waypoints", "Waypoints", true, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_show_players", "Radar Show Players", true, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_show_npcs", "Radar Show NPCs", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_show_loot", "Radar Show Loot", true, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_show_world", "Radar Show Resources", true, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_show_base", "Radar Show Base Parts", false, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_show_waypoints", "Radar Show Waypoints", true, root)
     menu.add_checkbox(T, G.RADAR, "april_map_labels", "Radar Show Labels", false, root)
 
-    menu.add_colorpicker(T, G.RADAR, "april_map_bg", "Background", theme.MAP_BG, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_grid", "Grid", theme.MAP_GRID, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_player_col", "Players", theme.RED, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_npc_col", "NPCs", theme.ORANGE, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_loot_col", "Loot", { 1, 0.85, 0.35, 1 }, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_world_col", "Resources", theme.GREEN, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_base_col", "Base", { 0.55, 0.55, 1, 1 }, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_wp_col", "Waypoints", theme.CYAN, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_local", "You", theme.CYAN, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_bg", "Radar Background", theme.MAP_BG, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_grid", "Radar Grid", theme.MAP_GRID, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_player_col", "Radar Players Color", theme.RED, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_npc_col", "Radar NPCs Color", theme.ORANGE, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_loot_col", "Radar Loot Color", { 1, 0.85, 0.35, 1 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_world_col", "Radar Resources Color", theme.GREEN, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_base_col", "Radar Base Color", { 0.55, 0.55, 1, 1 }, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_wp_col", "Radar Waypoints Color", theme.CYAN, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_local", "Radar You Color", theme.CYAN, root)
 
     menu_util.gap(T, G.RADAR)
-    menu.add_slider_float(T, G.RADAR, "april_map_zoom", "Zoom Level", 0.05, 5.0, 1.0, "%.2f", root)
+    menu.add_slider_int(T, G.RADAR, "april_map_zoom", "Radar Zoom Level", 0.05, 5.0, 1.0, "%.2f", root)
     menu.add_slider_int(T, G.RADAR, "april_map_size", "Radar Size", 140, 420, 240, root)
-    menu.add_slider_int(T, G.RADAR, "april_map_icon_scale", "Blip Size", 2, 6, 3, root)
+    menu.add_slider_int(T, G.RADAR, "april_map_icon_scale", "Radar Blip Size", 2, 6, 3, root)
 
     menu_util.bind_children(P, {
         "april_map_show_players", "april_map_show_npcs", "april_map_show_loot",
@@ -15776,15 +17269,15 @@ function M.register_menu()
 
     menu.add_checkbox(T, G.MISC, P, "Keybind Viewer", false)
 
-    menu_util.section(T, G.MISC, "Display")
+    menu_util.section(T, G.MISC, "Keybinds Display")
     menu.add_checkbox(T, G.MISC, "april_keybinds_active_only", "Only Show Active", false, root)
     menu.add_checkbox(T, G.MISC, "april_keybinds_show_unbound", "Show Unbound", true, root)
     menu.add_checkbox(T, G.MISC, "april_keybinds_show_mode", "Show Bind Mode", true, root)
 
-    menu_util.section(T, G.MISC, "Layout")
-    menu.add_slider_int(T, G.MISC, X_ID, "Position X", 0, 1920, 16, root)
-    menu.add_slider_int(T, G.MISC, Y_ID, "Position Y", 0, 1080, 280, root)
-    menu.add_slider_int(T, G.MISC, W_ID, "Panel Width", 160, 480, 260, root)
+    menu_util.section(T, G.MISC, "Keybinds Layout")
+    menu.add_slider_int(T, G.MISC, X_ID, "Keybinds Pos X", 0, 1920, 16, root)
+    menu.add_slider_int(T, G.MISC, Y_ID, "Keybinds Pos Y", 0, 1080, 280, root)
+    menu.add_slider_int(T, G.MISC, W_ID, "Keybinds Width", 160, 480, 260, root)
 
     menu_util.bind_children(P, {
         "april_keybinds_active_only", "april_keybinds_show_unbound", "april_keybinds_show_mode",
@@ -15854,400 +17347,71 @@ return M
 
 end)()
 
--- ── features/utility/mod_checker.lua ──
-April._mods["features.utility.mod_checker"] = (function()
+-- ── features/utility/anti_afk.lua ──
+April._mods["features.utility.anti_afk"] = (function()
+-- Anti-AFK: Roblox kicks ~20m idle. Nudge input every 14m while enabled.
+
 local settings = April.require("core.settings")
-local notify = April.require("core.notify")
-local mod_ids = April.require("game.mod_ids")
 local menu_util = April.require("core.menu_util")
-local draw_util = April.require("core.draw_util")
-local env = April.require("core.env")
-local esp_util = April.require("core.esp_util")
-local image_cache = April.require("core.image_cache")
-local asset_urls = April.require("game.asset_urls")
-local theme = April.require("core.ui_theme")
 
 local M = {}
-local P = "april_mod_checker_enabled"
-local X_ID = "april_mod_checker_x"
-local Y_ID = "april_mod_checker_y"
-local W_ID = "april_mod_checker_w"
-local MOD_ICON_KEY = "mod_warning"
-local HEAD_OFFSET = 3.5
-local TITLE_H = 24
+local P = "april_anti_afk"
 
-local seen = {}
-local active = {}
-local last_scan = -1
-local SCAN_MS = 2500
-M._session = nil
-M._was_enabled = false
+-- Stay under Roblox's ~20 minute idle kick.
+local INTERVAL_MS = 14 * 60 * 1000
 
-local function tick_ms()
-    return utility and utility.get_tick_count and utility.get_tick_count() or 0
-end
+M._last_nudge = 0
 
-local function session_id()
-    if not game then return "none" end
-    local pid = game.place_id or 0
-    local ws = game.workspace
-    local ws_addr = (ws and (ws.Address or ws.address)) or 0
-    return pid .. ":" .. ws_addr
-end
-
-function M.reset_state()
-    seen = {}
-    active = {}
-    last_scan = -1
-end
-
-function M.tick_session()
-    local sid = session_id()
-    if M._session == nil then
-        M._session = sid
-        last_scan = -1
-        return
+local function now_ms()
+    if utility and utility.get_tick_count then
+        return utility.get_tick_count()
     end
-    if sid ~= M._session then
-        M._session = sid
-        M.reset_state()
-    end
+    return math.floor(os.clock() * 1000)
 end
 
-local function player_label(p)
-    if not p then return "Unknown" end
-    if p.display_name and p.display_name ~= "" then return p.display_name end
-    return p.name or "Unknown"
-end
-
-local function format_duration(ms)
-    ms = math.max(0, ms or 0)
-    local sec = math.floor(ms / 1000)
-    if sec < 60 then return sec .. "s" end
-    local min = math.floor(sec / 60)
-    sec = sec % 60
-    if min < 60 then return string.format("%dm %02ds", min, sec) end
-    local hr = math.floor(min / 60)
-    min = min % 60
-    return string.format("%dh %02dm", hr, min)
-end
-
-local function head_world_pos(p)
-    if p.head_position then
-        local hp = p.head_position
-        if type(hp) == "table" then
-            if hp.x then return hp.x, hp.y + HEAD_OFFSET, hp.z end
-            return hp[1], (hp[2] or 0) + HEAD_OFFSET, hp[3]
-        end
+local function nudge()
+    -- Prefer a tiny mouse wiggle (doesn't fire weapons). Fall back to space tap.
+    if input and input.move_mouse then
+        pcall(input.move_mouse, 1, 0)
+        pcall(input.move_mouse, -1, 0)
+        return true
     end
-    if p.position then
-        local pos = p.position
-        return pos.x, pos.y + HEAD_OFFSET + 1.5, pos.z
+    if utility and utility.key_press then
+        pcall(utility.key_press, 0x20) -- space
+        return true
     end
-    return nil
+    if utility and utility.mouse_click then
+        -- Last resort; avoid if possible (can shoot).
+        return false
+    end
+    return false
 end
 
 function M.register_menu()
     local G = menu_util.G
-    local T, _ = menu_util.group(G.MISC)
-    local root = menu_util.parent(P)
-
-    menu.add_checkbox(T, G.MISC, P, "Mod Checker", false)
-
-    menu_util.section(T, G.MISC, "Scan")
-    menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Scan Interval (ms)", 1000, 10000, 2500, root)
-
-    menu_util.section(T, G.MISC, "Layout")
-    menu.add_slider_int(T, G.MISC, X_ID, "Position X", 0, 1920, 1600, root)
-    menu.add_slider_int(T, G.MISC, Y_ID, "Position Y", 0, 1080, 72, root)
-    menu.add_slider_int(T, G.MISC, W_ID, "Panel Width", 180, 420, 260, root)
-
-    menu_util.bind_master(P, {
-        "april_mod_checker_interval", X_ID, Y_ID, W_ID,
-    })
-end
-
-function M.init()
-    image_cache.ensure(MOD_ICON_KEY, asset_urls.mod_warning_png())
-    last_scan = -1
-end
-
-function M.track_player(p, role)
-    local uid = p.user_id
-    if not uid or uid == 0 then return end
-
-    local now = tick_ms()
-    if not active[uid] then
-        active[uid] = {
-            uid = uid,
-            label = player_label(p),
-            username = p.name or "?",
-            role = role,
-            first_seen = now,
-        }
-    else
-        local entry = active[uid]
-        entry.label = player_label(p)
-        entry.username = p.name or entry.username
-        entry.role = role
-    end
-end
-
-function M.check_player(p)
-    if not settings.enabled(P) then return end
-    if not p or p.is_local then return end
-
-    local uid = p.user_id
-    if not uid or uid == 0 then return end
-
-    local role = mod_ids.role_for(uid)
-    if not role then return end
-
-    M.track_player(p, role)
-
-    if seen[uid] then return end
-    seen[uid] = true
-    local label = player_label(p)
-    notify.warning(string.format("MOD: %s (%s) - %s", label, p.name or "?", role), 6000)
-end
-
-function M.reconcile_active()
-    if not entity or not entity.get_players then return end
-
-    local players = entity.get_players()
-    if #players == 0 then return end
-
-    local present = {}
-    for _, p in ipairs(players) do
-        if p.is_local then goto continue end
-        local uid = p.user_id
-        if not uid or uid == 0 then goto continue end
-
-        local role = mod_ids.role_for(uid)
-        if role then
-            present[uid] = true
-            M.track_player(p, role)
-        end
-
-        ::continue::
-    end
-
-    for uid in pairs(active) do
-        if not present[uid] then
-            active[uid] = nil
-            seen[uid] = nil
-        end
-    end
-end
-
-function M.scan_all()
-    if not settings.enabled(P) then return end
-    M.reconcile_active()
-
-    for _, p in ipairs(entity and entity.get_players and entity.get_players() or {}) do
-        M.check_player(p)
-    end
-end
-
-function M.on_player_added(p)
-    M.check_player(p)
-end
-
-function M.on_player_removed(p)
-    if not p then return end
-    local uid = p.user_id
-    if uid and uid ~= 0 then
-        seen[uid] = nil
-        active[uid] = nil
-    end
-end
-
-function M.is_staff(player)
-    if not player then return false end
-    local uid = player.user_id
-    if not uid or uid == 0 then return false end
-    if active[uid] then return true end
-    return mod_ids.role_for(uid) ~= nil
+    local T = menu_util.group(G.MISC)
+    menu.add_checkbox(T, G.MISC, P, "Anti AFK", false)
 end
 
 function M.update(_dt)
-    M.tick_session()
-
-    if not settings.enabled(P) then
-        if M._was_enabled then M.reset_state() end
-        M._was_enabled = false
-        return
-    end
-    M._was_enabled = true
-
-    local now = tick_ms()
-    local interval = settings.num("april_mod_checker_interval", SCAN_MS)
-    if last_scan < 0 or (now - last_scan) >= interval then
-        last_scan = now
-        M.scan_all()
-    end
-end
-
-function M.draw_mod_markers()
-    if not settings.enabled(P) then return end
-    if not entity or not entity.get_players then return end
-
-    for _, p in ipairs(entity.get_players()) do
-        if p.is_local then goto continue end
-
-        local uid = p.user_id
-        if not uid or uid == 0 then goto continue end
-        if not mod_ids.role_for(uid) then goto continue end
-
-        local wx, wy, wz = head_world_pos(p)
-        if not wx then goto continue end
-
-        local sx, sy, vis = esp_util.w2s(wx, wy, wz)
-        if not vis then goto continue end
-
-        theme.draw_mod_marker(sx, sy, image_cache, MOD_ICON_KEY)
-
-        ::continue::
-    end
-end
-
-local function build_staff_rows()
-    local rows = {}
-    local me = env.get_local_player()
-    local now = tick_ms()
-
-    if not entity or not entity.get_players then return rows end
-
-    for _, p in ipairs(entity.get_players()) do
-        if p.is_local then goto continue end
-
-        local uid = p.user_id
-        if not uid or uid == 0 then goto continue end
-
-        local role = mod_ids.role_for(uid)
-        if not role then goto continue end
-
-        M.track_player(p, role)
-        local entry = active[uid]
-        if not entry then goto continue end
-
-        local dist = nil
-        if me and me.position and p.position then
-            local dx = p.position.x - me.position.x
-            local dy = p.position.y - me.position.y
-            local dz = p.position.z - me.position.z
-            dist = math.floor(math.sqrt(dx * dx + dy * dy + dz * dz))
-        end
-
-        local meta = format_duration(now - (entry.first_seen or now))
-        if dist then
-            meta = meta .. "  |  " .. dist .. "m"
-        end
-
-        rows[#rows + 1] = {
-            name = entry.label or entry.username or "Unknown",
-            role = role,
-            meta = meta,
-            first_seen = entry.first_seen or now,
-        }
-
-        ::continue::
-    end
-
-    table.sort(rows, function(a, b)
-        return (a.first_seen or 0) < (b.first_seen or 0)
-    end)
-
-    return rows
-end
-
-local function clamp_layout(x, y, w, sw, sh)
-    w = math.max(180, math.min(420, math.floor(w or 260)))
-    x = math.max(0, math.min(math.max(0, sw - w), math.floor(x or 0)))
-    y = math.max(0, math.min(math.max(0, sh - 40), math.floor(y or 0)))
-    return x, y, w
-end
-
-local function draw_staff_panel(x, y, width, rows)
-    if not draw or not draw.text then return end
-
-    local pad = 10
-    local row_h = 44
-    local count = math.max(#rows, 1)
-    local height = TITLE_H + count * row_h + 6
-
-    theme.draw_panel(x, y, width, height, {
-        bg = theme.alpha(theme.BG, 0.90),
-        border = theme.alpha(theme.BORDER, 0.45),
-        accent = theme.RED,
-        accent_w = 2,
-        rounding = theme.ROUND,
-    })
-
-    local title = "Staff In Lobby"
-    if #rows > 1 then
-        title = title .. " (" .. #rows .. ")"
-    end
-    draw_util.text(x + pad, y + 6, title, theme.TEXT, 12)
-
-    local div_y = y + TITLE_H
-    if draw.line then
-        draw.line(x + pad, div_y, x + width - pad, div_y, theme.alpha(theme.BORDER, 0.55), 1)
-    end
-
-    local ry = div_y + 6
-    if #rows == 0 then
-        draw.text(x + pad + 12, ry, "No staff detected", theme.TEXT_MUTED, 11)
+    if not settings.bool(P, false) then
+        M._last_nudge = 0
         return
     end
 
-    local max_name = math.max(10, math.floor((width - pad * 2 - 12) / 7))
-
-    for i = 1, #rows do
-        local row = rows[i]
-        local accent = row.accent or theme.role_accent(row.role)
-
-        if i > 1 and draw.line then
-            draw.line(x + pad, ry - 4, x + width - pad, ry - 4, theme.alpha(theme.BORDER, 0.22), 1)
-        end
-
-        if draw.circle_filled then
-            draw.circle_filled(x + pad + 3, ry + 7, 3, accent, 8)
-        end
-
-        local name = row.name or "?"
-        if #name > max_name then name = name:sub(1, math.max(1, max_name - 2)) .. ".." end
-        draw.text(x + pad + 12, ry, name, theme.TEXT, 13)
-
-        local role = row.role or "Staff"
-        if #role > max_name then role = role:sub(1, math.max(1, max_name - 2)) .. ".." end
-        draw.text(x + pad + 12, ry + 15, role, accent, 11)
-
-        if row.meta and row.meta ~= "" then
-            draw.text(x + pad + 12, ry + 28, row.meta, theme.TEXT_MUTED, 10)
-        end
-
-        ry = ry + row_h
+    local now = now_ms()
+    if M._last_nudge == 0 then
+        M._last_nudge = now
+        return
     end
+    if (now - M._last_nudge) < INTERVAL_MS then
+        return
+    end
+    M._last_nudge = now
+    nudge()
 end
 
-function M.draw()
-    M.draw_mod_markers()
-
-    if not settings.enabled(P) then return end
-
-    M.reconcile_active()
-
-    local sw, sh = draw_util.screen_size()
-    local x, y, panel_w = clamp_layout(
-        settings.num(X_ID, 1600),
-        settings.num(Y_ID, 72),
-        settings.num(W_ID, 260),
-        sw, sh
-    )
-
-    draw_staff_panel(x, y, panel_w, build_staff_rows())
-end
+function M.draw() end
 
 return M
 
@@ -16382,6 +17546,7 @@ M._menu_registered = false
 M.FEATURE_ORDER = {
     "features.combat.aimbot",
     "features.combat.gun_mods",
+    "features.visuals.player_esp",
     "features.visuals.target_overlay",
     "features.visuals.crosshair",
     "features.visuals.bullet_tracers",
@@ -16394,6 +17559,7 @@ M.FEATURE_ORDER = {
     "features.radar.waypoints",
     "features.utility.keybind_viewer",
     "features.utility.mod_checker",
+    "features.utility.anti_afk",
     "features.combat.perfect_farm",
     "features.movement.exploits",
     "features.movement.fling",

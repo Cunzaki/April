@@ -87,8 +87,9 @@ function M.model_screen_bounds(model)
     if not env.is_valid(model) then return nil end
 
     local part_names = {
-        "Head", "HumanoidRootPart", "UpperTorso", "LowerTorso",
-        "LeftFoot", "RightFoot", "Left Leg", "Right Leg",
+        "Head", "HumanoidRootPart", "UpperTorso", "LowerTorso", "Torso",
+        "LeftFoot", "RightFoot", "LeftHand", "RightHand",
+        "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg",
     }
 
     local min_x, min_y, max_x, max_y
@@ -118,7 +119,70 @@ function M.model_screen_bounds(model)
 
     local w = math.max(8, max_x - min_x)
     local h = math.max(12, max_y - min_y)
-    return { x = min_x, y = min_y, w = w, h = h, valid = true }
+    -- Pad so boxes don't hug the mesh too tightly.
+    local pad_x = math.max(2, w * 0.12)
+    local pad_y = math.max(2, h * 0.06)
+    return {
+        x = min_x - pad_x,
+        y = min_y - pad_y,
+        w = w + pad_x * 2,
+        h = h + pad_y * 2,
+        valid = true,
+    }
+end
+
+-- Build screen AABB from entity bone projections (best far-range box).
+function M.bones_screen_bounds(player)
+    if not player or not player.get_bones_screen then return nil end
+    local bones = player:get_bones_screen()
+    if not bones then return nil end
+
+    local min_x, min_y, max_x, max_y
+    local any = false
+    for _, pt in pairs(bones) do
+        if pt then
+            local x = pt.x or pt[1]
+            local y = pt.y or pt[2]
+            if x and y then
+                any = true
+                min_x = min_x and math.min(min_x, x) or x
+                min_y = min_y and math.min(min_y, y) or y
+                max_x = max_x and math.max(max_x, x) or x
+                max_y = max_y and math.max(max_y, y) or y
+            end
+        end
+    end
+    if not any then return nil end
+
+    local w = math.max(4, max_x - min_x)
+    local h = math.max(6, max_y - min_y)
+    local pad_x = math.max(2, w * 0.14)
+    local pad_y = math.max(2, h * 0.06)
+    return {
+        x = min_x - pad_x,
+        y = min_y - pad_y,
+        w = w + pad_x * 2,
+        h = h + pad_y * 2,
+        valid = true,
+    }
+end
+
+-- Keep far targets readable: never let the box collapse to a speck.
+function M.ensure_min_bounds(b, min_w, min_h)
+    if not b or not b.valid then return b end
+    min_w = min_w or 22
+    min_h = min_h or 40
+    local cx = b.x + b.w * 0.5
+    local cy = b.y + b.h * 0.5
+    if b.w < min_w then
+        b.w = min_w
+        b.x = cx - min_w * 0.5
+    end
+    if b.h < min_h then
+        b.h = min_h
+        b.y = cy - min_h * 0.5
+    end
+    return b
 end
 
 function M.draw_model_skeleton(model, col, thick)
@@ -208,6 +272,55 @@ function M.draw_offscreen_arrow(cx, cy, tx, ty, col, size)
         draw_util.line(px, py, px - dx * 8 + lx * 6, py - dy * 8 + ly * 6, col, 2)
         draw_util.line(px, py, px - dx * 8 - lx * 6, py - dy * 8 - ly * 6, col, 2)
     end
+end
+
+-- Clamp a world point to the screen edge and draw an arrow pointing at it.
+-- Returns true if an arrow was drawn (target off-screen / outside margin).
+function M.draw_offscreen_to(wx, wy, wz, col, size, margin)
+    local sw, sh = draw_util.screen_size()
+    if not sw or sw < 1 or not sh or sh < 1 then return false end
+
+    local cx, cy = sw * 0.5, sh * 0.5
+    margin = margin or 28
+    size = size or 14
+
+    local sx, sy, on = M.w2s(wx, wy, wz)
+    sx = tonumber(sx) or cx
+    sy = tonumber(sy) or cy
+
+    if on and sx >= margin and sy >= margin and sx <= (sw - margin) and sy <= (sh - margin) then
+        return false
+    end
+
+    local dx, dy = sx - cx, sy - cy
+    -- Behind / degenerate projection: aim from look direction if available.
+    if (dx * dx + dy * dy) < 1 then
+        if camera and camera.get_look_vector then
+            local look = camera.get_look_vector()
+            if look then
+                dx = look.x or look.X or 0
+                dy = -(look.y or look.Y or 0)
+            end
+        end
+        if (dx * dx + dy * dy) < 0.0001 then
+            dx, dy = 0, -1
+        end
+    end
+
+    local len = math.sqrt(dx * dx + dy * dy)
+    dx, dy = dx / len, dy / len
+
+    -- Ray from center → edge of inset rect.
+    local hw = (sw * 0.5) - margin
+    local hh = (sh * 0.5) - margin
+    local scale_x = (math.abs(dx) > 1e-6) and (hw / math.abs(dx)) or 1e9
+    local scale_y = (math.abs(dy) > 1e-6) and (hh / math.abs(dy)) or 1e9
+    local scale = math.min(scale_x, scale_y)
+    local ex = cx + dx * scale
+    local ey = cy + dy * scale
+
+    M.draw_offscreen_arrow(cx, cy, ex, ey, col, size)
+    return true
 end
 
 local BOX_EDGES = {

@@ -88,13 +88,13 @@ function M.register_menu()
         parent = P,
         colorpicker = { 1, 0.2, 0.2, 1 },
     })
-    menu.add_combo(T, G.VISUALS, "april_hitmarkers_style", "Style", STYLES, 0, root)
+    menu.add_combo(T, G.VISUALS, "april_hitmarkers_style", "Hitmarker Style", STYLES, 0, root)
 
     menu_util.gap(T, G.VISUALS)
-    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_size", "Size", 4, 28, 10, root)
-    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_gap", "Gap", 0, 12, 3, root)
-    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_life", "Life (ms)", 80, 800, 280, root)
-    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_thick", "Thickness", 1, 4, 2, root)
+    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_size", "Hitmarker Size", 4, 28, 10, root)
+    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_gap", "Hitmarker Gap", 0, 12, 3, root)
+    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_life", "Hitmarker Life (ms)", 80, 800, 280, root)
+    menu.add_slider_int(T, G.VISUALS, "april_hitmarkers_thick", "Hitmarker Thickness", 1, 4, 2, root)
 
     menu_util.bind_children(P, {
         "april_hitmarkers_head", "april_hitmarkers_style",

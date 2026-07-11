@@ -14,7 +14,7 @@ function M.register_menu()
     menu.add_combo(T, G.VISUALS, "april_crosshair_type", "Crosshair Type", { "Cross", "Circle", "Dot", "T-Shape" }, 0, root)
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_color", "Crosshair Color", true, menu_util.parent(P, { colorpicker = { 0, 1, 0, 1 } }))
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_dot", "Center Dot", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 1 } }))
-    menu.add_checkbox(T, G.VISUALS, "april_crosshair_outline", "Outline", true, menu_util.parent(P, { colorpicker = { 0, 0, 0, 1 } }))
+    menu.add_checkbox(T, G.VISUALS, "april_crosshair_outline", "Crosshair Outline", true, menu_util.parent(P, { colorpicker = { 0, 0, 0, 1 } }))
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_rainbow", "Rainbow Crosshair", false, root)
     menu.add_slider_int(T, G.VISUALS, "april_crosshair_rainbow_speed", "Rainbow Speed", 1, 100, 10,
         menu_util.parent("april_crosshair_rainbow"))

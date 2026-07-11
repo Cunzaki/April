@@ -143,7 +143,7 @@ function M.register_menu()
     local root = menu_util.parent(P)
 
     menu_util.section(T, G.MISC, "Bullet Manip (TEST)")
-    menu_util.register_keybind(T, G.MISC, P, "Bullet Manipulation", false)
+    menu_util.register_keybind(T, G.MISC, P, "Standalone Bullet Manip", false)
     menu.add_slider_int(T, G.MISC, "april_bullet_manip_range", "Bullet Target Range", 50, 500, 250, root)
     menu.add_slider_int(T, G.MISC, "april_bullet_manip_speed", "Bullet Peek Speed", 4, 40, 18, root)
     menu.add_checkbox(T, G.MISC, "april_bullet_manip_debug", "Bullet Debug Overlay", true, root)

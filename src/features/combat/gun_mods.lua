@@ -201,7 +201,7 @@ function M.register_menu()
     menu.add_slider_int(T, G.GUN_MODS, "april_gm_speed_mult", "Speed Mult", 1, 100, 100,
         menu_util.parent("april_gm_speed"))
 
-    menu.add_checkbox(T, G.GUN_MODS, "april_gm_range", "Range", false, root)
+    menu.add_checkbox(T, G.GUN_MODS, "april_gm_range", "Gun Range", false, root)
     menu.add_slider_int(T, G.GUN_MODS, "april_gm_range_mult", "Range Mult", 1, 20, 10,
         menu_util.parent("april_gm_range"))
 

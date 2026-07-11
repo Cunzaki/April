@@ -71,10 +71,7 @@ function M.color_index(id, default)
 end
 
 function M.multicombo_selected(id, index)
-    local t = settings.get(id)
-    if type(t) ~= "table" then return false end
-    local v = t[index]
-    return v == true or v == 1
+    return settings.multi(id, index, false)
 end
 
 function M.multicombo_defaults(count)
@@ -128,7 +125,8 @@ local function apply_one(inst, applied)
     if not addr then return false end
     if applied[addr] then return true end
     local ok, result = pcall(exploits.ApplyChamsToInstance, inst)
-    if ok and result then
+    -- Some builds return nil on success; only treat explicit false as failure.
+    if ok and result ~= false then
         applied[addr] = true
         return true
     end
@@ -137,6 +135,61 @@ end
 
 function M.cham_part(inst, applied)
     return apply_one(inst, applied or {})
+end
+
+-- Fallen R15: body MeshParts + nested armor copies under skin Models (dump).
+local PLAYER_CHAM_NAMES = {
+    Head = true, UpperTorso = true, LowerTorso = true, Torso = true,
+    LeftUpperArm = true, RightUpperArm = true, LeftLowerArm = true, RightLowerArm = true,
+    LeftHand = true, RightHand = true,
+    LeftUpperLeg = true, RightUpperLeg = true, LeftLowerLeg = true, RightLowerLeg = true,
+    LeftFoot = true, RightFoot = true,
+    Armor = true, -- clothing layer MeshParts under Default/Abibas models
+}
+
+local PLAYER_CHAM_SKIP = {
+    HumanoidRootPart = true,
+    CollisionPart = true,
+}
+
+function M.cham_player_character(char, applied)
+    if not char or not env.is_valid(char) then return 0 end
+    applied = applied or {}
+
+    local list = env.safe_call(function()
+        if char.get_descendants then return char:get_descendants() end
+        return char:GetDescendants()
+    end) or {}
+
+    local n = 0
+    for i = 1, #list do
+        local inst = list[i]
+        local name = inst and (inst.Name or inst.name)
+        if name and PLAYER_CHAM_NAMES[name] and not PLAYER_CHAM_SKIP[name] then
+            if apply_one(inst, applied) then
+                n = n + 1
+            end
+        end
+    end
+
+    -- Fallback: direct children only (some builds omit nested descendants).
+    if n == 0 then
+        local kids = env.safe_call(function()
+            if char.get_children then return char:get_children() end
+            return char:GetChildren()
+        end) or {}
+        for i = 1, #kids do
+            local inst = kids[i]
+            local name = inst and (inst.Name or inst.name)
+            if name and PLAYER_CHAM_NAMES[name] and not PLAYER_CHAM_SKIP[name] then
+                if apply_one(inst, applied) then
+                    n = n + 1
+                end
+            end
+        end
+    end
+
+    return n
 end
 
 -- Prefer a single visual part per ESP entry (Main / HRP / first MeshPart).

@@ -96,13 +96,13 @@ function M.register_menu()
 
     menu.add_checkbox(T, G.MISC, P, "Mod Checker", false)
 
-    menu_util.section(T, G.MISC, "Scan")
+    menu_util.section(T, G.MISC, "Mod Checker Scan")
     menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Scan Interval (ms)", 1000, 10000, 2500, root)
 
-    menu_util.section(T, G.MISC, "Layout")
-    menu.add_slider_int(T, G.MISC, X_ID, "Position X", 0, 1920, 1600, root)
-    menu.add_slider_int(T, G.MISC, Y_ID, "Position Y", 0, 1080, 72, root)
-    menu.add_slider_int(T, G.MISC, W_ID, "Panel Width", 180, 420, 260, root)
+    menu_util.section(T, G.MISC, "Mod Panel Layout")
+    menu.add_slider_int(T, G.MISC, X_ID, "Mod Panel Pos X", 0, 1920, 1600, root)
+    menu.add_slider_int(T, G.MISC, Y_ID, "Mod Panel Pos Y", 0, 1080, 72, root)
+    menu.add_slider_int(T, G.MISC, W_ID, "Mod Panel Width", 180, 420, 260, root)
 
     menu_util.bind_master(P, {
         "april_mod_checker_interval", X_ID, Y_ID, W_ID,

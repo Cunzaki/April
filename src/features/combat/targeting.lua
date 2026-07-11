@@ -24,14 +24,15 @@ function M.is_npc_target(target)
 end
 
 local function npc_enabled(entry, prefix)
-    if not settings.bool(prefix .. "target_npcs", false) then
+    local targets = prefix .. "targets"
+    if not settings.multi(targets, 2, false) then
         return false
     end
     if entry.kind == "soldier" then
-        return settings.bool(prefix .. "target_npc_soldiers", true)
+        return settings.multi(targets, 3, true)
     end
     if entry.kind == "boss" then
-        return settings.bool(prefix .. "target_npc_bosses", true)
+        return settings.multi(targets, 4, true)
     end
     return false
 end
@@ -136,10 +137,10 @@ function M.passes_filters(target, prefix, aim, origin, opts)
     opts = opts or {}
 
     if M.is_npc_target(target) then
-        if settings.bool(prefix .. "filter_health", true) and not M.is_npc_alive(target) then
+        if settings.multi(prefix .. "filters", 1, true) and not M.is_npc_alive(target) then
             return false
         end
-        if settings.bool(prefix .. "filter_visible", false) and not passes_visibility(target, aim, origin) then
+        if settings.multi(prefix .. "filters", 2, false) and not passes_visibility(target, aim, origin) then
             return false
         end
         return true
@@ -149,19 +150,23 @@ function M.passes_filters(target, prefix, aim, origin, opts)
         return false
     end
 
-    if settings.bool(prefix .. "filter_health", true) then
+    if settings.multi(prefix .. "filters", 1, true) then
         if not player_state.passes_health_check(target) then return false end
     end
 
-    if not player_state.passes_downed_check(target, settings.num(prefix .. "filter_downed", 0)) then
+    if not player_state.passes_downed_check(target, combat_menu.downed_mode_from_filters(prefix)) then
         return false
     end
 
-    if settings.bool(prefix .. "filter_team", true) then
+    if settings.multi(prefix .. "filters", 3, true) then
         if not player_state.passes_team_check(target) then return false end
     end
 
-    if settings.bool(prefix .. "filter_visible", false) then
+    if settings.multi(prefix .. "filters", 4, true) then
+        if not player_state.passes_safezone_check(target, true) then return false end
+    end
+
+    if settings.multi(prefix .. "filters", 2, false) then
         if not passes_visibility(target, aim, origin) then return false end
     end
 
@@ -403,9 +408,9 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
     local use_fov = M.target_priority_crosshair(prefix)
     local best, best_score = nil, use_fov and fov_px or math.huge
     local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
-    local filter_visible = settings.bool(prefix .. "filter_visible", false)
-    local target_players = settings.bool(prefix .. "target_players", true)
-    local target_npcs = settings.bool(prefix .. "target_npcs", false)
+    local filter_visible = settings.multi(prefix .. "filters", 2, false)
+    local target_players = settings.multi(prefix .. "targets", 1, true)
+    local target_npcs = settings.multi(prefix .. "targets", 2, false)
 
     if target_players and entity and entity.get_players then
         for _, p in ipairs(entity.get_players()) do

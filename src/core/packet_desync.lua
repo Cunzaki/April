@@ -12,6 +12,15 @@ function M.apply_movement_only()
     fflag_mem.set_int("DataSenderRate", 60)
 end
 
+-- Divine-style extend choke: bandwidth -9999 before physical peek move.
+function M.apply_extend()
+    active_count = active_count + 1
+    pcall(fflag_mem.refresh)
+    fflag_mem.set_int("S2PhysicsSenderRate", 0)
+    fflag_mem.set_int("PhysicsSenderMaxBandwidthBps", -9999)
+    fflag_mem.set_int("DataSenderRate", 60)
+end
+
 function M.release()
     active_count = math.max(0, active_count - 1)
     if active_count == 0 then

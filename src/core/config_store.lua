@@ -20,6 +20,15 @@ local EXCLUDE = {
 
 local MENU_KEYS = {
     "april_esp_text_size",
+    "april_player_enabled", "april_player_enabled_mode",
+    "april_player_box_mode",
+    "april_player_health", "april_player_skeleton", "april_player_offscreen",
+    "april_player_show_name", "april_player_show_distance",
+    "april_player_show_weapon", "april_player_health_text",
+    "april_player_clan_tag", "april_player_clan_color",
+    "april_player_esp_filters", "april_player_esp_flags",
+    "april_player_chams", "april_player_chams_mode", "april_player_chams_color",
+    "april_player_range",
         "april_target_overlay", "april_target_overlay_fov", "april_target_overlay_gear_size", "april_target_overlay_top",
         "april_target_overlay_fallback_fov",
     "april_crosshair_enabled", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
@@ -31,13 +40,12 @@ local MENU_KEYS = {
     "april_hitmarkers_size", "april_hitmarkers_gap", "april_hitmarkers_life", "april_hitmarkers_thick",
     "april_silent_aim", "april_silent_aim_mode",
     "april_silent_target_type", "april_silent_bone",
-    "april_silent_filter_health", "april_silent_filter_visible", "april_silent_filter_team",
-    "april_silent_filter_downed", "april_silent_filter_whitelist", "april_silent_whitelist_ids",
-    "april_silent_target_players", "april_silent_target_npcs", "april_silent_target_npc_soldiers", "april_silent_target_npc_bosses",
-    "april_silent_sticky", "april_silent_wallbang",
+    "april_silent_filters", "april_silent_whitelist_ids",
+    "april_silent_targets", "april_silent_options",
     "april_silent_bullet_tp", "april_silent_tp_ray_mode", "april_silent_tp_ray_vis",
     "april_silent_bullet_manip",
-    "april_silent_manip_dist", "april_silent_manip_status", "april_silent_manip_peek_vis",
+    "april_silent_manip_dist", "april_silent_manip_extend", "april_silent_manip_extend_dist",
+    "april_silent_manip_status", "april_silent_manip_peek_vis",
     "april_silent_draw_fov", "april_silent_fov_style", "april_silent_target_line",
     "april_silent_hit_chance", "april_silent_max_dist", "april_silent_fov",
     "april_gunmods_enabled", "april_gunmods_enabled_mode", "april_gm_mode", "april_gm_weapon_select",
@@ -64,6 +72,7 @@ local MENU_KEYS = {
     "april_npc_enabled", "april_npc_enabled_mode", "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode",
     "april_npc_health", "april_npc_skeleton",
     "april_npc_offscreen", "april_npc_show_name", "april_npc_show_distance", "april_npc_range",
+    "april_anti_afk",
     "april_base_enabled", "april_base_enabled_mode", "april_base_cabinet", "april_storage_cabinet", "april_small_box", "april_large_box",
     "april_sleeping_bag", "april_auto_turret", "april_auto_turret_ring", "april_shotgun_turret", "april_shotgun_turret_ring",
     "april_wooden_door", "april_wooden_double_door", "april_salvaged_door", "april_metal_door",
@@ -99,6 +108,7 @@ local COLOR_KEYS = {
     "april_bullet_tracers", "april_bullet_tracers_color2",
     "april_hitmarkers", "april_hitmarkers_head",
     "april_silent_aim", "april_silent_draw_fov", "april_silent_target_line", "april_silent_tp_ray_vis",
+    "april_player_enabled",
     "april_stone_node", "april_metal_node", "april_phosphate_node", "april_corn_plant", "april_tomato_plant",
     "april_pumpkin_plant", "april_lemon_plant", "april_raspberry_plant", "april_blueberry_plant",
     "april_wool_plant", "april_hemp_plant", "april_deer", "april_boar", "april_wolf",
@@ -151,6 +161,7 @@ local HOTKEY_KEYS = {
     "april_desync_enabled",
     "april_bullet_manip_enabled",
     "april_silent_aim",
+    "april_player_enabled",
 }
 
 function M.get_config_path(name)
@@ -170,8 +181,34 @@ local function serialize_value(v)
     if t == "string" then return v end
     if t == "table" then
         local parts = {}
-        for i = 1, #v do
-            parts[i] = tostring(v[i])
+        local n = #v
+        -- 0-based arrays from some menu builds
+        if n == 0 and v[0] ~= nil then
+            local i = 0
+            while v[i] ~= nil do
+                local item = v[i]
+                if type(item) == "boolean" then
+                    parts[#parts + 1] = item and "1" or "0"
+                elseif item == 1 or item == "1" or item == true then
+                    parts[#parts + 1] = "1"
+                else
+                    parts[#parts + 1] = "0"
+                end
+                i = i + 1
+            end
+            return table.concat(parts, ",")
+        end
+        for i = 1, n do
+            local item = v[i]
+            if type(item) == "boolean" then
+                parts[i] = item and "1" or "0"
+            elseif item == 1 or item == "1" or item == true or item == "true" then
+                parts[i] = "1"
+            elseif type(item) == "number" then
+                parts[i] = tostring(item)
+            else
+                parts[i] = "0"
+            end
         end
         return table.concat(parts, ",")
     end
@@ -182,11 +219,18 @@ local function parse_value(raw)
     if raw == "true" then return true end
     if raw == "false" then return false end
     local n = tonumber(raw)
-    if n then return n end
+    if n and not raw:find(",") then return n end
     if raw:find(",") then
         local out = {}
         for part in raw:gmatch("[^,]+") do
-            table.insert(out, tonumber(part) or part)
+            part = part:match("^%s*(.-)%s*$") or part
+            if part == "true" or part == "1" then
+                out[#out + 1] = true
+            elseif part == "false" or part == "0" then
+                out[#out + 1] = false
+            else
+                out[#out + 1] = tonumber(part) or part
+            end
         end
         return out
     end

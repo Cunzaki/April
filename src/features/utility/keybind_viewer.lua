@@ -136,15 +136,15 @@ function M.register_menu()
 
     menu.add_checkbox(T, G.MISC, P, "Keybind Viewer", false)
 
-    menu_util.section(T, G.MISC, "Display")
+    menu_util.section(T, G.MISC, "Keybinds Display")
     menu.add_checkbox(T, G.MISC, "april_keybinds_active_only", "Only Show Active", false, root)
     menu.add_checkbox(T, G.MISC, "april_keybinds_show_unbound", "Show Unbound", true, root)
     menu.add_checkbox(T, G.MISC, "april_keybinds_show_mode", "Show Bind Mode", true, root)
 
-    menu_util.section(T, G.MISC, "Layout")
-    menu.add_slider_int(T, G.MISC, X_ID, "Position X", 0, 1920, 16, root)
-    menu.add_slider_int(T, G.MISC, Y_ID, "Position Y", 0, 1080, 280, root)
-    menu.add_slider_int(T, G.MISC, W_ID, "Panel Width", 160, 480, 260, root)
+    menu_util.section(T, G.MISC, "Keybinds Layout")
+    menu.add_slider_int(T, G.MISC, X_ID, "Keybinds Pos X", 0, 1920, 16, root)
+    menu.add_slider_int(T, G.MISC, Y_ID, "Keybinds Pos Y", 0, 1080, 280, root)
+    menu.add_slider_int(T, G.MISC, W_ID, "Keybinds Width", 160, 480, 260, root)
 
     menu_util.bind_children(P, {
         "april_keybinds_active_only", "april_keybinds_show_unbound", "april_keybinds_show_mode",

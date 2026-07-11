@@ -73,8 +73,8 @@ function M.register_menu()
     })
     menu.add_colorpicker(T, G.VISUALS, "april_bullet_tracers_color2", "Tracer Glow",
         { 1, 0.25, 0.35, 0.55 }, root)
-    menu.add_slider_int(T, G.VISUALS, "april_bullet_tracers_thick", "Thickness", 1, 6, 2, root)
-    menu.add_slider_int(T, G.VISUALS, "april_bullet_tracers_life", "Life (ms)", 100, 1500, 450, root)
+    menu.add_slider_int(T, G.VISUALS, "april_bullet_tracers_thick", "Tracer Thickness", 1, 6, 2, root)
+    menu.add_slider_int(T, G.VISUALS, "april_bullet_tracers_life", "Tracer Life (ms)", 100, 1500, 450, root)
 
     menu_util.bind_children(P, {
         "april_bullet_tracers_color2",
