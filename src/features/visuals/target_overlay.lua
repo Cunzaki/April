@@ -247,7 +247,7 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.VISUALS)
 
-    menu_util.section(T, G, "Combat HUD")
+    menu_util.section(T, G.VISUALS, "Combat HUD")
     menu_util.register_keybind(T, G.VISUALS, P, "Target Gear", false)
 
     local root = menu_util.parent(P)

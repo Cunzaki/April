@@ -13,7 +13,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.RADAR)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G, "Waypoints")
+    menu_util.section(T, G.RADAR, "Waypoints")
     menu_util.register_keybind(T, G.RADAR, P, "Enable Waypoints", false)
     menu.add_checkbox(T, G.RADAR, "april_wp_dist", "Waypoint Show Distance", false, root)
     menu.add_checkbox(T, G.RADAR, "april_wp_beacon", "Beacon Pillar", false, root)

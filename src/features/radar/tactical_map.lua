@@ -195,7 +195,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.RADAR)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G, "Tactical Map")
+    menu_util.section(T, G.RADAR, "Tactical Map")
     menu_util.register_keybind(T, G.RADAR, P, "Enable Radar", false, { key = 0x28 })
 
     menu.add_checkbox(T, G.RADAR, "april_map_show_players", "Radar Show Players", true, root)

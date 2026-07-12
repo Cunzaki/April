@@ -129,7 +129,7 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.VISUALS)
 
-    menu_util.section(T, G, "Player ESP")
+    menu_util.section(T, G.VISUALS, "Player ESP")
     menu_util.register_keybind(T, G.VISUALS, P, "Player ESP", false, {
         colorpicker = { 1, 0.35, 0.35, 1 },
     })

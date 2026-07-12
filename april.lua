@@ -1,11 +1,11 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-12T23:41:05.397Z
+    Built: 2026-07-12T23:42:38.787Z
 ]]
 
 April = {
-    version = "3.69.0",
+    version = "3.69.2",
     debug = false,
     _mods = {},
     bundled = true,
@@ -2462,6 +2462,9 @@ function M.gap(T, G)
 end
 
 function M.section(T, G, title)
+    if type(G) ~= "string" then
+        error("[April] menu_util.section: pass group name string (e.g. menu_util.G.VISUALS), not the G table")
+    end
     menu.add_separator(T, G)
     if title and title ~= "" and menu.add_label then
         menu.add_label(T, G, title)
@@ -12100,7 +12103,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G, "Farm")
+    menu_util.section(T, G.MISC, "Farm")
     menu_util.register_keybind(T, G.MISC, P, "Farm Helper", false)
     menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", true, root)
     menu_util.gap(T, G.MISC)
@@ -12776,7 +12779,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G, "Utility")
+    menu_util.section(T, G.MISC, "Utility")
     menu.add_checkbox(T, G.MISC, P, "Mod Checker", false)
 
     menu_util.section(T, G.MISC, "Mod Checker Scan")
@@ -13211,7 +13214,7 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.VISUALS)
 
-    menu_util.section(T, G, "Player ESP")
+    menu_util.section(T, G.VISUALS, "Player ESP")
     menu_util.register_keybind(T, G.VISUALS, P, "Player ESP", false, {
         colorpicker = { 1, 0.35, 0.35, 1 },
     })
@@ -13740,7 +13743,7 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.VISUALS)
 
-    menu_util.section(T, G, "Combat HUD")
+    menu_util.section(T, G.VISUALS, "Combat HUD")
     menu_util.register_keybind(T, G.VISUALS, P, "Target Gear", false)
 
     local root = menu_util.parent(P)
@@ -13863,7 +13866,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.VISUALS)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G, "Crosshair")
+    menu_util.section(T, G.VISUALS, "Crosshair")
     menu.add_checkbox(T, G.VISUALS, P, "Custom Crosshair", false)
     menu.add_combo(T, G.VISUALS, "april_crosshair_type", "Crosshair Type", { "Cross", "Circle", "Dot", "T-Shape" }, 0, root)
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_color", "Crosshair Color", true, menu_util.parent(P, { colorpicker = { 0, 1, 0, 1 } }))
@@ -14192,7 +14195,7 @@ function M.register_menu()
     local T = menu_util.group(G.VISUALS)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G, "Hit Feedback")
+    menu_util.section(T, G.VISUALS, "Hit Feedback")
     menu.add_checkbox(T, G.VISUALS, P, "Hitmarkers", false, {
         colorpicker = { 1, 1, 1, 0.95 },
     })
@@ -14403,7 +14406,7 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.WORLD)
-    menu_util.section(T, G, "Resources")
+    menu_util.section(T, G.WORLD, "Resources")
     menu_util.register_keybind(T, G.WORLD, P, "Resource ESP", false)
     for _, t in ipairs(maps.WORLD_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
@@ -14903,7 +14906,7 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.WORLD)
-    menu_util.section(T, G, "Loot")
+    menu_util.section(T, G.WORLD, "Loot")
     menu_util.register_keybind(T, G.WORLD, P, "Loot ESP", false)
     for _, t in ipairs(maps.LOOT_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
@@ -15182,7 +15185,7 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.WORLD)
-    menu_util.section(T, G, "Bases")
+    menu_util.section(T, G.WORLD, "Bases")
     menu_util.register_keybind(T, G.WORLD, P, "Base ESP", false)
     for _, t in ipairs(maps.BASE_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
@@ -15451,7 +15454,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.WORLD)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G, "NPCs")
+    menu_util.section(T, G.WORLD, "NPCs")
     menu_util.register_keybind(T, G.WORLD, P, "NPC ESP", false, { colorpicker = { 1, 0.3, 0.3, 1 } })
     menu.add_checkbox(T, G.WORLD, "april_npc_soldiers", "Soldiers", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, menu_util.parent(P, { colorpicker = { 1, 0.5, 0.1, 1 } }))
@@ -15800,7 +15803,7 @@ function M.register_menu()
     local G = menu_util.G
     local T = menu_util.group(G.MISC)
 
-    menu_util.section(T, G, "Movement")
+    menu_util.section(T, G.MISC, "Movement")
 
     -- Id kept as april_noclip_enabled for config compatibility; label is Fly.
     menu_util.register_keybind(T, G.MISC, "april_noclip_enabled", "Fly", false, { key = 0x46 })
@@ -16487,7 +16490,7 @@ function M.register_menu()
     local T = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G, "Combat")
+    menu_util.section(T, G.MISC, "Combat")
     menu_util.register_keybind(T, G.MISC, P, "Fling", false)
     menu.add_slider_int(T, G.MISC, P_FOV, "Fling FOV", 20, 600, 150, root)
     menu.add_slider_int(T, G.MISC, P_DURATION, "Fling Duration", 2, 10, 2, root)
@@ -16636,7 +16639,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G, "Network")
+    menu_util.section(T, G.MISC, "Network")
     menu_util.register_keybind(T, G.MISC, P, "Desync", false)
     menu.add_checkbox(T, G.MISC, "april_desync_autosend", "Desync Auto Send", false, root)
     menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Desync Send Threshold", 0, 1, 0.3,
@@ -16721,7 +16724,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.RADAR)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G, "Waypoints")
+    menu_util.section(T, G.RADAR, "Waypoints")
     menu_util.register_keybind(T, G.RADAR, P, "Enable Waypoints", false)
     menu.add_checkbox(T, G.RADAR, "april_wp_dist", "Waypoint Show Distance", false, root)
     menu.add_checkbox(T, G.RADAR, "april_wp_beacon", "Beacon Pillar", false, root)
@@ -16996,7 +16999,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.RADAR)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G, "Tactical Map")
+    menu_util.section(T, G.RADAR, "Tactical Map")
     menu_util.register_keybind(T, G.RADAR, P, "Enable Radar", false, { key = 0x28 })
 
     menu.add_checkbox(T, G.RADAR, "april_map_show_players", "Radar Show Players", true, root)

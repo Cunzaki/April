@@ -87,6 +87,9 @@ function M.gap(T, G)
 end
 
 function M.section(T, G, title)
+    if type(G) ~= "string" then
+        error("[April] menu_util.section: pass group name string (e.g. menu_util.G.VISUALS), not the G table")
+    end
     menu.add_separator(T, G)
     if title and title ~= "" and menu.add_label then
         menu.add_label(T, G, title)

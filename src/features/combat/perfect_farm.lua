@@ -165,7 +165,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G, "Farm")
+    menu_util.section(T, G.MISC, "Farm")
     menu_util.register_keybind(T, G.MISC, P, "Farm Helper", false)
     menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", true, root)
     menu_util.gap(T, G.MISC)
