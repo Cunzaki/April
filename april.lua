@@ -1,11 +1,11 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-12T23:42:38.787Z
+    Built: 2026-07-12T23:48:52.626Z
 ]]
 
 April = {
-    version = "3.69.2",
+    version = "3.69.3",
     debug = false,
     _mods = {},
     bundled = true,
@@ -11325,12 +11325,16 @@ end)()
 
 -- ── features/combat/manip_extend.lua ──
 April._mods["features.combat.manip_extend"] = (function()
--- Extend manip: incremental origin scan only (no desync, no HRP move, no fire-rate patch).
+-- Extend manip: incremental origin scan + fire-rate spike on extended-angle shots only.
 
+local settings = April.require("core.settings")
 local manip_math = April.require("core.manip_math")
+local gc = April.require("game.gc_weapon_mods")
 
 local M = {}
 
+local DEFAULT_BURST_MULT = 3.0
+local burst_active = false
 local scan = nil
 
 local function scan_key(origin, target)
@@ -11339,11 +11343,42 @@ local function scan_key(origin, target)
         origin.x, origin.y, origin.z, target.x, target.y, target.z)
 end
 
+local function burst_fire_rate_mult()
+    -- Prefer gun-mods slider when enabled; else extend default (3.0).
+    if settings.bool("april_gm_fire_rate", false) then
+        return settings.num("april_gm_fire_rate_mult", DEFAULT_BURST_MULT)
+    end
+    return DEFAULT_BURST_MULT
+end
+
 function M.reset()
+    burst_active = false
     scan = nil
 end
 
--- Incremental ring scan for extend — one ring per call (progress bar).
+function M.is_burst_active()
+    return burst_active
+end
+
+-- ViewmodelController: shot delay *= 1 - FireRateMult — only while extended peek + LMB.
+function M.tick_burst(prefix, manip_info, firing)
+    prefix = prefix or "april_silent_"
+
+    local want_burst = firing
+        and manip_info
+        and manip_info.state == "ready"
+        and manip_info.extend_active
+        and settings.bool(prefix .. "bullet_manip", false)
+        and settings.bool(prefix .. "manip_extend", false)
+
+    if want_burst and gc.available() then
+        pcall(gc.apply_weapon, { FireRateMult = burst_fire_rate_mult() })
+        burst_active = true
+    elseif burst_active then
+        burst_active = false
+    end
+end
+
 function M.evaluate_extend(origin, target_pos, base_r, extra_r)
     base_r = manip_math.clamp_radius(base_r)
     extra_r = manip_math.clamp_extend_extra(extra_r)
@@ -11853,6 +11888,9 @@ function M.update(_dt)
     cached_track.origin = origin
     cached_track.aim = aim
     cached_track.manip = manip_info or { state = "off" }
+
+    local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)
+    manip_extend.tick_burst(PREFIX, cached_track.manip, firing)
 
     local info = cached_track.manip
     local ok_track = false

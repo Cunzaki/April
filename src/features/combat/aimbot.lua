@@ -310,6 +310,9 @@ function M.update(_dt)
     cached_track.aim = aim
     cached_track.manip = manip_info or { state = "off" }
 
+    local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)
+    manip_extend.tick_burst(PREFIX, cached_track.manip, firing)
+
     local info = cached_track.manip
     local ok_track = false
     if info.use_curve and silent_ray.track_curve then
