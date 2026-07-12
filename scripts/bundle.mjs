@@ -55,12 +55,12 @@ const ORDER = [
   "game/gun_mod_profiles.lua",
   "game/combat_stats.lua",
   "game/combat_origin.lua",
+  "game/team_state.lua",
+  "game/player_state.lua",
   "game/combat_target.lua",
   "game/farm_tools.lua",
   "game/inventory.lua",
   "game/player_gear.lua",
-  "game/team_state.lua",
-  "game/player_state.lua",
   "game/npcs.lua",
   "game/mod_ids.lua",
   "game/turret_stats.lua",
@@ -105,7 +105,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.69.0",
+    version = "3.69.1",
     debug = false,
     _mods = {},
     bundled = true,
