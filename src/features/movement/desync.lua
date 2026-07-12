@@ -121,7 +121,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
-    menu_util.gap(T, G.MISC)
+    menu_util.section(T, G, "Network")
     menu_util.register_keybind(T, G.MISC, P, "Desync", false)
     menu.add_checkbox(T, G.MISC, "april_desync_autosend", "Desync Auto Send", false, root)
     menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Desync Send Threshold", 0, 1, 0.3,

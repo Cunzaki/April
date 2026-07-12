@@ -1,14 +1,8 @@
--- Extend manip: incremental origin scan, mag-dump fire-rate spike (no HRP move).
+-- Extend manip: incremental origin scan only (no desync, no HRP move, no fire-rate patch).
 
-local settings = April.require("core.settings")
 local manip_math = April.require("core.manip_math")
-local gc = April.require("game.gc_weapon_mods")
 
 local M = {}
-
-local PREFIX = "april_silent_"
-local BURST_FIRE_RATE = 0.99
-local burst_active = false
 
 local scan = nil
 
@@ -19,15 +13,10 @@ local function scan_key(origin, target)
 end
 
 function M.reset()
-    burst_active = false
     scan = nil
 end
 
-function M.is_burst_active()
-    return burst_active
-end
-
--- Incremental ring scan for extend — one ring sample batch per call (progress bar).
+-- Incremental ring scan for extend — one ring per call (progress bar).
 function M.evaluate_extend(origin, target_pos, base_r, extra_r)
     base_r = manip_math.clamp_radius(base_r)
     extra_r = manip_math.clamp_extend_extra(extra_r)
@@ -36,7 +25,7 @@ function M.evaluate_extend(origin, target_pos, base_r, extra_r)
     if not origin or not target_pos then
         return {
             state = "blocked", peek = nil, radius = base_r,
-            base_radius = base_r, extend_active = false, scan_progress = 0, extend_burst = false,
+            base_radius = base_r, extend_active = false, scan_progress = 0,
         }
     end
 
@@ -44,7 +33,7 @@ function M.evaluate_extend(origin, target_pos, base_r, extra_r)
         scan = nil
         return {
             state = "direct", peek = nil, radius = base_r,
-            base_radius = base_r, extend_active = false, scan_progress = 1, extend_burst = false,
+            base_radius = base_r, extend_active = false, scan_progress = 1,
         }
     end
 
@@ -85,7 +74,7 @@ function M.evaluate_extend(origin, target_pos, base_r, extra_r)
         return {
             state = "ready", peek = peek, radius = radius,
             base_radius = base_r, extend_active = extended,
-            scan_progress = 1, extend_burst = extended,
+            scan_progress = 1,
         }
     end
 
@@ -94,31 +83,15 @@ function M.evaluate_extend(origin, target_pos, base_r, extra_r)
         scan = nil
         return {
             state = "blocked", peek = nil, radius = max_r,
-            base_radius = base_r, extend_active = false, scan_progress = 1, extend_burst = false,
+            base_radius = base_r, extend_active = false, scan_progress = 1,
         }
     end
 
     return {
         state = "scanning", peek = nil, radius = radius,
         base_radius = base_r, extend_active = false,
-        scan_progress = progress, extend_burst = false,
+        scan_progress = progress,
     }
-end
-
-function M.tick_burst(prefix, manip_info, firing)
-    prefix = prefix or PREFIX
-
-    local want_burst = firing
-        and manip_info
-        and manip_info.extend_burst
-        and settings.bool(prefix .. "manip_extend", false)
-
-    if want_burst and gc.available() then
-        pcall(gc.apply_weapon, { FireRateMult = BURST_FIRE_RATE })
-        burst_active = true
-    elseif burst_active then
-        burst_active = false
-    end
 end
 
 return M

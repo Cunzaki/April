@@ -1,22 +1,70 @@
--- Shared combat target: prefer silent-aim lock, else nil.
--- Visuals (gear / tracers / hitmarkers) should use this instead of their own FOV.
+-- Shared combat target: silent-aim lock first, then crosshair FOV fallback.
+
+local settings = April.require("core.settings")
+local player_state = April.require("game.player_state")
+local esp_util = April.require("core.esp_util")
+local math_util = April.require("core.math_util")
+local draw_util = April.require("core.draw_util")
 
 local M = {}
+
+local OVERLAY_FOV_ID = "april_target_overlay_fov"
+local FALLBACK_ID = "april_target_overlay_fallback_fov"
+
+local function crosshair_center()
+    local sw, sh = draw_util.screen_size()
+    return sw * 0.5, sh * 0.5
+end
+
+local function find_crosshair_target(fov_px)
+    if not entity or not entity.get_players then return nil end
+
+    local cx, cy = crosshair_center()
+    local best, best_dist = nil, fov_px
+
+    for _, p in ipairs(entity.get_players()) do
+        if not player_state.is_combat_target(p) then goto continue end
+
+        local pos = p.head_position or p.position
+        if not pos then goto continue end
+
+        local px = pos.x or pos[1]
+        local py = pos.y or pos[2]
+        local pz = pos.z or pos[3]
+        if not px then goto continue end
+
+        local sx, sy, vis = esp_util.w2s(px, py, pz)
+        if not vis then goto continue end
+
+        local dist = math_util.screen_fov_dist(sx, sy, cx, cy)
+        if dist <= fov_px and dist < best_dist then
+            best_dist = dist
+            best = p
+        end
+
+        ::continue::
+    end
+
+    return best
+end
 
 function M.get()
     local ok, aimbot = pcall(function()
         return April.require("features.combat.aimbot")
     end)
-    if not ok or not aimbot or not aimbot.get_target then return nil end
-
-    local t = aimbot.get_target()
-    if not t then return nil end
-
-    local player_state = April.require("game.player_state")
-    if player_state and player_state.is_combat_target and not player_state.is_combat_target(t) then
-        return nil
+    if ok and aimbot then
+        local t = (aimbot.get_scoped_target and aimbot.get_scoped_target())
+            or (aimbot.get_target and aimbot.get_target())
+        if t and player_state.is_combat_target(t) then
+            return t
+        end
     end
-    return t
+
+    if settings.bool(FALLBACK_ID, true) then
+        return find_crosshair_target(settings.num(OVERLAY_FOV_ID, 150))
+    end
+
+    return nil
 end
 
 function M.aim_point(target)

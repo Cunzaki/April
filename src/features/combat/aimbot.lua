@@ -62,25 +62,18 @@ local MANIP_LABELS = {
 local function draw_extend_bar(cx, cy, fov, info)
     if not settings.bool(PREFIX .. "manip_extend", false) then return end
     if not info then return end
-    if info.state ~= "scanning" and not info.extend_active and info.state ~= "ready" then return end
+    if info.state ~= "scanning" and info.state ~= "ready" and info.state ~= "direct" then return end
 
-    local prog = info.scan_progress or 0
-    if info.extend_active then
-        prog = 1
-    elseif info.state == "blocked" then
-        prog = 1
-    end
-    prog = math.max(0, math.min(1, prog))
+    local has_target = info.state == "ready" or info.state == "direct"
+    local prog = has_target and 1 or math.max(0, math.min(1, info.scan_progress or 0))
 
     local bar_w, bar_h = 120, 6
     local x = cx - bar_w * 0.5
     local y = cy + fov + 8
     local fill_w = bar_w * prog
-    local r = 1 - prog
-    local g = prog
-    local fill_col = { r, g, 0.15, 0.95 }
+    local fill_col = has_target and theme.GREEN or { 1 - prog, prog, 0.15, 0.95 }
     local bg_col = theme.alpha(theme.PANEL_DEEP, 0.85)
-    local border_col = theme.alpha(theme.RED, 0.5)
+    local border_col = has_target and theme.alpha(theme.GREEN, 0.55) or theme.alpha(theme.RED, 0.5)
 
     if draw and draw.rect_filled then
         draw.rect_filled(x, y, bar_w, bar_h, bg_col)
@@ -317,9 +310,6 @@ function M.update(_dt)
     cached_track.aim = aim
     cached_track.manip = manip_info or { state = "off" }
 
-    local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)
-    manip_extend.tick_burst(PREFIX, cached_track.manip, firing)
-
     local info = cached_track.manip
     local ok_track = false
     if info.use_curve and silent_ray.track_curve then
@@ -341,6 +331,16 @@ end
 
 function M.get_target()
     return locked_target
+end
+
+-- Gear / tracers: FOV target while silent aim is on (even without a gun out).
+function M.get_scoped_target()
+    if locked_target then return locked_target end
+    if not settings.enabled(P_MASTER) then return nil end
+
+    local sw, sh = targeting.screen_center()
+    local fov = settings.num(PREFIX .. "fov", 150)
+    return targeting.find_target(sw * 0.5, sh * 0.5, fov, PREFIX)
 end
 
 function M.draw()

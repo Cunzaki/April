@@ -1,11 +1,11 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-12T23:23:50.685Z
+    Built: 2026-07-12T23:38:22.176Z
 ]]
 
 April = {
-    version = "3.68.0",
+    version = "3.69.0",
     debug = false,
     _mods = {},
     bundled = true,
@@ -3257,7 +3257,7 @@ function M.evaluate_manipulation(origin, target_pos, opts)
         return {
             state = "ready", peek = peek, radius = radius,
             base_radius = base_r, extend_active = extended,
-            scan_progress = progress or 1, extend_burst = extended,
+            scan_progress = progress or 1,
         }
     end
 
@@ -8095,25 +8095,73 @@ end)()
 
 -- ── game/combat_target.lua ──
 April._mods["game.combat_target"] = (function()
--- Shared combat target: prefer silent-aim lock, else nil.
--- Visuals (gear / tracers / hitmarkers) should use this instead of their own FOV.
+-- Shared combat target: silent-aim lock first, then crosshair FOV fallback.
+
+local settings = April.require("core.settings")
+local player_state = April.require("game.player_state")
+local esp_util = April.require("core.esp_util")
+local math_util = April.require("core.math_util")
+local draw_util = April.require("core.draw_util")
 
 local M = {}
+
+local OVERLAY_FOV_ID = "april_target_overlay_fov"
+local FALLBACK_ID = "april_target_overlay_fallback_fov"
+
+local function crosshair_center()
+    local sw, sh = draw_util.screen_size()
+    return sw * 0.5, sh * 0.5
+end
+
+local function find_crosshair_target(fov_px)
+    if not entity or not entity.get_players then return nil end
+
+    local cx, cy = crosshair_center()
+    local best, best_dist = nil, fov_px
+
+    for _, p in ipairs(entity.get_players()) do
+        if not player_state.is_combat_target(p) then goto continue end
+
+        local pos = p.head_position or p.position
+        if not pos then goto continue end
+
+        local px = pos.x or pos[1]
+        local py = pos.y or pos[2]
+        local pz = pos.z or pos[3]
+        if not px then goto continue end
+
+        local sx, sy, vis = esp_util.w2s(px, py, pz)
+        if not vis then goto continue end
+
+        local dist = math_util.screen_fov_dist(sx, sy, cx, cy)
+        if dist <= fov_px and dist < best_dist then
+            best_dist = dist
+            best = p
+        end
+
+        ::continue::
+    end
+
+    return best
+end
 
 function M.get()
     local ok, aimbot = pcall(function()
         return April.require("features.combat.aimbot")
     end)
-    if not ok or not aimbot or not aimbot.get_target then return nil end
-
-    local t = aimbot.get_target()
-    if not t then return nil end
-
-    local player_state = April.require("game.player_state")
-    if player_state and player_state.is_combat_target and not player_state.is_combat_target(t) then
-        return nil
+    if ok and aimbot then
+        local t = (aimbot.get_scoped_target and aimbot.get_scoped_target())
+            or (aimbot.get_target and aimbot.get_target())
+        if t and player_state.is_combat_target(t) then
+            return t
+        end
     end
-    return t
+
+    if settings.bool(FALLBACK_ID, true) then
+        return find_crosshair_target(settings.num(OVERLAY_FOV_ID, 150))
+    end
+
+    return nil
 end
 
 function M.aim_point(target)
@@ -10591,7 +10639,6 @@ function M.bone_from_index(idx)
     return M.BONE_MAP[label] or label
 end
 
--- 0 = skip, 1 = allow, 2 = only (matches player_state.passes_downed_check)
 function M.downed_mode_from_filters(prefix)
     local filters = (prefix or "april_silent_") .. "filters"
     if settings.multi(filters, M.FILTER_SKIP_DOWNED, true) then
@@ -10603,14 +10650,18 @@ end
 function M.register_silent_aim(T, G, prefix, parent_id, opts)
     opts = opts or {}
     local p = prefix
-    -- Fresh { parent = ... } per widget — sharing one opts table blanks multicombo lists.
 
+    menu_util.section(T, G, "Targeting")
     menu.add_combo(T, G, p .. "target_type", "Target Type", { "Crosshair", "Distance" }, 0,
         { parent = parent_id })
     menu.add_combo(T, G, p .. "bone", "Hitbox", M.SILENT_BONES, 0, { parent = parent_id })
-
-    -- All toggle filters in one multicombo (API: menu.get → {bool,...})
-    menu.add_multicombo(T, G, p .. "filters", "Aim Filters", {
+    menu.add_multicombo(T, G, p .. "targets", "Aim At", {
+        "Players", "NPCs", "NPC Soldiers", "NPC Bosses",
+    }, { false, false, false, false }, { parent = parent_id })
+    if menu and menu.set then
+        pcall(menu.set, p .. "targets", { true, false, true, true })
+    end
+    menu.add_multicombo(T, G, p .. "filters", "Filters", {
         "Health Check",
         "Visible Only",
         "Team Check",
@@ -10621,7 +10672,6 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     if menu and menu.set then
         pcall(menu.set, p .. "filters", { true, false, true, true, false, true })
     end
-
     menu.add_input(T, G, p .. "whitelist_ids", "Whitelist IDs", "")
     if menu and menu.set_visible then
         pcall(menu.set_visible, p .. "whitelist_ids", false)
@@ -10630,24 +10680,23 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
         local wl = April.require("features.combat.silent_whitelist")
         if wl and wl.clear then wl.clear() end
     end)
+    menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, { parent = parent_id })
 
-    menu.add_multicombo(T, G, p .. "targets", "Aim Targets", {
-        "Players", "NPCs", "NPC Soldiers", "NPC Bosses",
-    }, { false, false, false, false }, { parent = parent_id })
-    if menu and menu.set then
-        pcall(menu.set, p .. "targets", { true, false, true, true })
-    end
-
-    menu.add_multicombo(T, G, p .. "options", "Aim Options", {
+    menu_util.section(T, G, "Aim")
+    menu.add_multicombo(T, G, p .. "options", "Options", {
         "Sticky Target",
     }, { false }, { parent = parent_id })
+    menu.add_slider_int(T, G, p .. "hit_chance", "Hit Chance %", 1, 100, 100, { parent = parent_id })
+    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 150, { parent = parent_id })
 
+    menu_util.section(T, G, "Bullet TP")
     local tp_root = menu_util.parent(p .. "bullet_tp")
     menu.add_checkbox(T, G, p .. "bullet_tp", "Bullet TP", false, { parent = parent_id })
     menu.add_checkbox(T, G, p .. "tp_ray_vis", "Visualize Ray Path", false, menu_util.parent(p .. "bullet_tp", {
         colorpicker = { 0.95, 0.45, 1, 0.9 },
     }))
 
+    menu_util.section(T, G, "Bullet Manip")
     local manip_root = menu_util.parent(p .. "bullet_manip")
     menu.add_checkbox(T, G, p .. "bullet_manip", "Silent Bullet Manip", false, { parent = parent_id })
     menu.add_slider_float(T, G, p .. "manip_dist", "Manip Distance", 0.1, 1, 1, "%.2f", manip_root)
@@ -10657,16 +10706,13 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_checkbox(T, G, p .. "manip_status", "Manip Status Bar", false, manip_root)
     menu.add_checkbox(T, G, p .. "manip_peek_vis", "Manip Peek Visual", true, manip_root)
 
+    menu_util.section(T, G, "Visuals")
     menu.add_checkbox(T, G, p .. "draw_fov", "FOV Circle", false,
         menu_util.parent(parent_id, { colorpicker = opts.fov_color or { 0.55, 0.2, 1, 1 } }))
     menu.add_combo(T, G, p .. "fov_style", "FOV Style", { "Outline", "Filled Circle" }, 1,
         menu_util.parent(p .. "draw_fov"))
     menu.add_checkbox(T, G, p .. "target_line", "Target Line", false,
         menu_util.parent(parent_id, { colorpicker = opts.line_color or { 1, 0.25, 0.25, 1 } }))
-
-    menu.add_slider_int(T, G, p .. "hit_chance", "Hit Chance %", 1, 100, 100, { parent = parent_id })
-    menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, { parent = parent_id })
-    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 150, { parent = parent_id })
 end
 
 return M
@@ -11276,17 +11322,11 @@ end)()
 
 -- ── features/combat/manip_extend.lua ──
 April._mods["features.combat.manip_extend"] = (function()
--- Extend manip: incremental origin scan, mag-dump fire-rate spike (no HRP move).
+-- Extend manip: incremental origin scan only (no desync, no HRP move, no fire-rate patch).
 
-local settings = April.require("core.settings")
 local manip_math = April.require("core.manip_math")
-local gc = April.require("game.gc_weapon_mods")
 
 local M = {}
-
-local PREFIX = "april_silent_"
-local BURST_FIRE_RATE = 0.99
-local burst_active = false
 
 local scan = nil
 
@@ -11297,15 +11337,10 @@ local function scan_key(origin, target)
 end
 
 function M.reset()
-    burst_active = false
     scan = nil
 end
 
-function M.is_burst_active()
-    return burst_active
-end
-
--- Incremental ring scan for extend — one ring sample batch per call (progress bar).
+-- Incremental ring scan for extend — one ring per call (progress bar).
 function M.evaluate_extend(origin, target_pos, base_r, extra_r)
     base_r = manip_math.clamp_radius(base_r)
     extra_r = manip_math.clamp_extend_extra(extra_r)
@@ -11314,7 +11349,7 @@ function M.evaluate_extend(origin, target_pos, base_r, extra_r)
     if not origin or not target_pos then
         return {
             state = "blocked", peek = nil, radius = base_r,
-            base_radius = base_r, extend_active = false, scan_progress = 0, extend_burst = false,
+            base_radius = base_r, extend_active = false, scan_progress = 0,
         }
     end
 
@@ -11322,7 +11357,7 @@ function M.evaluate_extend(origin, target_pos, base_r, extra_r)
         scan = nil
         return {
             state = "direct", peek = nil, radius = base_r,
-            base_radius = base_r, extend_active = false, scan_progress = 1, extend_burst = false,
+            base_radius = base_r, extend_active = false, scan_progress = 1,
         }
     end
 
@@ -11363,7 +11398,7 @@ function M.evaluate_extend(origin, target_pos, base_r, extra_r)
         return {
             state = "ready", peek = peek, radius = radius,
             base_radius = base_r, extend_active = extended,
-            scan_progress = 1, extend_burst = extended,
+            scan_progress = 1,
         }
     end
 
@@ -11372,31 +11407,15 @@ function M.evaluate_extend(origin, target_pos, base_r, extra_r)
         scan = nil
         return {
             state = "blocked", peek = nil, radius = max_r,
-            base_radius = base_r, extend_active = false, scan_progress = 1, extend_burst = false,
+            base_radius = base_r, extend_active = false, scan_progress = 1,
         }
     end
 
     return {
         state = "scanning", peek = nil, radius = radius,
         base_radius = base_r, extend_active = false,
-        scan_progress = progress, extend_burst = false,
+        scan_progress = progress,
     }
-end
-
-function M.tick_burst(prefix, manip_info, firing)
-    prefix = prefix or PREFIX
-
-    local want_burst = firing
-        and manip_info
-        and manip_info.extend_burst
-        and settings.bool(prefix .. "manip_extend", false)
-
-    if want_burst and gc.available() then
-        pcall(gc.apply_weapon, { FireRateMult = BURST_FIRE_RATE })
-        burst_active = true
-    elseif burst_active then
-        burst_active = false
-    end
 end
 
 return M
@@ -11438,7 +11457,6 @@ local function apply_drop_aim(track_origin, hitpart, weapon, state, extra)
         base_radius = extra and extra.base_radius or nil,
         extend_active = extra and extra.extend_active or false,
         scan_progress = extra and extra.scan_progress or 0,
-        extend_burst = extra and extra.extend_burst or false,
     }
     return muzzle, aim_far or hitpart, info
 end
@@ -11478,7 +11496,6 @@ function M.resolve_track(target, prefix, cx, cy)
             base_radius = base_r,
             extend_active = false,
             scan_progress = 0,
-            extend_burst = false,
         }
         local fire = fire_origin(camera)
 
@@ -11498,7 +11515,6 @@ function M.resolve_track(target, prefix, cx, cy)
             extra.base_radius = ev.base_radius or base_r
             extra.extend_active = ev.extend_active == true
             extra.scan_progress = ev.scan_progress or 0
-            extra.extend_burst = ev.extend_burst == true
             if ev.state == "ready" and ev.peek then
                 fire = manip_math.peek_track_origin(ev.peek) or fire
             elseif ev.state == "scanning" then
@@ -11587,25 +11603,18 @@ local MANIP_LABELS = {
 local function draw_extend_bar(cx, cy, fov, info)
     if not settings.bool(PREFIX .. "manip_extend", false) then return end
     if not info then return end
-    if info.state ~= "scanning" and not info.extend_active and info.state ~= "ready" then return end
+    if info.state ~= "scanning" and info.state ~= "ready" and info.state ~= "direct" then return end
 
-    local prog = info.scan_progress or 0
-    if info.extend_active then
-        prog = 1
-    elseif info.state == "blocked" then
-        prog = 1
-    end
-    prog = math.max(0, math.min(1, prog))
+    local has_target = info.state == "ready" or info.state == "direct"
+    local prog = has_target and 1 or math.max(0, math.min(1, info.scan_progress or 0))
 
     local bar_w, bar_h = 120, 6
     local x = cx - bar_w * 0.5
     local y = cy + fov + 8
     local fill_w = bar_w * prog
-    local r = 1 - prog
-    local g = prog
-    local fill_col = { r, g, 0.15, 0.95 }
+    local fill_col = has_target and theme.GREEN or { 1 - prog, prog, 0.15, 0.95 }
     local bg_col = theme.alpha(theme.PANEL_DEEP, 0.85)
-    local border_col = theme.alpha(theme.RED, 0.5)
+    local border_col = has_target and theme.alpha(theme.GREEN, 0.55) or theme.alpha(theme.RED, 0.5)
 
     if draw and draw.rect_filled then
         draw.rect_filled(x, y, bar_w, bar_h, bg_col)
@@ -11842,9 +11851,6 @@ function M.update(_dt)
     cached_track.aim = aim
     cached_track.manip = manip_info or { state = "off" }
 
-    local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)
-    manip_extend.tick_burst(PREFIX, cached_track.manip, firing)
-
     local info = cached_track.manip
     local ok_track = false
     if info.use_curve and silent_ray.track_curve then
@@ -11866,6 +11872,16 @@ end
 
 function M.get_target()
     return locked_target
+end
+
+-- Gear / tracers: FOV target while silent aim is on (even without a gun out).
+function M.get_scoped_target()
+    if locked_target then return locked_target end
+    if not settings.enabled(P_MASTER) then return nil end
+
+    local sw, sh = targeting.screen_center()
+    local fov = settings.num(PREFIX .. "fov", 150)
+    return targeting.find_target(sw * 0.5, sh * 0.5, fov, PREFIX)
 end
 
 function M.draw()
@@ -12084,6 +12100,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
+    menu_util.section(T, G, "Farm")
     menu_util.register_keybind(T, G.MISC, P, "Farm Helper", false)
     menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", true, root)
     menu_util.gap(T, G.MISC)
@@ -12338,16 +12355,14 @@ function M.register_menu()
 
     menu_util.register_keybind(T, G.GUN_MODS, P, "Enable Gun Mods", false)
 
-    menu_util.gap(T, G.GUN_MODS)
+    menu_util.section(T, G.GUN_MODS, "Apply")
     menu_util.input(T, G.GUN_MODS, HELD_ID, "Held Weapon", "—")
-
     menu.add_combo(T, G.GUN_MODS, profiles.MODE_ID, "Apply Mode", profiles.MODES, 0, root)
 
     M._combo_ctx = { T = T, G = G.GUN_MODS, root = root }
     ensure_weapon_combo()
 
-    -- Toggles first (feature toggles together)
-    menu_util.gap(T, G.GUN_MODS)
+    menu_util.section(T, G.GUN_MODS, "Modifiers")
     menu.add_checkbox(T, G.GUN_MODS, "april_gm_recoil", "No Recoil", false, root)
     menu.add_slider_int(T, G.GUN_MODS, "april_gm_recoil_pct", "Recoil Reduction %", 0, 100, 100,
         menu_util.parent("april_gm_recoil"))
@@ -12372,7 +12387,7 @@ function M.register_menu()
 
     menu.add_checkbox(T, G.GUN_MODS, "april_gm_double_tap", "Double Tap", false, root)
 
-    menu_util.gap(T, G.GUN_MODS)
+    menu_util.section(T, G.GUN_MODS, "Profiles")
     menu_util.button(T, G.GUN_MODS, "april_gm_save", "Save Profile", function()
         local key = selected_weapon_key()
         if not key then
@@ -12761,6 +12776,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
+    menu_util.section(T, G, "Utility")
     menu.add_checkbox(T, G.MISC, P, "Mod Checker", false)
 
     menu_util.section(T, G.MISC, "Mod Checker Scan")
@@ -13195,6 +13211,7 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.VISUALS)
 
+    menu_util.section(T, G, "Player ESP")
     menu_util.register_keybind(T, G.VISUALS, P, "Player ESP", false, {
         colorpicker = { 1, 0.35, 0.35, 1 },
     })
@@ -13483,7 +13500,6 @@ local items = April.require("game.items")
 local player_gear = April.require("game.player_gear")
 local player_state = April.require("game.player_state")
 local combat_target = April.require("game.combat_target")
-local math_util = April.require("core.math_util")
 local text_util = April.require("core.text_util")
 
 local M = {}
@@ -13557,43 +13573,6 @@ local function get_gear(player)
     local data = player_gear.scan_player(player)
     gear_cache[uid] = { t = now, data = data }
     return data
-end
-
-local function crosshair_center()
-    local sw, sh = draw_util.screen_size()
-    return sw * 0.5, sh * 0.5
-end
-
-local function find_crosshair_target(fov_px)
-    if not entity or not entity.get_players then return nil end
-
-    local cx, cy = crosshair_center()
-    local best, best_dist = nil, fov_px
-
-    for _, p in ipairs(entity.get_players()) do
-        if not player_state.is_combat_target(p) then goto continue end
-
-        local pos = p.head_position or p.position
-        if not pos then goto continue end
-
-        local px = pos.x or pos[1]
-        local py = pos.y or pos[2]
-        local pz = pos.z or pos[3]
-        if not px then goto continue end
-
-        local sx, sy, vis = esp_util.w2s(px, py, pz)
-        if not vis then goto continue end
-
-        local dist = math_util.screen_fov_dist(sx, sy, cx, cy)
-        if dist <= fov_px and dist < best_dist then
-            best_dist = dist
-            best = p
-        end
-
-        ::continue::
-    end
-
-    return best
 end
 
 local function armor_sort_key(piece)
@@ -13761,18 +13740,17 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.VISUALS)
 
-    local root = menu_util.parent(P)
+    menu_util.section(T, G, "Combat HUD")
+    menu_util.register_keybind(T, G.VISUALS, P, "Target Gear", false)
 
-    menu.add_checkbox(T, G.VISUALS, P, "Target Gear", false)
-    menu.add_checkbox(T, G.VISUALS, P .. "_fallback_fov", "Fallback Crosshair FOV", false, root)
+    local root = menu_util.parent(P)
+    menu.add_checkbox(T, G.VISUALS, P .. "_fallback_fov", "Crosshair FOV Fallback", true, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Fallback FOV", 40, 400, 150,
         menu_util.parent(P .. "_fallback_fov"))
-
-    menu_util.gap(T, G.VISUALS)
     menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, root)
 
-    menu_util.bind_master(P, {
+    menu_util.bind_children(P, {
         P .. "_fallback_fov", P .. "_fov",
         P .. "_gear_size", P .. "_top",
     })
@@ -13787,12 +13765,7 @@ function M.refresh_target()
     end
 
     local gear_sz = settings.num(P .. "_gear_size", 48)
-
-    -- Prefer silent-aim lock; optional FOV fallback when no lock.
     local target = combat_target.get()
-    if not target and settings.bool(P .. "_fallback_fov", false) then
-        target = find_crosshair_target(settings.num(P .. "_fov", 150))
-    end
 
     if not target or not player_state.is_combat_target(target) then
         M._target = nil
@@ -13890,6 +13863,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.VISUALS)
     local root = menu_util.parent(P)
 
+    menu_util.section(T, G, "Crosshair")
     menu.add_checkbox(T, G.VISUALS, P, "Custom Crosshair", false)
     menu.add_combo(T, G.VISUALS, "april_crosshair_type", "Crosshair Type", { "Cross", "Circle", "Dot", "T-Shape" }, 0, root)
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_color", "Crosshair Color", true, menu_util.parent(P, { colorpicker = { 0, 1, 0, 1 } }))
@@ -14218,6 +14192,7 @@ function M.register_menu()
     local T = menu_util.group(G.VISUALS)
     local root = menu_util.parent(P)
 
+    menu_util.section(T, G, "Hit Feedback")
     menu.add_checkbox(T, G.VISUALS, P, "Hitmarkers", false, {
         colorpicker = { 1, 1, 1, 0.95 },
     })
@@ -14428,6 +14403,7 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.WORLD)
+    menu_util.section(T, G, "Resources")
     menu_util.register_keybind(T, G.WORLD, P, "Resource ESP", false)
     for _, t in ipairs(maps.WORLD_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
@@ -14927,6 +14903,7 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.WORLD)
+    menu_util.section(T, G, "Loot")
     menu_util.register_keybind(T, G.WORLD, P, "Loot ESP", false)
     for _, t in ipairs(maps.LOOT_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
@@ -15205,6 +15182,7 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.WORLD)
+    menu_util.section(T, G, "Bases")
     menu_util.register_keybind(T, G.WORLD, P, "Base ESP", false)
     for _, t in ipairs(maps.BASE_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })
@@ -15473,6 +15451,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.WORLD)
     local root = menu_util.parent(P)
 
+    menu_util.section(T, G, "NPCs")
     menu_util.register_keybind(T, G.WORLD, P, "NPC ESP", false, { colorpicker = { 1, 0.3, 0.3, 1 } })
     menu.add_checkbox(T, G.WORLD, "april_npc_soldiers", "Soldiers", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, menu_util.parent(P, { colorpicker = { 1, 0.5, 0.1, 1 } }))
@@ -15820,6 +15799,8 @@ local M = {}
 function M.register_menu()
     local G = menu_util.G
     local T = menu_util.group(G.MISC)
+
+    menu_util.section(T, G, "Movement")
 
     -- Id kept as april_noclip_enabled for config compatibility; label is Fly.
     menu_util.register_keybind(T, G.MISC, "april_noclip_enabled", "Fly", false, { key = 0x46 })
@@ -16506,6 +16487,7 @@ function M.register_menu()
     local T = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
+    menu_util.section(T, G, "Combat")
     menu_util.register_keybind(T, G.MISC, P, "Fling", false)
     menu.add_slider_int(T, G.MISC, P_FOV, "Fling FOV", 20, 600, 150, root)
     menu.add_slider_int(T, G.MISC, P_DURATION, "Fling Duration", 2, 10, 2, root)
@@ -16654,7 +16636,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
-    menu_util.gap(T, G.MISC)
+    menu_util.section(T, G, "Network")
     menu_util.register_keybind(T, G.MISC, P, "Desync", false)
     menu.add_checkbox(T, G.MISC, "april_desync_autosend", "Desync Auto Send", false, root)
     menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Desync Send Threshold", 0, 1, 0.3,
@@ -16739,6 +16721,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.RADAR)
     local root = menu_util.parent(P)
 
+    menu_util.section(T, G, "Waypoints")
     menu_util.register_keybind(T, G.RADAR, P, "Enable Waypoints", false)
     menu.add_checkbox(T, G.RADAR, "april_wp_dist", "Waypoint Show Distance", false, root)
     menu.add_checkbox(T, G.RADAR, "april_wp_beacon", "Beacon Pillar", false, root)
@@ -17013,6 +16996,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.RADAR)
     local root = menu_util.parent(P)
 
+    menu_util.section(T, G, "Tactical Map")
     menu_util.register_keybind(T, G.RADAR, P, "Enable Radar", false, { key = 0x28 })
 
     menu.add_checkbox(T, G.RADAR, "april_map_show_players", "Radar Show Players", true, root)
@@ -17568,24 +17552,24 @@ M._menu_registered = false
 M.FEATURE_ORDER = {
     "features.combat.aimbot",
     "features.combat.gun_mods",
-    "features.visuals.player_esp",
     "features.visuals.target_overlay",
     "features.visuals.crosshair",
-    "features.visuals.bullet_tracers",
     "features.visuals.hitmarkers",
+    "features.visuals.bullet_tracers",
+    "features.visuals.player_esp",
     "features.world.world_esp",
     "features.world.loot_esp",
     "features.world.npc_esp",
     "features.world.base_esp",
     "features.radar.tactical_map",
     "features.radar.waypoints",
-    "features.utility.keybind_viewer",
+    "features.movement.exploits",
+    "features.movement.desync",
+    "features.movement.fling",
+    "features.combat.perfect_farm",
     "features.utility.mod_checker",
     "features.utility.anti_afk",
-    "features.combat.perfect_farm",
-    "features.movement.exploits",
-    "features.movement.fling",
-    "features.movement.desync",
+    "features.utility.keybind_viewer",
     "features.utility.config",
 }
 

@@ -91,6 +91,7 @@ end
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.WORLD)
+    menu_util.section(T, G, "Resources")
     menu_util.register_keybind(T, G.WORLD, P, "Resource ESP", false)
     for _, t in ipairs(maps.WORLD_TOGGLES) do
         menu.add_checkbox(T, G.WORLD, t.id, t.label, false, { parent = P, colorpicker = t.color })

@@ -7,7 +7,6 @@ local items = April.require("game.items")
 local player_gear = April.require("game.player_gear")
 local player_state = April.require("game.player_state")
 local combat_target = April.require("game.combat_target")
-local math_util = April.require("core.math_util")
 local text_util = April.require("core.text_util")
 
 local M = {}
@@ -81,43 +80,6 @@ local function get_gear(player)
     local data = player_gear.scan_player(player)
     gear_cache[uid] = { t = now, data = data }
     return data
-end
-
-local function crosshair_center()
-    local sw, sh = draw_util.screen_size()
-    return sw * 0.5, sh * 0.5
-end
-
-local function find_crosshair_target(fov_px)
-    if not entity or not entity.get_players then return nil end
-
-    local cx, cy = crosshair_center()
-    local best, best_dist = nil, fov_px
-
-    for _, p in ipairs(entity.get_players()) do
-        if not player_state.is_combat_target(p) then goto continue end
-
-        local pos = p.head_position or p.position
-        if not pos then goto continue end
-
-        local px = pos.x or pos[1]
-        local py = pos.y or pos[2]
-        local pz = pos.z or pos[3]
-        if not px then goto continue end
-
-        local sx, sy, vis = esp_util.w2s(px, py, pz)
-        if not vis then goto continue end
-
-        local dist = math_util.screen_fov_dist(sx, sy, cx, cy)
-        if dist <= fov_px and dist < best_dist then
-            best_dist = dist
-            best = p
-        end
-
-        ::continue::
-    end
-
-    return best
 end
 
 local function armor_sort_key(piece)
@@ -285,18 +247,17 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.VISUALS)
 
-    local root = menu_util.parent(P)
+    menu_util.section(T, G, "Combat HUD")
+    menu_util.register_keybind(T, G.VISUALS, P, "Target Gear", false)
 
-    menu.add_checkbox(T, G.VISUALS, P, "Target Gear", false)
-    menu.add_checkbox(T, G.VISUALS, P .. "_fallback_fov", "Fallback Crosshair FOV", false, root)
+    local root = menu_util.parent(P)
+    menu.add_checkbox(T, G.VISUALS, P .. "_fallback_fov", "Crosshair FOV Fallback", true, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Fallback FOV", 40, 400, 150,
         menu_util.parent(P .. "_fallback_fov"))
-
-    menu_util.gap(T, G.VISUALS)
     menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, root)
 
-    menu_util.bind_master(P, {
+    menu_util.bind_children(P, {
         P .. "_fallback_fov", P .. "_fov",
         P .. "_gear_size", P .. "_top",
     })
@@ -311,12 +272,7 @@ function M.refresh_target()
     end
 
     local gear_sz = settings.num(P .. "_gear_size", 48)
-
-    -- Prefer silent-aim lock; optional FOV fallback when no lock.
     local target = combat_target.get()
-    if not target and settings.bool(P .. "_fallback_fov", false) then
-        target = find_crosshair_target(settings.num(P .. "_fov", 150))
-    end
 
     if not target or not player_state.is_combat_target(target) then
         M._target = nil

@@ -108,7 +108,7 @@ function M.evaluate_manipulation(origin, target_pos, opts)
         return {
             state = "ready", peek = peek, radius = radius,
             base_radius = base_r, extend_active = extended,
-            scan_progress = progress or 1, extend_burst = extended,
+            scan_progress = progress or 1,
         }
     end
 

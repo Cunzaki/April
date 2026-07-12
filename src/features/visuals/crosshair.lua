@@ -10,6 +10,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.VISUALS)
     local root = menu_util.parent(P)
 
+    menu_util.section(T, G, "Crosshair")
     menu.add_checkbox(T, G.VISUALS, P, "Custom Crosshair", false)
     menu.add_combo(T, G.VISUALS, "april_crosshair_type", "Crosshair Type", { "Cross", "Circle", "Dot", "T-Shape" }, 0, root)
     menu.add_checkbox(T, G.VISUALS, "april_crosshair_color", "Crosshair Color", true, menu_util.parent(P, { colorpicker = { 0, 1, 0, 1 } }))

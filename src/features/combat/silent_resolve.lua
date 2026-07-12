@@ -31,7 +31,6 @@ local function apply_drop_aim(track_origin, hitpart, weapon, state, extra)
         base_radius = extra and extra.base_radius or nil,
         extend_active = extra and extra.extend_active or false,
         scan_progress = extra and extra.scan_progress or 0,
-        extend_burst = extra and extra.extend_burst or false,
     }
     return muzzle, aim_far or hitpart, info
 end
@@ -71,7 +70,6 @@ function M.resolve_track(target, prefix, cx, cy)
             base_radius = base_r,
             extend_active = false,
             scan_progress = 0,
-            extend_burst = false,
         }
         local fire = fire_origin(camera)
 
@@ -91,7 +89,6 @@ function M.resolve_track(target, prefix, cx, cy)
             extra.base_radius = ev.base_radius or base_r
             extra.extend_active = ev.extend_active == true
             extra.scan_progress = ev.scan_progress or 0
-            extra.extend_burst = ev.extend_burst == true
             if ev.state == "ready" and ev.peek then
                 fire = manip_math.peek_track_origin(ev.peek) or fire
             elseif ev.state == "scanning" then

@@ -94,6 +94,7 @@ function M.register_menu()
     local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
+    menu_util.section(T, G, "Utility")
     menu.add_checkbox(T, G.MISC, P, "Mod Checker", false)
 
     menu_util.section(T, G.MISC, "Mod Checker Scan")

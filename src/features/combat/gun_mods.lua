@@ -175,16 +175,14 @@ function M.register_menu()
 
     menu_util.register_keybind(T, G.GUN_MODS, P, "Enable Gun Mods", false)
 
-    menu_util.gap(T, G.GUN_MODS)
+    menu_util.section(T, G.GUN_MODS, "Apply")
     menu_util.input(T, G.GUN_MODS, HELD_ID, "Held Weapon", "—")
-
     menu.add_combo(T, G.GUN_MODS, profiles.MODE_ID, "Apply Mode", profiles.MODES, 0, root)
 
     M._combo_ctx = { T = T, G = G.GUN_MODS, root = root }
     ensure_weapon_combo()
 
-    -- Toggles first (feature toggles together)
-    menu_util.gap(T, G.GUN_MODS)
+    menu_util.section(T, G.GUN_MODS, "Modifiers")
     menu.add_checkbox(T, G.GUN_MODS, "april_gm_recoil", "No Recoil", false, root)
     menu.add_slider_int(T, G.GUN_MODS, "april_gm_recoil_pct", "Recoil Reduction %", 0, 100, 100,
         menu_util.parent("april_gm_recoil"))
@@ -209,7 +207,7 @@ function M.register_menu()
 
     menu.add_checkbox(T, G.GUN_MODS, "april_gm_double_tap", "Double Tap", false, root)
 
-    menu_util.gap(T, G.GUN_MODS)
+    menu_util.section(T, G.GUN_MODS, "Profiles")
     menu_util.button(T, G.GUN_MODS, "april_gm_save", "Save Profile", function()
         local key = selected_weapon_key()
         if not key then

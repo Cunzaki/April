@@ -81,6 +81,7 @@ function M.register_menu()
     local T = menu_util.group(G.VISUALS)
     local root = menu_util.parent(P)
 
+    menu_util.section(T, G, "Hit Feedback")
     menu.add_checkbox(T, G.VISUALS, P, "Hitmarkers", false, {
         colorpicker = { 1, 1, 1, 0.95 },
     })
