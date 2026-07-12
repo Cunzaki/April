@@ -88,12 +88,21 @@ function M.has_saved(weapon_name)
     return weapon_name and M._profiles[weapon_name] ~= nil
 end
 
-function M.has_active_mods(weapon_name)
-    local profile = M.get(weapon_name)
-    if not profile then return false end
+function M.profile_has_active_mods(profile)
+    profile = M.normalize_profile(profile)
     return profile.recoil or profile.spread or profile.sway
         or profile.fire_rate or profile.speed or profile.range
         or profile.double_tap
+end
+
+function M.has_active_mods(weapon_name)
+    local profile = M.get(weapon_name)
+    if not profile then return false end
+    return M.profile_has_active_mods(profile)
+end
+
+function M.editor_has_active_mods()
+    return M.profile_has_active_mods(M.read_editor())
 end
 
 function M.has_gc_mods(weapon_name)

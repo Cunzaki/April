@@ -30,7 +30,6 @@ M.FILTER_TEAM = 3
 M.FILTER_SAFEZONE = 4
 M.FILTER_WHITELIST = 5
 M.FILTER_SKIP_DOWNED = 6
-M.FILTER_ONLY_DOWNED = 7
 
 -- april_silent_targets
 M.TARGET_PLAYERS = 1
@@ -40,7 +39,6 @@ M.TARGET_NPC_BOSSES = 4
 
 -- april_silent_options
 M.OPT_STICKY = 1
-M.OPT_WALLBANG = 2
 
 function M.bone_from_index(idx)
     local label = M.SILENT_BONES[(idx or 0) + 1] or "Head"
@@ -50,9 +48,6 @@ end
 -- 0 = skip, 1 = allow, 2 = only (matches player_state.passes_downed_check)
 function M.downed_mode_from_filters(prefix)
     local filters = (prefix or "april_silent_") .. "filters"
-    if settings.multi(filters, M.FILTER_ONLY_DOWNED, false) then
-        return 2
-    end
     if settings.multi(filters, M.FILTER_SKIP_DOWNED, true) then
         return 0
     end
@@ -76,10 +71,9 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
         "Skip Safezone",
         "Whitelist",
         "Skip Downed",
-        "Only Downed",
-    }, { false, false, false, false, false, false, false }, { parent = parent_id })
+    }, { false, false, false, false, false, false }, { parent = parent_id })
     if menu and menu.set then
-        pcall(menu.set, p .. "filters", { true, false, true, true, false, true, false })
+        pcall(menu.set, p .. "filters", { true, false, true, true, false, true })
     end
 
     menu.add_input(T, G, p .. "whitelist_ids", "Whitelist IDs", "")
@@ -99,13 +93,11 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     end
 
     menu.add_multicombo(T, G, p .. "options", "Aim Options", {
-        "Sticky Target", "Wallbang",
-    }, { false, false }, { parent = parent_id })
+        "Sticky Target",
+    }, { false }, { parent = parent_id })
 
     local tp_root = menu_util.parent(p .. "bullet_tp")
     menu.add_checkbox(T, G, p .. "bullet_tp", "Bullet TP", false, { parent = parent_id })
-    menu.add_combo(T, G, p .. "tp_ray_mode", "TP Ray Mode",
-        { "Direct", "Snap", "Deep", "Curve", "Arch" }, 0, tp_root)
     menu.add_checkbox(T, G, p .. "tp_ray_vis", "Visualize Ray Path", false, menu_util.parent(p .. "bullet_tp", {
         colorpicker = { 0.95, 0.45, 1, 0.9 },
     }))
@@ -114,7 +106,7 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_checkbox(T, G, p .. "bullet_manip", "Silent Bullet Manip", false, { parent = parent_id })
     menu.add_slider_float(T, G, p .. "manip_dist", "Manip Distance", 0.1, 1, 1, "%.2f", manip_root)
     menu.add_checkbox(T, G, p .. "manip_extend", "Extend", false, manip_root)
-    menu.add_slider_float(T, G, p .. "manip_extend_dist", "Extend Distance", 1, 8, 8, "%.1f",
+    menu.add_slider_float(T, G, p .. "manip_extend_dist", "Extra Scan Distance", 1, 8, 8, "%.1f",
         menu_util.parent(p .. "manip_extend"))
     menu.add_checkbox(T, G, p .. "manip_status", "Manip Status Bar", false, manip_root)
     menu.add_checkbox(T, G, p .. "manip_peek_vis", "Manip Peek Visual", true, manip_root)

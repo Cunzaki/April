@@ -114,12 +114,14 @@ local function sync_held_display(held)
     held = held or profiles.held_weapon_name()
     local text = held or "—"
     if held then
-        if profiles.is_global_mode() and store.has_saved(profiles.GLOBAL_PROFILE_KEY) then
-            text = held .. " (global profile)"
+        if store.editor_has_active_mods() then
+            text = held .. (profiles.is_global_mode() and " (global live)" or " (live)")
+        elseif profiles.is_global_mode() and store.has_saved(profiles.GLOBAL_PROFILE_KEY) then
+            text = held .. " (global saved)"
         elseif store.has_saved(held) then
             text = held .. " (saved)"
         else
-            text = held .. " (no profile)"
+            text = held .. " (no mods)"
         end
     end
     if text ~= M._held_display then
@@ -281,6 +283,23 @@ function M.register_menu()
             M.reset_mods()
         end
     end)
+
+    local editor_ids = {
+        "april_gm_recoil", "april_gm_recoil_pct",
+        "april_gm_spread", "april_gm_spread_pct",
+        "april_gm_sway",
+        "april_gm_fire_rate", "april_gm_fire_rate_mult",
+        "april_gm_speed", "april_gm_speed_mult",
+        "april_gm_range", "april_gm_range_mult",
+        "april_gm_double_tap",
+    }
+    for _, id in ipairs(editor_ids) do
+        settings.on_change(id, function()
+            if settings.enabled(P) then
+                schedule_apply(150)
+            end
+        end)
+    end
 
     load_selected_editor()
     sync_held_display()

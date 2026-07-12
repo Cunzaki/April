@@ -71,8 +71,8 @@ const ORDER = [
   "features/combat/combat_menu.lua",
   "features/combat/targeting.lua",
   "features/combat/bullet_tp_ray.lua",
-  "features/combat/silent_resolve.lua",
   "features/combat/manip_extend.lua",
+  "features/combat/silent_resolve.lua",
   "features/combat/aimbot.lua",
   "features/combat/perfect_farm.lua",
   "features/combat/gun_mods.lua",
@@ -105,7 +105,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.66.0",
+    version = "3.67.0",
     debug = false,
     _mods = {},
     bundled = true,

@@ -28,16 +28,13 @@ local function profile_speed_mult(held)
     local store = store_mod()
 
     if profiles.is_global_mode() then
-        if not store.has_saved(profiles.GLOBAL_PROFILE_KEY) then return 0 end
-        local p = store.get(profiles.GLOBAL_PROFILE_KEY)
+        local p = store.read_editor()
         if not p or not p.speed then return 0 end
         return p.speed_mult or 0
     end
 
-    if store.has_saved(held) then
-        local p = store.get(held)
-        if p and p.speed then return p.speed_mult or 0 end
-    end
+    local p = store.read_editor()
+    if p and p.speed then return p.speed_mult or 0 end
 
     return 0
 end

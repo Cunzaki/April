@@ -54,9 +54,44 @@ end
 local MANIP_LABELS = {
     direct = "MANIP: CLEAR SHOT",
     ready = "MANIP: RAY READY",
+    scanning = "MANIP: SCANNING",
     blocked = "MANIP: NO PEEK",
     off = "",
 }
+
+local function draw_extend_bar(cx, cy, fov, info)
+    if not settings.bool(PREFIX .. "manip_extend", false) then return end
+    if not info then return end
+    if info.state ~= "scanning" and not info.extend_active and info.state ~= "ready" then return end
+
+    local prog = info.scan_progress or 0
+    if info.extend_active then
+        prog = 1
+    elseif info.state == "blocked" then
+        prog = 1
+    end
+    prog = math.max(0, math.min(1, prog))
+
+    local bar_w, bar_h = 120, 6
+    local x = cx - bar_w * 0.5
+    local y = cy + fov + 8
+    local fill_w = bar_w * prog
+    local r = 1 - prog
+    local g = prog
+    local fill_col = { r, g, 0.15, 0.95 }
+    local bg_col = theme.alpha(theme.PANEL_DEEP, 0.85)
+    local border_col = theme.alpha(theme.RED, 0.5)
+
+    if draw and draw.rect_filled then
+        draw.rect_filled(x, y, bar_w, bar_h, bg_col)
+        if fill_w > 0.5 then
+            draw.rect_filled(x, y, fill_w, bar_h, fill_col)
+        end
+        if draw.rect then
+            draw.rect(x, y, bar_w, bar_h, border_col, 1)
+        end
+    end
+end
 
 local function draw_manip_status(cx, cy, fov, info)
     if not info or info.state == "off" then return end
@@ -64,14 +99,15 @@ local function draw_manip_status(cx, cy, fov, info)
 
     local ready = info.state == "ready" or info.state == "direct"
     local text = MANIP_LABELS[info.state] or "MANIP: ..."
-    local col = ready and theme.GREEN or theme.RED
+    local col = ready and theme.GREEN or (info.state == "scanning" and theme.ORANGE or theme.RED)
 
     local tw = theme.text_w(text, 11)
     local pad_x, pad_y = 10, 4
     local w = tw + pad_x * 2
     local h = 18
     local x = cx - w * 0.5
-    local y = cy + fov + 10
+    local extend_bar = settings.bool(PREFIX .. "manip_extend", false)
+    local y = cy + fov + (extend_bar and 22 or 10)
 
     theme.draw_panel(x, y, w, h, {
         bg = theme.alpha(theme.PANEL_DEEP, 0.9),
@@ -148,7 +184,7 @@ function M.register_menu()
         PREFIX .. "filters",
         PREFIX .. "whitelist_ids", PREFIX .. "whitelist_clear",
         PREFIX .. "targets", PREFIX .. "options",
-        PREFIX .. "bullet_tp", PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
+        PREFIX .. "bullet_tp", PREFIX .. "tp_ray_vis",
         PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_extend", PREFIX .. "manip_extend_dist",
         PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
         PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
@@ -156,7 +192,7 @@ function M.register_menu()
     })
 
     menu_util.bind_children(PREFIX .. "bullet_tp", {
-        PREFIX .. "tp_ray_mode", PREFIX .. "tp_ray_vis",
+        PREFIX .. "tp_ray_vis",
     })
 
     menu_util.bind_children(PREFIX .. "bullet_manip", {
@@ -242,8 +278,10 @@ function M.update(_dt)
         return
     end
 
-    -- Extend: desync + physical peek up to 8 studs (1-stud silent manip stays separate).
-    manip_extend.update(locked_target, PREFIX)
+    -- Extend scan state only — no HRP move.
+    if not settings.bool(PREFIX .. "manip_extend", false) then
+        manip_extend.reset()
+    end
 
     -- Hit chance rolls once per mouse-down (not every frame).
     local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)
@@ -269,12 +307,18 @@ function M.update(_dt)
     local ok_resolve, origin, aim, manip_info = pcall(silent_resolve.resolve_track, locked_target, PREFIX, cx, cy)
     if not ok_resolve or not aim or not origin then
         silent_ray.stop()
+        if manip_info and manip_info.state == "scanning" then
+            cached_track.manip = manip_info
+        end
         return
     end
 
     cached_track.origin = origin
     cached_track.aim = aim
     cached_track.manip = manip_info or { state = "off" }
+
+    local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)
+    manip_extend.tick_burst(PREFIX, cached_track.manip, firing)
 
     local info = cached_track.manip
     local ok_track = false
@@ -321,6 +365,7 @@ function M.draw()
     end
 
     if active() and settings.bool(PREFIX .. "bullet_manip", false) then
+        draw_extend_bar(cx, cy, fov, cached_track.manip)
         draw_manip_status(cx, cy, fov, cached_track.manip)
         draw_manip_peek(cached_track.manip)
     end

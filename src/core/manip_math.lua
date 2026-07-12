@@ -4,7 +4,7 @@ local EYE_OFFSET_Y = 2.5
 local DEFAULT_STEPS = 16
 local MIN_RADIUS = 0.1
 local MAX_RADIUS = 1
-local MAX_EXTEND_RADIUS = 8
+local MAX_EXTEND_EXTRA = 8
 
 function M.eye_offset_y()
     return EYE_OFFSET_Y
@@ -17,11 +17,11 @@ function M.clamp_radius(radius)
     return math.floor(radius * 100 + 0.5) / 100
 end
 
-function M.clamp_extend_radius(radius)
-    radius = tonumber(radius) or MAX_EXTEND_RADIUS
-    if radius < MIN_RADIUS then return MIN_RADIUS end
-    if radius > MAX_EXTEND_RADIUS then return MAX_EXTEND_RADIUS end
-    return math.floor(radius * 100 + 0.5) / 100
+function M.clamp_extend_extra(extra)
+    extra = tonumber(extra) or MAX_EXTEND_EXTRA
+    if extra < 0 then return 0 end
+    if extra > MAX_EXTEND_EXTRA then return MAX_EXTEND_EXTRA end
+    return math.floor(extra * 100 + 0.5) / 100
 end
 
 function M.is_visible_from(ox, oy, oz, tx, ty, tz)
@@ -50,53 +50,72 @@ local function search_ring(origin, target_pos, radius, steps)
     return nil, radius
 end
 
-local function search_peek(origin, target_pos, max_radius, steps, extend)
-    steps = steps or DEFAULT_STEPS
-
-    if not extend then
-        max_radius = M.clamp_radius(max_radius)
-        return search_ring(origin, target_pos, max_radius, steps)
-    end
-
-    max_radius = M.clamp_extend_radius(max_radius)
-    -- Prefer nearer peeks first (1 → … → max), matching divine multi-radius search.
+local function build_radii(base, max_r)
     local radii = {}
-    local r = 1
-    while r < max_radius - 0.05 do
+    local r = base
+    while r < max_r - 0.04 do
         radii[#radii + 1] = r
-        r = r + 1
+        r = r + (r < 1 and 0.15 or 0.5)
     end
-    radii[#radii + 1] = max_radius
+    radii[#radii + 1] = max_r
+    return radii
+end
 
-    for _, radius in ipairs(radii) do
+local function search_peek(origin, target_pos, base_r, max_r, steps, extend)
+    steps = steps or DEFAULT_STEPS
+    base_r = M.clamp_radius(base_r)
+    if not extend then
+        local peek, radius = search_ring(origin, target_pos, base_r, steps)
+        return peek, radius, peek and 1 or 1
+    end
+
+    max_r = base_r + M.clamp_extend_extra(max_r - base_r)
+    local radii = build_radii(base_r, max_r)
+    local total = #radii
+    for idx, radius in ipairs(radii) do
         local peek = search_ring(origin, target_pos, radius, steps)
         if peek then
-            return peek, radius
+            return peek, radius, idx / total
         end
     end
-
-    return nil, max_radius
+    return nil, max_r, 1
 end
 
 function M.evaluate_manipulation(origin, target_pos, opts)
     opts = opts or {}
     local extend = opts.extend == true
-    local clamp = extend and M.clamp_extend_radius or M.clamp_radius
+    local base_r = M.clamp_radius(opts.base_radius or opts.max_radius or 1)
+    local extra = extend and M.clamp_extend_extra(opts.extend_extra or 0) or 0
+    local max_r = extend and (base_r + extra) or base_r
 
     if not origin or not target_pos then
-        return { state = "blocked", peek = nil, radius = clamp(opts.max_radius) }
+        return {
+            state = "blocked", peek = nil, radius = base_r,
+            base_radius = base_r, extend_active = false, scan_progress = 0,
+        }
     end
 
     if M.is_visible_from_pos(origin, target_pos) then
-        return { state = "direct", peek = nil, radius = clamp(opts.max_radius) }
+        return {
+            state = "direct", peek = nil, radius = base_r,
+            base_radius = base_r, extend_active = false, scan_progress = 1,
+        }
     end
 
-    local peek, radius = search_peek(origin, target_pos, opts.max_radius, opts.steps, extend)
+    local peek, radius, progress = search_peek(origin, target_pos, base_r, max_r, opts.steps, extend)
     if peek then
-        return { state = "ready", peek = peek, radius = radius }
+        local extended = extend and radius > base_r + 0.05
+        return {
+            state = "ready", peek = peek, radius = radius,
+            base_radius = base_r, extend_active = extended,
+            scan_progress = progress or 1, extend_burst = extended,
+        }
     end
 
-    return { state = "blocked", peek = nil, radius = clamp(opts.max_radius) }
+    return {
+        state = "blocked", peek = nil, radius = max_r,
+        base_radius = base_r, extend_active = false, scan_progress = 1,
+    }
 end
 
 function M.find_manipulation_position(origin, target_pos, opts)

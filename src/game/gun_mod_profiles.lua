@@ -98,41 +98,29 @@ function M.build_mods_for_weapon(name)
     return M.build_mods_from_profile(profile)
 end
 
-function M.build_mods_for_apply(held)
-    if M.is_global_mode() then
-        if store.has_saved(M.GLOBAL_PROFILE_KEY) then
-            return M.build_mods_for_weapon(M.GLOBAL_PROFILE_KEY)
-        end
-        return nil
-    end
+-- Live menu toggles/sliders — no saved profile required.
+function M.editor_profile()
+    return store.read_editor()
+end
 
-    if held and store.has_saved(held) then
-        return M.build_mods_for_weapon(held)
-    end
-    return nil
+function M.build_mods_for_apply(_held)
+    if not store.editor_has_active_mods() then return nil end
+    return M.build_mods_from_profile(M.editor_profile())
 end
 
 function M.build_toolinfo_for_apply(held)
-    local profile
+    if not store.editor_has_active_mods() then return nil, nil end
+    local profile = M.editor_profile()
+    local opts = M.build_toolinfo_opts(profile)
     if M.is_global_mode() then
-        if not store.has_saved(M.GLOBAL_PROFILE_KEY) then return nil, nil end
-        profile = store.get(M.GLOBAL_PROFILE_KEY)
-        return M.build_toolinfo_opts(profile), nil -- nil weapon = all
+        return opts, nil
     end
-
-    if held and store.has_saved(held) then
-        profile = store.get(held)
-        return M.build_toolinfo_opts(profile), held
-    end
-    return nil, nil
+    return opts, held
 end
 
 function M.should_apply_for_held(held)
     if not held then return false end
-    if M.is_global_mode() then
-        return store.has_saved(M.GLOBAL_PROFILE_KEY) and store.has_active_mods(M.GLOBAL_PROFILE_KEY)
-    end
-    return store.has_saved(held) and store.has_active_mods(held)
+    return store.editor_has_active_mods()
 end
 
 function M.build_mods()

@@ -1,20 +1,18 @@
-local ballistic = April.require("core.ballistic")
 local combat_origin = April.require("game.combat_origin")
-local math_util = April.require("core.math_util")
 
 local M = {}
 
--- Prefer Direct/Snap — most consistent valids. Deep/Curve/Arch kept for visuals.
-M.RAY_MODES = { "Direct", "Snap", "Deep", "Curve", "Arch" }
+local EYE_Y = 2.5
+local BACK_MIN = 0.35
+local BACK_MAX = 6
+local BACK_STEP = 0.2
+local RING_STEPS = 12
+local RING_FRACTIONS = { 0.15, 0.35, 0.55 }
 
--- Tighter back offsets for Direct/Snap = hook closer to target = more valids.
-local BACK_STUDS = {
-    Direct = 2.25,
-    Snap = 1.15,
-    Deep = 5.5,
-    Curve = 2.75,
-    Arch = 2.75,
-}
+local function copy_pos(p)
+    if not p then return nil end
+    return { x = p.x, y = p.y, z = p.z }
+end
 
 local function unit(dx, dy, dz)
     local len = math.sqrt(dx * dx + dy * dy + dz * dz)
@@ -23,117 +21,116 @@ local function unit(dx, dy, dz)
     return dx * inv, dy * inv, dz * inv, len
 end
 
-local function copy_pos(p)
-    if not p then return nil end
-    return { x = p.x, y = p.y, z = p.z }
+local function eye_pos(base)
+    return { x = base.x, y = base.y + EYE_Y, z = base.z }
 end
 
-local function lerp(a, b, t)
-    return {
-        x = a.x + (b.x - a.x) * t,
-        y = a.y + (b.y - a.y) * t,
-        z = a.z + (b.z - a.z) * t,
-    }
+local function los_visible(from, to)
+    if not from or not to then return false end
+    if raycast and raycast.is_visible then
+        return raycast.is_visible(from.x, from.y, from.z, to.x, to.y, to.z) == true
+    end
+    return true
 end
 
-function M.mode_name(idx)
-    return M.RAY_MODES[(idx or 0) + 1] or "Direct"
+local function score_candidate(origin, aim, camera, back)
+    if not los_visible(origin, aim) then return nil end
+    local dx = origin.x - (camera and camera.x or origin.x)
+    local dy = origin.y - (camera and camera.y or origin.y)
+    local dz = origin.z - (camera and camera.z or origin.z)
+    local cam_dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+    -- ponytail: greedy score — prefer shorter back-offset + nearer camera (most natural valid)
+    return 1000 - back * 40 - cam_dist * 0.15
 end
 
-function M.back_studs(mode_name)
-    return BACK_STUDS[mode_name] or BACK_STUDS.Direct
-end
-
--- Exact hitpart — no velocity / drop lead (silent is instant).
 function M.hitpart_aim(head)
     return copy_pos(head)
 end
 
--- Kept for callers; intentionally ignores velocity (instant hook).
 function M.predict_aim(_target, head, _camera, _weapon_name)
     return M.hitpart_aim(head)
 end
 
-function M.track_origin(camera, aim, mode_name)
+-- Scan LOS back-offsets + small rings for the most likely server-valid origin.
+function M.find_best_origin(camera, aim, muzzle)
     if not aim then return nil end
-    if not camera then return copy_pos(aim) end
+    camera = camera or aim
+    muzzle = muzzle or combat_origin.get_muzzle_origin() or camera
 
     local dx, dy, dz = aim.x - camera.x, aim.y - camera.y, aim.z - camera.z
     local ux, uy, uz, len = unit(dx, dy, dz)
     if len < 0.05 then return copy_pos(aim) end
 
-    local back = M.back_studs(mode_name)
-
-    -- Snap: pull slightly toward camera along LOS for cleaner server ray.
-    if mode_name == "Snap" then
-        back = math.min(back, math.max(0.55, len * 0.08))
-    elseif mode_name == "Direct" then
-        back = math.min(back, math.max(0.85, len * 0.12))
+    local best, best_score = nil, -math.huge
+    local function try(base, back)
+        local cand = eye_pos(base)
+        local sc = score_candidate(cand, aim, camera, back or 0)
+        if sc and sc > best_score then
+            best, best_score = { x = base.x, y = base.y, z = base.z }, sc
+        end
     end
 
-    if back >= len - 0.35 then
-        back = math.max(0.55, len * 0.28)
+    local back_limit = math.min(BACK_MAX, math.max(BACK_MIN, len * 0.45))
+    local back = BACK_MIN
+    while back <= back_limit + 0.001 do
+        try({
+            x = aim.x - ux * back,
+            y = aim.y - uy * back,
+            z = aim.z - uz * back,
+        }, back)
+        back = back + BACK_STEP
     end
 
-    return {
-        x = aim.x - ux * back,
-        y = aim.y - uy * back,
-        z = aim.z - uz * back,
-    }
+    for _, frac in ipairs(RING_FRACTIONS) do
+        local ring_r = math.min(1.2, len * frac * 0.08)
+        local center_back = math.min(back_limit * 0.5, len * frac * 0.35)
+        local cx = aim.x - ux * center_back
+        local cy = aim.y - uy * center_back
+        local cz = aim.z - uz * center_back
+        for i = 0, RING_STEPS - 1 do
+            local ang = (i / RING_STEPS) * math.pi * 2
+            local px = -uz
+            local pz = ux
+            local ring_x = cx + math.cos(ang) * ring_r * px
+            local ring_z = cz + math.sin(ang) * ring_r * pz
+            try({ x = ring_x, y = cy, z = ring_z }, center_back)
+        end
+    end
+
+    if best then
+        return eye_pos(best)
+    end
+
+    -- Fallback: muzzle or camera eye along LOS
+    if muzzle and los_visible(eye_pos(muzzle), aim) then
+        return eye_pos(muzzle)
+    end
+    return eye_pos({
+        x = aim.x - ux * math.min(1.5, len * 0.12),
+        y = aim.y - uy * math.min(1.5, len * 0.12),
+        z = aim.z - uz * math.min(1.5, len * 0.12),
+    })
 end
 
-local function sample_line(a, b, steps)
-    steps = steps or 12
-    local out = {}
-    for i = 0, steps do
-        out[#out + 1] = lerp(a, b, i / steps)
-    end
-    return out
+function M.track_origin(camera, aim, _mode_name)
+    local muzzle = combat_origin.get_muzzle_origin()
+    return M.find_best_origin(camera, aim, muzzle)
 end
 
-local function sample_curve(from, to, steps)
-    steps = steps or 16
-    local mid = lerp(from, to, 0.5)
-    local dx, dy, dz = to.x - from.x, to.y - from.y, to.z - from.z
-    local len = math.sqrt(dx * dx + dy * dy + dz * dz)
-    if len < 0.001 then return sample_line(from, to, steps) end
-
-    local bend = math.min(4.5, len * 0.12)
-    local px, py, pz = -dz / len * bend, 0, dx / len * bend
-    mid = { x = mid.x + px, y = mid.y + py, z = mid.z + pz }
-
+function M.build_path(hook_origin, aim, _weapon_name)
+    if not hook_origin or not aim then return {} end
+    local muzzle = combat_origin.get_muzzle_origin() or hook_origin
+    local steps = 14
     local out = {}
     for i = 0, steps do
         local t = i / steps
-        local u = 1 - t
         out[#out + 1] = {
-            x = u * u * from.x + 2 * u * t * mid.x + t * t * to.x,
-            y = u * u * from.y + 2 * u * t * mid.y + t * t * to.y,
-            z = u * u * from.z + 2 * u * t * mid.z + t * t * to.z,
+            x = muzzle.x + (aim.x - muzzle.x) * t,
+            y = muzzle.y + (aim.y - muzzle.y) * t,
+            z = muzzle.z + (aim.z - muzzle.z) * t,
         }
     end
     return out
-end
-
-local function sample_arch(muzzle, aim, weapon_name, steps)
-    local curve = ballistic.curve_for_weapon(muzzle, aim, weapon_name, steps or 20)
-    if curve and curve.path then return curve.path end
-    return sample_line(muzzle, aim, steps or 14)
-end
-
-function M.build_path(mode_name, hook_origin, aim, weapon_name)
-    if not hook_origin or not aim then return {} end
-
-    local muzzle = combat_origin.get_muzzle_origin() or hook_origin
-    local start = muzzle
-
-    if mode_name == "Curve" then
-        return sample_curve(start, aim, 18)
-    end
-    if mode_name == "Arch" then
-        return sample_arch(start, aim, weapon_name, 22)
-    end
-    return sample_line(start, aim, 14)
 end
 
 return M

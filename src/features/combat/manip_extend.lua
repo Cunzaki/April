@@ -1,136 +1,124 @@
--- Physical manip extend: keep 1-stud silent peek math, but when Extend is on
--- search up to 8 studs, desync (bandwidth choke), move local HRP to peek, then
--- restore + undesync when manip ends — same pattern as divine rbxcli.
+-- Extend manip: incremental origin scan, mag-dump fire-rate spike (no HRP move).
 
 local settings = April.require("core.settings")
-local env = April.require("core.env")
 local manip_math = April.require("core.manip_math")
-local packet_desync = April.require("core.packet_desync")
-local cframe_move = April.require("core.cframe_move")
-local combat_origin = April.require("game.combat_origin")
-local targeting = April.require("features.combat.targeting")
-local misc_gate = April.require("core.misc_gate")
+local gc = April.require("game.gc_weapon_mods")
 
 local M = {}
 
 local PREFIX = "april_silent_"
-local active = false
-local og_pos = nil
-local peek_pos = nil
-local desync_on = false
+local BURST_FIRE_RATE = 0.99
+local burst_active = false
 
-local function get_root()
-    local lp = env.get_local_player()
-    if not lp then return nil end
-    local char = lp.character or (game and game.local_player and game.local_player.character)
-    if not char then return nil end
-    return env.safe_call(function()
-        if char.find_first_child then return char:find_first_child("HumanoidRootPart") end
-        return char:FindFirstChild("HumanoidRootPart")
-    end)
-end
+local scan = nil
 
-local function set_root(root, pos)
-    if not root or not pos then return end
-    cframe_move.set_position(root, pos.x, pos.y, pos.z)
-    if part and part.set_velocity then
-        pcall(part.set_velocity, root, 0, 0, 0)
-    end
-end
-
-local function apply_desync(on)
-    if on and not desync_on then
-        packet_desync.apply_extend()
-        desync_on = true
-    elseif not on and desync_on then
-        packet_desync.release()
-        desync_on = false
-    end
+local function scan_key(origin, target)
+    if not origin or not target then return nil end
+    return string.format("%.1f,%.1f,%.1f|%.1f,%.1f,%.1f",
+        origin.x, origin.y, origin.z, target.x, target.y, target.z)
 end
 
 function M.reset()
-    if active and og_pos then
-        local root = get_root()
-        if root then set_root(root, og_pos) end
+    burst_active = false
+    scan = nil
+end
+
+function M.is_burst_active()
+    return burst_active
+end
+
+-- Incremental ring scan for extend — one ring sample batch per call (progress bar).
+function M.evaluate_extend(origin, target_pos, base_r, extra_r)
+    base_r = manip_math.clamp_radius(base_r)
+    extra_r = manip_math.clamp_extend_extra(extra_r)
+    local max_r = base_r + extra_r
+
+    if not origin or not target_pos then
+        return {
+            state = "blocked", peek = nil, radius = base_r,
+            base_radius = base_r, extend_active = false, scan_progress = 0, extend_burst = false,
+        }
     end
-    apply_desync(false)
-    active = false
-    og_pos = nil
-    peek_pos = nil
+
+    if manip_math.is_visible_from_pos(origin, target_pos) then
+        scan = nil
+        return {
+            state = "direct", peek = nil, radius = base_r,
+            base_radius = base_r, extend_active = false, scan_progress = 1, extend_burst = false,
+        }
+    end
+
+    local key = scan_key(origin, target_pos)
+    if not scan or scan.key ~= key or scan.base ~= base_r or scan.max ~= max_r then
+        local radii = {}
+        local r = base_r
+        while r < max_r - 0.04 do
+            radii[#radii + 1] = r
+            r = r + (r < 1 and 0.15 or 0.5)
+        end
+        radii[#radii + 1] = max_r
+        scan = {
+            key = key, base = base_r, max = max_r,
+            radii = radii, ri = 1, steps = 16,
+            origin = origin, target = target_pos,
+        }
+    end
+
+    local s = scan
+    local radius = s.radii[s.ri]
+    local peek = nil
+    for i = 0, s.steps - 1 do
+        local angle = (i / s.steps) * math.pi * 2
+        local cx = s.origin.x + math.cos(angle) * radius
+        local cy = s.origin.y
+        local cz = s.origin.z + math.sin(angle) * radius
+        if manip_math.is_visible_from(cx, cy, cz, s.target.x, s.target.y, s.target.z) then
+            peek = { x = cx, y = cy, z = cz }
+            break
+        end
+    end
+
+    local progress = s.ri / #s.radii
+    if peek then
+        local extended = radius > base_r + 0.05
+        scan = nil
+        return {
+            state = "ready", peek = peek, radius = radius,
+            base_radius = base_r, extend_active = extended,
+            scan_progress = 1, extend_burst = extended,
+        }
+    end
+
+    s.ri = s.ri + 1
+    if s.ri > #s.radii then
+        scan = nil
+        return {
+            state = "blocked", peek = nil, radius = max_r,
+            base_radius = base_r, extend_active = false, scan_progress = 1, extend_burst = false,
+        }
+    end
+
+    return {
+        state = "scanning", peek = nil, radius = radius,
+        base_radius = base_r, extend_active = false,
+        scan_progress = progress, extend_burst = false,
+    }
 end
 
-function M.is_active()
-    return active
-end
-
-function M.update(target, prefix)
+function M.tick_burst(prefix, manip_info, firing)
     prefix = prefix or PREFIX
 
-    if not misc_gate.movement_allowed() then
-        M.reset()
-        return
-    end
+    local want_burst = firing
+        and manip_info
+        and manip_info.extend_burst
+        and settings.bool(prefix .. "manip_extend", false)
 
-    local manip_on = settings.bool(prefix .. "bullet_manip", false)
-    local extend_on = settings.bool(prefix .. "manip_extend", false)
-    if not manip_on or not extend_on or not target then
-        M.reset()
-        return
+    if want_burst and gc.available() then
+        pcall(gc.apply_weapon, { FireRateMult = BURST_FIRE_RATE })
+        burst_active = true
+    elseif burst_active then
+        burst_active = false
     end
-
-    local root = get_root()
-    if not root then
-        M.reset()
-        return
-    end
-
-    local body = combat_origin.get_server_origin()
-    if not body then
-        -- Fall back to current root while not yet desynced.
-        body = cframe_move.read_pos(root)
-    end
-    if not body then
-        M.reset()
-        return
-    end
-
-    local hitpart = targeting.bone_world(target, targeting.bone_name(prefix))
-        or (target.head_position and {
-            x = target.head_position.x,
-            y = target.head_position.y,
-            z = target.head_position.z,
-        })
-    if not hitpart then
-        M.reset()
-        return
-    end
-
-    local max_r = manip_math.clamp_extend_radius(settings.num(prefix .. "manip_extend_dist", 8))
-    local origin = og_pos or body
-    local ev = manip_math.evaluate_manipulation(origin, hitpart, {
-        max_radius = max_r,
-        extend = true,
-    })
-
-    if ev.state == "direct" then
-        -- Already have LOS from origin — no need to stay extended.
-        M.reset()
-        return
-    end
-
-    if ev.state ~= "ready" or not ev.peek then
-        M.reset()
-        return
-    end
-
-    if not active then
-        og_pos = { x = body.x, y = body.y, z = body.z }
-        apply_desync(true)
-        active = true
-    end
-
-    peek_pos = ev.peek
-    set_root(root, peek_pos)
 end
 
 return M

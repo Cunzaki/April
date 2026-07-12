@@ -42,7 +42,7 @@ local MENU_KEYS = {
     "april_silent_target_type", "april_silent_bone",
     "april_silent_filters", "april_silent_whitelist_ids",
     "april_silent_targets", "april_silent_options",
-    "april_silent_bullet_tp", "april_silent_tp_ray_mode", "april_silent_tp_ray_vis",
+    "april_silent_bullet_tp", "april_silent_tp_ray_vis",
     "april_silent_bullet_manip",
     "april_silent_manip_dist", "april_silent_manip_extend", "april_silent_manip_extend_dist",
     "april_silent_manip_status", "april_silent_manip_peek_vis",
