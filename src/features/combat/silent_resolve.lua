@@ -4,7 +4,6 @@ local silent_ray = April.require("core.silent_ray")
 local manip_math = April.require("core.manip_math")
 local targeting = April.require("features.combat.targeting")
 local bullet_tp_ray = April.require("features.combat.bullet_tp_ray")
-local manip_extend = April.require("features.combat.manip_extend")
 local weapons = April.require("game.weapons")
 local ballistic = April.require("core.ballistic")
 
@@ -16,8 +15,45 @@ local function fire_origin(camera)
     return combat_origin.get_muzzle_origin() or camera
 end
 
-local function apply_drop_aim(track_origin, hitpart, weapon, state, extra)
-    local muzzle = fire_origin(track_origin)
+local function resolve_manip(body, hitpart, muzzle, prefix)
+    local extra = {
+        state = "off",
+        peek = nil,
+        radius = 0,
+        base_radius = 0,
+        extend_active = false,
+        scan_progress = 0,
+    }
+    if not settings.bool(prefix .. "bullet_manip", false) or not body then
+        return nil, extra
+    end
+
+    local base_r = manip_math.clamp_radius(settings.num(prefix .. "manip_dist", 1))
+    local extend_on = settings.bool(prefix .. "manip_extend", false)
+    local ext_extra = extend_on
+        and manip_math.clamp_extend_extra(settings.num(prefix .. "manip_extend_dist", 7))
+        or 0
+    local ev = manip_math.evaluate_manipulation(body, hitpart, {
+        base_radius = base_r,
+        extend = extend_on,
+        extend_extra = ext_extra,
+    })
+
+    extra.state = ev.state
+    extra.peek = ev.peek
+    extra.radius = ev.radius or base_r
+    extra.base_radius = base_r
+    extra.extend_active = ev.extend_active == true
+    extra.scan_progress = ev.scan_progress or 0
+
+    if ev.state == "ready" and ev.peek then
+        return manip_math.peek_track_origin(ev.peek, muzzle, body), extra
+    end
+    return nil, extra
+end
+
+local function apply_drop_aim(origin, hitpart, weapon, state, extra)
+    local muzzle = origin or combat_origin.get_muzzle_origin()
     local aim_far, curve = ballistic.silent_aim_point(muzzle, hitpart, weapon)
     local info = {
         state = state or "curve",
@@ -35,76 +71,85 @@ local function apply_drop_aim(track_origin, hitpart, weapon, state, extra)
     return muzzle, aim_far or hitpart, info
 end
 
+local function apply_ray_aim(origin, aim, hitpart, weapon, state, extra, meta)
+    meta = meta or {}
+    local info = {
+        state = state,
+        peek = extra and extra.peek or nil,
+        radius = extra and extra.radius or 0,
+        use_curve = false,
+        weapon = weapon,
+        hitpart = hitpart,
+        base_radius = extra and extra.base_radius or nil,
+        extend_active = extra and extra.extend_active or false,
+        scan_progress = extra and extra.scan_progress or 0,
+        tp_path = meta.tp_path,
+        tp_method = meta.method,
+        tp_visual = meta.visual == true,
+    }
+    return origin, aim, info
+end
+
 function M.resolve_track(target, prefix, cx, cy)
     if not target then return nil, nil, OFF_INFO end
 
     local camera = silent_ray.get_camera_origin()
     if not camera then return nil, nil, OFF_INFO end
 
-    local hitpart = targeting.resolve_bone_world(target, targeting.bone_name(prefix), cx, cy)
+    local bone = targeting.bone_name(prefix)
+    local hitpart = targeting.resolve_bone_world(target, bone, cx, cy)
     if not hitpart then return nil, nil, OFF_INFO end
+    local center = bullet_tp_ray.target_center(hitpart, bone) or hitpart
 
     local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
+    local muzzle = fire_origin(camera)
+    local body = combat_origin.get_server_origin()
 
-    if settings.bool(prefix .. "bullet_tp", false) then
-        local head = targeting.bone_world(target, "Head") or hitpart
-        hitpart = bullet_tp_ray.hitpart_aim(head) or head
-        local track_origin = bullet_tp_ray.track_origin(camera, hitpart) or hitpart
+    local manip_fire, manip_extra = resolve_manip(body, hitpart, muzzle, prefix)
+    local fire = manip_fire or muzzle
 
-        return track_origin, hitpart, {
-            state = "tp",
-            peek = nil,
-            radius = 0,
-            tp_path = bullet_tp_ray.build_path(track_origin, hitpart, weapon),
-            use_curve = false,
-            weapon = weapon,
+    local hitscan_on = settings.bool(prefix .. "hitscan", false)
+    local tp_on = settings.bool(prefix .. "bullet_tp", false)
+
+    if tp_on then
+        local tp = bullet_tp_ray.resolve({
+            method = settings.num(prefix .. "tp_method", 0),
+            camera = camera,
             hitpart = hitpart,
-        }
-    end
-
-    if settings.bool(prefix .. "bullet_manip", false) then
-        local body = combat_origin.get_server_origin()
-        local base_r = manip_math.clamp_radius(settings.num(prefix .. "manip_dist", 1))
-        local extra = {
-            radius = base_r,
-            base_radius = base_r,
-            extend_active = false,
-            scan_progress = 0,
-        }
-        local fire = fire_origin(camera)
-
-        if body then
-            local ev
-            if settings.bool(prefix .. "manip_extend", false) then
-                local ext_extra = manip_math.clamp_extend_extra(settings.num(prefix .. "manip_extend_dist", 8))
-                ev = manip_extend.evaluate_extend(body, hitpart, base_r, ext_extra)
-            else
-                ev = manip_math.evaluate_manipulation(body, hitpart, {
-                    base_radius = base_r,
-                })
-            end
-            extra.state = ev.state
-            extra.peek = ev.peek
-            extra.radius = ev.radius or base_r
-            extra.base_radius = ev.base_radius or base_r
-            extra.extend_active = ev.extend_active == true
-            extra.scan_progress = ev.scan_progress or 0
-            if ev.state == "ready" and ev.peek then
-                fire = manip_math.peek_track_origin(ev.peek) or fire
-            elseif ev.state == "scanning" then
-                extra.state = "scanning"
-                return nil, nil, extra
-            end
-        else
-            extra.state = "blocked"
+            bone = bone,
+            muzzle = muzzle,
+        })
+        if not tp or not tp.origin or not tp.aim then
+            return nil, nil, { state = "blocked", peek = manip_extra.peek, radius = manip_extra.radius or 0 }
         end
-
-        local origin, aim_far, info = apply_drop_aim(fire, hitpart, weapon, extra.state or "blocked", extra)
-        return origin, aim_far, info
+        return apply_ray_aim(tp.origin, tp.aim, tp.hitpart or center, weapon, "tp", manip_extra, tp)
     end
 
-    local fire = fire_origin(camera)
-    return apply_drop_aim(fire, hitpart, weapon, "curve", nil)
+    if hitscan_on then
+        return apply_ray_aim(fire, center, center, weapon, "hitscan", manip_extra, {
+            tp_path = bullet_tp_ray.build_path(fire, center, muzzle),
+            method = "Hitscan",
+            visual = false,
+        })
+    end
+
+    if manip_extra.state == "ready" and manip_fire then
+        return apply_ray_aim(manip_fire, center, center, weapon, "ready", manip_extra, {
+            tp_path = bullet_tp_ray.build_path(manip_fire, center, muzzle),
+            method = "Manip",
+            visual = false,
+        })
+    end
+
+    if manip_extra.state == "direct" then
+        return apply_drop_aim(muzzle, center, weapon, "direct", manip_extra)
+    end
+
+    if settings.bool(prefix .. "bullet_manip", false) and manip_extra.state == "blocked" then
+        return nil, nil, manip_extra
+    end
+
+    return apply_drop_aim(muzzle, center, weapon, "curve", manip_extra)
 end
 
 return M

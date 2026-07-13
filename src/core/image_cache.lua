@@ -44,12 +44,14 @@ function M.register(key, asset_id_or_url)
 end
 
 -- API.md: HTTPS, rbxassetid://, http://www.roblox.com/asset/?id=
-local FALLBACKS = { "item_png", "roblox_asset_http" }
+local FALLBACKS = { "roblox_thumb", "item_png", "roblox_asset_http" }
 
 local function fallback_url(kind, asset_id)
     if not asset_id then return nil end
     if kind == "item_png" then
         return asset_urls.item_png(asset_id)
+    elseif kind == "roblox_thumb" then
+        return asset_urls.roblox_thumb(asset_id)
     elseif kind == "rbx_asset" then
         return asset_urls.rbx_asset(asset_id)
     elseif kind == "roblox_asset_http" then

@@ -2,14 +2,44 @@ local combat_origin = April.require("game.combat_origin")
 
 local M = {}
 
-local EYE_Y = 2.5
-local BACK_MIN = 0.25
-local BACK_MAX = 8
-local BACK_STEP = 0.15
-local RING_STEPS = 16
-local RING_FRACTIONS = { 0.1, 0.22, 0.38, 0.55 }
-local VERTICAL_OFFS = { 0, -0.4, 0.4, -0.85, 0.85, -1.35, 1.35 }
-local LATERAL_OFFS = { 0, 0.2, -0.2, 0.45, -0.45 }
+local RAY_LEN = 1024
+local GRID_STEP = 0.28
+
+-- Direct TP: spawn ray origin on / around hitpart center, aim into center.
+M.METHODS = {
+    "Center",
+    "Random Ring",
+    "Random Sphere",
+    "Offset Grid",
+    "Camera Face",
+    "Away From Cam",
+    "Shuffle Valid",
+    "Dense Shuffle",
+}
+
+local BONE_CENTER_Y = {
+    Head = -0.62,
+    UpperTorso = 0,
+    LowerTorso = 0,
+    HumanoidRootPart = 0,
+    LeftUpperArm = 0,
+    RightUpperArm = 0,
+    LeftUpperLeg = -0.15,
+    RightUpperLeg = -0.15,
+}
+
+local GRID_OFFS = {}
+do
+    for y = -0.56, 0.56, GRID_STEP do
+        for x = -0.56, 0.56, GRID_STEP do
+            for z = -0.56, 0.56, GRID_STEP do
+                GRID_OFFS[#GRID_OFFS + 1] = { x = x, y = y, z = z }
+            end
+        end
+    end
+end
+
+local scan = { key = nil, idx = 0 }
 
 local function copy_pos(p)
     if not p then return nil end
@@ -23,11 +53,45 @@ local function unit(dx, dy, dz)
     return dx * inv, dy * inv, dz * inv, len
 end
 
-local function eye_pos(base)
-    return { x = base.x, y = base.y + EYE_Y, z = base.z }
+local function add_off(base, off)
+    return {
+        x = base.x + (off.x or 0),
+        y = base.y + (off.y or 0),
+        z = base.z + (off.z or 0),
+    }
 end
 
-local function los_visible(from, to)
+function M.target_center(hitpart, bone)
+    if not hitpart then return nil end
+    local c = copy_pos(hitpart)
+    local yoff = BONE_CENTER_Y[bone or "Head"] or -0.35
+    c.y = c.y + yoff
+    return c
+end
+
+local function toward_camera(origin, camera)
+    if not camera then return 0, 0, 1, 1 end
+    return unit(camera.x - origin.x, camera.y - origin.y, camera.z - origin.z)
+end
+
+local function aim_through(center, from, camera)
+    local ux, uy, uz, len = unit(center.x - from.x, center.y - from.y, center.z - from.z)
+    if len > 0.02 then
+        return {
+            x = center.x + ux * 0.08,
+            y = center.y + uy * 0.08,
+            z = center.z + uz * 0.08,
+        }
+    end
+    local lx, ly, lz = toward_camera(center, camera)
+    return {
+        x = center.x + lx * 0.08,
+        y = center.y + ly * 0.08,
+        z = center.z + lz * 0.08,
+    }
+end
+
+local function los_clear(from, to)
     if not from or not to then return false end
     if raycast and raycast.is_visible then
         return raycast.is_visible(from.x, from.y, from.z, to.x, to.y, to.z) == true
@@ -35,123 +99,146 @@ local function los_visible(from, to)
     return true
 end
 
-local function cast_clear(from, to)
-    if not los_visible(from, to) then return false end
-    if not raycast or not raycast.cast then return true end
-    if raycast.is_ready and not raycast.is_ready() then return los_visible(from, to) end
-
-    local hit, _, dist = raycast.cast(from.x, from.y, from.z, to.x, to.y, to.z)
-    if not hit then return true end
-    local dx, dy, dz = to.x - from.x, to.y - from.y, to.z - from.z
-    local len = math.sqrt(dx * dx + dy * dy + dz * dz)
-    if len < 0.001 then return true end
-    return dist and dist >= len - 1.5
+local function scan_key(center, method_idx)
+    return string.format("%d|%.2f,%.2f,%.2f", method_idx, center.x, center.y, center.z)
 end
 
-local function score_candidate(origin, aim, camera, back)
-    if not cast_clear(origin, aim) then return nil end
-    local dx = origin.x - (camera and camera.x or origin.x)
-    local dy = origin.y - (camera and camera.y or origin.y)
-    local dz = origin.z - (camera and camera.z or origin.z)
-    local cam_dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-    return 1000 - back * 35 - cam_dist * 0.12
-end
-
-function M.hitpart_aim(head)
-    return copy_pos(head)
-end
-
-function M.predict_aim(_target, head, _camera, _weapon_name)
-    return M.hitpart_aim(head)
-end
-
-function M.find_best_origin(camera, aim, muzzle)
-    if not aim then return nil end
-    camera = camera or aim
-    muzzle = muzzle or combat_origin.get_muzzle_origin() or camera
-
-    local dx, dy, dz = aim.x - camera.x, aim.y - camera.y, aim.z - camera.z
-    local ux, uy, uz, len = unit(dx, dy, dz)
-    if len < 0.05 then return copy_pos(aim) end
-
-    local px, py, pz = -uz, uy * 0.15, ux
-    local plen = math.sqrt(px * px + py * py + pz * pz)
-    if plen > 0.001 then
-        px, py, pz = px / plen, py / plen, pz / plen
+local function next_grid_offset(center, method_idx)
+    local key = scan_key(center, method_idx)
+    if scan.key ~= key then
+        scan.key = key
+        scan.idx = 1
     end
+    local off = GRID_OFFS[scan.idx] or GRID_OFFS[1]
+    scan.idx = scan.idx + 1
+    if scan.idx > #GRID_OFFS then scan.idx = 1 end
+    return off
+end
 
-    local best, best_score = nil, -math.huge
-    local function try(base, back)
-        local cand = eye_pos(base)
-        local sc = score_candidate(cand, aim, camera, back or 0)
-        if sc and sc > best_score then
-            best, best_score = { x = base.x, y = base.y, z = base.z }, sc
+local function rand_unit()
+    local u = math.random() * 2 - 1
+    local v = math.random() * 2 - 1
+    local s = u * u + v * v
+    while s >= 1 or s < 0.0001 do
+        u = math.random() * 2 - 1
+        v = math.random() * 2 - 1
+        s = u * u + v * v
+    end
+    local w = math.sqrt((1 - s) / s)
+    return u * w, v * w, math.sqrt(1 - s)
+end
+
+local function origin_center(_center, _camera)
+    return copy_pos(_center)
+end
+
+local function origin_random_ring(center, _camera)
+    local ang = math.random() * math.pi * 2
+    local r = 0.18 + math.random() * 0.55
+    return {
+        x = center.x + math.cos(ang) * r,
+        y = center.y + (math.random() - 0.5) * 0.35,
+        z = center.z + math.sin(ang) * r,
+    }
+end
+
+local function origin_random_sphere(center, _camera)
+    local ux, uy, uz = rand_unit()
+    local r = 0.12 + math.random() * 0.65
+    return {
+        x = center.x + ux * r,
+        y = center.y + uy * r,
+        z = center.z + uz * r,
+    }
+end
+
+local function origin_offset_grid(center, camera, method_idx)
+    return add_off(center, next_grid_offset(center, method_idx))
+end
+
+local function origin_camera_face(center, camera)
+    local lx, ly, lz = toward_camera(center, camera)
+    local d = 0.22 + math.random() * 0.75
+    return {
+        x = center.x + lx * d,
+        y = center.y + ly * d,
+        z = center.z + lz * d,
+    }
+end
+
+local function origin_away_from_cam(center, camera)
+    local lx, ly, lz = toward_camera(center, camera)
+    local d = 0.22 + math.random() * 0.75
+    return {
+        x = center.x - lx * d,
+        y = center.y - ly * d + (math.random() - 0.5) * 0.25,
+        z = center.z - lz * d,
+    }
+end
+
+local function origin_shuffle_valid(center, camera, tries)
+    tries = tries or 14
+    local best = copy_pos(center)
+    for _ = 1, tries do
+        local cand = origin_random_sphere(center, camera)
+        if los_clear(cand, center) then
+            return cand
         end
     end
-
-    local back_limit = math.min(BACK_MAX, math.max(BACK_MIN, len * 0.55))
-    local back = BACK_MIN
-    while back <= back_limit + 0.001 do
-        for _, vy in ipairs(VERTICAL_OFFS) do
-            for _, lat in ipairs(LATERAL_OFFS) do
-                try({
-                    x = aim.x - ux * back + px * lat,
-                    y = aim.y - uy * back + vy,
-                    z = aim.z - uz * back + pz * lat,
-                }, back)
-            end
-        end
-        back = back + BACK_STEP
-    end
-
-    for _, frac in ipairs(RING_FRACTIONS) do
-        local ring_r = math.min(1.8, len * frac * 0.1)
-        local center_back = math.min(back_limit * 0.55, len * frac * 0.4)
-        local cx = aim.x - ux * center_back
-        local cy = aim.y - uy * center_back
-        local cz = aim.z - uz * center_back
-        for _, vy in ipairs(VERTICAL_OFFS) do
-            for i = 0, RING_STEPS - 1 do
-                local ang = (i / RING_STEPS) * math.pi * 2
-                local ring_x = cx + math.cos(ang) * ring_r * px
-                local ring_z = cz + math.sin(ang) * ring_r * pz
-                try({ x = ring_x, y = cy + vy, z = ring_z }, center_back)
-            end
-        end
-    end
-
-    if best then
-        return eye_pos(best)
-    end
-
-    if muzzle and cast_clear(eye_pos(muzzle), aim) then
-        return eye_pos(muzzle)
-    end
-    return eye_pos({
-        x = aim.x - ux * math.min(1.5, len * 0.12),
-        y = aim.y - uy * math.min(1.5, len * 0.12),
-        z = aim.z - uz * math.min(1.5, len * 0.12),
-    })
+    return best
 end
 
-function M.track_origin(camera, aim, _mode_name)
-    local muzzle = combat_origin.get_muzzle_origin()
-    return M.find_best_origin(camera, aim, muzzle)
+local ORIGIN_FN = {
+    origin_center,
+    origin_random_ring,
+    origin_random_sphere,
+    origin_offset_grid,
+    origin_camera_face,
+    origin_away_from_cam,
+    origin_shuffle_valid,
+    function(c, cam) return origin_shuffle_valid(c, cam, 28) end,
+}
+
+function M.hitpart_aim(hit, bone)
+    return M.target_center(hit, bone)
 end
 
-function M.build_path(hook_origin, aim, _weapon_name)
-    if not hook_origin or not aim then return {} end
-    local muzzle = combat_origin.get_muzzle_origin() or hook_origin
-    local steps = 14
+function M.resolve(opts)
+    opts = opts or {}
+    local camera = opts.camera or combat_origin.get_camera_origin()
+    local hitpart = opts.hitpart
+    if not hitpart or not camera then return nil end
+
+    local method_idx = math.floor(tonumber(opts.method) or 0)
+    if method_idx < 0 then method_idx = 0 end
+    if method_idx >= #M.METHODS then method_idx = 0 end
+
+    local center = M.target_center(hitpart, opts.bone)
+    if not center then return nil end
+
+    local muzzle = opts.muzzle or combat_origin.get_muzzle_origin() or camera
+    local pick = ORIGIN_FN[method_idx + 1] or origin_center
+    local origin = pick(center, camera, method_idx)
+    if not origin then return nil end
+
+    local aim = aim_through(center, origin, camera)
+
+    return {
+        origin = origin,
+        aim = aim,
+        hitpart = center,
+        visual = false,
+        method = M.METHODS[method_idx + 1],
+        tp_path = M.build_path(origin, center, muzzle),
+    }
+end
+
+function M.build_path(tp_origin, center, muzzle)
+    if not tp_origin or not center then return {} end
     local out = {}
-    for i = 0, steps do
-        local t = i / steps
-        out[#out + 1] = {
-            x = muzzle.x + (aim.x - muzzle.x) * t,
-            y = muzzle.y + (aim.y - muzzle.y) * t,
-            z = muzzle.z + (aim.z - muzzle.z) * t,
-        }
-    end
+    if muzzle then out[#out + 1] = copy_pos(muzzle) end
+    out[#out + 1] = copy_pos(tp_origin)
+    out[#out + 1] = copy_pos(center)
     return out
 end
 

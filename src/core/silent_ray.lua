@@ -91,7 +91,7 @@ function M.last_curve()
 end
 
 -- Direct ray to aim (legacy / bullet TP).
-function M.track(origin, aim_point, shoot_vk)
+function M.track(origin, aim_point, shoot_vk, hitpart)
     M._last_ok = false
     M._last_curve = nil
 
@@ -125,20 +125,23 @@ function M.track(origin, aim_point, shoot_vk)
             dist = math.sqrt(dx * dx + dy * dy + dz * dz)
         end
         if not dist or dist < 0.001 then
-            dir = make_vec3(0, MOUSE_RAY_LEN * 0.01, 0)
+            dir = make_vec3(0, 1, 0)
         else
-            local inv = 1 / dist
-            dir = make_vec3(dx * inv * MOUSE_RAY_LEN, dy * inv * MOUSE_RAY_LEN, dz * inv * MOUSE_RAY_LEN)
+            dir = make_vec3(dx, dy, dz)
         end
     else
-        local inv = 1 / dist
-        dir = make_vec3(dx * inv * MOUSE_RAY_LEN, dy * inv * MOUSE_RAY_LEN, dz * inv * MOUSE_RAY_LEN)
+        -- API example: direction = target - origin (not pre-normalized).
+        dir = make_vec3(dx, dy, dz)
     end
     local origin_v = make_vec3(ox, oy, oz)
     local key = shoot_vk or 0x01
 
     M._last_origin = { x = ox, y = oy, z = oz }
-    M._last_target = { x = ax, y = ay, z = az }
+    if hitpart and hitpart.x then
+        M._last_target = { x = hitpart.x, y = hitpart.y, z = hitpart.z }
+    else
+        M._last_target = { x = ax, y = ay, z = az }
+    end
 
     local ok_call, ok = pcall(raycast.track_silent_target, origin_v, dir, key)
     ok = ok_call and ok == true

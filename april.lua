@@ -1,11 +1,11 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-13T00:08:56.925Z
+    Built: 2026-07-13T00:53:44.413Z
 ]]
 
 April = {
-    version = "3.70.1",
+    version = "3.73.1",
     debug = false,
     _mods = {},
     bundled = true,
@@ -1173,12 +1173,14 @@ function M.register(key, asset_id_or_url)
 end
 
 -- API.md: HTTPS, rbxassetid://, http://www.roblox.com/asset/?id=
-local FALLBACKS = { "item_png", "roblox_asset_http" }
+local FALLBACKS = { "roblox_thumb", "item_png", "roblox_asset_http" }
 
 local function fallback_url(kind, asset_id)
     if not asset_id then return nil end
     if kind == "item_png" then
         return asset_urls.item_png(asset_id)
+    elseif kind == "roblox_thumb" then
+        return asset_urls.roblox_thumb(asset_id)
     elseif kind == "rbx_asset" then
         return asset_urls.rbx_asset(asset_id)
     elseif kind == "roblox_asset_http" then
@@ -3019,7 +3021,7 @@ function M.last_curve()
 end
 
 -- Direct ray to aim (legacy / bullet TP).
-function M.track(origin, aim_point, shoot_vk)
+function M.track(origin, aim_point, shoot_vk, hitpart)
     M._last_ok = false
     M._last_curve = nil
 
@@ -3053,20 +3055,23 @@ function M.track(origin, aim_point, shoot_vk)
             dist = math.sqrt(dx * dx + dy * dy + dz * dz)
         end
         if not dist or dist < 0.001 then
-            dir = make_vec3(0, MOUSE_RAY_LEN * 0.01, 0)
+            dir = make_vec3(0, 1, 0)
         else
-            local inv = 1 / dist
-            dir = make_vec3(dx * inv * MOUSE_RAY_LEN, dy * inv * MOUSE_RAY_LEN, dz * inv * MOUSE_RAY_LEN)
+            dir = make_vec3(dx, dy, dz)
         end
     else
-        local inv = 1 / dist
-        dir = make_vec3(dx * inv * MOUSE_RAY_LEN, dy * inv * MOUSE_RAY_LEN, dz * inv * MOUSE_RAY_LEN)
+        -- API example: direction = target - origin (not pre-normalized).
+        dir = make_vec3(dx, dy, dz)
     end
     local origin_v = make_vec3(ox, oy, oz)
     local key = shoot_vk or 0x01
 
     M._last_origin = { x = ox, y = oy, z = oz }
-    M._last_target = { x = ax, y = ay, z = az }
+    if hitpart and hitpart.x then
+        M._last_target = { x = hitpart.x, y = hitpart.y, z = hitpart.z }
+    else
+        M._last_target = { x = ax, y = ay, z = az }
+    end
 
     local ok_call, ok = pcall(raycast.track_silent_target, origin_v, dir, key)
     ok = ok_call and ok == true
@@ -3209,7 +3214,7 @@ local EYE_OFFSET_Y = 2.5
 local DEFAULT_STEPS = 16
 local MIN_RADIUS = 0.1
 local MAX_RADIUS = 1
-local MAX_EXTEND_EXTRA = 8
+local MAX_EXTEND_EXTRA = 7
 
 -- Body Y offsets for ring peek (includes above-head peeks).
 local RING_Y_OFFSETS = { 0, 0.75, 1.5, 2.5, 3.25, -0.5 }
@@ -3343,13 +3348,15 @@ function M.find_manipulation_position(origin, target_pos, opts)
     return ev.peek
 end
 
-function M.peek_track_origin(peek)
+function M.peek_track_origin(peek, muzzle, body)
     if not peek then return nil end
-    return {
-        x = peek.x,
-        y = peek.y + EYE_OFFSET_Y,
-        z = peek.z,
-    }
+    local y = peek.y
+    if muzzle and body then
+        y = peek.y + (muzzle.y - body.y)
+    else
+        y = peek.y + EYE_OFFSET_Y
+    end
+    return { x = peek.x, y = y, z = peek.z }
 end
 
 function M.ring_y(origin)
@@ -4212,12 +4219,12 @@ local MENU_KEYS = {
     "april_silent_target_type", "april_silent_bone",
     "april_silent_filters", "april_silent_whitelist_ids",
     "april_silent_targets", "april_silent_options",
-    "april_silent_bullet_tp", "april_silent_tp_ray_vis",
+    "april_silent_bullet_tp", "april_silent_tp_method", "april_silent_tp_ray_vis",
     "april_silent_bullet_manip",
     "april_silent_manip_dist", "april_silent_manip_extend", "april_silent_manip_extend_dist",
     "april_silent_manip_status", "april_silent_manip_peek_vis",
     "april_silent_draw_fov", "april_silent_fov_style", "april_silent_target_line",
-    "april_silent_hit_chance", "april_silent_max_dist", "april_silent_fov",
+    "april_silent_hit_chance", "april_silent_max_dist", "april_silent_fov", "april_silent_hitscan",
     "april_gunmods_enabled", "april_gunmods_enabled_mode", "april_gm_mode", "april_gm_weapon_select",
     "april_gm_recoil", "april_gm_recoil_pct", "april_gm_spread", "april_gm_spread_pct",
     "april_gm_sway", "april_gm_fire_rate", "april_gm_fire_rate_mult",
@@ -10666,12 +10673,273 @@ return M
 
 end)()
 
+-- ── features/combat/bullet_tp_ray.lua ──
+April._mods["features.combat.bullet_tp_ray"] = (function()
+local combat_origin = April.require("game.combat_origin")
+
+local M = {}
+
+local RAY_LEN = 1024
+local GRID_STEP = 0.28
+
+-- Direct TP: spawn ray origin on / around hitpart center, aim into center.
+M.METHODS = {
+    "Center",
+    "Random Ring",
+    "Random Sphere",
+    "Offset Grid",
+    "Camera Face",
+    "Away From Cam",
+    "Shuffle Valid",
+    "Dense Shuffle",
+}
+
+local BONE_CENTER_Y = {
+    Head = -0.62,
+    UpperTorso = 0,
+    LowerTorso = 0,
+    HumanoidRootPart = 0,
+    LeftUpperArm = 0,
+    RightUpperArm = 0,
+    LeftUpperLeg = -0.15,
+    RightUpperLeg = -0.15,
+}
+
+local GRID_OFFS = {}
+do
+    for y = -0.56, 0.56, GRID_STEP do
+        for x = -0.56, 0.56, GRID_STEP do
+            for z = -0.56, 0.56, GRID_STEP do
+                GRID_OFFS[#GRID_OFFS + 1] = { x = x, y = y, z = z }
+            end
+        end
+    end
+end
+
+local scan = { key = nil, idx = 0 }
+
+local function copy_pos(p)
+    if not p then return nil end
+    return { x = p.x, y = p.y, z = p.z }
+end
+
+local function unit(dx, dy, dz)
+    local len = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if len < 0.001 then return 0, 0, 0, 0 end
+    local inv = 1 / len
+    return dx * inv, dy * inv, dz * inv, len
+end
+
+local function add_off(base, off)
+    return {
+        x = base.x + (off.x or 0),
+        y = base.y + (off.y or 0),
+        z = base.z + (off.z or 0),
+    }
+end
+
+function M.target_center(hitpart, bone)
+    if not hitpart then return nil end
+    local c = copy_pos(hitpart)
+    local yoff = BONE_CENTER_Y[bone or "Head"] or -0.35
+    c.y = c.y + yoff
+    return c
+end
+
+local function toward_camera(origin, camera)
+    if not camera then return 0, 0, 1, 1 end
+    return unit(camera.x - origin.x, camera.y - origin.y, camera.z - origin.z)
+end
+
+local function aim_through(center, from, camera)
+    local ux, uy, uz, len = unit(center.x - from.x, center.y - from.y, center.z - from.z)
+    if len > 0.02 then
+        return {
+            x = center.x + ux * 0.08,
+            y = center.y + uy * 0.08,
+            z = center.z + uz * 0.08,
+        }
+    end
+    local lx, ly, lz = toward_camera(center, camera)
+    return {
+        x = center.x + lx * 0.08,
+        y = center.y + ly * 0.08,
+        z = center.z + lz * 0.08,
+    }
+end
+
+local function los_clear(from, to)
+    if not from or not to then return false end
+    if raycast and raycast.is_visible then
+        return raycast.is_visible(from.x, from.y, from.z, to.x, to.y, to.z) == true
+    end
+    return true
+end
+
+local function scan_key(center, method_idx)
+    return string.format("%d|%.2f,%.2f,%.2f", method_idx, center.x, center.y, center.z)
+end
+
+local function next_grid_offset(center, method_idx)
+    local key = scan_key(center, method_idx)
+    if scan.key ~= key then
+        scan.key = key
+        scan.idx = 1
+    end
+    local off = GRID_OFFS[scan.idx] or GRID_OFFS[1]
+    scan.idx = scan.idx + 1
+    if scan.idx > #GRID_OFFS then scan.idx = 1 end
+    return off
+end
+
+local function rand_unit()
+    local u = math.random() * 2 - 1
+    local v = math.random() * 2 - 1
+    local s = u * u + v * v
+    while s >= 1 or s < 0.0001 do
+        u = math.random() * 2 - 1
+        v = math.random() * 2 - 1
+        s = u * u + v * v
+    end
+    local w = math.sqrt((1 - s) / s)
+    return u * w, v * w, math.sqrt(1 - s)
+end
+
+local function origin_center(_center, _camera)
+    return copy_pos(_center)
+end
+
+local function origin_random_ring(center, _camera)
+    local ang = math.random() * math.pi * 2
+    local r = 0.18 + math.random() * 0.55
+    return {
+        x = center.x + math.cos(ang) * r,
+        y = center.y + (math.random() - 0.5) * 0.35,
+        z = center.z + math.sin(ang) * r,
+    }
+end
+
+local function origin_random_sphere(center, _camera)
+    local ux, uy, uz = rand_unit()
+    local r = 0.12 + math.random() * 0.65
+    return {
+        x = center.x + ux * r,
+        y = center.y + uy * r,
+        z = center.z + uz * r,
+    }
+end
+
+local function origin_offset_grid(center, camera, method_idx)
+    return add_off(center, next_grid_offset(center, method_idx))
+end
+
+local function origin_camera_face(center, camera)
+    local lx, ly, lz = toward_camera(center, camera)
+    local d = 0.22 + math.random() * 0.75
+    return {
+        x = center.x + lx * d,
+        y = center.y + ly * d,
+        z = center.z + lz * d,
+    }
+end
+
+local function origin_away_from_cam(center, camera)
+    local lx, ly, lz = toward_camera(center, camera)
+    local d = 0.22 + math.random() * 0.75
+    return {
+        x = center.x - lx * d,
+        y = center.y - ly * d + (math.random() - 0.5) * 0.25,
+        z = center.z - lz * d,
+    }
+end
+
+local function origin_shuffle_valid(center, camera, tries)
+    tries = tries or 14
+    local best = copy_pos(center)
+    for _ = 1, tries do
+        local cand = origin_random_sphere(center, camera)
+        if los_clear(cand, center) then
+            return cand
+        end
+    end
+    return best
+end
+
+local ORIGIN_FN = {
+    origin_center,
+    origin_random_ring,
+    origin_random_sphere,
+    origin_offset_grid,
+    origin_camera_face,
+    origin_away_from_cam,
+    origin_shuffle_valid,
+    function(c, cam) return origin_shuffle_valid(c, cam, 28) end,
+}
+
+function M.hitpart_aim(hit, bone)
+    return M.target_center(hit, bone)
+end
+
+function M.resolve(opts)
+    opts = opts or {}
+    local camera = opts.camera or combat_origin.get_camera_origin()
+    local hitpart = opts.hitpart
+    if not hitpart or not camera then return nil end
+
+    local method_idx = math.floor(tonumber(opts.method) or 0)
+    if method_idx < 0 then method_idx = 0 end
+    if method_idx >= #M.METHODS then method_idx = 0 end
+
+    local center = M.target_center(hitpart, opts.bone)
+    if not center then return nil end
+
+    local muzzle = opts.muzzle or combat_origin.get_muzzle_origin() or camera
+    local pick = ORIGIN_FN[method_idx + 1] or origin_center
+    local origin = pick(center, camera, method_idx)
+    if not origin then return nil end
+
+    local aim = aim_through(center, origin, camera)
+
+    return {
+        origin = origin,
+        aim = aim,
+        hitpart = center,
+        visual = false,
+        method = M.METHODS[method_idx + 1],
+        tp_path = M.build_path(origin, center, muzzle),
+    }
+end
+
+function M.build_path(tp_origin, center, muzzle)
+    if not tp_origin or not center then return {} end
+    local out = {}
+    if muzzle then out[#out + 1] = copy_pos(muzzle) end
+    out[#out + 1] = copy_pos(tp_origin)
+    out[#out + 1] = copy_pos(center)
+    return out
+end
+
+return M
+
+end)()
+
 -- ── features/combat/combat_menu.lua ──
 April._mods["features.combat.combat_menu"] = (function()
 local menu_util = April.require("core.menu_util")
 local settings = April.require("core.settings")
 
 local M = {}
+
+M.TP_METHODS = {
+    "Center",
+    "Random Ring",
+    "Random Sphere",
+    "Offset Grid",
+    "Camera Face",
+    "Away From Cam",
+    "Shuffle Valid",
+    "Dense Shuffle",
+}
 
 M.SILENT_BONES = {
     "Head",
@@ -10764,10 +11032,12 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     }, { false }, { parent = parent_id })
     menu.add_slider_int(T, G, p .. "hit_chance", "Hit Chance %", 1, 100, 100, { parent = parent_id })
     menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 150, { parent = parent_id })
+    menu.add_checkbox(T, G, p .. "hitscan", "Hitscan", false, { parent = parent_id })
 
     menu_util.section(T, G, "Bullet TP")
     local tp_root = menu_util.parent(p .. "bullet_tp")
     menu.add_checkbox(T, G, p .. "bullet_tp", "Bullet TP", false, { parent = parent_id })
+    menu.add_combo(T, G, p .. "tp_method", "TP Method", M.TP_METHODS, 0, tp_root)
     menu.add_checkbox(T, G, p .. "tp_ray_vis", "Visualize Ray Path", false, menu_util.parent(p .. "bullet_tp", {
         colorpicker = { 0.95, 0.45, 1, 0.9 },
     }))
@@ -10777,7 +11047,7 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_checkbox(T, G, p .. "bullet_manip", "Silent Bullet Manip", false, { parent = parent_id })
     menu.add_slider_float(T, G, p .. "manip_dist", "Manip Distance", 0.1, 1, 1, "%.2f", manip_root)
     menu.add_checkbox(T, G, p .. "manip_extend", "Extend", false, manip_root)
-    menu.add_slider_float(T, G, p .. "manip_extend_dist", "Extra Scan Distance", 1, 8, 8, "%.1f",
+    menu.add_slider_float(T, G, p .. "manip_extend_dist", "Extra Scan Distance", 1, 7, 7, "%.1f",
         menu_util.parent(p .. "manip_extend"))
     menu.add_checkbox(T, G, p .. "manip_status", "Manip Status Bar", false, manip_root)
     menu.add_checkbox(T, G, p .. "manip_peek_vis", "Manip Peek Visual", true, manip_root)
@@ -11255,260 +11525,6 @@ return M
 
 end)()
 
--- ── features/combat/bullet_tp_ray.lua ──
-April._mods["features.combat.bullet_tp_ray"] = (function()
-local combat_origin = April.require("game.combat_origin")
-
-local M = {}
-
-local EYE_Y = 2.5
-local BACK_MIN = 0.25
-local BACK_MAX = 8
-local BACK_STEP = 0.15
-local RING_STEPS = 16
-local RING_FRACTIONS = { 0.1, 0.22, 0.38, 0.55 }
-local VERTICAL_OFFS = { 0, -0.4, 0.4, -0.85, 0.85, -1.35, 1.35 }
-local LATERAL_OFFS = { 0, 0.2, -0.2, 0.45, -0.45 }
-
-local function copy_pos(p)
-    if not p then return nil end
-    return { x = p.x, y = p.y, z = p.z }
-end
-
-local function unit(dx, dy, dz)
-    local len = math.sqrt(dx * dx + dy * dy + dz * dz)
-    if len < 0.001 then return 0, 0, 0, 0 end
-    local inv = 1 / len
-    return dx * inv, dy * inv, dz * inv, len
-end
-
-local function eye_pos(base)
-    return { x = base.x, y = base.y + EYE_Y, z = base.z }
-end
-
-local function los_visible(from, to)
-    if not from or not to then return false end
-    if raycast and raycast.is_visible then
-        return raycast.is_visible(from.x, from.y, from.z, to.x, to.y, to.z) == true
-    end
-    return true
-end
-
-local function cast_clear(from, to)
-    if not los_visible(from, to) then return false end
-    if not raycast or not raycast.cast then return true end
-    if raycast.is_ready and not raycast.is_ready() then return los_visible(from, to) end
-
-    local hit, _, dist = raycast.cast(from.x, from.y, from.z, to.x, to.y, to.z)
-    if not hit then return true end
-    local dx, dy, dz = to.x - from.x, to.y - from.y, to.z - from.z
-    local len = math.sqrt(dx * dx + dy * dy + dz * dz)
-    if len < 0.001 then return true end
-    return dist and dist >= len - 1.5
-end
-
-local function score_candidate(origin, aim, camera, back)
-    if not cast_clear(origin, aim) then return nil end
-    local dx = origin.x - (camera and camera.x or origin.x)
-    local dy = origin.y - (camera and camera.y or origin.y)
-    local dz = origin.z - (camera and camera.z or origin.z)
-    local cam_dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-    return 1000 - back * 35 - cam_dist * 0.12
-end
-
-function M.hitpart_aim(head)
-    return copy_pos(head)
-end
-
-function M.predict_aim(_target, head, _camera, _weapon_name)
-    return M.hitpart_aim(head)
-end
-
-function M.find_best_origin(camera, aim, muzzle)
-    if not aim then return nil end
-    camera = camera or aim
-    muzzle = muzzle or combat_origin.get_muzzle_origin() or camera
-
-    local dx, dy, dz = aim.x - camera.x, aim.y - camera.y, aim.z - camera.z
-    local ux, uy, uz, len = unit(dx, dy, dz)
-    if len < 0.05 then return copy_pos(aim) end
-
-    local px, py, pz = -uz, uy * 0.15, ux
-    local plen = math.sqrt(px * px + py * py + pz * pz)
-    if plen > 0.001 then
-        px, py, pz = px / plen, py / plen, pz / plen
-    end
-
-    local best, best_score = nil, -math.huge
-    local function try(base, back)
-        local cand = eye_pos(base)
-        local sc = score_candidate(cand, aim, camera, back or 0)
-        if sc and sc > best_score then
-            best, best_score = { x = base.x, y = base.y, z = base.z }, sc
-        end
-    end
-
-    local back_limit = math.min(BACK_MAX, math.max(BACK_MIN, len * 0.55))
-    local back = BACK_MIN
-    while back <= back_limit + 0.001 do
-        for _, vy in ipairs(VERTICAL_OFFS) do
-            for _, lat in ipairs(LATERAL_OFFS) do
-                try({
-                    x = aim.x - ux * back + px * lat,
-                    y = aim.y - uy * back + vy,
-                    z = aim.z - uz * back + pz * lat,
-                }, back)
-            end
-        end
-        back = back + BACK_STEP
-    end
-
-    for _, frac in ipairs(RING_FRACTIONS) do
-        local ring_r = math.min(1.8, len * frac * 0.1)
-        local center_back = math.min(back_limit * 0.55, len * frac * 0.4)
-        local cx = aim.x - ux * center_back
-        local cy = aim.y - uy * center_back
-        local cz = aim.z - uz * center_back
-        for _, vy in ipairs(VERTICAL_OFFS) do
-            for i = 0, RING_STEPS - 1 do
-                local ang = (i / RING_STEPS) * math.pi * 2
-                local ring_x = cx + math.cos(ang) * ring_r * px
-                local ring_z = cz + math.sin(ang) * ring_r * pz
-                try({ x = ring_x, y = cy + vy, z = ring_z }, center_back)
-            end
-        end
-    end
-
-    if best then
-        return eye_pos(best)
-    end
-
-    if muzzle and cast_clear(eye_pos(muzzle), aim) then
-        return eye_pos(muzzle)
-    end
-    return eye_pos({
-        x = aim.x - ux * math.min(1.5, len * 0.12),
-        y = aim.y - uy * math.min(1.5, len * 0.12),
-        z = aim.z - uz * math.min(1.5, len * 0.12),
-    })
-end
-
-function M.track_origin(camera, aim, _mode_name)
-    local muzzle = combat_origin.get_muzzle_origin()
-    return M.find_best_origin(camera, aim, muzzle)
-end
-
-function M.build_path(hook_origin, aim, _weapon_name)
-    if not hook_origin or not aim then return {} end
-    local muzzle = combat_origin.get_muzzle_origin() or hook_origin
-    local steps = 14
-    local out = {}
-    for i = 0, steps do
-        local t = i / steps
-        out[#out + 1] = {
-            x = muzzle.x + (aim.x - muzzle.x) * t,
-            y = muzzle.y + (aim.y - muzzle.y) * t,
-            z = muzzle.z + (aim.z - muzzle.z) * t,
-        }
-    end
-    return out
-end
-
-return M
-
-end)()
-
--- ── features/combat/manip_extend.lua ──
-April._mods["features.combat.manip_extend"] = (function()
--- Extend manip: incremental origin scan only (no desync, no HRP move, no fire-rate patch).
-
-local manip_math = April.require("core.manip_math")
-
-local M = {}
-
-local scan = nil
-
-local function scan_key(origin, target)
-    if not origin or not target then return nil end
-    return string.format("%.1f,%.1f,%.1f|%.1f,%.1f,%.1f",
-        origin.x, origin.y, origin.z, target.x, target.y, target.z)
-end
-
-function M.reset()
-    scan = nil
-end
-
-function M.evaluate_extend(origin, target_pos, base_r, extra_r)
-    base_r = manip_math.clamp_radius(base_r)
-    extra_r = manip_math.clamp_extend_extra(extra_r)
-    local max_r = base_r + extra_r
-
-    if not origin or not target_pos then
-        return {
-            state = "blocked", peek = nil, radius = base_r,
-            base_radius = base_r, extend_active = false, scan_progress = 0,
-        }
-    end
-
-    if manip_math.is_visible_from_pos(origin, target_pos) then
-        scan = nil
-        return {
-            state = "direct", peek = nil, radius = base_r,
-            base_radius = base_r, extend_active = false, scan_progress = 1,
-        }
-    end
-
-    local key = scan_key(origin, target_pos)
-    if not scan or scan.key ~= key or scan.base ~= base_r or scan.max ~= max_r then
-        local radii = {}
-        local r = base_r
-        while r < max_r - 0.04 do
-            radii[#radii + 1] = r
-            r = r + (r < 1 and 0.15 or 0.5)
-        end
-        radii[#radii + 1] = max_r
-        scan = {
-            key = key, base = base_r, max = max_r,
-            radii = radii, ri = 1, steps = 16,
-            origin = origin, target = target_pos,
-        }
-    end
-
-    local s = scan
-    local radius = s.radii[s.ri]
-    local peek = manip_math.search_peek_at_radius(s.origin, s.target, radius, s.steps)
-
-    local progress = s.ri / #s.radii
-    if peek then
-        local extended = radius > base_r + 0.05
-        scan = nil
-        return {
-            state = "ready", peek = peek, radius = radius,
-            base_radius = base_r, extend_active = extended,
-            scan_progress = 1,
-        }
-    end
-
-    s.ri = s.ri + 1
-    if s.ri > #s.radii then
-        scan = nil
-        return {
-            state = "blocked", peek = nil, radius = max_r,
-            base_radius = base_r, extend_active = false, scan_progress = 1,
-        }
-    end
-
-    return {
-        state = "scanning", peek = nil, radius = radius,
-        base_radius = base_r, extend_active = false,
-        scan_progress = progress,
-    }
-end
-
-return M
-
-end)()
-
 -- ── features/combat/silent_resolve.lua ──
 April._mods["features.combat.silent_resolve"] = (function()
 local settings = April.require("core.settings")
@@ -11517,7 +11533,6 @@ local silent_ray = April.require("core.silent_ray")
 local manip_math = April.require("core.manip_math")
 local targeting = April.require("features.combat.targeting")
 local bullet_tp_ray = April.require("features.combat.bullet_tp_ray")
-local manip_extend = April.require("features.combat.manip_extend")
 local weapons = April.require("game.weapons")
 local ballistic = April.require("core.ballistic")
 
@@ -11529,8 +11544,45 @@ local function fire_origin(camera)
     return combat_origin.get_muzzle_origin() or camera
 end
 
-local function apply_drop_aim(track_origin, hitpart, weapon, state, extra)
-    local muzzle = fire_origin(track_origin)
+local function resolve_manip(body, hitpart, muzzle, prefix)
+    local extra = {
+        state = "off",
+        peek = nil,
+        radius = 0,
+        base_radius = 0,
+        extend_active = false,
+        scan_progress = 0,
+    }
+    if not settings.bool(prefix .. "bullet_manip", false) or not body then
+        return nil, extra
+    end
+
+    local base_r = manip_math.clamp_radius(settings.num(prefix .. "manip_dist", 1))
+    local extend_on = settings.bool(prefix .. "manip_extend", false)
+    local ext_extra = extend_on
+        and manip_math.clamp_extend_extra(settings.num(prefix .. "manip_extend_dist", 7))
+        or 0
+    local ev = manip_math.evaluate_manipulation(body, hitpart, {
+        base_radius = base_r,
+        extend = extend_on,
+        extend_extra = ext_extra,
+    })
+
+    extra.state = ev.state
+    extra.peek = ev.peek
+    extra.radius = ev.radius or base_r
+    extra.base_radius = base_r
+    extra.extend_active = ev.extend_active == true
+    extra.scan_progress = ev.scan_progress or 0
+
+    if ev.state == "ready" and ev.peek then
+        return manip_math.peek_track_origin(ev.peek, muzzle, body), extra
+    end
+    return nil, extra
+end
+
+local function apply_drop_aim(origin, hitpart, weapon, state, extra)
+    local muzzle = origin or combat_origin.get_muzzle_origin()
     local aim_far, curve = ballistic.silent_aim_point(muzzle, hitpart, weapon)
     local info = {
         state = state or "curve",
@@ -11548,76 +11600,85 @@ local function apply_drop_aim(track_origin, hitpart, weapon, state, extra)
     return muzzle, aim_far or hitpart, info
 end
 
+local function apply_ray_aim(origin, aim, hitpart, weapon, state, extra, meta)
+    meta = meta or {}
+    local info = {
+        state = state,
+        peek = extra and extra.peek or nil,
+        radius = extra and extra.radius or 0,
+        use_curve = false,
+        weapon = weapon,
+        hitpart = hitpart,
+        base_radius = extra and extra.base_radius or nil,
+        extend_active = extra and extra.extend_active or false,
+        scan_progress = extra and extra.scan_progress or 0,
+        tp_path = meta.tp_path,
+        tp_method = meta.method,
+        tp_visual = meta.visual == true,
+    }
+    return origin, aim, info
+end
+
 function M.resolve_track(target, prefix, cx, cy)
     if not target then return nil, nil, OFF_INFO end
 
     local camera = silent_ray.get_camera_origin()
     if not camera then return nil, nil, OFF_INFO end
 
-    local hitpart = targeting.resolve_bone_world(target, targeting.bone_name(prefix), cx, cy)
+    local bone = targeting.bone_name(prefix)
+    local hitpart = targeting.resolve_bone_world(target, bone, cx, cy)
     if not hitpart then return nil, nil, OFF_INFO end
+    local center = bullet_tp_ray.target_center(hitpart, bone) or hitpart
 
     local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
+    local muzzle = fire_origin(camera)
+    local body = combat_origin.get_server_origin()
 
-    if settings.bool(prefix .. "bullet_tp", false) then
-        local head = targeting.bone_world(target, "Head") or hitpart
-        hitpart = bullet_tp_ray.hitpart_aim(head) or head
-        local track_origin = bullet_tp_ray.track_origin(camera, hitpart) or hitpart
+    local manip_fire, manip_extra = resolve_manip(body, hitpart, muzzle, prefix)
+    local fire = manip_fire or muzzle
 
-        return track_origin, hitpart, {
-            state = "tp",
-            peek = nil,
-            radius = 0,
-            tp_path = bullet_tp_ray.build_path(track_origin, hitpart, weapon),
-            use_curve = false,
-            weapon = weapon,
+    local hitscan_on = settings.bool(prefix .. "hitscan", false)
+    local tp_on = settings.bool(prefix .. "bullet_tp", false)
+
+    if tp_on then
+        local tp = bullet_tp_ray.resolve({
+            method = settings.num(prefix .. "tp_method", 0),
+            camera = camera,
             hitpart = hitpart,
-        }
-    end
-
-    if settings.bool(prefix .. "bullet_manip", false) then
-        local body = combat_origin.get_server_origin()
-        local base_r = manip_math.clamp_radius(settings.num(prefix .. "manip_dist", 1))
-        local extra = {
-            radius = base_r,
-            base_radius = base_r,
-            extend_active = false,
-            scan_progress = 0,
-        }
-        local fire = fire_origin(camera)
-
-        if body then
-            local ev
-            if settings.bool(prefix .. "manip_extend", false) then
-                local ext_extra = manip_math.clamp_extend_extra(settings.num(prefix .. "manip_extend_dist", 8))
-                ev = manip_extend.evaluate_extend(body, hitpart, base_r, ext_extra)
-            else
-                ev = manip_math.evaluate_manipulation(body, hitpart, {
-                    base_radius = base_r,
-                })
-            end
-            extra.state = ev.state
-            extra.peek = ev.peek
-            extra.radius = ev.radius or base_r
-            extra.base_radius = ev.base_radius or base_r
-            extra.extend_active = ev.extend_active == true
-            extra.scan_progress = ev.scan_progress or 0
-            if ev.state == "ready" and ev.peek then
-                fire = manip_math.peek_track_origin(ev.peek) or fire
-            elseif ev.state == "scanning" then
-                extra.state = "scanning"
-                return nil, nil, extra
-            end
-        else
-            extra.state = "blocked"
+            bone = bone,
+            muzzle = muzzle,
+        })
+        if not tp or not tp.origin or not tp.aim then
+            return nil, nil, { state = "blocked", peek = manip_extra.peek, radius = manip_extra.radius or 0 }
         end
-
-        local origin, aim_far, info = apply_drop_aim(fire, hitpart, weapon, extra.state or "blocked", extra)
-        return origin, aim_far, info
+        return apply_ray_aim(tp.origin, tp.aim, tp.hitpart or center, weapon, "tp", manip_extra, tp)
     end
 
-    local fire = fire_origin(camera)
-    return apply_drop_aim(fire, hitpart, weapon, "curve", nil)
+    if hitscan_on then
+        return apply_ray_aim(fire, center, center, weapon, "hitscan", manip_extra, {
+            tp_path = bullet_tp_ray.build_path(fire, center, muzzle),
+            method = "Hitscan",
+            visual = false,
+        })
+    end
+
+    if manip_extra.state == "ready" and manip_fire then
+        return apply_ray_aim(manip_fire, center, center, weapon, "ready", manip_extra, {
+            tp_path = bullet_tp_ray.build_path(manip_fire, center, muzzle),
+            method = "Manip",
+            visual = false,
+        })
+    end
+
+    if manip_extra.state == "direct" then
+        return apply_drop_aim(muzzle, center, weapon, "direct", manip_extra)
+    end
+
+    if settings.bool(prefix .. "bullet_manip", false) and manip_extra.state == "blocked" then
+        return nil, nil, manip_extra
+    end
+
+    return apply_drop_aim(muzzle, center, weapon, "curve", manip_extra)
 end
 
 return M
@@ -11637,7 +11698,6 @@ local combat_menu = April.require("features.combat.combat_menu")
 local silent_ray = April.require("core.silent_ray")
 local silent_resolve = April.require("features.combat.silent_resolve")
 local silent_whitelist = April.require("features.combat.silent_whitelist")
-local manip_extend = April.require("features.combat.manip_extend")
 local manip_math = April.require("core.manip_math")
 local desync_vis = April.require("core.desync_vis")
 local theme = April.require("core.ui_theme")
@@ -11765,11 +11825,12 @@ local function draw_manip_peek(info)
 end
 
 local function draw_tp_ray_path(info)
-    -- Only Bullet TP "Visualize Ray Path" — never auto-draw weapon drop curves
-    -- (those looked like a second target line on bows).
-    if not info or info.state ~= "tp" then return end
-    if not settings.bool(PREFIX .. "bullet_tp", false) then return end
+    if not info then return end
+    if info.state ~= "tp" and info.state ~= "hitscan" and info.state ~= "ready" then return end
     if not settings.bool(PREFIX .. "tp_ray_vis", false) then return end
+    if info.state == "tp" and not settings.bool(PREFIX .. "bullet_tp", false) then return end
+    if info.state == "hitscan" and not settings.bool(PREFIX .. "hitscan", false) then return end
+    if info.state == "ready" and not settings.bool(PREFIX .. "bullet_manip", false) then return end
 
     local path = info.tp_path
     if not path or #path < 2 then return end
@@ -11781,7 +11842,7 @@ local function draw_tp_ray_path(info)
     end
 
     local hook = cached_track.origin
-    local aim = cached_track.aim
+    local aim = info.hitpart or cached_track.aim
     if hook and aim then
         desync_vis.draw_cross(hook.x, hook.y, hook.z, 0.45, { 1, 0.85, 0.2, 0.95 }, 2)
         desync_vis.draw_link(hook, aim, { col[1], col[2], col[3], 0.35 }, 1)
@@ -11805,7 +11866,8 @@ function M.register_menu()
         PREFIX .. "filters",
         PREFIX .. "whitelist_ids", PREFIX .. "whitelist_clear",
         PREFIX .. "targets", PREFIX .. "options",
-        PREFIX .. "bullet_tp", PREFIX .. "tp_ray_vis",
+        PREFIX .. "hitscan",
+        PREFIX .. "bullet_tp", PREFIX .. "tp_method", PREFIX .. "tp_ray_vis",
         PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_extend", PREFIX .. "manip_extend_dist",
         PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
         PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
@@ -11813,7 +11875,7 @@ function M.register_menu()
     })
 
     menu_util.bind_children(PREFIX .. "bullet_tp", {
-        PREFIX .. "tp_ray_vis",
+        PREFIX .. "tp_method", PREFIX .. "tp_ray_vis",
     })
 
     menu_util.bind_children(PREFIX .. "bullet_manip", {
@@ -11866,7 +11928,6 @@ function M.update(_dt)
         fire_was_down = false
         shot_allowed = true
         silent_ray.stop()
-        manip_extend.reset()
         return
     end
 
@@ -11874,7 +11935,6 @@ function M.update(_dt)
 
     if not holding_weapon() then
         silent_ray.stop()
-        manip_extend.reset()
         return
     end
 
@@ -11895,13 +11955,7 @@ function M.update(_dt)
 
     if not locked_target or not targeting.is_aim_target(locked_target) then
         silent_ray.stop()
-        manip_extend.reset()
         return
-    end
-
-    -- Extend scan state only — no HRP move.
-    if not settings.bool(PREFIX .. "manip_extend", false) then
-        manip_extend.reset()
     end
 
     -- Hit chance rolls once per mouse-down (not every frame).
@@ -11928,7 +11982,7 @@ function M.update(_dt)
     local ok_resolve, origin, aim, manip_info = pcall(silent_resolve.resolve_track, locked_target, PREFIX, cx, cy)
     if not ok_resolve or not aim or not origin then
         silent_ray.stop()
-        if manip_info and manip_info.state == "scanning" then
+        if manip_info then
             cached_track.manip = manip_info
         end
         return
@@ -11952,7 +12006,7 @@ function M.update(_dt)
             end
         end
     else
-        ok_track = silent_ray.track(origin, aim, SHOOT_VK) == true
+        ok_track = silent_ray.track(origin, aim, SHOOT_VK, info.hitpart or aim) == true
     end
     cached_track.tracking = ok_track
 end

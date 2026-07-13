@@ -4,7 +4,7 @@ local EYE_OFFSET_Y = 2.5
 local DEFAULT_STEPS = 16
 local MIN_RADIUS = 0.1
 local MAX_RADIUS = 1
-local MAX_EXTEND_EXTRA = 8
+local MAX_EXTEND_EXTRA = 7
 
 -- Body Y offsets for ring peek (includes above-head peeks).
 local RING_Y_OFFSETS = { 0, 0.75, 1.5, 2.5, 3.25, -0.5 }
@@ -138,13 +138,15 @@ function M.find_manipulation_position(origin, target_pos, opts)
     return ev.peek
 end
 
-function M.peek_track_origin(peek)
+function M.peek_track_origin(peek, muzzle, body)
     if not peek then return nil end
-    return {
-        x = peek.x,
-        y = peek.y + EYE_OFFSET_Y,
-        z = peek.z,
-    }
+    local y = peek.y
+    if muzzle and body then
+        y = peek.y + (muzzle.y - body.y)
+    else
+        y = peek.y + EYE_OFFSET_Y
+    end
+    return { x = peek.x, y = y, z = peek.z }
 end
 
 function M.ring_y(origin)

@@ -3,6 +3,17 @@ local settings = April.require("core.settings")
 
 local M = {}
 
+M.TP_METHODS = {
+    "Center",
+    "Random Ring",
+    "Random Sphere",
+    "Offset Grid",
+    "Camera Face",
+    "Away From Cam",
+    "Shuffle Valid",
+    "Dense Shuffle",
+}
+
 M.SILENT_BONES = {
     "Head",
     "Torso",
@@ -94,10 +105,12 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     }, { false }, { parent = parent_id })
     menu.add_slider_int(T, G, p .. "hit_chance", "Hit Chance %", 1, 100, 100, { parent = parent_id })
     menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 150, { parent = parent_id })
+    menu.add_checkbox(T, G, p .. "hitscan", "Hitscan", false, { parent = parent_id })
 
     menu_util.section(T, G, "Bullet TP")
     local tp_root = menu_util.parent(p .. "bullet_tp")
     menu.add_checkbox(T, G, p .. "bullet_tp", "Bullet TP", false, { parent = parent_id })
+    menu.add_combo(T, G, p .. "tp_method", "TP Method", M.TP_METHODS, 0, tp_root)
     menu.add_checkbox(T, G, p .. "tp_ray_vis", "Visualize Ray Path", false, menu_util.parent(p .. "bullet_tp", {
         colorpicker = { 0.95, 0.45, 1, 0.9 },
     }))
@@ -107,7 +120,7 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_checkbox(T, G, p .. "bullet_manip", "Silent Bullet Manip", false, { parent = parent_id })
     menu.add_slider_float(T, G, p .. "manip_dist", "Manip Distance", 0.1, 1, 1, "%.2f", manip_root)
     menu.add_checkbox(T, G, p .. "manip_extend", "Extend", false, manip_root)
-    menu.add_slider_float(T, G, p .. "manip_extend_dist", "Extra Scan Distance", 1, 8, 8, "%.1f",
+    menu.add_slider_float(T, G, p .. "manip_extend_dist", "Extra Scan Distance", 1, 7, 7, "%.1f",
         menu_util.parent(p .. "manip_extend"))
     menu.add_checkbox(T, G, p .. "manip_status", "Manip Status Bar", false, manip_root)
     menu.add_checkbox(T, G, p .. "manip_peek_vis", "Manip Peek Visual", true, manip_root)

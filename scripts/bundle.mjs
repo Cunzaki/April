@@ -68,10 +68,9 @@ const ORDER = [
   "game/esp_scan.lua",
   "game/toolinfo_weapon_mods.lua",
   "features/combat/silent_whitelist.lua",
+  "features/combat/bullet_tp_ray.lua",
   "features/combat/combat_menu.lua",
   "features/combat/targeting.lua",
-  "features/combat/bullet_tp_ray.lua",
-  "features/combat/manip_extend.lua",
   "features/combat/silent_resolve.lua",
   "features/combat/aimbot.lua",
   "features/combat/perfect_farm.lua",
@@ -105,7 +104,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.70.1",
+    version = "3.73.1",
     debug = false,
     _mods = {},
     bundled = true,

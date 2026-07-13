@@ -9,7 +9,6 @@ local combat_menu = April.require("features.combat.combat_menu")
 local silent_ray = April.require("core.silent_ray")
 local silent_resolve = April.require("features.combat.silent_resolve")
 local silent_whitelist = April.require("features.combat.silent_whitelist")
-local manip_extend = April.require("features.combat.manip_extend")
 local manip_math = April.require("core.manip_math")
 local desync_vis = April.require("core.desync_vis")
 local theme = April.require("core.ui_theme")
@@ -137,11 +136,12 @@ local function draw_manip_peek(info)
 end
 
 local function draw_tp_ray_path(info)
-    -- Only Bullet TP "Visualize Ray Path" — never auto-draw weapon drop curves
-    -- (those looked like a second target line on bows).
-    if not info or info.state ~= "tp" then return end
-    if not settings.bool(PREFIX .. "bullet_tp", false) then return end
+    if not info then return end
+    if info.state ~= "tp" and info.state ~= "hitscan" and info.state ~= "ready" then return end
     if not settings.bool(PREFIX .. "tp_ray_vis", false) then return end
+    if info.state == "tp" and not settings.bool(PREFIX .. "bullet_tp", false) then return end
+    if info.state == "hitscan" and not settings.bool(PREFIX .. "hitscan", false) then return end
+    if info.state == "ready" and not settings.bool(PREFIX .. "bullet_manip", false) then return end
 
     local path = info.tp_path
     if not path or #path < 2 then return end
@@ -153,7 +153,7 @@ local function draw_tp_ray_path(info)
     end
 
     local hook = cached_track.origin
-    local aim = cached_track.aim
+    local aim = info.hitpart or cached_track.aim
     if hook and aim then
         desync_vis.draw_cross(hook.x, hook.y, hook.z, 0.45, { 1, 0.85, 0.2, 0.95 }, 2)
         desync_vis.draw_link(hook, aim, { col[1], col[2], col[3], 0.35 }, 1)
@@ -177,7 +177,8 @@ function M.register_menu()
         PREFIX .. "filters",
         PREFIX .. "whitelist_ids", PREFIX .. "whitelist_clear",
         PREFIX .. "targets", PREFIX .. "options",
-        PREFIX .. "bullet_tp", PREFIX .. "tp_ray_vis",
+        PREFIX .. "hitscan",
+        PREFIX .. "bullet_tp", PREFIX .. "tp_method", PREFIX .. "tp_ray_vis",
         PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_extend", PREFIX .. "manip_extend_dist",
         PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
         PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
@@ -185,7 +186,7 @@ function M.register_menu()
     })
 
     menu_util.bind_children(PREFIX .. "bullet_tp", {
-        PREFIX .. "tp_ray_vis",
+        PREFIX .. "tp_method", PREFIX .. "tp_ray_vis",
     })
 
     menu_util.bind_children(PREFIX .. "bullet_manip", {
@@ -238,7 +239,6 @@ function M.update(_dt)
         fire_was_down = false
         shot_allowed = true
         silent_ray.stop()
-        manip_extend.reset()
         return
     end
 
@@ -246,7 +246,6 @@ function M.update(_dt)
 
     if not holding_weapon() then
         silent_ray.stop()
-        manip_extend.reset()
         return
     end
 
@@ -267,13 +266,7 @@ function M.update(_dt)
 
     if not locked_target or not targeting.is_aim_target(locked_target) then
         silent_ray.stop()
-        manip_extend.reset()
         return
-    end
-
-    -- Extend scan state only — no HRP move.
-    if not settings.bool(PREFIX .. "manip_extend", false) then
-        manip_extend.reset()
     end
 
     -- Hit chance rolls once per mouse-down (not every frame).
@@ -300,7 +293,7 @@ function M.update(_dt)
     local ok_resolve, origin, aim, manip_info = pcall(silent_resolve.resolve_track, locked_target, PREFIX, cx, cy)
     if not ok_resolve or not aim or not origin then
         silent_ray.stop()
-        if manip_info and manip_info.state == "scanning" then
+        if manip_info then
             cached_track.manip = manip_info
         end
         return
@@ -324,7 +317,7 @@ function M.update(_dt)
             end
         end
     else
-        ok_track = silent_ray.track(origin, aim, SHOOT_VK) == true
+        ok_track = silent_ray.track(origin, aim, SHOOT_VK, info.hitpart or aim) == true
     end
     cached_track.tracking = ok_track
 end
