@@ -323,9 +323,21 @@ local function resolve_held_weapon(player, char)
     return nil, nil
 end
 
-local function scan_attachments_folder(folder, out, seen, depth)
+local function find_attachments_folder(parent)
+    if not parent or not env.is_valid(parent) then return nil end
+    return env.safe_call(function()
+        if parent.find_first_child then
+            return parent:find_first_child("Attachments") or parent:find_first_child("attachments")
+        end
+        return parent:FindFirstChild("Attachments") or parent:FindFirstChild("attachments")
+    end)
+end
+
+-- Fallen Ultimate pattern: Attachments:GetChildren() → attachment item names only.
+-- Do not recurse into attachment model internals (Vignette, Sight mesh parts, etc.).
+local function scan_weapon_attachments_folder(folder, out, seen, depth)
     depth = depth or 0
-    if not folder or not env.is_valid(folder) or depth > 5 then return end
+    if not folder or not env.is_valid(folder) or depth > 4 then return end
 
     local children = env.safe_call(function()
         if folder.get_children then return folder:get_children() end
@@ -346,18 +358,11 @@ local function scan_attachments_folder(folder, out, seen, depth)
         end
 
         if is_attachment_slot_name(name) then
-            scan_attachments_folder(child, out, seen, depth + 1)
+            scan_weapon_attachments_folder(child, out, seen, depth + 1)
             goto continue
         end
 
-        if is_attachment_name(name) or attachment_images.get_asset_id(name) or items.get_image_asset_id(name) then
-            add_attachment_piece(out, seen, name)
-            goto continue
-        end
-
-        if cn == "Model" or cn == "Folder" or cn == "folder" then
-            scan_attachments_folder(child, out, seen, depth + 1)
-        end
+        add_attachment_piece(out, seen, name)
 
         ::continue::
     end
@@ -365,22 +370,14 @@ end
 
 local function scan_weapon_attachments(char, tool_inst, out, seen)
     if tool_inst and env.is_valid(tool_inst) then
-        local attachments = env.safe_call(function()
-            if tool_inst.find_first_child then return tool_inst:find_first_child("Attachments") end
-            return tool_inst:FindFirstChild("Attachments")
-        end)
-        scan_attachments_folder(attachments, out, seen)
+        scan_weapon_attachments_folder(find_attachments_folder(tool_inst), out, seen)
 
         local weapon = env.safe_call(function()
             if tool_inst.find_first_child then return tool_inst:find_first_child("Weapon") end
             return tool_inst:FindFirstChild("Weapon")
         end)
         if weapon and env.is_valid(weapon) then
-            local nested = env.safe_call(function()
-                if weapon.find_first_child then return weapon:find_first_child("Attachments") end
-                return weapon:FindFirstChild("Attachments")
-            end)
-            scan_attachments_folder(nested, out, seen)
+            scan_weapon_attachments_folder(find_attachments_folder(weapon), out, seen)
         end
         return
     end

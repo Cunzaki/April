@@ -236,6 +236,112 @@ local function held_piece(held)
     return { name = held }
 end
 
+local LABEL_COL = { 0.55, 0.55, 0.58, 0.85 }
+
+local function split_words(text)
+    local words = {}
+    for word in text:gmatch("%S+") do
+        words[#words + 1] = word
+    end
+    return words
+end
+
+local function wrap_words(words, max_w, fs)
+    local lines = {}
+    local i = 1
+    while i <= #words do
+        local line = words[i]
+        local j = i + 1
+        while j <= #words do
+            local try = line .. " " .. words[j]
+            if select(1, draw.get_text_size(try, fs)) <= max_w then
+                line = try
+                j = j + 1
+            else
+                break
+            end
+        end
+        lines[#lines + 1] = line
+        i = j
+    end
+    return lines
+end
+
+local function words_fit(words, fs, max_w)
+    for _, word in ipairs(words) do
+        if select(1, draw.get_text_size(word, fs)) > max_w then
+            return false
+        end
+    end
+    return true
+end
+
+local function slot_label(piece)
+    if type(piece) ~= "table" then return nil end
+    local name = piece.name
+    if not name or name == "" then return nil end
+
+    name = text_util.sanitize(name)
+    local base, slash_var = name:match("^([^/]+)/(.+)$")
+    if base and slash_var then
+        return base .. " " .. slash_var
+    end
+
+    local variant = piece.variant
+    if variant and variant ~= "" and variant ~= "Default" then
+        return name .. " " .. text_util.sanitize(variant)
+    end
+    return name
+end
+
+local function draw_fitted_label(x, y, size, text)
+    if not draw or not draw.text or not draw.get_text_size then return end
+
+    text = text_util.sanitize(text)
+    if text == "" then return end
+
+    local pad = 4
+    local inner = size - pad * 2
+    local words = split_words(text)
+    if #words == 0 then return end
+
+    local max_fs = math.max(8, math.floor(size * 0.26))
+    local min_fs = 6
+    local chosen_fs, chosen_lines
+
+    for fs = max_fs, min_fs, -1 do
+        if words_fit(words, fs, inner) then
+            local lines = wrap_words(words, inner, fs)
+            local line_h = fs + 1
+            if #lines * line_h <= inner then
+                chosen_fs = fs
+                chosen_lines = lines
+                break
+            end
+        end
+    end
+
+    if not chosen_lines then
+        chosen_fs = min_fs
+        chosen_lines = wrap_words(words, inner, min_fs)
+    end
+
+    local line_h = chosen_fs + 1
+    local total_h = #chosen_lines * line_h
+    local ty = y + pad + (inner - total_h) * 0.5
+
+    for i, line in ipairs(chosen_lines) do
+        local tw = select(1, draw.get_text_size(line, chosen_fs))
+        draw.text(
+            x + size * 0.5 - tw * 0.5,
+            ty + (i - 1) * line_h,
+            line,
+            LABEL_COL,
+            chosen_fs
+        )
+    end
+end
+
 local function draw_slot(x, y, size, key, piece, style)
     local pad = 3
     local bg = SLOT_BG
@@ -264,21 +370,14 @@ local function draw_slot(x, y, size, key, piece, style)
     if key and image_cache.draw_fit(key, x + pad, y + pad, size - pad * 2, size - pad * 2) then
         return
     end
-
-    local label = "?"
-    if type(piece) == "table" and piece.name and piece.name ~= "" then
-        label = piece.name:sub(1, 1):upper()
+    if key and image_cache.state(key) ~= "failed" then
+        return
     end
 
-    local fs = math.max(10, math.floor(size * 0.34))
-    local tw = select(1, draw.get_text_size(label, fs))
-    draw.text(
-        x + size * 0.5 - tw * 0.5,
-        y + size * 0.5 - fs * 0.45,
-        label,
-        { 0.55, 0.55, 0.58, 0.85 },
-        fs
-    )
+    local label = slot_label(piece)
+    if label then
+        draw_fitted_label(x, y, size, label)
+    end
 end
 
 local function same_target(a, b)

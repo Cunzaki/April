@@ -70,7 +70,6 @@ local function get_handle(key)
 
     if not entry.handle then
         entry.handle = draw.load_image(entry.url)
-        return nil
     end
 
     if draw.image_failed and draw.image_failed(entry.handle) then

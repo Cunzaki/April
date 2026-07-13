@@ -87,11 +87,10 @@ async function resolveThumbnails(ids) {
     const json = await res.json();
     const out = new Map();
     const rows = json.data || [];
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const id = ids[i];
+    for (const row of rows) {
+      const id = row?.targetId != null ? String(row.targetId) : null;
       if (id && row?.imageUrl && row.state === "Completed") {
-        out.set(String(id), row.imageUrl);
+        out.set(id, row.imageUrl);
       }
     }
     return out;
@@ -189,6 +188,11 @@ async function downloadAssets(assetIds) {
       const dest = path.join(ITEMS_DIR, `${id}.png`);
       const url = map.get(String(id));
       if (!url) {
+        const bytes = await tryAssetDelivery(id, dest);
+        if (bytes) {
+          saved++;
+          return;
+        }
         stillMissing.push(id);
         failed++;
         return;
@@ -285,7 +289,8 @@ async function main() {
   console.log(`  by_name:     ${stats.itemNames} entries (incl. skin-only variants)`);
   console.log(`  asset IDs:   ${stats.assetCount}`);
   console.log(`  skin rows:   ${stats.skinMerged}`);
-  console.log(`  attachments: ${stats.attAdded} from mesh + ${stats.attLinked} catalog-linked`);
+  console.log(`  attachments: ${stats.attAdded} mesh + ${stats.attLinked} catalog-linked`);
+  console.log(`  prefabs:     ${stats.prefabAdded} from Benches/VMs/Armors (${stats.prefabSources} sources)`);
 
   const manifest = writeOutputs(data);
   console.log(`\nWrote ${dryRun ? "(dry-run) " : ""}item_images.lua, attachment_images.lua, manifest.json`);
