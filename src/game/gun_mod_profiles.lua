@@ -15,6 +15,14 @@ local function pct_to_neg_mult(pct)
     return -(pct / 100)
 end
 
+-- Items dump: Muzzle Boost FireRateMult = 0.12. Game delay *= 1 - FireRateMult.
+-- Menu slider 1.0–3.0 maps to 0.12–0.99 (works without muzzle attachment).
+function M.fire_rate_mult(slider)
+    slider = math.max(1, math.min(3, tonumber(slider) or 1.5))
+    local t = (slider - 1) / 2
+    return 0.12 + t * (0.99 - 0.12)
+end
+
 function M.build_mods_from_profile(profile)
     local mods = {}
     if not profile then return mods end
@@ -31,7 +39,7 @@ function M.build_mods_from_profile(profile)
         mods.SwayMult = -1
     end
     if profile.fire_rate then
-        mods.FireRateMult = profile.fire_rate_mult or 1.5
+        mods.FireRateMult = M.fire_rate_mult(profile.fire_rate_mult)
     end
     if profile.speed then
         mods.SpeedMult = profile.speed_mult or 100

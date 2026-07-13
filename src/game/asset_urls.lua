@@ -15,6 +15,12 @@ function M.roblox_thumb(asset_id)
     )
 end
 
+function M.asset_delivery(asset_id)
+    asset_id = digits(asset_id)
+    if not asset_id then return nil end
+    return string.format("https://assetdelivery.roblox.com/v1/asset/?id=%s", asset_id)
+end
+
 function M.item_png(asset_id)
     asset_id = digits(asset_id)
     if not asset_id then return nil end

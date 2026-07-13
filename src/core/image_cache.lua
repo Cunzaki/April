@@ -23,7 +23,7 @@ function M.ensure(key, asset_id_or_url)
         asset_id = asset_id and tostring(asset_id) or nil,
         handle = nil,
         failed = false,
-        fallback = false,
+        fallback_idx = 0,
     }
     return keys[key]
 end
@@ -32,16 +32,29 @@ function M.register(key, asset_id_or_url)
     return M.ensure(key, asset_id_or_url)
 end
 
-local function try_fallback(entry)
-    if entry.fallback or not entry.asset_id then return false end
-    local fb = asset_urls.roblox_thumb(entry.asset_id)
-    if not fb or fb == entry.url then return false end
-    entry.fallback = true
-    entry.url = fb
-    entry.handle = nil
-    entry.failed = false
-    entry.just_loaded = nil
-    return true
+local FALLBACKS = { "roblox_thumb", "asset_delivery" }
+
+local function fallback_url(kind, asset_id)
+    if kind == "roblox_thumb" then
+        return asset_urls.roblox_thumb(asset_id)
+    elseif kind == "asset_delivery" then
+        return asset_urls.asset_delivery(asset_id)
+    end
+    return nil
+end
+
+local function try_fallback(entry, key)
+    while entry.fallback_idx < #FALLBACKS do
+        entry.fallback_idx = entry.fallback_idx + 1
+        local url = fallback_url(FALLBACKS[entry.fallback_idx], entry.asset_id)
+        if url and url ~= entry.url then
+            entry.url = url
+            entry.handle = nil
+            entry.failed = false
+            return true
+        end
+    end
+    return false
 end
 
 local function get_handle(key)
@@ -55,17 +68,21 @@ local function get_handle(key)
         return nil
     end
 
+    if draw.image_loaded and draw.image_loaded(entry.handle) then
+        return entry.handle
+    end
+
     if draw.image_failed and draw.image_failed(entry.handle) then
-        if try_fallback(entry) then
+        if try_fallback(entry, key) then
             return nil
         end
-        debug.warn_once("img:" .. key, "load failed - " .. entry.url)
+        debug.warn_once("img:" .. key, "load failed - " .. tostring(entry.url))
         entry.failed = true
         entry.handle = nil
         return nil
     end
 
-    return entry.handle
+    return nil
 end
 
 local function draw_image(handle, x, y, w, h, col)
@@ -97,15 +114,18 @@ function M.state(key)
     if not entry then return "none" end
     if entry.failed then return "failed" end
     if not entry.handle then return "loading" end
+    if draw and draw.image_loaded and draw.image_loaded(entry.handle) then
+        return "ready"
+    end
     if draw and draw.image_failed and draw.image_failed(entry.handle) then
-        if try_fallback(entry) then
+        if try_fallback(entry, key) then
             return "loading"
         end
         entry.failed = true
         entry.handle = nil
         return "failed"
     end
-    return "ready"
+    return "loading"
 end
 
 function M.is_ready(key)

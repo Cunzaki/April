@@ -6,6 +6,9 @@ local MIN_RADIUS = 0.1
 local MAX_RADIUS = 1
 local MAX_EXTEND_EXTRA = 8
 
+-- Body Y offsets for ring peek (includes above-head peeks).
+local RING_Y_OFFSETS = { 0, 0.75, 1.5, 2.5, 3.25, -0.5 }
+
 function M.eye_offset_y()
     return EYE_OFFSET_Y
 end
@@ -37,17 +40,23 @@ function M.is_visible_from_pos(origin, target)
     return M.is_visible_from(origin.x, origin.y, origin.z, target.x, target.y, target.z)
 end
 
-local function search_ring(origin, target_pos, radius, steps)
-    for i = 0, steps - 1 do
-        local angle = (i / steps) * math.pi * 2
-        local cx = origin.x + math.cos(angle) * radius
-        local cy = origin.y
-        local cz = origin.z + math.sin(angle) * radius
-        if M.is_visible_from(cx, cy, cz, target_pos.x, target_pos.y, target_pos.z) then
-            return { x = cx, y = cy, z = cz }, radius
+function M.search_peek_at_radius(origin, target_pos, radius, steps)
+    if not origin or not target_pos then return nil end
+    steps = steps or DEFAULT_STEPS
+
+    for _, yoff in ipairs(RING_Y_OFFSETS) do
+        local oy = origin.y + yoff
+        for i = 0, steps - 1 do
+            local angle = (i / steps) * math.pi * 2
+            local cx = origin.x + math.cos(angle) * radius
+            local cz = origin.z + math.sin(angle) * radius
+            if M.is_visible_from(cx, oy, cz, target_pos.x, target_pos.y, target_pos.z) then
+                return { x = cx, y = oy, z = cz }
+            end
         end
     end
-    return nil, radius
+
+    return nil
 end
 
 local function build_radii(base, max_r)
@@ -64,16 +73,19 @@ end
 local function search_peek(origin, target_pos, base_r, max_r, steps, extend)
     steps = steps or DEFAULT_STEPS
     base_r = M.clamp_radius(base_r)
-    if not extend then
-        local peek, radius = search_ring(origin, target_pos, base_r, steps)
-        return peek, radius, peek and 1 or 1
+
+    local radii
+    if extend then
+        max_r = base_r + M.clamp_extend_extra(max_r - base_r)
+        radii = build_radii(base_r, max_r)
+    else
+        radii = { base_r }
+        max_r = base_r
     end
 
-    max_r = base_r + M.clamp_extend_extra(max_r - base_r)
-    local radii = build_radii(base_r, max_r)
     local total = #radii
     for idx, radius in ipairs(radii) do
-        local peek = search_ring(origin, target_pos, radius, steps)
+        local peek = M.search_peek_at_radius(origin, target_pos, radius, steps)
         if peek then
             return peek, radius, idx / total
         end

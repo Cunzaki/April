@@ -1,11 +1,11 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-12T23:48:52.626Z
+    Built: 2026-07-13T00:05:59.172Z
 ]]
 
 April = {
-    version = "3.69.3",
+    version = "3.70.0",
     debug = false,
     _mods = {},
     bundled = true,
@@ -1093,6 +1093,12 @@ function M.roblox_thumb(asset_id)
     )
 end
 
+function M.asset_delivery(asset_id)
+    asset_id = digits(asset_id)
+    if not asset_id then return nil end
+    return string.format("https://assetdelivery.roblox.com/v1/asset/?id=%s", asset_id)
+end
+
 function M.item_png(asset_id)
     asset_id = digits(asset_id)
     if not asset_id then return nil end
@@ -1134,7 +1140,7 @@ function M.ensure(key, asset_id_or_url)
         asset_id = asset_id and tostring(asset_id) or nil,
         handle = nil,
         failed = false,
-        fallback = false,
+        fallback_idx = 0,
     }
     return keys[key]
 end
@@ -1143,16 +1149,29 @@ function M.register(key, asset_id_or_url)
     return M.ensure(key, asset_id_or_url)
 end
 
-local function try_fallback(entry)
-    if entry.fallback or not entry.asset_id then return false end
-    local fb = asset_urls.roblox_thumb(entry.asset_id)
-    if not fb or fb == entry.url then return false end
-    entry.fallback = true
-    entry.url = fb
-    entry.handle = nil
-    entry.failed = false
-    entry.just_loaded = nil
-    return true
+local FALLBACKS = { "roblox_thumb", "asset_delivery" }
+
+local function fallback_url(kind, asset_id)
+    if kind == "roblox_thumb" then
+        return asset_urls.roblox_thumb(asset_id)
+    elseif kind == "asset_delivery" then
+        return asset_urls.asset_delivery(asset_id)
+    end
+    return nil
+end
+
+local function try_fallback(entry, key)
+    while entry.fallback_idx < #FALLBACKS do
+        entry.fallback_idx = entry.fallback_idx + 1
+        local url = fallback_url(FALLBACKS[entry.fallback_idx], entry.asset_id)
+        if url and url ~= entry.url then
+            entry.url = url
+            entry.handle = nil
+            entry.failed = false
+            return true
+        end
+    end
+    return false
 end
 
 local function get_handle(key)
@@ -1166,17 +1185,21 @@ local function get_handle(key)
         return nil
     end
 
+    if draw.image_loaded and draw.image_loaded(entry.handle) then
+        return entry.handle
+    end
+
     if draw.image_failed and draw.image_failed(entry.handle) then
-        if try_fallback(entry) then
+        if try_fallback(entry, key) then
             return nil
         end
-        debug.warn_once("img:" .. key, "load failed - " .. entry.url)
+        debug.warn_once("img:" .. key, "load failed - " .. tostring(entry.url))
         entry.failed = true
         entry.handle = nil
         return nil
     end
 
-    return entry.handle
+    return nil
 end
 
 local function draw_image(handle, x, y, w, h, col)
@@ -1208,15 +1231,18 @@ function M.state(key)
     if not entry then return "none" end
     if entry.failed then return "failed" end
     if not entry.handle then return "loading" end
+    if draw and draw.image_loaded and draw.image_loaded(entry.handle) then
+        return "ready"
+    end
     if draw and draw.image_failed and draw.image_failed(entry.handle) then
-        if try_fallback(entry) then
+        if try_fallback(entry, key) then
             return "loading"
         end
         entry.failed = true
         entry.handle = nil
         return "failed"
     end
-    return "ready"
+    return "loading"
 end
 
 function M.is_ready(key)
@@ -3158,6 +3184,9 @@ local MIN_RADIUS = 0.1
 local MAX_RADIUS = 1
 local MAX_EXTEND_EXTRA = 8
 
+-- Body Y offsets for ring peek (includes above-head peeks).
+local RING_Y_OFFSETS = { 0, 0.75, 1.5, 2.5, 3.25, -0.5 }
+
 function M.eye_offset_y()
     return EYE_OFFSET_Y
 end
@@ -3189,17 +3218,23 @@ function M.is_visible_from_pos(origin, target)
     return M.is_visible_from(origin.x, origin.y, origin.z, target.x, target.y, target.z)
 end
 
-local function search_ring(origin, target_pos, radius, steps)
-    for i = 0, steps - 1 do
-        local angle = (i / steps) * math.pi * 2
-        local cx = origin.x + math.cos(angle) * radius
-        local cy = origin.y
-        local cz = origin.z + math.sin(angle) * radius
-        if M.is_visible_from(cx, cy, cz, target_pos.x, target_pos.y, target_pos.z) then
-            return { x = cx, y = cy, z = cz }, radius
+function M.search_peek_at_radius(origin, target_pos, radius, steps)
+    if not origin or not target_pos then return nil end
+    steps = steps or DEFAULT_STEPS
+
+    for _, yoff in ipairs(RING_Y_OFFSETS) do
+        local oy = origin.y + yoff
+        for i = 0, steps - 1 do
+            local angle = (i / steps) * math.pi * 2
+            local cx = origin.x + math.cos(angle) * radius
+            local cz = origin.z + math.sin(angle) * radius
+            if M.is_visible_from(cx, oy, cz, target_pos.x, target_pos.y, target_pos.z) then
+                return { x = cx, y = oy, z = cz }
+            end
         end
     end
-    return nil, radius
+
+    return nil
 end
 
 local function build_radii(base, max_r)
@@ -3216,16 +3251,19 @@ end
 local function search_peek(origin, target_pos, base_r, max_r, steps, extend)
     steps = steps or DEFAULT_STEPS
     base_r = M.clamp_radius(base_r)
-    if not extend then
-        local peek, radius = search_ring(origin, target_pos, base_r, steps)
-        return peek, radius, peek and 1 or 1
+
+    local radii
+    if extend then
+        max_r = base_r + M.clamp_extend_extra(max_r - base_r)
+        radii = build_radii(base_r, max_r)
+    else
+        radii = { base_r }
+        max_r = base_r
     end
 
-    max_r = base_r + M.clamp_extend_extra(max_r - base_r)
-    local radii = build_radii(base_r, max_r)
     local total = #radii
     for idx, radius in ipairs(radii) do
-        local peek = search_ring(origin, target_pos, radius, steps)
+        local peek = M.search_peek_at_radius(origin, target_pos, radius, steps)
         if peek then
             return peek, radius, idx / total
         end
@@ -7642,6 +7680,14 @@ local function pct_to_neg_mult(pct)
     return -(pct / 100)
 end
 
+-- Items dump: Muzzle Boost FireRateMult = 0.12. Game delay *= 1 - FireRateMult.
+-- Menu slider 1.0–3.0 maps to 0.12–0.99 (works without muzzle attachment).
+function M.fire_rate_mult(slider)
+    slider = math.max(1, math.min(3, tonumber(slider) or 1.5))
+    local t = (slider - 1) / 2
+    return 0.12 + t * (0.99 - 0.12)
+end
+
 function M.build_mods_from_profile(profile)
     local mods = {}
     if not profile then return mods end
@@ -7658,7 +7704,7 @@ function M.build_mods_from_profile(profile)
         mods.SwayMult = -1
     end
     if profile.fire_rate then
-        mods.FireRateMult = profile.fire_rate_mult or 1.5
+        mods.FireRateMult = M.fire_rate_mult(profile.fire_rate_mult)
     end
     if profile.speed then
         mods.SpeedMult = profile.speed_mult or 100
@@ -11189,11 +11235,13 @@ local combat_origin = April.require("game.combat_origin")
 local M = {}
 
 local EYE_Y = 2.5
-local BACK_MIN = 0.35
-local BACK_MAX = 6
-local BACK_STEP = 0.2
-local RING_STEPS = 12
-local RING_FRACTIONS = { 0.15, 0.35, 0.55 }
+local BACK_MIN = 0.25
+local BACK_MAX = 8
+local BACK_STEP = 0.15
+local RING_STEPS = 16
+local RING_FRACTIONS = { 0.1, 0.22, 0.38, 0.55 }
+local VERTICAL_OFFS = { 0, -0.4, 0.4, -0.85, 0.85, -1.35, 1.35 }
+local LATERAL_OFFS = { 0, 0.2, -0.2, 0.45, -0.45 }
 
 local function copy_pos(p)
     if not p then return nil end
@@ -11219,14 +11267,26 @@ local function los_visible(from, to)
     return true
 end
 
+local function cast_clear(from, to)
+    if not los_visible(from, to) then return false end
+    if not raycast or not raycast.cast then return true end
+    if raycast.is_ready and not raycast.is_ready() then return los_visible(from, to) end
+
+    local hit, _, dist = raycast.cast(from.x, from.y, from.z, to.x, to.y, to.z)
+    if not hit then return true end
+    local dx, dy, dz = to.x - from.x, to.y - from.y, to.z - from.z
+    local len = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if len < 0.001 then return true end
+    return dist and dist >= len - 1.5
+end
+
 local function score_candidate(origin, aim, camera, back)
-    if not los_visible(origin, aim) then return nil end
+    if not cast_clear(origin, aim) then return nil end
     local dx = origin.x - (camera and camera.x or origin.x)
     local dy = origin.y - (camera and camera.y or origin.y)
     local dz = origin.z - (camera and camera.z or origin.z)
     local cam_dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-    -- ponytail: greedy score — prefer shorter back-offset + nearer camera (most natural valid)
-    return 1000 - back * 40 - cam_dist * 0.15
+    return 1000 - back * 35 - cam_dist * 0.12
 end
 
 function M.hitpart_aim(head)
@@ -11237,7 +11297,6 @@ function M.predict_aim(_target, head, _camera, _weapon_name)
     return M.hitpart_aim(head)
 end
 
--- Scan LOS back-offsets + small rings for the most likely server-valid origin.
 function M.find_best_origin(camera, aim, muzzle)
     if not aim then return nil end
     camera = camera or aim
@@ -11246,6 +11305,12 @@ function M.find_best_origin(camera, aim, muzzle)
     local dx, dy, dz = aim.x - camera.x, aim.y - camera.y, aim.z - camera.z
     local ux, uy, uz, len = unit(dx, dy, dz)
     if len < 0.05 then return copy_pos(aim) end
+
+    local px, py, pz = -uz, uy * 0.15, ux
+    local plen = math.sqrt(px * px + py * py + pz * pz)
+    if plen > 0.001 then
+        px, py, pz = px / plen, py / plen, pz / plen
+    end
 
     local best, best_score = nil, -math.huge
     local function try(base, back)
@@ -11256,30 +11321,34 @@ function M.find_best_origin(camera, aim, muzzle)
         end
     end
 
-    local back_limit = math.min(BACK_MAX, math.max(BACK_MIN, len * 0.45))
+    local back_limit = math.min(BACK_MAX, math.max(BACK_MIN, len * 0.55))
     local back = BACK_MIN
     while back <= back_limit + 0.001 do
-        try({
-            x = aim.x - ux * back,
-            y = aim.y - uy * back,
-            z = aim.z - uz * back,
-        }, back)
+        for _, vy in ipairs(VERTICAL_OFFS) do
+            for _, lat in ipairs(LATERAL_OFFS) do
+                try({
+                    x = aim.x - ux * back + px * lat,
+                    y = aim.y - uy * back + vy,
+                    z = aim.z - uz * back + pz * lat,
+                }, back)
+            end
+        end
         back = back + BACK_STEP
     end
 
     for _, frac in ipairs(RING_FRACTIONS) do
-        local ring_r = math.min(1.2, len * frac * 0.08)
-        local center_back = math.min(back_limit * 0.5, len * frac * 0.35)
+        local ring_r = math.min(1.8, len * frac * 0.1)
+        local center_back = math.min(back_limit * 0.55, len * frac * 0.4)
         local cx = aim.x - ux * center_back
         local cy = aim.y - uy * center_back
         local cz = aim.z - uz * center_back
-        for i = 0, RING_STEPS - 1 do
-            local ang = (i / RING_STEPS) * math.pi * 2
-            local px = -uz
-            local pz = ux
-            local ring_x = cx + math.cos(ang) * ring_r * px
-            local ring_z = cz + math.sin(ang) * ring_r * pz
-            try({ x = ring_x, y = cy, z = ring_z }, center_back)
+        for _, vy in ipairs(VERTICAL_OFFS) do
+            for i = 0, RING_STEPS - 1 do
+                local ang = (i / RING_STEPS) * math.pi * 2
+                local ring_x = cx + math.cos(ang) * ring_r * px
+                local ring_z = cz + math.sin(ang) * ring_r * pz
+                try({ x = ring_x, y = cy + vy, z = ring_z }, center_back)
+            end
         end
     end
 
@@ -11287,8 +11356,7 @@ function M.find_best_origin(camera, aim, muzzle)
         return eye_pos(best)
     end
 
-    -- Fallback: muzzle or camera eye along LOS
-    if muzzle and los_visible(eye_pos(muzzle), aim) then
+    if muzzle and cast_clear(eye_pos(muzzle), aim) then
         return eye_pos(muzzle)
     end
     return eye_pos({
@@ -11325,16 +11393,12 @@ end)()
 
 -- ── features/combat/manip_extend.lua ──
 April._mods["features.combat.manip_extend"] = (function()
--- Extend manip: incremental origin scan + fire-rate spike on extended-angle shots only.
+-- Extend manip: incremental origin scan only (no desync, no HRP move, no fire-rate patch).
 
-local settings = April.require("core.settings")
 local manip_math = April.require("core.manip_math")
-local gc = April.require("game.gc_weapon_mods")
 
 local M = {}
 
-local DEFAULT_BURST_MULT = 3.0
-local burst_active = false
 local scan = nil
 
 local function scan_key(origin, target)
@@ -11343,40 +11407,8 @@ local function scan_key(origin, target)
         origin.x, origin.y, origin.z, target.x, target.y, target.z)
 end
 
-local function burst_fire_rate_mult()
-    -- Prefer gun-mods slider when enabled; else extend default (3.0).
-    if settings.bool("april_gm_fire_rate", false) then
-        return settings.num("april_gm_fire_rate_mult", DEFAULT_BURST_MULT)
-    end
-    return DEFAULT_BURST_MULT
-end
-
 function M.reset()
-    burst_active = false
     scan = nil
-end
-
-function M.is_burst_active()
-    return burst_active
-end
-
--- ViewmodelController: shot delay *= 1 - FireRateMult — only while extended peek + LMB.
-function M.tick_burst(prefix, manip_info, firing)
-    prefix = prefix or "april_silent_"
-
-    local want_burst = firing
-        and manip_info
-        and manip_info.state == "ready"
-        and manip_info.extend_active
-        and settings.bool(prefix .. "bullet_manip", false)
-        and settings.bool(prefix .. "manip_extend", false)
-
-    if want_burst and gc.available() then
-        pcall(gc.apply_weapon, { FireRateMult = burst_fire_rate_mult() })
-        burst_active = true
-    elseif burst_active then
-        burst_active = false
-    end
 end
 
 function M.evaluate_extend(origin, target_pos, base_r, extra_r)
@@ -11417,17 +11449,7 @@ function M.evaluate_extend(origin, target_pos, base_r, extra_r)
 
     local s = scan
     local radius = s.radii[s.ri]
-    local peek = nil
-    for i = 0, s.steps - 1 do
-        local angle = (i / s.steps) * math.pi * 2
-        local cx = s.origin.x + math.cos(angle) * radius
-        local cy = s.origin.y
-        local cz = s.origin.z + math.sin(angle) * radius
-        if manip_math.is_visible_from(cx, cy, cz, s.target.x, s.target.y, s.target.z) then
-            peek = { x = cx, y = cy, z = cz }
-            break
-        end
-    end
+    local peek = manip_math.search_peek_at_radius(s.origin, s.target, radius, s.steps)
 
     local progress = s.ri / #s.radii
     if peek then
@@ -11888,9 +11910,6 @@ function M.update(_dt)
     cached_track.origin = origin
     cached_track.aim = aim
     cached_track.manip = manip_info or { state = "off" }
-
-    local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)
-    manip_extend.tick_burst(PREFIX, cached_track.manip, firing)
 
     local info = cached_track.manip
     local ok_track = false
