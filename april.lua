@@ -1,11 +1,11 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-13T04:58:17.044Z
+    Built: 2026-07-13T05:05:51.042Z
 ]]
 
 April = {
-    version = "3.74.3",
+    version = "3.74.4",
     debug = false,
     _mods = {},
     bundled = true,
@@ -1460,96 +1460,142 @@ end)()
 
 -- ── core/image_cache.lua ──
 April._mods["core.image_cache"] = (function()
+--[[
+    Vector on_frame pattern (stable v3.65–3.69):
+      handle = draw.load_image(url) once
+      draw.image(handle, x, y, w, h, 255, 255, 255, 255) every frame — no-ops until ready
+    Do NOT gate on draw.image_loaded; that breaks gear icons on Vector.
+]]
+
+local asset_urls = April.require("game.asset_urls")
 local debug = April.require("core.debug")
 
 local M = {}
+
 local keys = {}
 
-function M.ensure(key, url)
-    if not key or not url or url == "" then return nil end
+local function url_for(asset_id_or_url)
+    if type(asset_id_or_url) == "string" then
+        if asset_id_or_url:find("https://", 1, true)
+            or asset_id_or_url:find("http://", 1, true)
+            or asset_id_or_url:find("rbxassetid://", 1, true) then
+            return asset_id_or_url
+        end
+    end
+    return asset_urls.item_png(asset_id_or_url)
+end
 
+local function asset_digits(asset_id_or_url)
+    if asset_id_or_url == nil then return nil end
+    if type(asset_id_or_url) == "number" then return tostring(asset_id_or_url) end
+    return tostring(asset_id_or_url):match("(%d+)$") or tostring(asset_id_or_url):match("^(%d+)$")
+end
+
+function M.ensure(key, asset_id_or_url)
+    if keys[key] then return keys[key] end
+    local url = url_for(asset_id_or_url)
+    if not url then return nil end
+    keys[key] = {
+        url = url,
+        asset_id = asset_digits(asset_id_or_url),
+        handle = nil,
+        failed = false,
+        fallback = false,
+    }
+    return keys[key]
+end
+
+function M.register(key, asset_id_or_url)
+    return M.ensure(key, asset_id_or_url)
+end
+
+local function try_fallback(entry)
+    if entry.fallback or not entry.asset_id then return false end
+    local fb = asset_urls.roblox_thumb(entry.asset_id)
+    if not fb or fb == entry.url then return false end
+    entry.fallback = true
+    entry.url = fb
+    entry.handle = nil
+    entry.failed = false
+    return true
+end
+
+local function get_handle(key)
     local entry = keys[key]
-    if not entry then
-        keys[key] = { url = url, handle = nil, failed = false }
-        return keys[key]
-    end
-
-    if entry.url ~= url then
-        entry.url = url
-        entry.handle = nil
-        entry.failed = false
-    end
-    return entry
-end
-
-function M.register(key, url)
-    return M.ensure(key, url)
-end
-
-local function tick(entry)
     if not entry or entry.failed or not draw or not draw.load_image then
         return nil
     end
 
-    if entry.handle and draw.image_loaded and draw.image_loaded(entry.handle) then
-        return entry.handle
+    if not entry.handle then
+        entry.handle = draw.load_image(entry.url)
+        return nil
     end
 
-    if entry.handle and draw.image_failed and draw.image_failed(entry.handle) then
-        debug.warn_once("img:" .. tostring(entry.url), "load failed")
+    if draw.image_failed and draw.image_failed(entry.handle) then
+        if try_fallback(entry) then
+            return nil
+        end
+        debug.warn_once("img:" .. key, "load failed - " .. entry.url)
         entry.failed = true
         entry.handle = nil
         return nil
     end
 
-    -- API.md: safe to call load_image every frame; same URL is deduplicated
-    entry.handle = draw.load_image(entry.url)
-    if entry.handle and draw.image_loaded and draw.image_loaded(entry.handle) then
-        return entry.handle
+    return entry.handle
+end
+
+local function draw_image(handle, x, y, w, h, col)
+    if col and type(col) == "table" then
+        local r = math.floor((col[1] or 1) * 255)
+        local g = math.floor((col[2] or 1) * 255)
+        local b = math.floor((col[3] or 1) * 255)
+        local a = math.floor((col[4] or 1) * 255)
+        draw.image(handle, x, y, w, h, r, g, b, a)
+    else
+        draw.image(handle, x, y, w, h, 255, 255, 255, 255)
     end
-    return nil
+end
+
+function M.draw_fit(key, x, y, w, h, col)
+    if not draw or not draw.image then return false end
+
+    local handle = get_handle(key)
+    if not handle then return false end
+
+    w = math.max(w or 0, 8)
+    h = math.max(h or 0, 8)
+    draw_image(handle, x, y, w, h, col)
+    return true
 end
 
 function M.state(key)
     local entry = keys[key]
     if not entry then return "none" end
     if entry.failed then return "failed" end
-    tick(entry)
-    if entry.failed then return "failed" end
-    if entry.handle and draw.image_loaded and draw.image_loaded(entry.handle) then
-        return "ready"
+    if not entry.handle then return "loading" end
+    if draw and draw.image_failed and draw.image_failed(entry.handle) then
+        if try_fallback(entry) then
+            return "loading"
+        end
+        entry.failed = true
+        entry.handle = nil
+        return "failed"
     end
-    return "loading"
+    return "ready"
 end
 
 function M.is_ready(key)
     return M.state(key) == "ready"
 end
 
+function M.preload(key, asset_id_or_url)
+    M.ensure(key, asset_id_or_url)
+    get_handle(key)
+end
+
 function M.begin_load(key)
-    local entry = keys[key]
-    if entry then tick(entry) end
-end
-
-function M.preload(key, url)
-    M.ensure(key, url)
-    M.begin_load(key)
-end
-
-function M.draw_fit(key, x, y, w, h)
-    if not draw or not draw.image then return false end
-
-    local entry = keys[key]
-    if not entry or entry.failed then return false end
-
-    local handle = tick(entry)
-    if not handle then return false end
-
-    w = math.max(w or 0, 8)
-    h = math.max(h or 0, 8)
-    -- API.md April pattern: 0-255 RGBA integer color args
-    draw.image(handle, x, y, w, h, 255, 255, 255, 255)
-    return true
+    if not key then return end
+    get_handle(key)
 end
 
 function M.draw_at_world(key, wx, wy, wz, size)
@@ -1557,10 +1603,7 @@ function M.draw_at_world(key, wx, wy, wz, size)
         return false
     end
 
-    local entry = keys[key]
-    if not entry or entry.failed then return false end
-
-    local handle = tick(entry)
+    local handle = get_handle(key)
     if not handle then return false end
 
     local sx, sy, vis = utility.world_to_screen(wx, wy, wz)
@@ -8731,72 +8774,24 @@ end)()
 
 -- ── game/combat_target.lua ──
 April._mods["game.combat_target"] = (function()
--- Shared combat target: silent-aim lock first, then optional crosshair FOV fallback.
-
-local settings = April.require("core.settings")
-local player_state = April.require("game.player_state")
-local esp_util = April.require("core.esp_util")
-local math_util = April.require("core.math_util")
-local draw_util = April.require("core.draw_util")
+-- Shared combat target: silent-aim lock only (gear FOV fallback lives in target_overlay).
 
 local M = {}
-
-local OVERLAY_FOV_ID = "april_target_overlay_fov"
-local FALLBACK_ID = "april_target_overlay_fallback_fov"
-
-local function crosshair_center()
-    local sw, sh = draw_util.screen_size()
-    return sw * 0.5, sh * 0.5
-end
-
-local function find_crosshair_target(fov_px)
-    if not entity or not entity.get_players then return nil end
-
-    local cx, cy = crosshair_center()
-    local best, best_dist = nil, fov_px
-
-    for _, p in ipairs(entity.get_players()) do
-        if not player_state.is_combat_target(p) then goto continue end
-
-        local pos = p.head_position or p.position
-        if not pos then goto continue end
-
-        local px = pos.x or pos[1]
-        local py = pos.y or pos[2]
-        local pz = pos.z or pos[3]
-        if not px then goto continue end
-
-        local sx, sy, vis = esp_util.w2s(px, py, pz)
-        if not vis then goto continue end
-
-        local dist = math_util.screen_fov_dist(sx, sy, cx, cy)
-        if dist <= fov_px and dist < best_dist then
-            best_dist = dist
-            best = p
-        end
-
-        ::continue::
-    end
-
-    return best
-end
 
 function M.get()
     local ok, aimbot = pcall(function()
         return April.require("features.combat.aimbot")
     end)
-    if ok and aimbot and aimbot.get_target then
-        local locked = aimbot.get_target()
-        if locked and player_state.is_combat_target(locked) then
-            return locked
-        end
-    end
+    if not ok or not aimbot or not aimbot.get_target then return nil end
 
-    if settings.bool(FALLBACK_ID, true) then
-        return find_crosshair_target(settings.num(OVERLAY_FOV_ID, 150))
-    end
+    local t = aimbot.get_target()
+    if not t then return nil end
 
-    return nil
+    local player_state = April.require("game.player_state")
+    if player_state and player_state.is_combat_target and not player_state.is_combat_target(t) then
+        return nil
+    end
+    return t
 end
 
 function M.aim_point(target)
@@ -13492,6 +13487,7 @@ local attachment_images = April.require("game.attachment_images")
 local player_gear = April.require("game.player_gear")
 local player_state = April.require("game.player_state")
 local combat_target = April.require("game.combat_target")
+local math_util = April.require("core.math_util")
 local text_util = April.require("core.text_util")
 
 local M = {}
@@ -13526,37 +13522,78 @@ local function img_key(prefix, id)
 end
 
 local function resolve_image_key(piece)
-    if not piece or type(piece) ~= "table" then return nil end
+    if not piece then return nil end
 
-    local url, id
-
-    if piece.name then
+    if type(piece) == "table" and piece.name then
         local att_id = attachment_images.get_asset_id(piece.name)
         if att_id then
-            id = att_id
-            url = asset_urls.rbx_asset(att_id)
+            local key = img_key("att_", att_id)
+            image_cache.ensure(key, asset_urls.rbx_asset(att_id))
+            return key
         end
     end
 
-    if not url then
-        local asset_id = piece.asset_id
-        if not asset_id and piece.name then
-            local resolved = items.resolve_item_label(
-                piece.variant and (piece.name .. "/" .. piece.variant) or piece.name
-            )
-            asset_id = resolved and resolved.asset_id or items.get_image_asset_id(piece.name, piece.variant)
+    if type(piece) == "table" and piece.asset_id then
+        local key = img_key("item_", piece.asset_id)
+        image_cache.ensure(key, piece.asset_id)
+        return key
+    end
+
+    if type(piece) == "table" and piece.name then
+        local resolved = items.resolve_item_label(
+            piece.variant and (piece.name .. "/" .. piece.variant) or piece.name
+        )
+        if resolved and resolved.asset_id then
+            local key = img_key("item_", resolved.asset_id)
+            image_cache.ensure(key, resolved.asset_id)
+            return key
         end
+        local asset_id = items.get_image_asset_id(piece.name, piece.variant)
         if asset_id then
-            id = asset_id
-            url = asset_urls.item_png(asset_id)
+            local key = img_key("item_", asset_id)
+            image_cache.ensure(key, asset_id)
+            return key
         end
     end
 
-    if not url then return nil end
+    return nil
+end
 
-    local key = img_key("img_", id or url)
-    image_cache.ensure(key, url)
-    return key
+local function crosshair_center()
+    local sw, sh = draw_util.screen_size()
+    return sw * 0.5, sh * 0.5
+end
+
+local function find_crosshair_target(fov_px)
+    if not entity or not entity.get_players then return nil end
+
+    local cx, cy = crosshair_center()
+    local best, best_dist = nil, fov_px
+
+    for _, p in ipairs(entity.get_players()) do
+        if not player_state.is_combat_target(p) then goto continue end
+
+        local pos = p.head_position or p.position
+        if not pos then goto continue end
+
+        local px = pos.x or pos[1]
+        local py = pos.y or pos[2]
+        local pz = pos.z or pos[3]
+        if not px then goto continue end
+
+        local sx, sy, vis = esp_util.w2s(px, py, pz)
+        if not vis then goto continue end
+
+        local dist = math_util.screen_fov_dist(sx, sy, cx, cy)
+        if dist <= fov_px and dist < best_dist then
+            best_dist = dist
+            best = p
+        end
+
+        ::continue::
+    end
+
+    return best
 end
 
 local function get_gear(player)
@@ -13705,14 +13742,8 @@ local function draw_slot(x, y, size, key, piece, style)
 
     if not piece then return end
 
-    if key then
-        image_cache.begin_load(key)
-        if image_cache.draw_fit(key, x + pad, y + pad, size - pad * 2, size - pad * 2) then
-            return
-        end
-        if image_cache.state(key) ~= "failed" then
-            return
-        end
+    if key and image_cache.draw_fit(key, x + pad, y + pad, size - pad * 2, size - pad * 2) then
+        return
     end
 
     local label = "?"
@@ -13747,7 +13778,7 @@ function M.register_menu()
     menu_util.register_keybind(T, G.VISUALS, P, "Target Gear", false)
 
     local root = menu_util.parent(P)
-    menu.add_checkbox(T, G.VISUALS, P .. "_fallback_fov", "Crosshair FOV Fallback", true, root)
+    menu.add_checkbox(T, G.VISUALS, P .. "_fallback_fov", "Crosshair FOV Fallback", false, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Fallback FOV", 40, 400, 150,
         menu_util.parent(P .. "_fallback_fov"))
     menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, root)
@@ -13768,7 +13799,11 @@ function M.refresh_target()
     end
 
     local gear_sz = settings.num(P .. "_gear_size", 48)
+
     local target = combat_target.get()
+    if not target and settings.bool(P .. "_fallback_fov", false) then
+        target = find_crosshair_target(settings.num(P .. "_fov", 150))
+    end
 
     if not target or not player_state.is_combat_target(target) then
         M._target = nil

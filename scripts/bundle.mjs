@@ -105,7 +105,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.74.3",
+    version = "3.74.4",
     debug = false,
     _mods = {},
     bundled = true,
