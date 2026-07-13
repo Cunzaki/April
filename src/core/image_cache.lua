@@ -20,9 +20,9 @@ local function url_for(asset_id_or_url)
     end
     local id = digits(asset_id_or_url)
     if id then
-        return asset_urls.rbx_asset(id)
+        return asset_urls.roblox_asset_http(id)
     end
-    return asset_urls.item_png(asset_id_or_url)
+    return nil
 end
 
 function M.ensure(key, asset_id_or_url)
@@ -43,8 +43,8 @@ function M.register(key, asset_id_or_url)
     return M.ensure(key, asset_id_or_url)
 end
 
--- API.md: HTTPS, rbxassetid://, http://www.roblox.com/asset/?id=
-local FALLBACKS = { "roblox_thumb", "item_png", "roblox_asset_http" }
+-- ponytail: Vector draw.load_image — rbxassetid + roblox asset http; try both
+local FALLBACKS = { "rbx_asset" }
 
 local function fallback_url(kind, asset_id)
     if not asset_id then return nil end

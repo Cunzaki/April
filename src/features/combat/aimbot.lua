@@ -137,10 +137,9 @@ end
 
 local function draw_tp_ray_path(info)
     if not info then return end
-    if info.state ~= "tp" and info.state ~= "hitscan" and info.state ~= "ready" then return end
+    if info.state ~= "tp" and info.state ~= "ready" then return end
     if not settings.bool(PREFIX .. "tp_ray_vis", false) then return end
     if info.state == "tp" and not settings.bool(PREFIX .. "bullet_tp", false) then return end
-    if info.state == "hitscan" and not settings.bool(PREFIX .. "hitscan", false) then return end
     if info.state == "ready" and not settings.bool(PREFIX .. "bullet_manip", false) then return end
 
     local path = info.tp_path

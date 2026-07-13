@@ -243,6 +243,29 @@ M.ROLES = {
     [164058661] = "OG", -- Zeus24X
 }
 
+function M.short_label(role)
+    if not role then return "STAFF" end
+    if role == "Game Moderator" then return "MOD" end
+    if role == "Game Tester" then return "TESTER" end
+    if role == "Lead Developer" or role == "Developers" then return "DEV" end
+    if role == "Co-Founder" then return "CO-FOUNDER" end
+    if role == "Founder" then return "FOUNDER" end
+    if role == "OG" then return "OG" end
+    if role == "Contribution" then return "CONTRIB" end
+    return role:upper()
+end
+
+function M.glyph_kind(role)
+    if not role then return "staff" end
+    local r = role:lower()
+    if r:find("moderator", 1, true) then return "mod" end
+    if r:find("tester", 1, true) then return "tester" end
+    if r:find("developer", 1, true) or r:find("founder", 1, true) then return "dev" end
+    if r == "og" then return "og" end
+    if r:find("contribution", 1, true) then return "contrib" end
+    return "staff"
+end
+
 function M.role_for(user_id)
     if not user_id then return nil end
     return M.ROLES[user_id] or M.ROLES[tonumber(user_id)]

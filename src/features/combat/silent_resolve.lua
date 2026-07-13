@@ -126,11 +126,7 @@ function M.resolve_track(target, prefix, cx, cy)
     end
 
     if hitscan_on then
-        return apply_ray_aim(fire, center, center, weapon, "hitscan", manip_extra, {
-            tp_path = bullet_tp_ray.build_path(fire, center, muzzle),
-            method = "Hitscan",
-            visual = false,
-        })
+        return apply_ray_aim(fire, center, center, weapon, "hitscan", manip_extra)
     end
 
     if manip_extra.state == "ready" and manip_fire then

@@ -219,7 +219,11 @@ local function collect_flags(p)
         if tag then
             out[#out + 1] = { text = tag, col = FLAG_COLS[tag] or FLAG_COLS.STAFF }
         elseif mod_checker.is_staff(p) then
-            out[#out + 1] = { text = "STAFF", col = FLAG_COLS.STAFF }
+            local role = mod_ids.role_for(p.user_id)
+            out[#out + 1] = {
+                text = mod_ids.short_label(role),
+                col = theme.role_accent(role),
+            }
         end
     end
     if settings.multi(FLAGS, FL_REVIVING, true) and player_state.is_reviving(p) then

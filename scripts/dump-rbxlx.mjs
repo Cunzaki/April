@@ -24,7 +24,7 @@ const DEFAULT_RBXLX =
     process.env.LOCALAPPDATA || "",
     "Volt",
     "workspace",
-    "place 13800717766 Fallen Survival Large Server.rbxlx"
+    "place 16849012343 Fallen Survival Medium Server.rbxlx"
   );
 
 const rbxlxPath = path.resolve(process.argv[2] || DEFAULT_RBXLX);
@@ -98,6 +98,15 @@ function safeSeg(name) {
 
 function scriptFileName(instPath, className) {
   return `${safeSeg(instPath)}.${className}.lua`;
+}
+
+/** Mirror instance path as nested folders: ReplicatedStorage/Modules/Items/ModuleScript.lua */
+function scriptPathFile(instPath, className) {
+  const parts = String(instPath || "")
+    .split(".")
+    .map(safeSeg)
+    .filter(Boolean);
+  return path.join(...parts, `${className}.lua`);
 }
 
 /** Roblox AttributesSerialize (BinaryString base64) */
@@ -566,11 +575,18 @@ function main() {
   wipeDir(outDir);
   const dirs = {
     catalog: path.join(outDir, "catalog"),
+    catalogRemotes: path.join(outDir, "catalog", "remotes"),
+    catalogAssets: path.join(outDir, "catalog", "assets"),
+    catalogGameplay: path.join(outDir, "catalog", "gameplay"),
     tree: path.join(outDir, "tree"),
+    treeServices: path.join(outDir, "tree", "services"),
     index: path.join(outDir, "index"),
     instances: path.join(outDir, "instances"),
     byClass: path.join(outDir, "instances", "by_class"),
+    byService: path.join(outDir, "instances", "by_service"),
     scripts: path.join(outDir, "scripts"),
+    scriptsByPath: path.join(outDir, "scripts", "by_path"),
+    scriptsFlat: path.join(outDir, "scripts", "flat"),
     attributes: path.join(outDir, "attributes"),
   };
   for (const d of Object.values(dirs)) ensureDir(d);
@@ -607,14 +623,27 @@ function main() {
   fs.copyFileSync(path.join(dirs.index, "instances.tsv"), path.join(outDir, "index.tsv"));
   fs.copyFileSync(path.join(dirs.instances, "all.jsonl"), path.join(outDir, "instances.jsonl"));
 
-  // --- scripts ---
-  const scriptIndex = ["referent\tclass\tpath\tfile\tbytes"];
+  // --- scripts (flat compat + by_path mirror) ---
+  const scriptIndex = ["referent\tclass\tpath\tflat_file\tpath_file\tbytes"];
   for (const inst of scripts) {
-    const file = scriptFileName(inst.path, inst.class);
+    const flatFile = scriptFileName(inst.path, inst.class);
+    const pathFile = scriptPathFile(inst.path, inst.class);
     const src = inst._source || "";
-    fs.writeFileSync(path.join(dirs.scripts, file), src, "utf8");
+    fs.writeFileSync(path.join(dirs.scriptsFlat, flatFile), src, "utf8");
+    const nested = path.join(dirs.scriptsByPath, pathFile);
+    ensureDir(path.dirname(nested));
+    fs.writeFileSync(nested, src, "utf8");
+    // Legacy flat name at scripts/ root for extract-* tools
+    fs.writeFileSync(path.join(dirs.scripts, flatFile), src, "utf8");
     scriptIndex.push(
-      [inst.referent, inst.class, tsvEscape(inst.path), `scripts\\${file}`, Buffer.byteLength(src)].join("\t")
+      [
+        inst.referent,
+        inst.class,
+        tsvEscape(inst.path),
+        `scripts\\flat\\${flatFile}`,
+        `scripts\\by_path\\${pathFile.replace(/\//g, "\\")}`,
+        Buffer.byteLength(src),
+      ].join("\t")
     );
   }
   writeLines(path.join(dirs.scripts, "_index.tsv"), scriptIndex);
@@ -647,6 +676,7 @@ function main() {
   catalogTsv("remotes.tsv", remotes, ["class", "path", "referent"], (i) =>
     [i.class, tsvEscape(i.path), i.referent].join("\t")
   );
+  fs.copyFileSync(path.join(dirs.catalog, "remotes.tsv"), path.join(dirs.catalogRemotes, "index.tsv"));
   catalogTsv("bindables.tsv", bindables, ["class", "path", "referent"], (i) =>
     [i.class, tsvEscape(i.path), i.referent].join("\t")
   );
@@ -663,6 +693,7 @@ function main() {
   catalogTsv("tools.tsv", tools, ["path", "referent"], (i) =>
     [tsvEscape(i.path), i.referent].join("\t")
   );
+  fs.copyFileSync(path.join(dirs.catalog, "tools.tsv"), path.join(dirs.catalogGameplay, "tools.tsv"));
   catalogTsv("sounds.tsv", sounds, ["path", "soundId"], (i) =>
     [tsvEscape(i.path), tsvEscape(i.properties.SoundId)].join("\t")
   );
@@ -682,10 +713,11 @@ function main() {
   catalogTsv("mesh_assets.tsv", meshAssets, ["class", "path", "meshId", "textureId"], (i) =>
     [i.class, tsvEscape(i.path), tsvEscape(i.meshId), tsvEscape(i.textureId)].join("\t")
   );
-  writeLines(path.join(dirs.catalog, "assets.tsv"), [
+  writeLines(path.join(dirs.catalogAssets, "all_ids.tsv"), [
     "assetId",
     ...[...allAssets].sort((a, b) => Number(a) - Number(b)),
   ]);
+  fs.copyFileSync(path.join(dirs.catalogAssets, "all_ids.tsv"), path.join(dirs.catalog, "assets.tsv"));
 
   // Compat text indexes (old layout)
   writeLines(
@@ -774,6 +806,54 @@ function main() {
   }
   writeLines(path.join(dirs.tree, "services.tsv"), serviceLines);
 
+  // Per-service subtree dumps (Workspace, ReplicatedStorage, …)
+  const SERVICE_ROOTS = new Set([
+    "Workspace",
+    "ReplicatedStorage",
+    "ReplicatedFirst",
+    "ServerScriptService",
+    "ServerStorage",
+    "StarterPlayer",
+    "StarterGui",
+    "Lighting",
+    "SoundService",
+    "Players",
+  ]);
+  for (const r of roots) {
+    if (!SERVICE_ROOTS.has(r.name)) continue;
+    const svcLines = [];
+    function walkSvc(ref, depth) {
+      for (const k of children.get(ref) || []) {
+        svcLines.push(`${"  ".repeat(depth)}${k.class} ${k.name}\t${k.path}`);
+        walkSvc(k.referent, depth + 1);
+      }
+    }
+    walkSvc(r.referent, 0);
+    writeLines(path.join(dirs.treeServices, `${safeSeg(r.name)}.txt`), svcLines);
+  }
+
+  // instances/by_service — jsonl chunks under each top-level service
+  const byServiceLines = new Map();
+  for (const inst of instances) {
+    const top = inst.path.split(".")[0];
+    if (!byServiceLines.has(top)) byServiceLines.set(top, []);
+    byServiceLines.get(top).push(
+      JSON.stringify({
+        referent: inst.referent,
+        class: inst.class,
+        name: inst.name,
+        path: inst.path,
+        parent_referent: inst.parent_referent,
+        properties: inst.properties,
+        attributes: inst.attributes,
+        tags: inst.tags,
+      })
+    );
+  }
+  for (const [svc, lines] of byServiceLines) {
+    writeLines(path.join(dirs.byService, `${safeSeg(svc)}.jsonl`), lines);
+  }
+
   // Workspace folder cheat-sheet
   const ws = instances.find((i) => i.class === "Workspace" && i.parent_referent == null);
   const wsFolders = ws
@@ -840,10 +920,14 @@ function main() {
     class_stats: Object.fromEntries(sortedClasses),
     layout: {
       catalog: "indexes (remotes, modules, assets, …)",
+      "catalog/remotes": "remote index copy",
+      "catalog/assets": "rbxassetid catalog",
+      "catalog/gameplay": "tools, prompts copies",
       tree: "hierarchy + services + gui",
+      "tree/services": "per-service subtree listings",
       index: "flat instance TSV",
-      instances: "all.jsonl + by_class/",
-      scripts: "sources + _index.tsv",
+      instances: "all.jsonl + by_class/ + by_service/",
+      scripts: "flat root (compat) + flat/ + by_path/",
       attributes: "decoded attribute jsonl",
     },
     dumper: "scripts/dump-rbxlx.mjs",
@@ -867,11 +951,16 @@ function main() {
     "| `manifest.json` | metadata + class stats |",
     "| `GAME_REFERENCE.txt` | quick ESP / RS cheat sheet |",
     "| `catalog/` | remotes, modules, assets, sounds, … |",
+    "| `catalog/remotes/`, `catalog/assets/`, `catalog/gameplay/` | grouped indexes |",
     "| `tree/` | hierarchy, services, gui |",
+    "| `tree/services/` | per-service subtree (`Workspace.txt`, …) |",
     "| `index/instances.tsv` | flat referent/path/class |",
     "| `instances/all.jsonl` | every instance + props + attrs |",
     "| `instances/by_class/` | per-class jsonl |",
-    "| `scripts/` | Script/LocalScript/ModuleScript source |",
+    "| `instances/by_service/` | per top-level service jsonl |",
+    "| `scripts/by_path/` | sources mirrored as instance folders |",
+    "| `scripts/flat/` | flat filenames (same as root `scripts/*.lua`) |",
+    "| `scripts/` | flat compat + `_index.tsv` |",
     "| `attributes/all.jsonl` | decoded AttributesSerialize |",
     "",
     "Root-level `*.txt` / `instances.jsonl` / `properties/` are **compat aliases** for older April tools.",

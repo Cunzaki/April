@@ -5,8 +5,6 @@ local menu_util = April.require("core.menu_util")
 local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
 local esp_util = April.require("core.esp_util")
-local image_cache = April.require("core.image_cache")
-local asset_urls = April.require("game.asset_urls")
 local theme = April.require("core.ui_theme")
 
 local M = {}
@@ -14,7 +12,6 @@ local P = "april_mod_checker_enabled"
 local X_ID = "april_mod_checker_x"
 local Y_ID = "april_mod_checker_y"
 local W_ID = "april_mod_checker_w"
-local MOD_ICON_KEY = "mod_warning"
 local HEAD_OFFSET = 3.5
 local TITLE_H = 24
 
@@ -111,7 +108,6 @@ function M.register_menu()
 end
 
 function M.init()
-    image_cache.ensure(MOD_ICON_KEY, asset_urls.mod_warning_png())
     last_scan = -1
 end
 
@@ -151,7 +147,7 @@ function M.check_player(p)
     if seen[uid] then return end
     seen[uid] = true
     local label = player_label(p)
-    notify.warning(string.format("MOD: %s (%s) - %s", label, p.name or "?", role), 6000)
+    notify.warning(string.format("%s: %s (%s)", mod_ids.short_label(role), label, p.name or "?"), 6000)
 end
 
 function M.reconcile_active()
@@ -248,7 +244,7 @@ function M.draw_mod_markers()
         local sx, sy, vis = esp_util.w2s(wx, wy, wz)
         if not vis then goto continue end
 
-        theme.draw_mod_marker(sx, sy, image_cache, MOD_ICON_KEY)
+        theme.draw_staff_badge(sx, sy, mod_ids.role_for(uid))
 
         ::continue::
     end
@@ -289,9 +285,10 @@ local function build_staff_rows()
 
         rows[#rows + 1] = {
             name = entry.label or entry.username or "Unknown",
-            role = role,
+            role = mod_ids.short_label(role),
             meta = meta,
             first_seen = entry.first_seen or now,
+            accent = theme.role_accent(role),
         }
 
         ::continue::

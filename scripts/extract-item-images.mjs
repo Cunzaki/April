@@ -19,61 +19,111 @@ const MANIFEST = path.join(ROOT, "assets/manifest.json");
 
 const TUNG_ID = "139818999438291";
 
+const CATALOG = path.join(ROOT, "src/game/item_catalog.lua");
+
 function rbxId(str) {
   if (!str) return null;
-  const m = String(str).match(/(\d{5,})/);
+  const m = String(str).match(/(\d{5,})$/);
   return m ? m[1] : null;
 }
 
-function parseItems(text) {
+function parseCatalogNames(text) {
+  const byId = {};
+  const re = /\[(\d+)\]\s*=\s*\{\s*name\s*=\s*"((?:[^"\\]|\\.)*)"/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    byId[Number(m[1])] = m[2].replace(/\\"/g, '"');
+  }
+  return byId;
+}
+
+function extractBlock(text, openIdx) {
+  let depth = 0;
+  for (let i = openIdx; i < text.length; i++) {
+    const c = text[i];
+    if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) return text.slice(openIdx, i + 1);
+    }
+  }
+  return null;
+}
+
+function parseImageBlock(block) {
+  const single = block.match(/Image\s*=\s*"(rbxassetid:\/\/[^"]+)"/);
+  if (single) {
+    const id = rbxId(single[1]);
+    return id ? { defaultId: id, variants: null } : null;
+  }
+
+  const imageBlock = block.match(/Image\s*=\s*\{/);
+  if (!imageBlock) return null;
+
+  const from = block.indexOf("Image = {") + "Image = {".length;
+  let depth = 1;
+  let i = from;
+  while (i < block.length && depth > 0) {
+    const c = block[i];
+    if (c === "{") depth++;
+    else if (c === "}") depth--;
+    i++;
+  }
+  const inner = block.slice(from, i - 1);
+  const variants = {};
+  const pairRe = /(\w+|"(?:[^"\\]|\\.)*")\s*=\s*"(rbxassetid:\/\/[^"]+)"/g;
+  let p;
+  while ((p = pairRe.exec(inner)) !== null) {
+    let key = p[1];
+    if (key.startsWith('"')) key = key.slice(1, -1);
+    const id = rbxId(p[2]);
+    if (id) variants[key] = id;
+  }
+  const def = variants.Default || variants.default;
+  if (!def && Object.keys(variants).length === 0) return null;
+  return { defaultId: def || Object.values(variants)[0], variants };
+}
+
+function parseItems(text, namesById) {
   const byName = {};
   const assetIds = new Set();
-
-  const nameRe = /Name\s*=\s*"([^"]+)"/g;
+  const blockRe = /tbl_1\[(\d+)\]\s*=\s*\{/g;
   let m;
-  while ((m = nameRe.exec(text)) !== null) {
-    const name = m[1];
-    const start = m.index;
-    const next = text.indexOf('Name = "', start + 8);
-    const chunk = next > 0 ? text.slice(start, next) : text.slice(start, start + 8000);
 
-    const imageStr = chunk.match(/Image\s*=\s*"(rbxassetid:[^"]+)"/);
-    if (imageStr) {
-      const id = rbxId(imageStr[1]);
-      if (id) {
-        byName[name] = { defaultId: id };
-        assetIds.add(id);
-        continue;
-      }
+  while ((m = blockRe.exec(text)) !== null) {
+    const id = Number(m[1]);
+    const name = namesById[id];
+    if (!name) continue;
+
+    const openIdx = text.indexOf("{", m.index + m[0].length - 1);
+    const block = extractBlock(text, openIdx);
+    if (!block) continue;
+
+    const image = parseImageBlock(block);
+    if (!image) continue;
+
+    byName[name] = image;
+    assetIds.add(image.defaultId);
+    if (image.variants) {
+      for (const vid of Object.values(image.variants)) assetIds.add(vid);
     }
+  }
 
-    const imageBlock = chunk.match(/Image\s*=\s*\{/);
-    if (imageBlock) {
-      const from = chunk.indexOf("Image = {") + "Image = {".length;
-      let depth = 1;
-      let i = from;
-      while (i < chunk.length && depth > 0) {
-        const c = chunk[i];
-        if (c === "{") depth++;
-        else if (c === "}") depth--;
-        i++;
-      }
-      const inner = chunk.slice(from, i - 1);
-      const variants = {};
-      const pairRe = /(\w+|"(?:[^"\\]|\\.)*")\s*=\s*"(rbxassetid:[^"]+)"/g;
-      let p;
-      while ((p = pairRe.exec(inner)) !== null) {
-        let key = p[1];
-        if (key.startsWith('"')) key = key.slice(1, -1);
-        const id = rbxId(p[2]);
-        if (id) {
-          variants[key] = id;
-          assetIds.add(id);
+  // Legacy Name = "..." chunks (older dumps)
+  if (Object.keys(byName).length === 0) {
+    const nameRe = /Name\s*=\s*"([^"]+)"/g;
+    while ((m = nameRe.exec(text)) !== null) {
+      const name = m[1];
+      const start = m.index;
+      const next = text.indexOf('Name = "', start + 8);
+      const chunk = next > 0 ? text.slice(start, next) : text.slice(start, start + 8000);
+      const image = parseImageBlock(chunk);
+      if (image) {
+        byName[name] = image;
+        assetIds.add(image.defaultId);
+        if (image.variants) {
+          for (const vid of Object.values(image.variants)) assetIds.add(vid);
         }
-      }
-      const def = variants.Default || variants.default;
-      if (def || Object.keys(variants).length > 0) {
-        byName[name] = { defaultId: def || Object.values(variants)[0], variants };
       }
     }
   }
@@ -172,8 +222,14 @@ if (!DUMP) {
   process.exit(1);
 }
 
+if (!fs.existsSync(CATALOG)) {
+  console.error("Missing item_catalog.lua:", CATALOG);
+  process.exit(1);
+}
+
 const text = fs.readFileSync(DUMP, "utf8");
-const { byName, assetIds } = parseItems(text);
+const catalogNames = parseCatalogNames(fs.readFileSync(CATALOG, "utf8"));
+const { byName, assetIds } = parseItems(text, catalogNames);
 assetIds.add(TUNG_ID);
 
 fs.mkdirSync(path.dirname(OUT_LUA), { recursive: true });

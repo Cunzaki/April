@@ -32,15 +32,46 @@ local function parse_variant_name(name)
     return name, nil
 end
 
+local function rbx_asset_digits(value)
+    if value == nil then return nil end
+    return tostring(value):match("(%d+)$")
+end
+
+local function image_id_from_table(img, variant)
+    if type(img) == "string" then
+        return rbx_asset_digits(img)
+    end
+    if type(img) ~= "table" then return nil end
+    local pick = (variant and img[variant]) or img.Default or img.default
+    if pick then return rbx_asset_digits(pick) end
+    return nil
+end
+
 local function index_data(data)
     if data[1] and type(data[1]) == "table" then
-        for _, entry in ipairs(data) do
-            if entry.Name then by_name[entry.Name] = entry end
-        end
-    else
-        for name, entry in pairs(data) do
+        for id, entry in ipairs(data) do
             if type(entry) == "table" then
-                entry.Name = entry.Name or name
+                local cat = item_catalog.get(id)
+                if cat and cat.name then
+                    entry.Name = cat.name
+                    by_name[cat.name] = entry
+                end
+                by_name[id] = entry
+            end
+        end
+        return
+    end
+    for key, entry in pairs(data) do
+        if type(entry) == "table" then
+            if type(key) == "number" then
+                local cat = item_catalog.get(key)
+                if cat and cat.name then
+                    entry.Name = cat.name
+                    by_name[cat.name] = entry
+                end
+                by_name[key] = entry
+            else
+                entry.Name = entry.Name or key
                 by_name[entry.Name] = entry
             end
         end
@@ -113,17 +144,8 @@ function M.is_held_display(name)
     return HELD_TYPES[t] == true
 end
 
-local function rbx_id_from_image(img)
-    if type(img) == "string" then
-        return img:match("(%d+)")
-    end
-    if type(img) == "table" then
-        local pick = img.Default or img.default
-        if type(pick) == "string" then
-            return pick:match("(%d+)")
-        end
-    end
-    return nil
+local function rbx_id_from_image(img, variant)
+    return image_id_from_table(img, variant)
 end
 
 function M.get_by_id(id)
@@ -157,25 +179,33 @@ function M.get_image_asset_id(name, variant)
     local id = item_images.get_asset_id(name, variant)
     if id then return id end
 
+    local cat = item_catalog.get_by_name(name)
+    if cat and cat.id then
+        local item = M.get_by_id(cat.id)
+        if item and item.Image then
+            id = image_id_from_table(item.Image, variant)
+            if id then return id end
+        end
+    end
+
     if variant and variant ~= "" and variant ~= "Default" then
         id = item_images.get_asset_id(name, "Default")
         if id then return id end
+        if cat and cat.id then
+            local item = M.get_by_id(cat.id)
+            if item and item.Image then
+                id = image_id_from_table(item.Image, "Default")
+                if id then return id end
+            end
+        end
     end
 
     if not loaded then M.load() end
     local item = by_name[name]
-    if not item or not item.Image then return nil end
+    if item and item.Image then
+        return image_id_from_table(item.Image, variant)
+    end
 
-    local img = item.Image
-    if type(img) == "string" then
-        return img:match("(%d+)")
-    end
-    if type(img) == "table" then
-        if variant and img[variant] then
-            return tostring(img[variant]):match("(%d+)")
-        end
-        return rbx_id_from_image(img)
-    end
     return nil
 end
 
@@ -224,7 +254,7 @@ end
 
 function M.get_image_url(name, variant)
     local id = M.get_image_asset_id(name, variant)
-    if id then return asset_urls.item_png(id) end
+    if id then return asset_urls.rbx_asset(id) end
     return nil
 end
 

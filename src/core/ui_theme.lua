@@ -1,5 +1,6 @@
 local draw_util = April.require("core.draw_util")
 local text_util = April.require("core.text_util")
+local mod_ids = April.require("game.mod_ids")
 
 local M = {}
 
@@ -119,10 +120,65 @@ function M.role_accent(role)
     return M.CYAN
 end
 
-function M.draw_mod_marker(sx, sy, image_cache, icon_key)
+function M.draw_role_glyph(x, y, size, kind, accent)
+    if not draw then return end
+    local cx = x + size * 0.5
+    local cy = y + size * 0.5
+    local r, g, b, a = accent[1] or 1, accent[2] or 1, accent[3] or 1, accent[4] or 1
+
+    if kind == "mod" then
+        local h = size * 0.82
+        local half = h * 0.46
+        if draw.poly_filled then
+            draw.poly_filled({
+                { cx, y + 1 },
+                { cx - half, y + h },
+                { cx + half, y + h },
+            }, r, g, b, a)
+        end
+        if draw.text then
+            draw.text(cx - 2, y + size * 0.34, "!", { 1, 1, 1, 0.95 }, math.max(8, math.floor(size * 0.62)))
+        end
+    elseif kind == "tester" then
+        if draw.rect_filled then
+            draw.rect_filled(x + 1, y + 2, size - 2, size - 3, { r, g, b, a * 0.9 }, 3)
+        end
+        if draw.text then
+            local fs = math.max(8, math.floor(size * 0.58))
+            local tw = select(1, M.text_w("T", fs))
+            draw.text(cx - tw * 0.5, y + size * 0.22, "T", { 1, 1, 1, 0.95 }, fs)
+        end
+    elseif kind == "dev" then
+        if draw.rect_filled then
+            draw.rect_filled(x + 1, y + 2, size - 2, size - 3, { r, g, b, a * 0.35 }, 3)
+        end
+        if draw.text then
+            local fs = math.max(7, math.floor(size * 0.42))
+            draw.text(x + 2, y + size * 0.18, "</>", { r, g, b, a }, fs)
+        end
+    elseif kind == "og" or kind == "contrib" then
+        if draw.circle_filled then
+            draw.circle_filled(cx, cy, size * 0.34, { r, g, b, a }, 12)
+        end
+        if draw.text then
+            local ch = kind == "og" and "O" or "C"
+            local fs = math.max(8, math.floor(size * 0.5))
+            local tw = select(1, M.text_w(ch, fs))
+            draw.text(cx - tw * 0.5, y + size * 0.24, ch, { 1, 1, 1, 0.95 }, fs)
+        end
+    else
+        if draw.circle_filled then
+            draw.circle_filled(cx, cy, size * 0.3, { r, g, b, a }, 10)
+        end
+    end
+end
+
+function M.draw_staff_badge(sx, sy, role)
     if not draw or not draw.text then return end
 
-    local label = "MOD"
+    local label = mod_ids.short_label(role)
+    local accent = M.role_accent(role)
+    local glyph = mod_ids.glyph_kind(role)
     local fs = 11
     local icon_size = 14
     local gap = 4
@@ -136,23 +192,17 @@ function M.draw_mod_marker(sx, sy, image_cache, icon_key)
     M.draw_panel(x, y, w, h, {
         bg = M.alpha(M.BG, 0.86),
         border = M.alpha(M.BORDER, 0.35),
-        accent = M.RED,
+        accent = accent,
         accent_w = 2,
         rounding = 3,
     })
 
-    if image_cache and icon_key then
-        image_cache.begin_load(icon_key)
-        image_cache.draw_fit(icon_key, x + pad_x, y + pad_y, icon_size, icon_size)
-    end
+    M.draw_role_glyph(x + pad_x, y + pad_y, icon_size, glyph, accent)
+    draw.text(x + pad_x + icon_size + gap, y + pad_y + 1, label, accent, fs)
+end
 
-    draw.text(
-        x + pad_x + icon_size + gap,
-        y + pad_y + 1,
-        label,
-        M.RED,
-        fs
-    )
+function M.draw_mod_marker(sx, sy, _image_cache, _icon_key, role)
+    M.draw_staff_badge(sx, sy, role or "Game Moderator")
 end
 
 function M.draw_staff_list(x, y, width, rows, max_rows)
