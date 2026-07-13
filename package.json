@@ -10,6 +10,7 @@
     "sync-assets": "node scripts/sync-assets.mjs",
     "sync-assets:slow": "node scripts/sync-assets.mjs --slow",
     "assets": "node scripts/sync-assets.mjs",
-    "dump": "node scripts/dump-rbxlx.mjs"
+    "dump": "node scripts/dump-rbxlx.mjs",
+    "merge-dump": "node scripts/merge-dump.mjs"
   }
 }

@@ -1,0 +1,3 @@
+{"referent":"62757","class":"Team","name":"Attackers","path":"Teams.Attackers","parent_referent":"62756","properties":{"AutoAssignable":false,"AttributesSerialize":"","DefinesCapabilities":false,"Name":"Attackers"},"attributes":null,"tags":[]}
+{"referent":"62758","class":"Team","name":"Defenders","path":"Teams.Defenders","parent_referent":"62756","properties":{"AutoAssignable":false,"AttributesSerialize":"","DefinesCapabilities":false,"Name":"Defenders"},"attributes":null,"tags":[]}
+{"referent":"62756","class":"Teams","name":"Teams","path":"Teams","parent_referent":null,"properties":{"AttributesSerialize":"","Capabilities":"0","DefinesCapabilities":false,"Name":"Teams","SourceAssetId":-1},"attributes":null,"tags":[]}

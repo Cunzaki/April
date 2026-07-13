@@ -89,7 +89,7 @@ async function resolveThumbnails(ids) {
     const rows = json.data || [];
     for (const row of rows) {
       const id = row?.targetId != null ? String(row.targetId) : null;
-      if (id && row?.imageUrl && row.state === "Completed") {
+      if (id && row?.imageUrl && (row.state === "Completed" || row.state === "Pending")) {
         out.set(id, row.imageUrl);
       }
     }

@@ -1,0 +1,25 @@
+Sound Hit	SoundService.Hit
+Sound HitHead	SoundService.HitHead
+Sound Notification1	SoundService.Notification1
+Sound WireCutters	SoundService.WireCutters
+Sound ChristmasBells	SoundService.ChristmasBells
+SoundGroup ExplosionReverb	SoundService.ExplosionReverb
+  ChorusSoundEffect Chorus	SoundService.ExplosionReverb.Chorus
+  CompressorSoundEffect Compressor	SoundService.ExplosionReverb.Compressor
+  EqualizerSoundEffect Equalizer	SoundService.ExplosionReverb.Equalizer
+SoundGroup General	SoundService.General
+SoundGroup GunshotReverb	SoundService.GunshotReverb
+  ChorusSoundEffect Chorus	SoundService.GunshotReverb.Chorus
+  CompressorSoundEffect Compressor	SoundService.GunshotReverb.Compressor
+  EqualizerSoundEffect Equalizer	SoundService.GunshotReverb.Equalizer
+SoundGroup Gunshots	SoundService.Gunshots
+SoundGroup Jukebox	SoundService.Jukebox
+SoundGroup OLDExplosionReverb	SoundService.OLDExplosionReverb
+  Sound Rocket	SoundService.OLDExplosionReverb.Rocket
+  Sound Rocket	SoundService.OLDExplosionReverb.Rocket
+  ChorusSoundEffect Chorus	SoundService.OLDExplosionReverb.Chorus
+  CompressorSoundEffect Compressor	SoundService.OLDExplosionReverb.Compressor
+SoundGroup OLDGunshotReverb	SoundService.OLDGunshotReverb
+  ChorusSoundEffect Chorus	SoundService.OLDGunshotReverb.Chorus
+  CompressorSoundEffect Compressor	SoundService.OLDGunshotReverb.Compressor
+CompressorSoundEffect SilencedEffect	SoundService.SilencedEffect

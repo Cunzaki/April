@@ -1,0 +1,7 @@
+LocalScript Preload	ReplicatedFirst.Preload
+  ScreenGui LoadingScreen	ReplicatedFirst.Preload.LoadingScreen
+    Frame BG	ReplicatedFirst.Preload.LoadingScreen.BG
+    TextLabel Title	ReplicatedFirst.Preload.LoadingScreen.Title
+    TextLabel Load	ReplicatedFirst.Preload.LoadingScreen.Load
+    TextButton Skip	ReplicatedFirst.Preload.LoadingScreen.Skip
+Script Script	ReplicatedFirst.Script
