@@ -3,9 +3,7 @@ local draw_util = April.require("core.draw_util")
 local esp_util = April.require("core.esp_util")
 local menu_util = April.require("core.menu_util")
 local image_cache = April.require("core.image_cache")
-local asset_urls = April.require("game.asset_urls")
 local items = April.require("game.items")
-local attachment_images = April.require("game.attachment_images")
 local player_gear = April.require("game.player_gear")
 local player_state = April.require("game.player_state")
 local combat_target = April.require("game.combat_target")
@@ -45,15 +43,6 @@ end
 
 local function resolve_image_key(piece)
     if not piece then return nil end
-
-    if type(piece) == "table" and piece.name then
-        local att_id = attachment_images.get_asset_id(piece.name)
-        if att_id then
-            local key = img_key("att_", att_id)
-            image_cache.ensure(key, asset_urls.rbx_asset(att_id))
-            return key
-        end
-    end
 
     if type(piece) == "table" and piece.asset_id then
         local key = img_key("item_", piece.asset_id)
@@ -235,7 +224,15 @@ end
 
 local function held_piece(held)
     if not held then return nil end
-    if type(held) == "table" then return held end
+    if type(held) == "table" then
+        if held.name and player_gear.is_empty_held_name and player_gear.is_empty_held_name(held.name) then
+            return nil
+        end
+        return held
+    end
+    if player_gear.is_empty_held_name and player_gear.is_empty_held_name(held) then
+        return nil
+    end
     return { name = held }
 end
 

@@ -22,6 +22,12 @@ local ATTACHMENT_SLOT_HINTS = {
     ["p1"] = true, ["p2"] = true, ["p3"] = true, ["p4"] = true,
     ["slot1"] = true, ["slot2"] = true, ["slot3"] = true,
     ["sight"] = true, ["muzzle"] = true, ["underbarrel"] = true,
+    ["barrel"] = true, ["magazine"] = true,
+}
+
+local EMPTY_HELD_NAMES = {
+    ["hand"] = true, ["hands"] = true, ["fist"] = true, ["fists"] = true,
+    ["unarmed"] = true, ["nothing"] = true, ["none"] = true, ["empty"] = true,
 }
 
 local function parse_variant_name(name)
@@ -48,6 +54,11 @@ local function is_tool(inst)
     if not inst then return false end
     local cn = inst.ClassName or inst.class_name
     return cn == "Tool"
+end
+
+local function is_empty_held_name(name)
+    if not name or name == "" then return true end
+    return EMPTY_HELD_NAMES[name:lower()] == true
 end
 
 local function is_attachment_slot_name(name)
@@ -79,6 +90,7 @@ local function is_attachment_name(name)
 end
 
 local function is_valid_held_label(name)
+    if is_empty_held_name(name) then return false end
     if not name or name == "" then return false end
     if is_attachment_slot_name(name) then return false end
     if is_armor_child_name(name) then return false end
@@ -101,6 +113,10 @@ local function add_armor_piece(out, seen, piece)
 end
 
 local function add_held_piece(out, label)
+    if is_empty_held_name(label) then
+        out.held = nil
+        return false
+    end
     if not is_valid_held_label(label) then return false end
 
     local piece = items.resolve_item_label(label)
@@ -370,6 +386,10 @@ local function scan_armor_tree(inst, out, seen, depth)
     for _, child in ipairs(children) do
         scan_armor_tree(child, out, seen, depth + 1)
     end
+end
+
+function M.is_empty_held_name(name)
+    return is_empty_held_name(name)
 end
 
 function M.scan_player(player)
