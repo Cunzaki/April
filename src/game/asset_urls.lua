@@ -6,6 +6,18 @@ local function digits(id)
     return id and tostring(id):match("(%d+)")
 end
 
+function M.rbx_asset(asset_id)
+    asset_id = digits(asset_id)
+    if not asset_id then return nil end
+    return "rbxassetid://" .. asset_id
+end
+
+function M.roblox_asset_http(asset_id)
+    asset_id = digits(asset_id)
+    if not asset_id then return nil end
+    return "http://www.roblox.com/asset/?id=" .. asset_id
+end
+
 function M.roblox_thumb(asset_id)
     asset_id = digits(asset_id)
     if not asset_id then return nil end

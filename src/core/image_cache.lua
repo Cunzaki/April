@@ -5,9 +5,22 @@ local M = {}
 
 local keys = {}
 
+local function digits(id)
+    if not id then return nil end
+    return tostring(id):match("(%d+)$") or tostring(id):match("(%d+)")
+end
+
 local function url_for(asset_id_or_url)
-    if type(asset_id_or_url) == "string" and asset_id_or_url:find("https://", 1, true) then
-        return asset_id_or_url
+    if type(asset_id_or_url) == "string" then
+        if asset_id_or_url:find("rbxassetid://", 1, true)
+            or asset_id_or_url:find("https://", 1, true)
+            or asset_id_or_url:find("http://", 1, true) then
+            return asset_id_or_url
+        end
+    end
+    local id = digits(asset_id_or_url)
+    if id then
+        return asset_urls.rbx_asset(id)
     end
     return asset_urls.item_png(asset_id_or_url)
 end
@@ -16,11 +29,9 @@ function M.ensure(key, asset_id_or_url)
     if keys[key] then return keys[key] end
     local url = url_for(asset_id_or_url)
     if not url then return nil end
-    local asset_id = type(asset_id_or_url) == "number" and asset_id_or_url
-        or (type(asset_id_or_url) == "string" and asset_id_or_url:match("^(%d+)$"))
     keys[key] = {
         url = url,
-        asset_id = asset_id and tostring(asset_id) or nil,
+        asset_id = digits(asset_id_or_url),
         handle = nil,
         failed = false,
         fallback_idx = 0,
@@ -32,13 +43,17 @@ function M.register(key, asset_id_or_url)
     return M.ensure(key, asset_id_or_url)
 end
 
-local FALLBACKS = { "roblox_thumb", "asset_delivery" }
+-- API.md: HTTPS, rbxassetid://, http://www.roblox.com/asset/?id=
+local FALLBACKS = { "item_png", "roblox_asset_http" }
 
 local function fallback_url(kind, asset_id)
-    if kind == "roblox_thumb" then
-        return asset_urls.roblox_thumb(asset_id)
-    elseif kind == "asset_delivery" then
-        return asset_urls.asset_delivery(asset_id)
+    if not asset_id then return nil end
+    if kind == "item_png" then
+        return asset_urls.item_png(asset_id)
+    elseif kind == "rbx_asset" then
+        return asset_urls.rbx_asset(asset_id)
+    elseif kind == "roblox_asset_http" then
+        return asset_urls.roblox_asset_http(asset_id)
     end
     return nil
 end
