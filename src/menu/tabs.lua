@@ -28,7 +28,6 @@ M.FEATURE_ORDER = {
     "features.combat.perfect_farm",
     "features.utility.mod_checker",
     "features.utility.anti_afk",
-    "features.utility.fullbright",
     "features.utility.keybind_viewer",
     "features.utility.config",
 }

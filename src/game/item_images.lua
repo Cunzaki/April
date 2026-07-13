@@ -16,7 +16,7 @@ M.by_name = {
     ["Boss Helmet"] = { default = "16652579167", variants = { ["Default"] = "16652579167", ["Cryo"] = "102872157681930", ["Boris"] = "18312187080", ["Brutus"] = "134265072222654", ["Boris Sky"] = "140423012958795", ["Boris Carbon"] = "106169002653059", ["Boris Abibas"] = "18450404634", ["Bruno Tundra"] = "106377950808399", } },
     ["Boulder"] = { default = "15304806846", variants = { ["Default"] = "15304806846", ["Bubblegum"] = "15304805303", ["Frosty"] = "15304805239", ["Tester"] = "15304805180", ["Voxel"] = "15574223076", ["Wrapped"] = "15712360641", ["Pixskull"] = "17766619061", ["Stellark"] = "97313343547804", ["Cursed"] = "92913832321996", ["Sushi"] = "78426403974796", ["Chocolate"] = "139716602333201", ["Moai"] = "115978938918724", ["Ducky"] = "124674000707337", ["Pumpkin"] = "126349162347833", ["Mosaic"] = "74510585736689", ["ERROR 404"] = "16031055626", ["Jack-O-Lantern"] = "86358241058177", ["Fish Tank"] = "15792001129", } },
     ["Bruno's ACOG Sight"] = { default = "15377519371" },
-    ["Bruno\\\\'s M4A1"] = { default = "15574295393", variants = { ["Default"] = "15574295393", } },
+    ["Bruno's M4A1"] = { default = "15574295393", variants = { ["Default"] = "15574295393", } },
     ["Bunny Ears"] = { default = "16916795577", variants = { ["Default"] = "16916795577", } },
     ["Campfire"] = { default = "15128008159", variants = { ["Default"] = "15128008159", ["Skulls"] = "133107732568884", } },
     ["Candy Cane"] = { default = "15633196493", variants = { ["Default"] = "15633196493", } },

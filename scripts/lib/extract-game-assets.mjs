@@ -24,14 +24,37 @@ export function rbxId(str) {
   return m ? m[1] : null;
 }
 
+/** Catalog/item names sometimes ship as Bruno\\'s in lua — normalize for lookups. */
+export function normalizeItemName(s) {
+  if (!s) return s;
+  return s.replace(/\\'/g, "'").replace(/\\\\/g, "\\");
+}
+
 export function parseCatalogNames(text) {
   const byId = {};
   const re = /\[(\d+)\]\s*=\s*\{\s*name\s*=\s*"((?:[^"\\]|\\.)*)"/g;
   let m;
   while ((m = re.exec(text)) !== null) {
-    byId[Number(m[1])] = m[2].replace(/\\"/g, '"');
+    byId[Number(m[1])] = normalizeItemName(m[2].replace(/\\"/g, '"'));
   }
   return byId;
+}
+
+export function parseCatalogTypes(text) {
+  const byId = {};
+  const re = /\[(\d+)\]\s*=\s*\{[^}]*name\s*=\s*"(?:[^"\\]|\\.)*"[^}]*type\s*=\s*"([^"]+)"/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    byId[Number(m[1])] = m[2];
+  }
+  return byId;
+}
+
+export function collectRbxAssetIds(text) {
+  const ids = new Set();
+  if (!text) return ids;
+  for (const m of text.matchAll(/rbxassetid:\/\/(\d+)/g)) ids.add(m[1]);
+  return ids;
 }
 
 function extractBlock(text, openIdx) {
@@ -103,13 +126,14 @@ function addImageEntry(byName, assetIds, name, image) {
 
 export function parseItemsModule(text, namesById) {
   const byName = {};
+  const byItemId = {};
   const assetIds = new Set();
   const blockRe = /tbl_1\[(\d+)\]\s*=\s*\{/g;
   let m;
 
   while ((m = blockRe.exec(text)) !== null) {
     const itemId = Number(m[1]);
-    const name = namesById[itemId];
+    const name = normalizeItemName(namesById[itemId]);
 
     const openIdx = text.indexOf("{", m.index + m[0].length - 1);
     const block = extractBlock(text, openIdx);
@@ -118,6 +142,7 @@ export function parseItemsModule(text, namesById) {
     const image = parseImageBlock(block);
     if (!image) continue;
 
+    byItemId[itemId] = mergeImageEntry(byItemId[itemId], image);
     if (name) {
       addImageEntry(byName, assetIds, name, image);
     } else {
@@ -128,7 +153,14 @@ export function parseItemsModule(text, namesById) {
     }
   }
 
-  return { byName, assetIds, unnamedImages: 0 };
+  // ponytail: catalog id join — every named item with an Image block in Items
+  for (const [idStr, rawName] of Object.entries(namesById)) {
+    const name = normalizeItemName(rawName);
+    const image = byItemId[Number(idStr)];
+    if (name && image) addImageEntry(byName, assetIds, name, image);
+  }
+
+  return { byName, byItemId, assetIds };
 }
 
 export function parseSkinsModule(text, byName, assetIds) {
@@ -136,8 +168,8 @@ export function parseSkinsModule(text, byName, assetIds) {
   const re = /\{"((?:[^"\\]|\\.)*)",\s*"((?:[^"\\]|\\.)*)",\s*"(rbxassetid:\/\/[^"]+)"/g;
   let m;
   while ((m = re.exec(text)) !== null) {
-    const item = m[1].replace(/\\"/g, '"');
-    const variant = m[2].replace(/\\"/g, '"');
+    const item = normalizeItemName(m[1].replace(/\\"/g, '"'));
+    const variant = normalizeItemName(m[2].replace(/\\"/g, '"'));
     const id = rbxId(m[3]);
     if (!id) continue;
 
@@ -275,18 +307,43 @@ export function extractAllAssets(root, catalogPath) {
   const meshTsv = path.join(root, "dump/catalog/mesh_assets.tsv");
   const catalogText = fs.readFileSync(catalogPath, "utf8");
   const namesById = parseCatalogNames(catalogText);
+  const typesById = parseCatalogTypes(catalogText);
 
   const itemsText = fs.readFileSync(itemsPath, "utf8");
+  const skinsText = skinsPath ? fs.readFileSync(skinsPath, "utf8") : "";
   const { byName, assetIds } = parseItemsModule(itemsText, namesById);
 
   let skinMerged = 0;
-  if (skinsPath) {
-    skinMerged = parseSkinsModule(fs.readFileSync(skinsPath, "utf8"), byName, assetIds);
+  if (skinsText) {
+    skinMerged = parseSkinsModule(skinsText, byName, assetIds);
   }
 
   const { added: attAdded, attMap } = mergeAttachmentTextures(byName, assetIds, meshTsv);
+
+  // Every catalog attachment name → mesh texture icon (12 in ReplicatedStorage.Attachments)
+  let attLinked = 0;
+  for (const [idStr, rawName] of Object.entries(namesById)) {
+    if (typesById[Number(idStr)] !== "Attachment") continue;
+    const name = normalizeItemName(rawName);
+    const tex = attMap.get(name);
+    if (!tex) continue;
+    if (!byName[name]) {
+      byName[name] = { defaultId: tex.id, variants: null };
+      assetIds.add(tex.id);
+      attLinked++;
+    }
+  }
+
+  // Union every item/skin icon rbxassetid from dump (639 items + 489 skins, deduped)
+  for (const id of collectRbxAssetIds(itemsText)) assetIds.add(id);
+  for (const id of collectRbxAssetIds(skinsText)) assetIds.add(id);
   assetIds.add(TUNG_ID);
 
+  const catalogTotal = Object.keys(namesById).length;
+  let catalogWithIcon = 0;
+  for (const rawName of Object.values(namesById)) {
+    if (byName[normalizeItemName(rawName)]) catalogWithIcon++;
+  }
   const assets = [...assetIds].sort((a, b) =>
     BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0,
   );
@@ -297,10 +354,14 @@ export function extractAllAssets(root, catalogPath) {
     attMap,
     sources: { itemsPath, skinsPath, meshTsv, catalogPath },
     stats: {
+      catalogTotal,
       itemNames: Object.keys(byName).length,
+      catalogWithIcon,
+      catalogWithoutIcon: catalogTotal - catalogWithIcon,
       assetCount: assets.length,
       skinMerged,
       attAdded,
+      attLinked,
     },
   };
 }

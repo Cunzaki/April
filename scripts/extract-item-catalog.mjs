@@ -9,11 +9,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const REPO = path.resolve(ROOT, "..");
-const DUMP = path.join(
-  REPO,
-  "dump/scripts/ReplicatedStorage.Modules.Items.ModuleScript.lua",
-);
+const DUMP = path.join(ROOT, "dump/scripts/ReplicatedStorage.Modules.Items.ModuleScript.lua");
 const OUT_IMAGES = path.join(ROOT, "src/game/item_images.lua");
 const OUT_CATALOG = path.join(ROOT, "src/game/item_catalog.lua");
 const MANIFEST = path.join(ROOT, "assets/manifest.json");

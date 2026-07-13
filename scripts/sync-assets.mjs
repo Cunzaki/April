@@ -109,6 +109,15 @@ async function downloadUrl(url, dest) {
   return buf.length;
 }
 
+async function tryAssetDelivery(id, dest) {
+  const url = `https://assetdelivery.roblox.com/v1/asset/?id=${id}`;
+  try {
+    return await downloadUrl(url, dest);
+  } catch {
+    return null;
+  }
+}
+
 function listOnDisk() {
   if (!fs.existsSync(ITEMS_DIR)) return new Set();
   return new Set(
@@ -209,6 +218,12 @@ async function downloadAssets(assetIds) {
         const url = map.get(String(id));
         if (!url) {
           console.warn(`  no thumbnail: ${id}`);
+          const bytes = await tryAssetDelivery(id, dest);
+          if (bytes) {
+            saved++;
+            failed = Math.max(0, failed - 1);
+            console.log(`  ${id}.png via assetdelivery (${bytes}b)`);
+          }
           continue;
         }
         const bytes = await downloadUrl(url, dest);
@@ -264,10 +279,13 @@ async function main() {
   const { stats } = data;
 
   console.log("Extract:");
-  console.log(`  item names:  ${stats.itemNames}`);
+  console.log(`  catalog:     ${stats.catalogTotal} items`);
+  console.log(`  with icons:  ${stats.catalogWithIcon} named in item_images`);
+  console.log(`  no icon:     ${stats.catalogWithoutIcon} (no Image in Items dump — resources/ammo/etc.)`);
+  console.log(`  by_name:     ${stats.itemNames} entries (incl. skin-only variants)`);
   console.log(`  asset IDs:   ${stats.assetCount}`);
   console.log(`  skin rows:   ${stats.skinMerged}`);
-  console.log(`  attachments: ${stats.attAdded} new from mesh dump`);
+  console.log(`  attachments: ${stats.attAdded} from mesh + ${stats.attLinked} catalog-linked`);
 
   const manifest = writeOutputs(data);
   console.log(`\nWrote ${dryRun ? "(dry-run) " : ""}item_images.lua, attachment_images.lua, manifest.json`);
