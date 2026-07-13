@@ -178,10 +178,6 @@ function M.get_image_asset_id(name, variant)
     name = M.normalize_name(name)
 
     local cat = item_catalog.get_by_name(name)
-    if cat and cat.type == "Attachment" then
-        local id = attachment_images.get_asset_id(name)
-        if id then return id end
-    end
 
     local id = item_images.get_asset_id(name, variant)
     if id then return id end

@@ -1,6 +1,6 @@
 /**
  * Extract item icon asset IDs from April dump → byName map + asset ID set.
- * Sources: Items module, SkinsModule, Attachments, Benches/VMs/Armors prefabs.
+ * Sources: Items module Image fields + SkinsModule only (inventory icons).
  */
 
 import fs from "fs";
@@ -188,94 +188,17 @@ export function parseSkinsModule(text, byName, assetIds) {
   return merged;
 }
 
-function updatePick(map, name, id, score, part) {
-  const cur = map.get(name);
-  if (!cur || score > cur.score) map.set(name, { id, score, part });
+
+function pickMeshIcon(meshCol) {
+  return rbxId(meshCol);
 }
 
-function benchPartScore(part, path) {
-  if (!path.includes(".Default.")) return -100;
-  const PREFERRED = { Detail: 10, Frame: 8, Top: 7, Cube: 6, Door1: 5, Door2: 5 };
-  const AVOID = new Set([
-    "Main", "Wire", "RayPart", "DamagePart", "CollisionSameOnly", "CollisionIgnoreSame", "FileMesh",
-  ]);
-  if (AVOID.has(part)) return -10;
-  return PREFERRED[part] ?? 1;
-}
-
-function vmPartScore(part, path) {
-  if (!path.includes(".Default.Weapon.") || path.includes(".Arms.")) return -100;
-  if (/^\d+$/.test(part)) return 8;
-  if (part === "Weapon") return 7;
-  return 2;
-}
-
-function armorPartScore(part) {
-  const PREFERRED = { Middle: 10, Armor: 9, UpperTorso: 7, LowerTorso: 6 };
-  if (part === "RightLowerArm" || part === "LeftLowerArm") return 0;
-  return PREFERRED[part] ?? 3;
-}
-
-function pickMeshIcon(meshCol, texCol) {
-  // ponytail: TextureID = colored surface decal; MeshId thumbnail = flat gray preview
-  return rbxId(texCol) || rbxId(meshCol);
-}
-
-/** Texture/decal icons from ReplicatedStorage.Benches / VMs / Armors prefabs. */
-export function parsePrefabMeshes(tsvPath) {
+/** MeshId thumbnails for attachments (ReplicatedStorage.Attachments prefabs). */
+export function parseAttachmentMeshes(tsvPath) {
   const pick = new Map();
   if (!fs.existsSync(tsvPath)) return pick;
 
-  for (const line of fs.readFileSync(tsvPath, "utf8").split("\n").slice(1)) {
-    const parts = line.split("\t");
-    const instPath = parts[1];
-    const id = pickMeshIcon(parts[2], parts[3]);
-    if (!instPath || !id) continue;
-
-    let m = instPath.match(/ReplicatedStorage\.Benches\.([^.]+)\.Default\.([^.]+)/);
-    if (m) {
-      updatePick(pick, m[1], id, benchPartScore(m[2], instPath), m[2]);
-      continue;
-    }
-
-    m = instPath.match(/ReplicatedStorage\.Benches\.([^.]+)\.([^.]+)/);
-    if (m && m[2] !== "Default") {
-      updatePick(pick, m[1], id, benchPartScore(m[2], instPath), m[2]);
-      continue;
-    }
-
-    m = instPath.match(/ReplicatedStorage\.VMs\.([^.]+)\.Default\.Weapon\.([^.]+)/);
-    if (m) {
-      updatePick(pick, m[1], id, vmPartScore(m[2], instPath), m[2]);
-      continue;
-    }
-
-    m = instPath.match(/ReplicatedStorage\.Armors\.([^.]+)\.Default\.(?:[^.]+\.)*([^.]+)$/);
-    if (m) {
-      updatePick(pick, m[1], id, armorPartScore(m[2]), m[2]);
-    }
-  }
-  return pick;
-}
-
-export function mergePrefabMeshes(byName, assetIds, namesById, prefabMap) {
-  let added = 0;
-  for (const rawName of Object.values(namesById)) {
-    const name = normalizeItemName(rawName);
-    if (byName[name]?.defaultId) continue;
-    const row = prefabMap.get(name);
-    if (!row) continue;
-    addImageEntry(byName, assetIds, name, { defaultId: row.id, variants: null });
-    added++;
-  }
-  return added;
-}
-
-export function parseAttachmentTextures(tsvPath) {
-  const pick = new Map();
-  if (!fs.existsSync(tsvPath)) return pick;
-
-  // ponytail: icon = MeshPart.TextureID (colored decal), not MeshId (gray mesh preview)
+  // ponytail: never MeshPart.TextureID — those are UV sheets, not inventory icons
   const PREFERRED = { Sight: 10, Silencer: 10, Muzzle: 9, Laser: 9, Base: 8, Handmade: 7, Middle: 6 };
   const AVOID = new Set([
     "Vignette", "Detail", "Lenses", "ADS", "M4Riser", "FlashPart", "Red", "Front",
@@ -290,29 +213,20 @@ export function parseAttachmentTextures(tsvPath) {
     if (!match) continue;
     const att = match[1];
     const part = match[2];
-    const id = pickMeshIcon(parts[2], parts[3]);
-    if (!id) continue;
+    const mesh = pickMeshIcon(parts[2]);
+    if (!mesh) continue;
 
     let score = PREFERRED[part] ?? (part === att ? 6 : AVOID.has(part) ? -10 : 1);
     const cur = pick.get(att);
-    if (!cur || score > cur.score) pick.set(att, { id, score, part });
+    if (!cur || score > cur.score) pick.set(att, { id: mesh, score, part });
   }
   return pick;
 }
 
-export function mergeAttachmentTextures(byName, assetIds, tsvPath) {
-  const attMap = parseAttachmentTextures(tsvPath);
-  let added = 0;
-  for (const [name, { id }] of attMap) {
-    assetIds.add(id);
-    if (!byName[name]) {
-      byName[name] = { defaultId: id, variants: null };
-      added++;
-    } else if (!byName[name].defaultId) {
-      byName[name].defaultId = id;
-    }
-  }
-  return { added, attMap };
+export function buildAttachmentMap(tsvPath, assetIds) {
+  const attMap = parseAttachmentMeshes(tsvPath);
+  for (const { id } of attMap.values()) assetIds.add(id);
+  return attMap;
 }
 
 export function luaEscape(s) {
@@ -322,7 +236,7 @@ export function luaEscape(s) {
 export function emitItemImagesLua(byName) {
   const lines = [
     "-- AUTO-GENERATED by scripts/sync-assets.mjs — do not edit by hand",
-    "-- Sources: Items module, SkinsModule, attachment/prefab TextureID decals",
+    "-- Sources: Items module Image + SkinsModule (inventory icons only)",
     "",
     "local M = {}",
     "",
@@ -364,7 +278,7 @@ export function emitItemImagesLua(byName) {
 export function emitAttachmentImagesLua(attMap) {
   const names = [...attMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   const lines = names.map(([name, v]) => `    ["${luaEscape(name)}"] = "${v.id}",`);
-  return `-- TextureID decals from dump: ReplicatedStorage.Attachments (mesh_assets.tsv)
+  return `-- MeshId thumbnails from dump: ReplicatedStorage.Attachments (mesh_assets.tsv)
 local M = {}
 
 M.by_name = {
@@ -397,7 +311,6 @@ export function extractAllAssets(root, catalogPath) {
   const meshTsv = path.join(root, "dump/catalog/mesh_assets.tsv");
   const catalogText = fs.readFileSync(catalogPath, "utf8");
   const namesById = parseCatalogNames(catalogText);
-  const typesById = parseCatalogTypes(catalogText);
 
   const itemsText = fs.readFileSync(itemsPath, "utf8");
   const skinsText = skinsPath ? fs.readFileSync(skinsPath, "utf8") : "";
@@ -408,31 +321,11 @@ export function extractAllAssets(root, catalogPath) {
     skinMerged = parseSkinsModule(skinsText, byName, assetIds);
   }
 
-  const { added: attAdded, attMap } = mergeAttachmentTextures(byName, assetIds, meshTsv);
-  const prefabMap = parsePrefabMeshes(meshTsv);
-  const prefabAdded = mergePrefabMeshes(byName, assetIds, namesById, prefabMap);
-
-  // Attachment catalog rows without Items.Image → attachment mesh thumbnail
-  let attLinked = 0;
-  for (const [idStr, rawName] of Object.entries(namesById)) {
-    if (typesById[Number(idStr)] !== "Attachment") continue;
-    const name = normalizeItemName(rawName);
-    const tex = attMap.get(name);
-    if (!tex) continue;
-    if (!byName[name]) {
-      byName[name] = { defaultId: tex.id, variants: null };
-      assetIds.add(tex.id);
-      attLinked++;
-    } else {
-      byName[name].defaultId = tex.id;
-      assetIds.add(tex.id);
-    }
-  }
+  const attMap = buildAttachmentMap(meshTsv, assetIds);
 
   // Union every item/skin icon rbxassetid from dump
   for (const id of collectRbxAssetIds(itemsText)) assetIds.add(id);
   for (const id of collectRbxAssetIds(skinsText)) assetIds.add(id);
-  for (const { id } of prefabMap.values()) assetIds.add(id);
   assetIds.add(TUNG_ID);
 
   const catalogTotal = Object.keys(namesById).length;
@@ -456,10 +349,7 @@ export function extractAllAssets(root, catalogPath) {
       catalogWithoutIcon: catalogTotal - catalogWithIcon,
       assetCount: assets.length,
       skinMerged,
-      attAdded,
-      attLinked,
-      prefabAdded,
-      prefabSources: prefabMap.size,
+      attCount: attMap.size,
     },
   };
 }

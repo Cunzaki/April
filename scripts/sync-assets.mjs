@@ -289,8 +289,7 @@ async function main() {
   console.log(`  by_name:     ${stats.itemNames} entries (incl. skin-only variants)`);
   console.log(`  asset IDs:   ${stats.assetCount}`);
   console.log(`  skin rows:   ${stats.skinMerged}`);
-  console.log(`  attachments: ${stats.attAdded} mesh + ${stats.attLinked} catalog-linked`);
-  console.log(`  prefabs:     ${stats.prefabAdded} from Benches/VMs/Armors (${stats.prefabSources} sources)`);
+  console.log(`  attachments: ${stats.attCount} mesh thumbnails`);
 
   const manifest = writeOutputs(data);
   console.log(`\nWrote ${dryRun ? "(dry-run) " : ""}item_images.lua, attachment_images.lua, manifest.json`);

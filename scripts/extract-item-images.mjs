@@ -41,5 +41,5 @@ fs.writeFileSync(
 console.log(
   `item_images.lua: ${data.stats.itemNames} items, ${data.stats.assetCount} asset IDs (+ tung)`,
 );
-console.log(`  skins merged: ${data.stats.skinMerged}, attachments: ${data.stats.attAdded}`);
+console.log(`  skins merged: ${data.stats.skinMerged}, attachments: ${data.stats.attCount}`);
 console.log("Run npm run sync-assets to prune stale PNGs and download missing.");
