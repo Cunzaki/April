@@ -18,6 +18,7 @@ const ORDER = [
   "core/cache.lua",
   "core/capabilities.lua",
   "core/debug.lua",
+  "game/mod_ids.lua",
   "core/settings.lua",
   "core/feature_bind.lua",
   "core/draw_util.lua",
@@ -62,7 +63,6 @@ const ORDER = [
   "game/inventory.lua",
   "game/player_gear.lua",
   "game/npcs.lua",
-  "game/mod_ids.lua",
   "game/turret_stats.lua",
   "game/esp_maps.lua",
   "game/esp_scan.lua",
@@ -104,7 +104,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.73.3",
+    version = "3.73.4",
     debug = false,
     _mods = {},
     bundled = true,
