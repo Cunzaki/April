@@ -1,4 +1,4 @@
--- Shared combat target: silent-aim lock first, then crosshair FOV fallback.
+-- Shared combat target: silent-aim lock first, then optional crosshair FOV fallback.
 
 local settings = April.require("core.settings")
 local player_state = April.require("game.player_state")
@@ -52,11 +52,10 @@ function M.get()
     local ok, aimbot = pcall(function()
         return April.require("features.combat.aimbot")
     end)
-    if ok and aimbot then
-        local t = (aimbot.get_scoped_target and aimbot.get_scoped_target())
-            or (aimbot.get_target and aimbot.get_target())
-        if t and player_state.is_combat_target(t) then
-            return t
+    if ok and aimbot and aimbot.get_target then
+        local locked = aimbot.get_target()
+        if locked and player_state.is_combat_target(locked) then
+            return locked
         end
     end
 

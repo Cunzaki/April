@@ -1,146 +1,61 @@
-local asset_urls = April.require("game.asset_urls")
 local debug = April.require("core.debug")
 
 local M = {}
-
 local keys = {}
 
-local function digits(id)
-    if not id then return nil end
-    return tostring(id):match("(%d+)$") or tostring(id):match("(%d+)")
-end
+function M.ensure(key, url)
+    if not key or not url or url == "" then return nil end
 
-local function url_for(asset_id_or_url)
-    if type(asset_id_or_url) == "string" then
-        if asset_id_or_url:find("rbxassetid://", 1, true)
-            or asset_id_or_url:find("https://", 1, true)
-            or asset_id_or_url:find("http://", 1, true) then
-            return asset_id_or_url
-        end
-    end
-    local id = digits(asset_id_or_url)
-    if id then
-        return asset_urls.item_png(id)
-    end
-    return nil
-end
-
-function M.ensure(key, asset_id_or_url)
-    if keys[key] then return keys[key] end
-    local url = url_for(asset_id_or_url)
-    if not url then return nil end
-    keys[key] = {
-        url = url,
-        asset_id = digits(asset_id_or_url),
-        handle = nil,
-        failed = false,
-        fallback_idx = 0,
-    }
-    return keys[key]
-end
-
-function M.register(key, asset_id_or_url)
-    return M.ensure(key, asset_id_or_url)
-end
-
--- GitHub HTTPS first (Vector draw.load_image); rbx fallbacks if CDN 404
-local FALLBACKS = { "rbx_asset", "roblox_asset_http" }
-
-local function fallback_url(kind, asset_id)
-    if not asset_id then return nil end
-    if kind == "item_png" then
-        return asset_urls.item_png(asset_id)
-    elseif kind == "roblox_thumb" then
-        return asset_urls.roblox_thumb(asset_id)
-    elseif kind == "rbx_asset" then
-        return asset_urls.rbx_asset(asset_id)
-    elseif kind == "roblox_asset_http" then
-        return asset_urls.roblox_asset_http(asset_id)
-    end
-    return nil
-end
-
-local function try_fallback(entry, key)
-    while entry.fallback_idx < #FALLBACKS do
-        entry.fallback_idx = entry.fallback_idx + 1
-        local url = fallback_url(FALLBACKS[entry.fallback_idx], entry.asset_id)
-        if url and url ~= entry.url then
-            entry.url = url
-            entry.handle = nil
-            entry.failed = false
-            return true
-        end
-    end
-    return false
-end
-
-local function get_handle(key)
     local entry = keys[key]
+    if not entry then
+        keys[key] = { url = url, handle = nil, failed = false }
+        return keys[key]
+    end
+
+    if entry.url ~= url then
+        entry.url = url
+        entry.handle = nil
+        entry.failed = false
+    end
+    return entry
+end
+
+function M.register(key, url)
+    return M.ensure(key, url)
+end
+
+local function tick(entry)
     if not entry or entry.failed or not draw or not draw.load_image then
         return nil
     end
 
-    if not entry.handle then
-        entry.handle = draw.load_image(entry.url)
-        return nil
-    end
-
-    if draw.image_loaded and draw.image_loaded(entry.handle) then
+    if entry.handle and draw.image_loaded and draw.image_loaded(entry.handle) then
         return entry.handle
     end
 
-    if draw.image_failed and draw.image_failed(entry.handle) then
-        if try_fallback(entry, key) then
-            return nil
-        end
-        debug.warn_once("img:" .. key, "load failed - " .. tostring(entry.url))
+    if entry.handle and draw.image_failed and draw.image_failed(entry.handle) then
+        debug.warn_once("img:" .. tostring(entry.url), "load failed")
         entry.failed = true
         entry.handle = nil
         return nil
     end
 
-    return nil
-end
-
-local function draw_image(handle, x, y, w, h, col)
-    if col and type(col) == "table" then
-        local r = math.floor((col[1] or 1) * 255)
-        local g = math.floor((col[2] or 1) * 255)
-        local b = math.floor((col[3] or 1) * 255)
-        local a = math.floor((col[4] or 1) * 255)
-        draw.image(handle, x, y, w, h, r, g, b, a)
-    else
-        draw.image(handle, x, y, w, h, 255, 255, 255, 255)
+    -- API.md: safe to call load_image every frame; same URL is deduplicated
+    entry.handle = draw.load_image(entry.url)
+    if entry.handle and draw.image_loaded and draw.image_loaded(entry.handle) then
+        return entry.handle
     end
-end
-
-function M.draw_fit(key, x, y, w, h, col)
-    if not draw or not draw.image then return false end
-
-    local handle = get_handle(key)
-    if not handle then return false end
-
-    w = math.max(w or 0, 8)
-    h = math.max(h or 0, 8)
-    draw_image(handle, x, y, w, h, col)
-    return true
+    return nil
 end
 
 function M.state(key)
     local entry = keys[key]
     if not entry then return "none" end
     if entry.failed then return "failed" end
-    if not entry.handle then return "loading" end
-    if draw and draw.image_loaded and draw.image_loaded(entry.handle) then
+    tick(entry)
+    if entry.failed then return "failed" end
+    if entry.handle and draw.image_loaded and draw.image_loaded(entry.handle) then
         return "ready"
-    end
-    if draw and draw.image_failed and draw.image_failed(entry.handle) then
-        if try_fallback(entry, key) then
-            return "loading"
-        end
-        entry.failed = true
-        entry.handle = nil
-        return "failed"
     end
     return "loading"
 end
@@ -149,14 +64,30 @@ function M.is_ready(key)
     return M.state(key) == "ready"
 end
 
-function M.preload(key, asset_id_or_url)
-    M.ensure(key, asset_id_or_url)
-    get_handle(key)
+function M.begin_load(key)
+    local entry = keys[key]
+    if entry then tick(entry) end
 end
 
-function M.begin_load(key)
-    if not key then return end
-    get_handle(key)
+function M.preload(key, url)
+    M.ensure(key, url)
+    M.begin_load(key)
+end
+
+function M.draw_fit(key, x, y, w, h)
+    if not draw or not draw.image then return false end
+
+    local entry = keys[key]
+    if not entry or entry.failed then return false end
+
+    local handle = tick(entry)
+    if not handle then return false end
+
+    w = math.max(w or 0, 8)
+    h = math.max(h or 0, 8)
+    -- API.md April pattern: 0-255 RGBA integer color args
+    draw.image(handle, x, y, w, h, 255, 255, 255, 255)
+    return true
 end
 
 function M.draw_at_world(key, wx, wy, wz, size)
@@ -164,7 +95,10 @@ function M.draw_at_world(key, wx, wy, wz, size)
         return false
     end
 
-    local handle = get_handle(key)
+    local entry = keys[key]
+    if not entry or entry.failed then return false end
+
+    local handle = tick(entry)
     if not handle then return false end
 
     local sx, sy, vis = utility.world_to_screen(wx, wy, wz)

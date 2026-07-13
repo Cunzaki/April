@@ -47,6 +47,7 @@ const ORDER = [
   "game/bootstrap.lua",
   "game/folders.lua",
   "game/item_images.lua",
+  "game/attachment_images.lua",
   "game/item_catalog.lua",
   "game/items.lua",
   "game/armor_map.lua",
@@ -104,7 +105,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.74.0",
+    version = "3.74.3",
     debug = false,
     _mods = {},
     bundled = true,

@@ -1,5 +1,6 @@
 local env = April.require("core.env")
 local item_images = April.require("game.item_images")
+local attachment_images = April.require("game.attachment_images")
 local item_catalog = April.require("game.item_catalog")
 local asset_urls = April.require("game.asset_urls")
 
@@ -179,6 +180,9 @@ function M.get_image_asset_id(name, variant)
     local id = item_images.get_asset_id(name, variant)
     if id then return id end
 
+    id = attachment_images.get_asset_id(name)
+    if id then return id end
+
     local cat = item_catalog.get_by_name(name)
     if cat and cat.id then
         local item = M.get_by_id(cat.id)
@@ -240,7 +244,8 @@ function M.resolve_item_label(label)
         end
     end
 
-    if item_catalog.get_by_name(base) or item_images.get_asset_id(base, variant) then
+    if item_catalog.get_by_name(base) or item_images.get_asset_id(base, variant)
+        or attachment_images.get_asset_id(base) then
         return M.make_piece(base, variant)
     end
 

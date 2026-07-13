@@ -5,6 +5,7 @@ local menu_util = April.require("core.menu_util")
 local image_cache = April.require("core.image_cache")
 local asset_urls = April.require("game.asset_urls")
 local items = April.require("game.items")
+local attachment_images = April.require("game.attachment_images")
 local player_gear = April.require("game.player_gear")
 local player_state = April.require("game.player_state")
 local combat_target = April.require("game.combat_target")
@@ -42,32 +43,37 @@ local function img_key(prefix, id)
 end
 
 local function resolve_image_key(piece)
-    if not piece then return nil end
+    if not piece or type(piece) ~= "table" then return nil end
 
-    if type(piece) == "table" and piece.asset_id then
-        local key = img_key("item_", piece.asset_id)
-        image_cache.ensure(key, asset_urls.item_png(piece.asset_id))
-        return key
+    local url, id
+
+    if piece.name then
+        local att_id = attachment_images.get_asset_id(piece.name)
+        if att_id then
+            id = att_id
+            url = asset_urls.rbx_asset(att_id)
+        end
     end
 
-    if type(piece) == "table" and piece.name then
-        local resolved = items.resolve_item_label(
-            piece.variant and (piece.name .. "/" .. piece.variant) or piece.name
-        )
-        if resolved and resolved.asset_id then
-            local key = img_key("item_", resolved.asset_id)
-            image_cache.ensure(key, asset_urls.item_png(resolved.asset_id))
-            return key
+    if not url then
+        local asset_id = piece.asset_id
+        if not asset_id and piece.name then
+            local resolved = items.resolve_item_label(
+                piece.variant and (piece.name .. "/" .. piece.variant) or piece.name
+            )
+            asset_id = resolved and resolved.asset_id or items.get_image_asset_id(piece.name, piece.variant)
         end
-        local asset_id = items.get_image_asset_id(piece.name, piece.variant)
         if asset_id then
-            local key = img_key("item_", asset_id)
-            image_cache.ensure(key, asset_urls.item_png(asset_id))
-            return key
+            id = asset_id
+            url = asset_urls.item_png(asset_id)
         end
     end
 
-    return nil
+    if not url then return nil end
+
+    local key = img_key("img_", id or url)
+    image_cache.ensure(key, url)
+    return key
 end
 
 local function get_gear(player)
@@ -216,8 +222,14 @@ local function draw_slot(x, y, size, key, piece, style)
 
     if not piece then return end
 
-    if key and image_cache.draw_fit(key, x + pad, y + pad, size - pad * 2, size - pad * 2) then
-        return
+    if key then
+        image_cache.begin_load(key)
+        if image_cache.draw_fit(key, x + pad, y + pad, size - pad * 2, size - pad * 2) then
+            return
+        end
+        if image_cache.state(key) ~= "failed" then
+            return
+        end
     end
 
     local label = "?"
