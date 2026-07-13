@@ -24,7 +24,7 @@ const DEFAULT_RBXLX =
     process.env.LOCALAPPDATA || "",
     "Volt",
     "workspace",
-    "place 16849012343 Fallen Survival Medium Server.rbxlx"
+    "place 13800717766 Fallen Survival Large Server(1).rbxlx"
   );
 
 const rbxlxPath = path.resolve(process.argv[2] || DEFAULT_RBXLX);

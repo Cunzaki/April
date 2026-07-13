@@ -45,6 +45,7 @@ const ORDER = [
   "core/memory_string.lua",
   "game/module_scan.lua",
   "game/bootstrap.lua",
+  "game/nvg_lighting.lua",
   "game/folders.lua",
   "game/item_images.lua",
   "game/attachment_images.lua",
@@ -93,6 +94,7 @@ const ORDER = [
   "features/radar/tactical_map.lua",
   "features/utility/keybind_viewer.lua",
   "features/utility/anti_afk.lua",
+  "features/utility/fullbright.lua",
   "features/utility/config.lua",
   "menu/tabs.lua",
   "app.lua",
@@ -105,7 +107,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.74.6",
+    version = "3.75.1",
     debug = false,
     _mods = {},
     bundled = true,

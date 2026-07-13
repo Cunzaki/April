@@ -48,10 +48,14 @@ function M.register(key, asset_id_or_url)
 end
 
 local function try_fallback(entry)
-    if entry.fallback or not entry.asset_id then return false end
-    local fb = asset_urls.roblox_thumb(entry.asset_id)
+    if not entry.asset_id then return false end
+    entry.fallback_idx = (entry.fallback_idx or 0) + 1
+    local chain = {
+        asset_urls.roblox_thumb(entry.asset_id),
+        asset_urls.asset_delivery(entry.asset_id),
+    }
+    local fb = chain[entry.fallback_idx]
     if not fb or fb == entry.url then return false end
-    entry.fallback = true
     entry.url = fb
     entry.handle = nil
     entry.failed = false

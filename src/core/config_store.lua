@@ -72,7 +72,7 @@ local MENU_KEYS = {
     "april_npc_enabled", "april_npc_enabled_mode", "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode",
     "april_npc_health", "april_npc_skeleton",
     "april_npc_offscreen", "april_npc_show_name", "april_npc_show_distance", "april_npc_range",
-    "april_anti_afk",
+    "april_anti_afk", "april_fullbright", "april_fullbright_log", "april_fullbright_hud",
     "april_base_enabled", "april_base_enabled_mode", "april_base_cabinet", "april_storage_cabinet", "april_small_box", "april_large_box",
     "april_sleeping_bag", "april_auto_turret", "april_auto_turret_ring", "april_shotgun_turret", "april_shotgun_turret_ring",
     "april_wooden_door", "april_wooden_double_door", "april_salvaged_door", "april_metal_door",

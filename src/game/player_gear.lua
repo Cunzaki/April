@@ -3,6 +3,7 @@ local items = April.require("game.items")
 local item_catalog = April.require("game.item_catalog")
 local inventory = April.require("game.inventory")
 local weapons = April.require("game.weapons")
+local attachment_images = April.require("game.attachment_images")
 
 local M = {}
 
@@ -322,8 +323,9 @@ local function resolve_held_weapon(player, char)
     return nil, nil
 end
 
-local function scan_attachments_folder(folder, out, seen)
-    if not folder or not env.is_valid(folder) then return end
+local function scan_attachments_folder(folder, out, seen, depth)
+    depth = depth or 0
+    if not folder or not env.is_valid(folder) or depth > 5 then return end
 
     local children = env.safe_call(function()
         if folder.get_children then return folder:get_children() end
@@ -332,9 +334,32 @@ local function scan_attachments_folder(folder, out, seen)
 
     for _, child in ipairs(children) do
         local name = child.Name or child.name
-        if name and name ~= "" then
-            add_attachment_piece(out, seen, name)
+        if not name or name == "" then goto continue end
+
+        local cn = child.ClassName or child.class_name
+        if cn == "StringValue" or cn == "stringvalue" then
+            local val = child.Value or child.value
+            if val and val ~= "" then
+                add_attachment_piece(out, seen, val)
+            end
+            goto continue
         end
+
+        if is_attachment_slot_name(name) then
+            scan_attachments_folder(child, out, seen, depth + 1)
+            goto continue
+        end
+
+        if is_attachment_name(name) or attachment_images.get_asset_id(name) or items.get_image_asset_id(name) then
+            add_attachment_piece(out, seen, name)
+            goto continue
+        end
+
+        if cn == "Model" or cn == "Folder" or cn == "folder" then
+            scan_attachments_folder(child, out, seen, depth + 1)
+        end
+
+        ::continue::
     end
 end
 
