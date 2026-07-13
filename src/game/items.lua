@@ -254,7 +254,7 @@ end
 
 function M.get_image_url(name, variant)
     local id = M.get_image_asset_id(name, variant)
-    if id then return asset_urls.rbx_asset(id) end
+    if id then return asset_urls.item_png(id) end
     return nil
 end
 

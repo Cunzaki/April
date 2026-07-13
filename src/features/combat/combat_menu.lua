@@ -123,7 +123,7 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_slider_float(T, G, p .. "manip_extend_dist", "Extra Scan Distance", 1, 7, 7, "%.1f",
         menu_util.parent(p .. "manip_extend"))
     menu.add_checkbox(T, G, p .. "manip_status", "Manip Status Bar", false, manip_root)
-    menu.add_checkbox(T, G, p .. "manip_peek_vis", "Manip Peek Visual", true, manip_root)
+    menu.add_checkbox(T, G, p .. "manip_peek_vis", "Manip Peek Visual", false, manip_root)
 
     menu_util.section(T, G, "Visuals")
     menu.add_checkbox(T, G, p .. "draw_fov", "FOV Circle", false,

@@ -119,10 +119,9 @@ function M.resolve_track(target, prefix, cx, cy)
             bone = bone,
             muzzle = muzzle,
         })
-        if not tp or not tp.origin or not tp.aim then
-            return nil, nil, { state = "blocked", peek = manip_extra.peek, radius = manip_extra.radius or 0 }
+        if tp and tp.origin and tp.aim then
+            return apply_ray_aim(tp.origin, tp.aim, tp.hitpart or center, weapon, "tp", manip_extra, tp)
         end
-        return apply_ray_aim(tp.origin, tp.aim, tp.hitpart or center, weapon, "tp", manip_extra, tp)
     end
 
     if hitscan_on then
@@ -139,10 +138,6 @@ function M.resolve_track(target, prefix, cx, cy)
 
     if manip_extra.state == "direct" then
         return apply_drop_aim(muzzle, center, weapon, "direct", manip_extra)
-    end
-
-    if settings.bool(prefix .. "bullet_manip", false) and manip_extra.state == "blocked" then
-        return nil, nil, manip_extra
     end
 
     return apply_drop_aim(muzzle, center, weapon, "curve", manip_extra)

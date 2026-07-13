@@ -1,11 +1,11 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-13T03:54:44.142Z
+    Built: 2026-07-13T04:18:27.172Z
 ]]
 
 April = {
-    version = "3.73.3",
+    version = "3.74.0",
     debug = false,
     _mods = {},
     bundled = true,
@@ -1482,7 +1482,7 @@ local function url_for(asset_id_or_url)
     end
     local id = digits(asset_id_or_url)
     if id then
-        return asset_urls.roblox_asset_http(id)
+        return asset_urls.item_png(id)
     end
     return nil
 end
@@ -1505,8 +1505,8 @@ function M.register(key, asset_id_or_url)
     return M.ensure(key, asset_id_or_url)
 end
 
--- ponytail: Vector draw.load_image — rbxassetid + roblox asset http; try both
-local FALLBACKS = { "rbx_asset" }
+-- GitHub HTTPS first (Vector draw.load_image); rbx fallbacks if CDN 404
+local FALLBACKS = { "rbx_asset", "roblox_asset_http" }
 
 local function fallback_url(kind, asset_id)
     if not asset_id then return nil end
@@ -6863,7 +6863,7 @@ end
 
 function M.get_image_url(name, variant)
     local id = M.get_image_asset_id(name, variant)
-    if id then return asset_urls.rbx_asset(id) end
+    if id then return asset_urls.item_png(id) end
     return nil
 end
 
@@ -10942,7 +10942,7 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_slider_float(T, G, p .. "manip_extend_dist", "Extra Scan Distance", 1, 7, 7, "%.1f",
         menu_util.parent(p .. "manip_extend"))
     menu.add_checkbox(T, G, p .. "manip_status", "Manip Status Bar", false, manip_root)
-    menu.add_checkbox(T, G, p .. "manip_peek_vis", "Manip Peek Visual", true, manip_root)
+    menu.add_checkbox(T, G, p .. "manip_peek_vis", "Manip Peek Visual", false, manip_root)
 
     menu_util.section(T, G, "Visuals")
     menu.add_checkbox(T, G, p .. "draw_fov", "FOV Circle", false,
@@ -11540,10 +11540,9 @@ function M.resolve_track(target, prefix, cx, cy)
             bone = bone,
             muzzle = muzzle,
         })
-        if not tp or not tp.origin or not tp.aim then
-            return nil, nil, { state = "blocked", peek = manip_extra.peek, radius = manip_extra.radius or 0 }
+        if tp and tp.origin and tp.aim then
+            return apply_ray_aim(tp.origin, tp.aim, tp.hitpart or center, weapon, "tp", manip_extra, tp)
         end
-        return apply_ray_aim(tp.origin, tp.aim, tp.hitpart or center, weapon, "tp", manip_extra, tp)
     end
 
     if hitscan_on then
@@ -11560,10 +11559,6 @@ function M.resolve_track(target, prefix, cx, cy)
 
     if manip_extra.state == "direct" then
         return apply_drop_aim(muzzle, center, weapon, "direct", manip_extra)
-    end
-
-    if settings.bool(prefix .. "bullet_manip", false) and manip_extra.state == "blocked" then
-        return nil, nil, manip_extra
     end
 
     return apply_drop_aim(muzzle, center, weapon, "curve", manip_extra)
@@ -11688,7 +11683,7 @@ local function draw_manip_status(cx, cy, fov, info)
 end
 
 local function draw_manip_peek(info)
-    if not settings.bool(PREFIX .. "manip_peek_vis", true) then return end
+    if not settings.bool(PREFIX .. "manip_peek_vis", false) then return end
     if not info or not info.peek then return end
     if info.state ~= "ready" then return end
 
@@ -12130,7 +12125,7 @@ function M.register_menu()
 
     menu_util.section(T, G.MISC, "Farm")
     menu_util.register_keybind(T, G.MISC, P, "Farm Helper", false)
-    menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", true, root)
+    menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", false, root)
     menu_util.gap(T, G.MISC)
     menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
     menu.add_slider_int(T, G.MISC, P_SMOOTH, "Camera Smoothness", 1, 30, 8, root)
@@ -13568,7 +13563,7 @@ local function resolve_image_key(piece)
 
     if type(piece) == "table" and piece.asset_id then
         local key = img_key("item_", piece.asset_id)
-        image_cache.ensure(key, asset_urls.rbx_asset(piece.asset_id))
+        image_cache.ensure(key, asset_urls.item_png(piece.asset_id))
         return key
     end
 
@@ -13578,13 +13573,13 @@ local function resolve_image_key(piece)
         )
         if resolved and resolved.asset_id then
             local key = img_key("item_", resolved.asset_id)
-            image_cache.ensure(key, asset_urls.rbx_asset(resolved.asset_id))
+            image_cache.ensure(key, asset_urls.item_png(resolved.asset_id))
             return key
         end
         local asset_id = items.get_image_asset_id(piece.name, piece.variant)
         if asset_id then
             local key = img_key("item_", asset_id)
-            image_cache.ensure(key, asset_urls.rbx_asset(asset_id))
+            image_cache.ensure(key, asset_urls.item_png(asset_id))
             return key
         end
     end
@@ -15833,7 +15828,7 @@ function M.register_menu()
     menu_util.section(T, G.MISC, "Movement")
 
     -- Id kept as april_noclip_enabled for config compatibility; label is Fly.
-    menu_util.register_keybind(T, G.MISC, "april_noclip_enabled", "Fly", false, { key = 0x46 })
+    menu_util.register_keybind(T, G.MISC, "april_noclip_enabled", "Fly", false)
     menu.add_slider_int(
         T,
         G.MISC,

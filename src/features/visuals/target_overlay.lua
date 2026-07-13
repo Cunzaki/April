@@ -46,7 +46,7 @@ local function resolve_image_key(piece)
 
     if type(piece) == "table" and piece.asset_id then
         local key = img_key("item_", piece.asset_id)
-        image_cache.ensure(key, asset_urls.rbx_asset(piece.asset_id))
+        image_cache.ensure(key, asset_urls.item_png(piece.asset_id))
         return key
     end
 
@@ -56,13 +56,13 @@ local function resolve_image_key(piece)
         )
         if resolved and resolved.asset_id then
             local key = img_key("item_", resolved.asset_id)
-            image_cache.ensure(key, asset_urls.rbx_asset(resolved.asset_id))
+            image_cache.ensure(key, asset_urls.item_png(resolved.asset_id))
             return key
         end
         local asset_id = items.get_image_asset_id(piece.name, piece.variant)
         if asset_id then
             local key = img_key("item_", asset_id)
-            image_cache.ensure(key, asset_urls.rbx_asset(asset_id))
+            image_cache.ensure(key, asset_urls.item_png(asset_id))
             return key
         end
     end

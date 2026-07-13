@@ -111,7 +111,7 @@ local function draw_manip_status(cx, cy, fov, info)
 end
 
 local function draw_manip_peek(info)
-    if not settings.bool(PREFIX .. "manip_peek_vis", true) then return end
+    if not settings.bool(PREFIX .. "manip_peek_vis", false) then return end
     if not info or not info.peek then return end
     if info.state ~= "ready" then return end
 
