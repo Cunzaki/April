@@ -1,0 +1,917 @@
+================================================================================
+STATIC APPENDIX — April/references/dump (tools/build_gc_static_catalog.mjs)
+Generated: 2026-07-04T22:20:57.849Z
+Purpose: static defs not guaranteed in live GC heap — merge with dumpgc output
+================================================================================
+
+--- GC KEY SEEDS (127) ---
+[seed   ] ActualRPM = (static/dump)
+[seed   ] AimForRecoilMult = (static/dump)
+[seed   ] AimSpreadMult = (static/dump)
+[seed   ] AmmoType = (static/dump)
+[seed   ] AmmoWheelImage = (static/dump)
+[seed   ] AnimSpeed = (static/dump)
+[seed   ] Animal = (static/dump)
+[seed   ] AnimationTimeScale = (static/dump)
+[seed   ] Animeaster = (static/dump)
+[seed   ] ArmorPen = (static/dump)
+[seed   ] ArmorPenMult = (static/dump)
+[seed   ] ArmorRightClickToBench = (static/dump)
+[seed   ] ArmorType = (static/dump)
+[seed   ] AttachmentIndex = (static/dump)
+[seed   ] AttachmentType = (static/dump)
+[seed   ] BaseMaxAmmo = (static/dump)
+[seed   ] Bleed = (static/dump)
+[seed   ] BleedMult = (static/dump)
+[seed   ] Bleeding = (static/dump)
+[seed   ] BoltAnimSpeed = (static/dump)
+[seed   ] BoltFed = (static/dump)
+[seed   ] BounceMult = (static/dump)
+[seed   ] Bullet = (static/dump)
+[seed   ] BulletCount = (static/dump)
+[seed   ] BulletRadius = (static/dump)
+[seed   ] BulletRange = (static/dump)
+[seed   ] BulletSize = (static/dump)
+[seed   ] Bullets = (static/dump)
+[seed   ] BulletsForMax = (static/dump)
+[seed   ] Burst = (static/dump)
+[seed   ] BurstRPM = (static/dump)
+[seed   ] ClientDropping = (static/dump)
+[seed   ] Comfort = (static/dump)
+[seed   ] Cooldown = (static/dump)
+[seed   ] CraftSpeedMult = (static/dump)
+[seed   ] CraftingEnabled = (static/dump)
+[seed   ] Cursed_BenchBarrel = (static/dump)
+[seed   ] Cursed_BenchVehicle = (static/dump)
+[seed   ] Cursed_BenchWood = (static/dump)
+[seed   ] Cursed_Metal = (static/dump)
+[seed   ] Cursed_Steel = (static/dump)
+[seed   ] Cursed_Stone = (static/dump)
+[seed   ] Cursed_Twig = (static/dump)
+[seed   ] Cursed_Wood = (static/dump)
+[seed   ] Damage = (static/dump)
+[seed   ] DamageMult = (static/dump)
+[seed   ] DamagePrefix = (static/dump)
+[seed   ] DamageType = (static/dump)
+[seed   ] DecayEnd = (static/dump)
+[seed   ] DecayMultiplier = (static/dump)
+[seed   ] DecayStart = (static/dump)
+[seed   ] DecayType = (static/dump)
+[seed   ] DefaultZoomLevel = (static/dump)
+[seed   ] DemolishTimer = (static/dump)
+[seed   ] DemolishTimerMult = (static/dump)
+[seed   ] DespawnTime = (static/dump)
+[seed   ] DisplayDamage = (static/dump)
+[seed   ] DistanceBenchDamage = (static/dump)
+[seed   ] DurabilityDecrease = (static/dump)
+[seed   ] ElectricityType = (static/dump)
+[seed   ] EquipAnimSpeed = (static/dump)
+[seed   ] ExtraReloadDuration = (static/dump)
+[seed   ] FilterType = (static/dump)
+[seed   ] FireRateMult = (static/dump)
+[seed   ] FuelMult = (static/dump)
+[seed   ] Gravity = (static/dump)
+[seed   ] GravityMult = (static/dump)
+[seed   ] GunRecoilAimMult = (static/dump)
+[seed   ] HeadshotDamage = (static/dump)
+[seed   ] HeadshotDamageMult = (static/dump)
+[seed   ] HideTracer = (static/dump)
+[seed   ] HipSpreadMult = (static/dump)
+[seed   ] HoverMult = (static/dump)
+[seed   ] HumanoidMaxDamage = (static/dump)
+[seed   ] IgnoreGatherMult = (static/dump)
+[seed   ] InputMult = (static/dump)
+[seed   ] InputStep = (static/dump)
+[seed   ] InstantRespawn = (static/dump)
+[seed   ] Loading = (static/dump)
+[seed   ] MapEnabled = (static/dump)
+[seed   ] MaxAmmoMult = (static/dump)
+[seed   ] MaxAttachments = (static/dump)
+[seed   ] MaxDurability = (static/dump)
+[seed   ] MaxPowerOut = (static/dump)
+[seed   ] MaxRange = (static/dump)
+[seed   ] MaxStack = (static/dump)
+[seed   ] Melee = (static/dump)
+[seed   ] MeleeResistance = (static/dump)
+[seed   ] MouseSway = (static/dump)
+[seed   ] Mult = (static/dump)
+[seed   ] MuzzleDurability = (static/dump)
+[seed   ] Penguin = (static/dump)
+[seed   ] PowerOut = (static/dump)
+[seed   ] RPM = (static/dump)
+[seed   ] Raining = (static/dump)
+[seed   ] RangeMult = (static/dump)
+[seed   ] RecoilMult = (static/dump)
+[seed   ] ReloadAnimSpeed = (static/dump)
+[seed   ] ReloadAnimTime = (static/dump)
+[seed   ] ReloadDuration = (static/dump)
+[seed   ] SReduction = (static/dump)
+[seed   ] Scope = (static/dump)
+[seed   ] ServerOS = (static/dump)
+[seed   ] ServerTick = (static/dump)
+[seed   ] ServerType = (static/dump)
+[seed   ] ShatterChance = (static/dump)
+[seed   ] ShowHiddenRecipes = (static/dump)
+[seed   ] SimpleDemolish = (static/dump)
+[seed   ] SoftSide = (static/dump)
+[seed   ] SoftSideMult = (static/dump)
+[seed   ] Spark = (static/dump)
+[seed   ] SparkMult = (static/dump)
+[seed   ] Speed = (static/dump)
+[seed   ] SpeedMult = (static/dump)
+[seed   ] SpreadMult = (static/dump)
+[seed   ] StepType = (static/dump)
+[seed   ] StopBleeds = (static/dump)
+[seed   ] SwayMult = (static/dump)
+[seed   ] SwingAnimSpeed = (static/dump)
+[seed   ] SwingSpeed = (static/dump)
+[seed   ] TargetRange = (static/dump)
+[seed   ] TeamSize = (static/dump)
+[seed   ] Toggle = (static/dump)
+[seed   ] TracerName = (static/dump)
+[seed   ] Type = (static/dump)
+[seed   ] WeaponDurability = (static/dump)
+[seed   ] ZoomLevel = (static/dump)
+
+
+--- ATTACHMENT STAT KEYS (Items.AttachmentStats) (14) ---
+[attach ] AimForRecoilMult
+[attach ] AimSpreadMult
+[attach ] DamageMult
+[attach ] FireRateMult
+[attach ] GunRecoilAimMult
+[attach ] HideTracer
+[attach ] HipSpreadMult
+[attach ] MaxAmmoMult
+[attach ] RangeMult
+[attach ] RecoilMult
+[attach ] Scope
+[attach ] SwayMult
+[attach ] Toggle
+[attach ] ZoomLevel
+
+
+--- VALUES REFERENCES (ReplicatedStorage.Values.*) (14) ---
+[values ] ClientDropping
+[values ] CraftSpeedMult
+[values ] CraftingEnabled
+[values ] DemolishTimer
+[values ] InstantRespawn
+[values ] Loading
+[values ] MapEnabled
+[values ] Raining
+[values ] ServerOS
+[values ] ServerTick
+[values ] ServerType
+[values ] ShowHiddenRecipes
+[values ] SimpleDemolish
+[values ] TeamSize
+
+
+--- ATTRIBUTES (GetAttribute from game scripts) (137) ---
+[attr   ] Admin
+[attr   ] Aiming
+[attr   ] ArenaIndex
+[attr   ] ArenaName
+[attr   ] Armed
+[attr   ] ArmorSleeves
+[attr   ] Armor_HasFlippers
+[attr   ] Armor_HasGoggles
+[attr   ] Armor_NVG
+[attr   ] Armor_SilentSteps
+[attr   ] BaseId
+[attr   ] BaseSize
+[attr   ] BedName
+[attr   ] BelowCeiling
+[attr   ] BenchName
+[attr   ] Biome
+[attr   ] BreakLocked
+[attr   ] CanInvite
+[attr   ] CanUse
+[attr   ] CategorySelectedColor
+[attr   ] ClanColor
+[attr   ] ClanTag
+[attr   ] ClientReplicationMultiplier
+[attr   ] ClosedTick
+[attr   ] ColorNegative
+[attr   ] ColorOff
+[attr   ] ColorOn
+[attr   ] ColorPositive
+[attr   ] CombatReady
+[attr   ] Comfort
+[attr   ] Cooldown
+[attr   ] CurOpen
+[attr   ] CurrentNum
+[attr   ] DamageConnections
+[attr   ] DamageType
+[attr   ] DamagedBenchOutlineColor
+[attr   ] Debug
+[attr   ] DebugDisableScriptAnims
+[attr   ] DebugEnableVMMovement
+[attr   ] DebugFrameworkSpeed
+[attr   ] DebugPrintRoundedDecimalPoints
+[attr   ] DebugShowRays
+[attr   ] DebugVMMovementAmount
+[attr   ] DebugVMRotating
+[attr   ] DefaultDistance
+[attr   ] Density
+[attr   ] Destroyed
+[attr   ] Dialog
+[attr   ] Digging
+[attr   ] Direction
+[attr   ] Downed
+[attr   ] Equipped
+[attr   ] FirstAction
+[attr   ] FreeLooking
+[attr   ] GunPosition
+[attr   ] HammerDemolishIcon
+[attr   ] HammerMetalIcon
+[attr   ] HammerRotateIcon
+[attr   ] HammerSteelIcon
+[attr   ] HammerStoneIcon
+[attr   ] HammerWoodIcon
+[attr   ] HasFuel
+[attr   ] Health
+[attr   ] Help
+[attr   ] HideTag
+[attr   ] ID
+[attr   ] Id
+[attr   ] InTeam
+[attr   ] InWater
+[attr   ] Index
+[attr   ] Initiated
+[attr   ] IsArenaOwner
+[attr   ] IsClimbing
+[attr   ] IsCrouch
+[attr   ] IsPlayStation
+[attr   ] IsSprint
+[attr   ] IsSwim
+[attr   ] IsUnder
+[attr   ] JoystickDeadzone
+[attr   ] LabelsOwned
+[attr   ] LastCode
+[attr   ] LastDamaged
+[attr   ] LastDeathPin
+[attr   ] LocalAmmo
+[attr   ] Locked
+[attr   ] MapClosedTick
+[attr   ] MapOpen
+[attr   ] Marked
+[attr   ] MaxCharacters
+[attr   ] MaxHealth
+[attr   ] MaxVolume
+[attr   ] Mod
+[attr   ] Monument
+[attr   ] Occupied
+[attr   ] OffersLocked
+[attr   ] On
+[attr   ] Open
+[attr   ] OrigOffset
+[attr   ] OrigTrans
+[attr   ] Owner
+[attr   ] OwnerName
+[attr   ] PlaceUnavailableColor
+[attr   ] Placed
+[attr   ] Placing
+[attr   ] PlayerMapPin
+[attr   ] PlinkoIndex
+[attr   ] Points
+[attr   ] PositionClosed
+[attr   ] PositionOpen
+[attr   ] PreferredInput
+[attr   ] Reach
+[attr   ] ReviveStart
+[attr   ] Reviving
+[attr   ] S
+[attr   ] SReduction
+[attr   ] Safe
+[attr   ] SafeZone
+[attr   ] SelectedSlotColor
+[attr   ] Settings
+[attr   ] ShopOnly
+[attr   ] Skin
+[attr   ] Split
+[attr   ] Stability
+[attr   ] StabilityLoss
+[attr   ] Stage
+[attr   ] StatGreenColor
+[attr   ] StatRedColor
+[attr   ] ToggleSigns
+[attr   ] TotalActions
+[attr   ] Typing
+[attr   ] UI
+[attr   ] Using
+[attr   ] VIP
+[attr   ] ViewmodelCFrame
+[attr   ] Vis
+[attr   ] WheelType
+[attr   ] WiresEquipped
+
+
+--- WEAPONS / TOOLS (ToolInfo) (65) ---
+[weapon ] Admin Tool
+[weapon ] Bandage
+[weapon ] Black Keycard
+[weapon ] Blueprint
+[weapon ] Bone Tool
+[weapon ] Boulder
+[weapon ] Bruno\'s M4A1
+[weapon ] Candy Cane
+[weapon ] Care Package Signal
+[weapon ] Carrot Blade
+[weapon ] Chainsaw
+[weapon ] Crossbow
+[weapon ] Dynamite Bundle
+[weapon ] Dynamite Stick
+[weapon ] Halloween Scythe
+[weapon ] Hammer
+[weapon ] Iron Shard Hatchet
+[weapon ] Iron Shard Pickaxe
+[weapon ] Lighter
+[weapon ] Machete
+[weapon ] Military AA12
+[weapon ] Military Barrett
+[weapon ] Military Grenade
+[weapon ] Military Grenade Launcher
+[weapon ] Military M39
+[weapon ] Military M4A1
+[weapon ] Military MP7
+[weapon ] Military PKM
+[weapon ] Military USP
+[weapon ] Mining Drill
+[weapon ] Nail Gun
+[weapon ] Pink Keycard
+[weapon ] Pumpkin Launcher
+[weapon ] Purple Keycard
+[weapon ] Red Keycard
+[weapon ] Salvaged AK47
+[weapon ] Salvaged AK74u
+[weapon ] Salvaged Break Action
+[weapon ] Salvaged Double Barrel
+[weapon ] Salvaged Grenade Launcher
+[weapon ] Salvaged M14
+[weapon ] Salvaged P250
+[weapon ] Salvaged Pipe Rifle
+[weapon ] Salvaged Pump Action
+[weapon ] Salvaged Python
+[weapon ] Salvaged RPG
+[weapon ] Salvaged SMG
+[weapon ] Salvaged Shotgun
+[weapon ] Salvaged Shovel
+[weapon ] Salvaged Skorpion
+[weapon ] Salvaged Sniper
+[weapon ] Saw Bat
+[weapon ] Small Medkit
+[weapon ] Steel Axe
+[weapon ] Steel Pickaxe
+[weapon ] Steel Shovel
+[weapon ] Stone Hatchet
+[weapon ] Stone Pickaxe
+[weapon ] Stone Spear
+[weapon ] Timed Charge
+[weapon ] Wire Cutters
+[weapon ] Wooden Bow
+[weapon ] Wooden Spear
+[weapon ] Yellow Keycard
+[weapon ] ez shovel
+
+
+--- ITEMS (Items module Name field) (356) ---
+[item   ] %s\'s Trophy
+[item   ] 40mm
+[item   ] Admin Tool
+[item   ] Ammo Press
+[item   ] Animal Fat
+[item   ] Anvil
+[item   ] Armor Plate
+[item   ] Armor Polish
+[item   ] Armor Stand
+[item   ] Auto Turret
+[item   ] Balaclava
+[item   ] Bandage
+[item   ] Barrel Light
+[item   ] Base Cabinet
+[item   ] Baseball Cap
+[item   ] Bean Can
+[item   ] Bear Trap
+[item   ] Bed
+[item   ] Beef MRE
+[item   ] Black Keycard
+[item   ] Blade
+[item   ] Blast Furnace
+[item   ] Blueberries
+[item   ] Blueberry Pie I
+[item   ] Blueberry Pie II
+[item   ] Blueberry Pie III
+[item   ] Blueberry Pie IV
+[item   ] Blueberry Plant Seed
+[item   ] Blueprint
+[item   ] Bone Armor
+[item   ] Bone Arrow
+[item   ] Bone Shards
+[item   ] Bone Tool
+[item   ] BoneArrow
+[item   ] Boots
+[item   ] Boss Chestplate
+[item   ] Boss Helmet
+[item   ] Bottle Caps
+[item   ] Boulder
+[item   ] Bruno\'s ACOG Sight
+[item   ] Bruno\'s M4A1
+[item   ] Buckshot
+[item   ] Bunny Ears
+[item   ] Button
+[item   ] CRUSH
+[item   ] Cactus Flesh
+[item   ] Campfire
+[item   ] Candle
+[item   ] Candy Cane
+[item   ] Candy Roll
+[item   ] Care Package Signal
+[item   ] Carpentry Table
+[item   ] Carrot Blade
+[item   ] Chainsaw
+[item   ] Charcoal
+[item   ] Chemistry Lab
+[item   ] Chicken Egg
+[item   ] Chicken House
+[item   ] Chicken MRE
+[item   ] Chocolate Bar
+[item   ] Christmas Lights
+[item   ] Christmas Tree
+[item   ] Circuit Boards
+[item   ] Clan Table
+[item   ] Cloth
+[item   ] Cloth Footwraps
+[item   ] Cloth Handwraps
+[item   ] Cloth Headwrap
+[item   ] Cloth Pants
+[item   ] Cloth Shirt
+[item   ] Collared Shirt
+[item   ] Combination Lock
+[item   ] Combustive Arrow
+[item   ] Combustive Buckshot
+[item   ] Combustive Heavy Ammo
+[item   ] Combustive Rocket
+[item   ] CombustiveBullet
+[item   ] Common Goodie Bag
+[item   ] Compensator
+[item   ] Cooked Pork
+[item   ] Cooked Venison
+[item   ] Cooked Wolf
+[item   ] Cooking Pot
+[item   ] Copper Cogs
+[item   ] Corn
+[item   ] Corn Bread I
+[item   ] Corn Bread II
+[item   ] Corn Bread III
+[item   ] Corn Bread IV
+[item   ] Corn Plant Seed
+[item   ] Cow Pasture
+[item   ] Crossbow
+[item   ] Crude Fuel
+[item   ] Crude Fuel Generator
+[item   ] Culinary Table
+[item   ] Cursed Pumpkin
+[item   ] Diving Goggles
+[item   ] Diving Tank
+[item   ] Duct Tape
+[item   ] Dynamite Bundle
+[item   ] Dynamite Stick
+[item   ] Electric Furnace
+[item   ] Electric Heater
+[item   ] Empty Can
+[item   ] Epic Goodie Bag
+[item   ] Explosive Shell
+[item   ] Extended Mag
+[item   ] External Stone Gate
+[item   ] External Stone Wall
+[item   ] External Wooden Gate
+[item   ] External Wooden Wall
+[item   ] FireArrow
+[item   ] Fireplace
+[item   ] Fish Can
+[item   ] Flannel Jacket
+[item   ] Flippers
+[item   ] Floor Grill
+[item   ] Furnace
+[item   ] Garage Door
+[item   ] Glass Window
+[item   ] Glue
+[item   ] Gunpowder
+[item   ] HVArrow
+[item   ] HVRocket
+[item   ] Halloween Scythe
+[item   ] Hammer
+[item   ] Hard Hat
+[item   ] Hazmat Suit
+[item   ] Heavy Ammo
+[item   ] Heavy Padding
+[item   ] Holo Sight
+[item   ] Hoodie
+[item   ] Horizontal Window Cover
+[item   ] IncendiaryRocket
+[item   ] Iron Ore
+[item   ] Iron Shard Hatchet
+[item   ] Iron Shard Pickaxe
+[item   ] Iron Shards
+[item   ] Jack-O-Lantern
+[item   ] Jail Door
+[item   ] Jail Wall
+[item   ] Jukebox
+[item   ] Ladder
+[item   ] Landmine Trap
+[item   ] Large Battery
+[item   ] Large Cobweb
+[item   ] Large Furnace
+[item   ] Large Medkit
+[item   ] Large Planter Box
+[item   ] Large Storage Box
+[item   ] Large Wooden Sign
+[item   ] Leather
+[item   ] Leather Boots
+[item   ] Leather Gloves
+[item   ] Leather Pants
+[item   ] Leather Poncho
+[item   ] Leather Shirt
+[item   ] Lemon
+[item   ] Lemon Cake I
+[item   ] Lemon Cake II
+[item   ] Lemon Cake III
+[item   ] Lemon Cake IV
+[item   ] Lemon Plant Seed
+[item   ] Light Ammo
+[item   ] Lighter
+[item   ] Lightweight Padding
+[item   ] Loom
+[item   ] Machete
+[item   ] Marsh Bar
+[item   ] Meatball Can
+[item   ] Medium Battery
+[item   ] Metal Barricade
+[item   ] Metal Door
+[item   ] Metal Double Door
+[item   ] Metal Plating
+[item   ] Metal Scraps
+[item   ] Metal Spikes
+[item   ] Metal Window Bars
+[item   ] Military AA12
+[item   ] Military ACOG Sight
+[item   ] Military Backpack
+[item   ] Military Barrett
+[item   ] Military Boat
+[item   ] Military Chestplate
+[item   ] Military Gloves
+[item   ] Military Grenade
+[item   ] Military Grenade Launcher
+[item   ] Military Helmet
+[item   ] Military Lasersight
+[item   ] Military Leggings
+[item   ] Military M39
+[item   ] Military M4A1
+[item   ] Military MP7
+[item   ] Military PKM
+[item   ] Military Sniper Scope
+[item   ] Military USP
+[item   ] MilitaryGrenade
+[item   ] Milk
+[item   ] Mining Drill
+[item   ] Muzzle Boost
+[item   ] Nail Gun
+[item   ] NailBullet
+[item   ] Nails
+[item   ] Night Vision Goggles
+[item   ] OPEN
+[item   ] Pants
+[item   ] Peanut Butter Cup
+[item   ] Petroleum
+[item   ] Petroleum Refinery
+[item   ] Phosphate Dust
+[item   ] Phosphate Ore
+[item   ] Piercing Heavy Ammo
+[item   ] Piercing Light Ammo
+[item   ] Pink Keycard
+[item   ] Pipe
+[item   ] Pistol Receiver
+[item   ] Power Cell
+[item   ] Propane Tank
+[item   ] Pumpkin
+[item   ] Pumpkin Launcher
+[item   ] Pumpkin Pie
+[item   ] Pumpkin Plant Seed
+[item   ] PumpkinCursed
+[item   ] PumpkinRegular
+[item   ] Purple Keycard
+[item   ] Purple Ornament
+[item   ] Quality Iron Ore
+[item   ] Radiation Vitamins
+[item   ] Rare Goodie Bag
+[item   ] Raspberries
+[item   ] Raspberry Pie I
+[item   ] Raspberry Pie II
+[item   ] Raspberry Pie III
+[item   ] Raspberry Pie IV
+[item   ] Raspberry Plant Seed
+[item   ] Raw Pork
+[item   ] Raw Venison
+[item   ] Raw Wolf
+[item   ] Red Keycard
+[item   ] Red Ornament
+[item   ] Repair Table
+[item   ] Resistant Rubber
+[item   ] Rifle Receiver
+[item   ] RifleBullet
+[item   ] Rocket
+[item   ] Rope
+[item   ] Rug
+[item   ] SMG Receiver
+[item   ] Salvaged AK47
+[item   ] Salvaged AK74u
+[item   ] Salvaged Backpack
+[item   ] Salvaged Break Action
+[item   ] Salvaged Chestplate
+[item   ] Salvaged Double Barrel
+[item   ] Salvaged Explosive Shell
+[item   ] Salvaged Flycopter
+[item   ] Salvaged Gloves
+[item   ] Salvaged Grenade Launcher
+[item   ] Salvaged Helmet
+[item   ] Salvaged Lasersight
+[item   ] Salvaged Leggings
+[item   ] Salvaged M14
+[item   ] Salvaged Metal Door
+[item   ] Salvaged P250
+[item   ] Salvaged Pipe Rifle
+[item   ] Salvaged Pump Action
+[item   ] Salvaged Python
+[item   ] Salvaged RPG
+[item   ] Salvaged SMG
+[item   ] Salvaged Shell
+[item   ] Salvaged Shotgun
+[item   ] Salvaged Shovel
+[item   ] Salvaged Sight
+[item   ] Salvaged Skorpion
+[item   ] Salvaged Sniper
+[item   ] Salvaged Sniper Scope
+[item   ] Santa Hat
+[item   ] Saw Bat
+[item   ] Scarecrow
+[item   ] Semi Receiver
+[item   ] Sewing Table
+[item   ] Shop Machine
+[item   ] Shorts
+[item   ] Shotgun Shell
+[item   ] Shotgun Turret
+[item   ] ShotgunBullet
+[item   ] Silencer
+[item   ] Sleeping Bag
+[item   ] Slug
+[item   ] Small Battery
+[item   ] Small Cobweb
+[item   ] Small Medkit
+[item   ] Small Planter Box
+[item   ] Small Storage Box
+[item   ] Small Wooden Sign
+[item   ] Snorkle
+[item   ] Solar Panel
+[item   ] Splitter
+[item   ] Spring
+[item   ] Steel Axe
+[item   ] Steel Chestplate
+[item   ] Steel Door
+[item   ] Steel Double Door
+[item   ] Steel Glass Window
+[item   ] Steel Helmet
+[item   ] Steel Leggings
+[item   ] Steel Metal
+[item   ] Steel Pickaxe
+[item   ] Steel Shovel
+[item   ] Steel Toes
+[item   ] Stone
+[item   ] Stone Hatchet
+[item   ] Stone Pickaxe
+[item   ] Stone Spear
+[item   ] Storage Cabinet
+[item   ] Swift Arrow
+[item   ] Swift Heavy Ammo
+[item   ] Swift Light Ammo
+[item   ] Swift Rocket
+[item   ] Switch
+[item   ] Tank Top
+[item   ] Tarp
+[item   ] Thread
+[item   ] Timed Charge
+[item   ] Tomato
+[item   ] Tomato Plant Seed
+[item   ] Trap Door
+[item   ] Triangle Trap Door
+[item   ] Vertical Window Cover
+[item   ] Water Bottle
+[item   ] Water Filter
+[item   ] Water Turbine
+[item   ] Weapon Flashlight
+[item   ] Wetsuit
+[item   ] White Ornament
+[item   ] Windmill
+[item   ] Wire Cutters
+[item   ] Wood Log
+[item   ] Wooden Arrow
+[item   ] Wooden Boat
+[item   ] Wooden Bow
+[item   ] Wooden Chestplate
+[item   ] Wooden Door
+[item   ] Wooden Double Door
+[item   ] Wooden Helmet
+[item   ] Wooden Leggings
+[item   ] Wooden Lock
+[item   ] Wooden Spear
+[item   ] Wooden Spikes
+[item   ] Wooden Window Bars
+[item   ] WoodenArrow
+[item   ] Wool
+[item   ] Wool Plant Seed
+[item   ] Wreath
+[item   ] Yellow Keycard
+[item   ] ez shovel
+
+
+--- REMOTES (readable paths only — obfuscated Remotes.* excluded) (74) ---
+[remote ] RemoteEvent	ReplicatedStorage.ClientSignals.Leaderboard
+[remote ] RemoteEvent	ReplicatedStorage.ClientSignals.VFXOrdered
+[remote ] RemoteEvent	ReplicatedStorage.ClientSignals.Inventory
+[remote ] RemoteEvent	ReplicatedStorage.ClientSignals.JukeboxSetId
+[remote ] RemoteEvent	ReplicatedStorage.ClientSignals.Radio
+[remote ] RemoteEvent	ReplicatedStorage.ClientSignals.UpdateBenchConnections
+[remote ] RemoteEvent	ReplicatedStorage.ClientSignals.UpdateBenchPower
+[remote ] RemoteEvent	ReplicatedStorage.ClientSignals.BenchCleanup
+[remote ] RemoteFunction	ReplicatedStorage.SettingRemotes.Fetch
+[remote ] RemoteEvent	ReplicatedStorage.SettingRemotes.Update
+[remote ] RemoteFunction	ReplicatedStorage.SettingRemotes.Reset
+[remote ] RemoteEvent	ReplicatedStorage.SettingRemotes.Teleport
+[remote ] RemoteFunction	ReplicatedStorage.ClanRemoteFunction
+[remote ] RemoteFunction	ReplicatedStorage.Ping
+[remote ] RemoteEvent	ReplicatedStorage.LoadingScreen
+[remote ] RemoteEvent	ReplicatedStorage.SoundRemotes.Play
+[remote ] RemoteEvent	ReplicatedStorage.SoundRemotes.Footsteps
+[remote ] RemoteEvent	ReplicatedStorage.Sigma
+[remote ] RemoteFunction	ReplicatedStorage.Sound
+[remote ] RemoteEvent	ReplicatedStorage.PlayerOwnershipUpdated
+[remote ] RemoteEvent	ReplicatedStorage.RelicsServerSoundAdded
+[remote ] RemoteFunction	ReplicatedStorage.GetTracksFunction
+[remote ] RemoteEvent	ReplicatedStorage.FavoriteChangedEvent
+[remote ] RemoteFunction	ReplicatedStorage.FavoriteStatusFunction
+[remote ] RemoteFunction	ReplicatedStorage.FavoriteTrackFunction
+[remote ] RemoteFunction	ReplicatedStorage.FavoriteIdsFunction
+[remote ] +����	ref=52275
+[remote ] ��$�r����LAL	ref=52286
+[remote ] ۫5KF�l�L[�fF�D.ax�+�7j����7?���x	ref=52308
+[remote ] ۫5KF�l�L[�fF�D.ek��+��NYt<����(�[	ref=52309
+[remote ] ۫5KF�l�L[�fF�D.�;���r3���s����C4{	ref=52310
+[remote ] ۫5KF�l�L[�fF�D.'M<^����v<�{=9s�b�	ref=52311
+[remote ] ۫5KF�l�L[�fF�D.2A�5��h���א��+�	ref=52312
+[remote ] ۫5KF�l�L[�fF�D.����OPLF�^9�X��	ref=52313
+[remote ] ��	ref=52314
+[remote ] ۫5KF�l�L[�fF�D.�;\V5E�����e��	ref=52315
+[remote ] ۫5KF�l�L[�fF�D.��)T�tp]Р:u�p�z�	ref=52317
+[remote ] ۫5KF�l�L[�fF�D.y�n� �4\�Zzx:�*Ǖ�	ref=52318
+[remote ] ۫5KF�l�L[�fF�D.A3�ަ,�8�{�P�Αi���	ref=52319
+[remote ] ۫5KF�l�L[�fF�D.XI��H|��Z���3��ί�	ref=52320
+[remote ] ۫5KF�l�L[�fF�D.g���>���{|ՍY�N�	ref=52321
+[remote ] ۫5KF�l�L[�fF�D.��&j��"Q,�)I��t���	ref=52322
+[remote ] ۫5KF�l�L[�fF�D.y͍a1#S�߹�%��$h	ref=52323
+[remote ] ۫5KF�l�L[�fF�D.&S)�ћ�$��lgFl�L	ref=52324
+[remote ] ۫5KF�l�L[�fF�D.S.�f��#����pxa7�	ref=52325
+[remote ] ۫5KF�l�L[�fF�D.�)=��ED���XNS��R#	ref=52326
+[remote ] ۫5KF�l�L[�fF�D.սX$��Z�$�t�r�I,	ref=52328
+[remote ] ۫5KF�l�L[�fF�D.�8�j0��p�?m$�	ref=52329
+[remote ] ۫5KF�l�L[�fF�D.<��ǆ��j���+F;9z��	ref=52330
+[remote ] ۫5KF�l�L[�fF�D.�O<�E��'�p~��v�T	ref=52331
+[remote ] ۫5KF�l�L[�fF�D.i%X��xJ^��^6A>I��	ref=52332
+[remote ] ۫5KF�l�L[�fF�D.���Yة�K�;�����f	ref=52333
+[remote ] ۫5KF�l�L[�fF�D.�m.PL�� �x��Ա'+�	ref=52334
+[remote ] ۫5KF�l�L[�fF�D.�3��9��:~���o��	ref=52335
+[remote ] ۫5KF�l�L[�fF�D.r2��Q���h���q��j	ref=52336
+[remote ] ۫5KF�l�L[�fF�D.����7�2M�\�8+\�U�	ref=52337
+[remote ] 5��ĝ�	ref=52338
+[remote ] ۫5KF�l�L[�fF�D.�/�I��1��aQF)#�5	ref=52339
+[remote ] ۫5KF�l�L[�fF�D.�2\~���g�j*�����	ref=52340
+[remote ] ۫5KF�l�L[�fF�D.�P�t���b��j�G���t	ref=52341
+[remote ] ۫5KF�l�L[�fF�D.֎@���6�!5��s<	ref=52342
+[remote ] ۫5KF�l�L[�fF�D.o�1�Be�L�&lK�-��	ref=52343
+[remote ] $,�S�ǊY{�	ref=52357
+[remote ] �g	ref=52366
+[remote ] 	ref=52399
+[remote ] �ֽZ&��	ref=52405
+[remote ] �k�g	ref=52409
+[remote ] JS�4Q�8��)��@w�	ref=52422
+[remote ] �����p�b��Ӟ	ref=52449
+[remote ] �Ǒє!����(�	ref=52450
+[remote ] �ؐI	ref=52462
+[remote ] RemoteEvent	ReplicatedStorage.Benches.Salvaged Flycopter.Default.Events.ReplicateEffect
+[remote ] RemoteEvent	ReplicatedStorage.Benches.Salvaged Flycopter.Default.Events.ReplicateHealth
+[remote ] RemoteEvent	StarterPlayer.StarterCharacterScripts.TorsoController.Look
+
+
+--- BINDABLES (21) ---
+[bind   ] BindableFunction	ReplicatedStorage.CharacterScripts.WheelController.Open
+[bind   ] BindableFunction	ReplicatedStorage.CharacterScripts.WheelController.Close
+[bind   ] BindableEvent	ReplicatedStorage.CharacterScripts.CraftingController.Update
+[bind   ] BindableFunction	ReplicatedStorage.CharacterScripts.InventoryController.Fetch
+[bind   ] BindableFunction	ReplicatedStorage.CharacterScripts.InventoryController.GetBench
+[bind   ] BindableFunction	ReplicatedStorage.CharacterScripts.InventoryController.ItemStats
+[bind   ] BindableEvent	ReplicatedStorage.CharacterScripts.InventoryController.Toggle
+[bind   ] BindableEvent	ReplicatedStorage.CharacterScripts.InventoryController.EquipArmor
+[bind   ] BindableFunction	ReplicatedStorage.CharacterScripts.TeamNavigationController.FetchTeam
+[bind   ] BindableEvent	ReplicatedStorage.CharacterScripts.ViewmodelController.EquipVM
+[bind   ] BindableEvent	ReplicatedStorage.CharacterScripts.ViewmodelController.UpdateVM
+[bind   ] BindableEvent	ReplicatedStorage.CharacterScripts.ViewmodelController.PlayVMAnimation
+[bind   ] BindableEvent	ReplicatedStorage.CharacterScripts.BuildController.EquipBench
+[bind   ] BindableEvent	ReplicatedStorage.CharacterScripts.StatsController.CraftUpdate
+[bind   ] BindableEvent	ReplicatedStorage.CharacterScripts.ClanLeaderboardController.Update
+[bind   ] BindableEvent	ReplicatedStorage.CharacterScripts.ElectricityController.OpenBench
+[bind   ] BindableEvent	ReplicatedStorage.CharacterScripts.ElectricityController.EquipWires
+[bind   ] BindableFunction	ReplicatedStorage.CharacterScripts.InteractController.GetSelected
+[bind   ] BindableFunction	ReplicatedStorage.Benches.Salvaged Flycopter.Default.TakeCriticalDamage
+[bind   ] BindableEvent	StarterPlayer.StarterPlayerScripts.ChatController.UpdateChannel
+[bind   ] BindableEvent	StarterPlayer.StarterPlayerScripts.ChatController.UpdateFontSize
+
+
+--- MODULES (game ReplicatedStorage) (31) ---
+[module ] ReplicatedStorage.Modules.WeldModule
+[module ] ReplicatedStorage.Modules.ActiveBenchModule
+[module ] ReplicatedStorage.Modules.ArmorModule
+[module ] ReplicatedStorage.Modules.GamepadIconModule
+[module ] ReplicatedStorage.Modules.BasePartInfo
+[module ] ReplicatedStorage.Modules.BenchInfo
+[module ] ReplicatedStorage.Modules.ButtonClass
+[module ] ReplicatedStorage.Modules.CameraShakeModule.CameraShakeInstance
+[module ] ReplicatedStorage.Modules.CameraShakeModule.CameraShakePresets
+[module ] ReplicatedStorage.Modules.CameraShakeModule
+[module ] ReplicatedStorage.Modules.GuiUtil
+[module ] ReplicatedStorage.Modules.ItemClass
+[module ] ReplicatedStorage.Modules.ItemSearchModule
+[module ] ReplicatedStorage.Modules.Items
+[module ] ReplicatedStorage.Modules.NumberUtil
+[module ] ReplicatedStorage.Modules.RaycastUtil
+[module ] ReplicatedStorage.Modules.RecipeModule.BasePartRecipes
+[module ] ReplicatedStorage.Modules.RecipeModule.ItemRecipes
+[module ] ReplicatedStorage.Modules.RecipeModule
+[module ] ReplicatedStorage.Modules.ResearchModule
+[module ] ReplicatedStorage.Modules.SettingsModule
+[module ] ReplicatedStorage.Modules.SoundModule
+[module ] ReplicatedStorage.Modules.Spring
+[module ] ReplicatedStorage.Modules.StatusClass
+[module ] ReplicatedStorage.Modules.TableUtil
+[module ] ReplicatedStorage.Modules.ToolInfo
+[module ] ReplicatedStorage.Modules.TweenUtil
+[module ] ReplicatedStorage.Modules.VFXModule
+[module ] ReplicatedStorage.Modules.ViewportModule
+[module ] ReplicatedStorage.Modules.SkinsModule
+[module ] ReplicatedStorage.Modules.AssetContainer
+
+
+--- WORKSPACE SCAN FOLDERS (10) ---
+[folder ] workspace.Drops
+[folder ] workspace.Bases
+[folder ] workspace.Animals
+[folder ] workspace.Plants
+[folder ] workspace.Vegetation
+[folder ] workspace.Military
+[folder ] workspace.Events
+[folder ] workspace.Monuments
+[folder ] workspace.Nodes
+[folder ] workspace.Bases.Loners
+
+
+--- PRELOAD BEFORE dumpgc (require into heap) (31) ---
+[preload] ReplicatedStorage.Modules.ActiveBenchModule
+[preload] ReplicatedStorage.Modules.ArmorModule
+[preload] ReplicatedStorage.Modules.AssetContainer
+[preload] ReplicatedStorage.Modules.BasePartInfo
+[preload] ReplicatedStorage.Modules.BenchInfo
+[preload] ReplicatedStorage.Modules.ButtonClass
+[preload] ReplicatedStorage.Modules.CameraShakeModule
+[preload] ReplicatedStorage.Modules.CameraShakeModule.CameraShakeInstance
+[preload] ReplicatedStorage.Modules.CameraShakeModule.CameraShakePresets
+[preload] ReplicatedStorage.Modules.GamepadIconModule
+[preload] ReplicatedStorage.Modules.GuiUtil
+[preload] ReplicatedStorage.Modules.ItemClass
+[preload] ReplicatedStorage.Modules.ItemSearchModule
+[preload] ReplicatedStorage.Modules.Items
+[preload] ReplicatedStorage.Modules.NumberUtil
+[preload] ReplicatedStorage.Modules.RaycastUtil
+[preload] ReplicatedStorage.Modules.RecipeModule
+[preload] ReplicatedStorage.Modules.RecipeModule.BasePartRecipes
+[preload] ReplicatedStorage.Modules.RecipeModule.ItemRecipes
+[preload] ReplicatedStorage.Modules.ResearchModule
+[preload] ReplicatedStorage.Modules.SettingsModule
+[preload] ReplicatedStorage.Modules.SkinsModule
+[preload] ReplicatedStorage.Modules.SoundModule
+[preload] ReplicatedStorage.Modules.Spring
+[preload] ReplicatedStorage.Modules.StatusClass
+[preload] ReplicatedStorage.Modules.TableUtil
+[preload] ReplicatedStorage.Modules.ToolInfo
+[preload] ReplicatedStorage.Modules.TweenUtil
+[preload] ReplicatedStorage.Modules.VFXModule
+[preload] ReplicatedStorage.Modules.ViewportModule
+[preload] ReplicatedStorage.Modules.WeldModule

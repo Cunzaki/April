@@ -12,6 +12,8 @@ Read this at the start of every session.
 | `scripts/bundle.mjs` | Bundles `src/` → `april.lua` |
 | `load.lua` | Local-first loader, then GitHub URL |
 | `dump/` | Game dump (gitignored — local only) |
+| `tools/` | GC / rbxlx utilities (local workspace) |
+| `docs/API.md` | Vector Lua Engine API — read every session |
 
 **Build:** `npm run build`
 

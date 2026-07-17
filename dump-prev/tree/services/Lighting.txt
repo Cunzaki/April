@@ -1,9 +1,0 @@
-Sky Sky	Lighting.Sky
-BloomEffect BloomEffect	Lighting.BloomEffect
-BlurEffect BlurEffect	Lighting.BlurEffect
-ColorCorrectionEffect ColorCorrectionEffect	Lighting.ColorCorrectionEffect
-ColorCorrectionEffect NVG	Lighting.NVG
-SunRaysEffect SunRaysEffect	Lighting.SunRaysEffect
-BlurEffect WaterBlur	Lighting.WaterBlur
-ColorCorrectionEffect WaterColorCorrection	Lighting.WaterColorCorrection
-Atmosphere Atmosphere	Lighting.Atmosphere

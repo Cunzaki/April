@@ -34,3 +34,6 @@ April_meta.txt
 # Local Fallen game dump (restored from history; do not commit)
 dump/
 
+# Local Vector injector config (workspace-only)
+injector/
+

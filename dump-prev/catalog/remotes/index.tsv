@@ -1,252 +1,0 @@
-class	path	referent
-RemoteEvent	ReplicatedStorage.Benches.Salvaged Flycopter.Default.Events.ReplicateEffect	37563
-RemoteEvent	ReplicatedStorage.Benches.Salvaged Flycopter.Default.Events.ReplicateHealth	37564
-RemoteEvent	ReplicatedStorage.ClientSignals.Leaderboard	40223
-UnreliableRemoteEvent	ReplicatedStorage.ClientSignals.VFX	40224
-RemoteEvent	ReplicatedStorage.ClientSignals.VFXOrdered	40225
-UnreliableRemoteEvent	ReplicatedStorage.ClientSignals.Build	40226
-RemoteEvent	ReplicatedStorage.ClientSignals.Inventory	40227
-RemoteEvent	ReplicatedStorage.ClientSignals.JukeboxSetId	40228
-RemoteEvent	ReplicatedStorage.ClientSignals.Radio	40229
-RemoteEvent	ReplicatedStorage.ClientSignals.UpdateBenchConnections	40230
-RemoteEvent	ReplicatedStorage.ClientSignals.UpdateBenchPower	40231
-UnreliableRemoteEvent	ReplicatedStorage.ClientSignals.SystemMessage	40232
-RemoteEvent	ReplicatedStorage.ClientSignals.BenchCleanup	40233
-RemoteFunction	ReplicatedStorage.SettingRemotes.Fetch	40529
-RemoteEvent	ReplicatedStorage.SettingRemotes.Update	40530
-RemoteFunction	ReplicatedStorage.SettingRemotes.Reset	40531
-RemoteEvent	ReplicatedStorage.SettingRemotes.Teleport	40532
-RemoteFunction	ReplicatedStorage.ClanRemoteFunction	61783
-RemoteFunction	ReplicatedStorage.Ping	61784
-RemoteEvent	ReplicatedStorage.LoadingScreen	61785
-RemoteEvent	ReplicatedStorage.SoundRemotes.Play	61787
-RemoteEvent	ReplicatedStorage.SoundRemotes.Footsteps	61788
-RemoteEvent	ReplicatedStorage.Sigma	61789
-RemoteFunction	ReplicatedStorage.Sound	61933
-RemoteEvent	ReplicatedStorage.PlayerOwnershipUpdated	61934
-RemoteEvent	ReplicatedStorage.RelicsServerSoundAdded	61935
-RemoteFunction	ReplicatedStorage.GetTracksFunction	61936
-RemoteEvent	ReplicatedStorage.FavoriteChangedEvent	61937
-RemoteFunction	ReplicatedStorage.FavoriteStatusFunction	61938
-RemoteFunction	ReplicatedStorage.FavoriteTrackFunction	61939
-RemoteFunction	ReplicatedStorage.FavoriteIdsFunction	61940
-RemoteEvent	ReplicatedStorage.Remotes.�1ȰV�В<o*1=D�cI.�$!.��M84Ϛy�H��Ap	61943
-RemoteFunction	ReplicatedStorage.Remotes.�1ȰV�В<o*1=D�cI.h�!)�i1E!H��/1ͨ	61944
-RemoteEvent	ReplicatedStorage.Remotes.�1ȰV�В<o*1=D�cI.�"\j�h*r��P!\�;}	61945
-RemoteEvent	ReplicatedStorage.Remotes.�1ȰV�В<o*1=D�cI.��M�H=[���9ih�	61946
-RemoteEvent	ReplicatedStorage.Remotes.�1ȰV�В<o*1=D�cI.�� ���U2qVg���Y	61947
-RemoteFunction	ReplicatedStorage.Remotes.��BEr�<�S9��B��.2�qn�>[U�~v�7t	61949
-RemoteEvent	ReplicatedStorage.Remotes.��BEr�<�S9��B��.8^~_9Ve�#Nc@����`	61950
-RemoteFunction	ReplicatedStorage.Remotes.��BEr�<�S9��B��.}�_jC-Y"6n#1�X�	61951
-RemoteEvent	ReplicatedStorage.Remotes.��BEr�<�S9��B��.�H�J�pN�^vr��q	61952
-RemoteEvent	ReplicatedStorage.Remotes.��BEr�<�S9��B��.!!uw��}e�c����	61953
-RemoteEvent	ReplicatedStorage.Remotes.��BEr�<�S9��B��.��i�Et4��#&�Rg�A�	61954
-RemoteEvent	ReplicatedStorage.Remotes.��BEr�<�S9��B��.B)$��P�^�T���	61955
-RemoteFunction	ReplicatedStorage.Remotes.��BEr�<�S9��B��.�&Ώ���)~��b�.�UX$	61956
-RemoteEvent	ReplicatedStorage.Remotes.��BEr�<�S9��B��.N�l�M&IM�����߹�	61957
-RemoteEvent	ReplicatedStorage.Remotes.��BEr�<�S9��B��.Y���)�V�ẃ��fqf	61958
-RemoteEvent	ReplicatedStorage.Remotes.��BEr�<�S9��B��.���pnn{�2Q�@]A0	61959
-RemoteEvent	ReplicatedStorage.Remotes.��BEr�<�S9��B��.\ݜ ~>�.����H��	61960
-RemoteEvent	ReplicatedStorage.Remotes.fD[�Hg�i%�6N#���.tE����.��1��<�	61962
-RemoteFunction	ReplicatedStorage.Remotes.fD[�Hg�i%�6N#���.�^���Ͳ(������	61963
-RemoteEvent	ReplicatedStorage.Remotes.fD[�Hg�i%�6N#���.���Ld���z��E�-`&j	61964
-RemoteEvent	ReplicatedStorage.Remotes.fD[�Hg�i%�6N#���.���î(��<��2��ω��d	61965
-RemoteEvent	ReplicatedStorage.Remotes.fD[�Hg�i%�6N#���.�d�~���^����0  ��	61966
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.ފ��A[�V���[��O�	61968
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.�ڃMG� @�i�j��k�nY;	61969
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.��ل#G=�Ô*k�>�n�	61970
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.��d��`n���ZN�*g	61971
-RemoteFunction	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.dO�Mt;$+���>R�Z	61972
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.�.c87e8�������o[	61973
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.���0�T�M�Z%]>���A	61974
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.��$���k��xH*�:�5�,	61975
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.�+�6�T�xx2!^�L�L	61976
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.)�o7c��0�n�Q�B	61977
-RemoteFunction	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.�� }݊1���CZ$]aC}�	61978
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.��酉s����e+W��nW	61979
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.SuZJ�S#DxC��%�3�e	61980
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.D�2$��~9��ܚ�4�	61981
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.dzy ������%0&�	61982
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.i���Tx$Z��g����O	61983
-RemoteFunction	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.�c}72��r��B1q���n	61984
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.�Ry04�V �C�8���L	61985
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.�|8���m�.��(��ZB	61986
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.]�i#�H�=;��2�HKWe	61987
-RemoteFunction	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.M(J����U���a�?�ރ��	61988
-RemoteFunction	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.�SؤY,����&	61989
-RemoteFunction	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.��s���A>j�{�D�2��g	61990
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.�7��W�aI�&�φ�Q[���	61991
-RemoteEvent	ReplicatedStorage.Remotes.d�eR�#o�,9��`B4q^W.��<�zv�:�o�+Og��	61992
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.>�|���NVT;�����	61994
-RemoteFunction	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.����"x��{LuOc_`�	61995
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.=�hB��$<���}DslF	61996
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.��5�����&�UQ!?�	61997
-RemoteFunction	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.��*Pe#c�~7t���	61998
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.-�փV@E=E�M�(��;	61999
-RemoteFunction	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.#���O5���/ڊ@� �	62000
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.M\*����!K'����w9	62001
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.�2S�����5��4YaO��	62002
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.i�rF�E{�4;I�k�6��	62003
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.o%��CN쁮��}a ��~	62004
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.~J�w����38���Z�"k5	62005
-RemoteFunction	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.�F�EwuQ��^�3DLryX�	62006
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.�\?���0�t�%����t	62007
-RemoteFunction	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.�A��2�kB���pW	62008
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.7��/�bˌ|�y&��^	62009
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.�_����տ� 8GED�}b	62010
-RemoteFunction	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.@�[�Vڐ�`m�I�F?X	62011
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.�+�����^7�����Nm	62012
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.�?�����R�����+�Gf	62013
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.e~��ǄUY+XN��OA	62014
-RemoteFunction	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.V���p*����܈!�7�a	62015
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.�=/h���vC7xC6W�	62016
-RemoteFunction	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.���D�TV���.��m���d	62017
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.GX!&K�q'��5��U��o,	62018
-RemoteFunction	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.?�§A`���E�� ;�{ƌ	62019
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.��Sw�e���ύqF�F}	62020
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.d�K�u�W��bR���^l	62021
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.�Z69j�����@�^�:�	62022
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.x����kN�i��SR-Ow	62023
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.��K� 0tq;��c��Xa�8	62024
-RemoteFunction	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.DNtf�!���-k/��T	62025
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.hpZ� H��B���?�By	62026
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.���3�TPZ�\.��1�>k	62027
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.�5ї�[�&�l���g�	62028
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.�L�F6\��jAާ/2а�	62029
-RemoteEvent	ReplicatedStorage.Remotes.�� ۫5KF�l�L[�fF�D.��^���s0�>E��k�B�@	62030
-RemoteFunction	ReplicatedStorage.Remotes.�1��|>T��"]��.�w�x(.�,Y�8�� �$	62032
-RemoteFunction	ReplicatedStorage.Remotes.�1��|>T��"]��.�bڲ���,�������]	62033
-RemoteEvent	ReplicatedStorage.Remotes.�1��|>T��"]��.NA�L �C �馕Y�s�	62034
-RemoteEvent	ReplicatedStorage.Remotes.�1��|>T��"]��.�Zo����d�W�Tԕ%�i�	62035
-RemoteFunction	ReplicatedStorage.Remotes.�1��|>T��"]��.��0]vq�� �t꒿�	62036
-RemoteFunction	ReplicatedStorage.Remotes.�1��|>T��"]��.�k[90����I������	62037
-RemoteFunction	ReplicatedStorage.Remotes.�1��|>T��"]��.Cϛ<�����s9�T`.��	62038
-RemoteEvent	ReplicatedStorage.Remotes.�1��|>T��"]��.OJx����e�䃀4��	62039
-RemoteEvent	ReplicatedStorage.Remotes.�1��|>T��"]��.�uW�EѦS��������	62040
-RemoteEvent	ReplicatedStorage.Remotes.�1��|>T��"]��.Bk�j�#�K֚ ��n	62041
-RemoteFunction	ReplicatedStorage.Remotes.�1��|>T��"]��.��&d����ȑ2�5�	62042
-RemoteEvent	ReplicatedStorage.Remotes.�1��|>T��"]��.[y�g9��֨�y[�����	62043
-RemoteEvent	ReplicatedStorage.Remotes.�1��|>T��"]��.I�P2�j8χ�����U�	62044
-RemoteEvent	ReplicatedStorage.Remotes.�1��|>T��"]��.�x�}��Z+����	62045
-RemoteEvent	ReplicatedStorage.Remotes.�1��|>T��"]��.���X�ܻ��X��'7ܝi	62046
-RemoteFunction	ReplicatedStorage.Remotes.�1��|>T��"]��.��`!'ta ��?����X	62047
-RemoteEvent	ReplicatedStorage.Remotes.�1��|>T��"]��.��!A�G��@K��#~#��	62048
-RemoteEvent	ReplicatedStorage.Remotes.�1��|>T��"]��.��.��O*�?���Rk�'$	62049
-RemoteEvent	ReplicatedStorage.Remotes.�1��|>T��"]��.؊�A�\����rN=ʤ�	62050
-RemoteEvent	ReplicatedStorage.Remotes.�1��|>T��"]��.҈���J��/��;纡	62051
-RemoteFunction	ReplicatedStorage.Remotes.�1��|>T��"]��.A�qoo�x��_���"�K	62052
-RemoteFunction	ReplicatedStorage.Remotes.�1��|>T��"]��.�x�UQi G4xI�46	62053
-RemoteEvent	ReplicatedStorage.Remotes.�1��|>T��"]��.^v�1K�34E�e�}ӓT	62054
-RemoteEvent	ReplicatedStorage.Remotes.�1��|>T��"]��.b]D]/��-��x-��n�K	62055
-RemoteEvent	ReplicatedStorage.Remotes.�1��|>T��"]��.� r�b䈾ߤ^$z�eQ��	62056
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.ʋ~j���IM0�pw��<	62058
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.��Z��z4g�t��!L�/	62059
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.m�s��\x�'xp0���	62060
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.g$�����3�����R�	62061
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.�𘬼�Q�W��!�妖	62062
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.��I���߲�f `�h�	62063
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.�F_�>'E����`��`}�8	62064
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.������/�Z��d'��z	62065
-RemoteFunction	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.-�b��G!��u�~���hi�j	62066
-RemoteFunction	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.���>��*��ipA�it	62067
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.�O-��:��l����y�~Z	62068
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.<���ngo�h��%���C�U	62069
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.�1�~��L�M���2��1{�	62070
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.�}�p����ywM��"	62071
-RemoteFunction	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.���JN�)�\���Kճ,�	62072
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.��,;$Q{����P���	62073
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.��jd]�_O�\���J�R��	62074
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.S/&�Xok�nl-�p��	62075
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.ۧo�S��sP�Ržqo(	62076
-RemoteFunction	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.x��A<��[�٩��d��	62077
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.�jX^ M�~4��v����_	62078
-RemoteFunction	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.W9En����h�-�@��v�h	62079
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.p{Ļ����R�лWk��	62080
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.w���0@J�e����-����	62081
-RemoteFunction	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.e.;�{��a�X *���	62082
-RemoteFunction	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.؉�ہqN��L���ί��	62083
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.�����>�a�j���.�	62084
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.�N����"���jU�EDI�'	62085
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.)���� �H/MR2^W�We	62086
-RemoteFunction	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.00�x��y�=�v��:��E	62087
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.!�Ѥ��Y�z�x�����~	62088
-RemoteFunction	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.c��!"ڇ�[|�F�5��W	62089
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.`ً.��D�����{{vSv	62090
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.n�T#��N�:u�%�M��ةQ	62091
-RemoteFunction	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.�>�m��O�B�M�_�`9�	62092
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.U&N9�{�]��:���y.W	62093
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.:�KQ�^,�_��yy�D�\�	62094
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.�H�c���08��\�P�	62095
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.��~u�O�/-�T��y�۳	62096
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.6��j.؆D����'��	62097
-RemoteFunction	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.��m��h�D3 ��m�ѷ��	62098
-RemoteFunction	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.l#&}��i�).���f��c	62099
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.��Ǐ�P�M;1�s������	62100
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.o�Z�A?D��e���.�f��	62101
-RemoteFunction	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.��Y�0��+�W�R<t�	62102
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.g-۴����_5��N%@�	62103
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.�i4�Xq������N��	62104
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.G�y�d��b�\3���e��	62105
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.��\�������ːmkg_	62106
-RemoteEvent	ReplicatedStorage.Remotes.�n&�A|[1m�O>p��.����Gr�Q.Bxj��Ne	62107
-RemoteEvent	ReplicatedStorage.Remotes.NM���j���F������.b��+�=a�*%f%��A�	62109
-RemoteEvent	ReplicatedStorage.Remotes.NM���j���F������.�R�j殭L�����-0�	62110
-RemoteFunction	ReplicatedStorage.Remotes.NM���j���F������.`�X;��0�[��6yX �m	62111
-RemoteEvent	ReplicatedStorage.Remotes.NM���j���F������.1v��tUE��>�<3����	62112
-RemoteFunction	ReplicatedStorage.Remotes.NM���j���F������.X5���+���Z �k�$	62113
-RemoteEvent	ReplicatedStorage.Remotes.NM���j���F������.�m�y��������;TE	62114
-RemoteEvent	ReplicatedStorage.Remotes.NM���j���F������.}T^ ���O@o�3*p��	62115
-RemoteEvent	ReplicatedStorage.Remotes.NM���j���F������.�q�R����j�獉��c3	62116
-RemoteFunction	ReplicatedStorage.Remotes.NM���j���F������.R/` tcx�J�ȱ����"�	62117
-RemoteEvent	ReplicatedStorage.Remotes.NM���j���F������.�0�N��l���p������	62118
-RemoteFunction	ReplicatedStorage.Remotes.NM���j���F������.��Cͫ[<����C��:=�	62119
-RemoteEvent	ReplicatedStorage.Remotes.NM���j���F������.x$���˛J<T����u�J�	62120
-RemoteEvent	ReplicatedStorage.Remotes.NM���j���F������.���|������~�^1g�J	62121
-RemoteEvent	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.*\�����2C�--(>�	62123
-RemoteEvent	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.V;X�7&���Ћ��Q��b	62124
-RemoteFunction	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.J���=v�?�//kb�4^	62125
-RemoteEvent	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.��a:����뾐�e�1t�	62126
-RemoteFunction	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.vA9v6Dly���t%@�	62127
-RemoteFunction	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.���j���9�l��t��	62128
-RemoteEvent	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.��>�x�>���ŭ�Ց�0Q�	62129
-RemoteEvent	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.���=����z��ZH���	62130
-RemoteEvent	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.<�����"1��K�ql���	62131
-RemoteFunction	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.��^�h[b*�2{�U2K7�g�	62132
-RemoteFunction	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.4f1gog�??�j�A�%�	62133
-RemoteEvent	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.��g�Q�[.��)����	62134
-RemoteEvent	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.��#"���>��>>�F��	62135
-RemoteEvent	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.��/�r���fҫ�|�{�0	62136
-RemoteFunction	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.��#�]�#�*�X.N�f�`	62137
-RemoteEvent	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.8����X��9[ѡ�I��	62138
-RemoteEvent	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.��K'�� p��S�/`\�{.�	62139
-RemoteEvent	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.��1iٟ���J�k�M1n�	62140
-RemoteFunction	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.rwKs~I2�¶粑E�uP	62141
-RemoteEvent	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.����8H��%-��E}��j�(	62142
-RemoteFunction	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.�ٙ6���a�Z����A	62143
-RemoteEvent	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.Ͽ*��~���Ɂ��1/�	62144
-RemoteEvent	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.�{��7��F�P�r��@�M	62145
-RemoteEvent	ReplicatedStorage.Remotes.�I=�i�����Q͏1��1.�c1I(�:֟��޼o3��	62146
-RemoteEvent	ReplicatedStorage.Remotes.~��a��G���g����.�^�i#u$�&��-(�K��	62148
-RemoteEvent	ReplicatedStorage.Remotes.~��a��G���g����.��Q�u�t�Q8()5[�?	62149
-RemoteFunction	ReplicatedStorage.Remotes.~��a��G���g����.ϨssP���SꜴc�gh	62150
-RemoteFunction	ReplicatedStorage.Remotes.~��a��G���g����.�����h����Ū�h80+�)	62151
-RemoteEvent	ReplicatedStorage.Remotes.~��a��G���g����.�ץ��V�U�d0��V/.�	62152
-RemoteEvent	ReplicatedStorage.Remotes.~��a��G���g����.���ЏTP��M���phx|-	62153
-RemoteEvent	ReplicatedStorage.Remotes.~��a��G���g����.��SqT�|�5�v�f�	62154
-RemoteFunction	ReplicatedStorage.Remotes.~��a��G���g����.��%�p� �����,x��	62155
-RemoteEvent	ReplicatedStorage.Remotes.~��a��G���g����.5_v�j��s>�9b�� &v	62156
-RemoteFunction	ReplicatedStorage.Remotes.~��a��G���g����.5���W_��^q}�:5%�	62157
-RemoteEvent	ReplicatedStorage.Remotes.~��a��G���g����.)� /����e�����Y�	62158
-RemoteFunction	ReplicatedStorage.Remotes.�#�W�^�b�a�����6.і���S��H�-G��0=8�	62160
-RemoteEvent	ReplicatedStorage.Remotes.�#�W�^�b�a�����6.�l�q����;�К>,�h{�	62161
-RemoteFunction	ReplicatedStorage.Remotes.�#�W�^�b�a�����6.�B�rdO��)E��p��x3�	62162
-RemoteEvent	ReplicatedStorage.Remotes.�#�W�^�b�a�����6.��&Ծm�O���x%!a	62163
-RemoteEvent	ReplicatedStorage.Remotes.�#�W�^�b�a�����6.K%{�k��;�� QG�� x��	62164
-RemoteEvent	ReplicatedStorage.Remotes.�#�W�^�b�a�����6.|����36bђ� ���A	62165
-RemoteEvent	ReplicatedStorage.Remotes.�#�W�^�b�a�����6.��O���sF�;!AM	62166
-RemoteEvent	ReplicatedStorage.Remotes.�#�W�^�b�a�����6.����� '�+���8�C47	62167
-RemoteFunction	ReplicatedStorage.Remotes.�#�W�^�b�a�����6.����h_p�`5�m�<�\	62168
-RemoteEvent	ReplicatedStorage.Remotes.�#�W�^�b�a�����6.���a���(�#��j��q	62169
-RemoteEvent	ReplicatedStorage.Remotes.�#�W�^�b�a�����6.]�qLR!�h����vY��	62170
-RemoteEvent	ReplicatedStorage.Remotes.�#�W�^�b�a�����6.�ٺ� c[/�z��@77M	62171
-RemoteEvent	StarterPlayer.StarterCharacterScripts.TorsoController.Look	62584
