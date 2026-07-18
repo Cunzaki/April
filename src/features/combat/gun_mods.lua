@@ -11,8 +11,9 @@ local M = {}
 local P = "april_gunmods_enabled"
 local HELD_ID = "april_gm_held_weapon"
 local REJOIN_GC_DELAY_MS = 20000
-local RETRY_MS = 750
-local RETRY_MAX_MS = 30000
+local RETRY_MS = 900
+local RETRY_MAX_MS = 12000
+local MIN_SCHEDULE_MS = 220
 
 M._apply_dirty = false
 M._force_apply = false
@@ -50,7 +51,8 @@ local function schedule_apply(delay_ms)
     M._apply_dirty = true
     M._force_apply = true
     local now = tick_ms()
-    local until_ms = now + (delay_ms or 400)
+    local wait = math.max(MIN_SCHEDULE_MS, delay_ms or 400)
+    local until_ms = now + wait
     if until_ms > M._defer_until then
         M._defer_until = until_ms
     end
@@ -294,7 +296,8 @@ function M.register_menu()
     for _, id in ipairs(editor_ids) do
         settings.on_change(id, function()
             if settings.enabled(P) then
-                schedule_apply(150)
+                -- Debounce slider spam — live editor applies without a saved profile
+                schedule_apply(280)
             end
         end)
     end

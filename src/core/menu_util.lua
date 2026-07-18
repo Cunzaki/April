@@ -35,6 +35,11 @@ end
 
 function M.ensure_tab()
     if M._tab_ready then return end
+    -- Custom UI mode: never create Vector menu tabs.
+    if April and April.custom_ui then
+        M._tab_ready = true
+        return
+    end
     if not (April and April._menu_tab_ready) and menu and menu.add_tab then
         menu.add_tab(M.TAB, "A", "full")
     end
@@ -149,13 +154,43 @@ local function master_visible(master_id)
     return settings_mod().bool(master_id, false)
 end
 
-function M.sync_masters()
-    for master_id in pairs(M._master_hooked) do
-        local show = master_visible(master_id)
-        for _, id in ipairs(M._master_children[master_id] or {}) do
-            set_visible(id, show)
+-- Child is visible only if every hooked master that lists it is on.
+local function effective_visible(id)
+    local any = false
+    for master_id, hooked in pairs(M._master_hooked) do
+        if hooked then
+            local kids = M._master_children[master_id]
+            if kids then
+                for i = 1, #kids do
+                    if kids[i] == id then
+                        any = true
+                        if not master_visible(master_id) then
+                            return false
+                        end
+                        break
+                    end
+                end
+            end
         end
     end
+    return true
+end
+
+local function apply_master_tree()
+    -- Collect every child id once, then apply AND of all parent masters
+    local seen = {}
+    for master_id in pairs(M._master_hooked) do
+        for _, id in ipairs(M._master_children[master_id] or {}) do
+            if not seen[id] then
+                seen[id] = true
+                set_visible(id, effective_visible(id))
+            end
+        end
+    end
+end
+
+function M.sync_masters()
+    apply_master_tree()
     for i = 1, #M._when_rules do
         local rule = M._when_rules[i]
         if rule.sync then rule.sync() end
@@ -164,9 +199,12 @@ end
 
 function M.sync_master(master_id)
     if not master_id or not M._master_hooked[master_id] then return end
-    local show = master_visible(master_id)
-    for _, id in ipairs(M._master_children[master_id] or {}) do
-        set_visible(id, show)
+    apply_master_tree()
+    for i = 1, #M._when_rules do
+        local rule = M._when_rules[i]
+        if rule.sync and rule.watch and rule.watch[master_id] then
+            rule.sync()
+        end
     end
 end
 
@@ -174,18 +212,19 @@ function M.bind_master(master_id, child_ids)
     if not master_id or not child_ids then return end
     M._master_children[master_id] = add_child_ids(M._master_children[master_id], child_ids)
 
-    if M._master_hooked[master_id] then return end
+    if M._master_hooked[master_id] then
+        apply_master_tree()
+        return
+    end
     M._master_hooked[master_id] = true
 
-    local function sync(new_val)
-        local show
-        if new_val == nil then
-            show = master_visible(master_id)
-        else
-            show = new_val == true or new_val == 1
-        end
-        for _, id in ipairs(M._master_children[master_id] or {}) do
-            set_visible(id, show)
+    local function sync()
+        apply_master_tree()
+        for i = 1, #M._when_rules do
+            local rule = M._when_rules[i]
+            if rule.sync and rule.watch and rule.watch[master_id] then
+                rule.sync()
+            end
         end
     end
 
@@ -242,8 +281,7 @@ function M.bind_children(master_id, extra_ids)
     M.bind_master(master_id, extra_ids or {})
 end
 
--- Custom Toggle / Hold bind (Vector's built-in Always/Hold/Toggle is unreliable).
--- Checkbox key is for display + our listener; Bind Mode combo is Toggle|Hold.
+-- Custom Always / Hold / Toggle bind (mode set via RMB on key chip in custom UI).
 -- Gate features with settings.enabled(id).
 function M.register_keybind(T, G, id, label, default, extra)
     extra = extra or {}
@@ -255,7 +293,7 @@ function M.register_keybind(T, G, id, label, default, extra)
 
     local mode_id = id .. "_mode"
     local mode_label = label .. " Bind Mode"
-    menu.add_combo(T, G, mode_id, mode_label, { "Toggle", "Hold" }, 0, M.parent(id))
+    menu.add_combo(T, G, mode_id, mode_label, { "Always", "Hold", "Toggle" }, 2, M.parent(id))
 
     April.require("core.feature_bind").register({
         id = id,

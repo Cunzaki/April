@@ -5,6 +5,7 @@ local esp_util = April.require("core.esp_util")
 local menu_util = April.require("core.menu_util")
 local gpu_chams = April.require("core.gpu_chams")
 local player_state = April.require("game.player_state")
+local player_gear = April.require("game.player_gear")
 local npcs = April.require("game.npcs")
 local mod_checker = April.require("features.utility.mod_checker")
 local mod_ids = April.require("game.mod_ids")
@@ -20,19 +21,15 @@ local FLAGS = "april_player_esp_flags"
 
 local ID_HEALTH = "april_player_health"
 local ID_SKELETON = "april_player_skeleton"
-local ID_OFFSCREEN = "april_player_offscreen"
 local ID_NAME = "april_player_show_name"
 local ID_DIST = "april_player_show_distance"
 local ID_WEAPON = "april_player_show_weapon"
-local ID_HP_TEXT = "april_player_health_text"
 local ID_CLAN = "april_player_clan_tag"
 local ID_CLAN_COLOR = "april_player_clan_color"
 local ID_BOX = "april_player_box_mode"
 local ID_RANGE = "april_player_range"
 
--- Filters
 local F_TEAM, F_SAFEZONE, F_SKIP_DOWNED = 1, 2, 3
--- Status flags (draw-only tags — not clan)
 local FL_DOWNED, FL_SAFEZONE, FL_VIP, FL_STAFF, FL_REVIVING = 1, 2, 3, 4, 5
 
 local MUTED = { 0.82, 0.84, 0.88, 0.92 }
@@ -46,6 +43,32 @@ local FLAG_COLS = {
     STAFF = { 1, 0.33, 0.33, 1 },
     REVIVE = { 0.45, 1, 0.55, 1 },
 }
+
+local _wpn_cache = {}
+local WPN_TTL_MS = 220
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function cache_key(p)
+    return tostring(p.user_id or 0) .. ":" .. tostring(p.name or "")
+end
+
+local function held_weapon_name(p)
+    local key = cache_key(p)
+    local now = tick_ms()
+    local ent = _wpn_cache[key]
+    if ent and (now - ent.t) < WPN_TTL_MS then
+        return ent.name
+    end
+    local name = nil
+    pcall(function()
+        name = player_gear.held_name(p)
+    end)
+    _wpn_cache[key] = { t = now, name = name }
+    return name
+end
 
 local function default_color()
     return settings.color(P, { 1, 0.35, 0.35, 1 })
@@ -69,13 +92,13 @@ local function players_chams_active()
 end
 
 local function filter_opts()
-    local downed = 1 -- allow
-    if settings.multi(FILTERS, F_SKIP_DOWNED, true) then
+    local downed = 1
+    if settings.multi(FILTERS, F_SKIP_DOWNED, false) then
         downed = 0
     end
     return {
         team = settings.multi(FILTERS, F_TEAM, true),
-        skip_sz = settings.multi(FILTERS, F_SAFEZONE, true),
+        skip_sz = settings.multi(FILTERS, F_SAFEZONE, false),
         downed = downed,
     }
 end
@@ -139,67 +162,36 @@ function M.register_menu()
     menu.add_checkbox(T, G.VISUALS, ID_HEALTH, "Player Health Bar", true, { parent = P })
     menu.add_checkbox(T, G.VISUALS, ID_SKELETON, "Player Skeleton", false,
         menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.92 } }))
-    menu.add_checkbox(T, G.VISUALS, ID_OFFSCREEN, "Player Offscreen Arrows", false,
-        menu_util.parent(P, { colorpicker = { 1, 0.35, 0.35, 1 } }))
     menu.add_checkbox(T, G.VISUALS, ID_NAME, "Player Name", true, { parent = P })
     menu.add_checkbox(T, G.VISUALS, ID_CLAN, "Player Clan Tag", true, { parent = P })
     menu.add_checkbox(T, G.VISUALS, ID_CLAN_COLOR, "Player Color By Clan", false, { parent = P })
     menu.add_checkbox(T, G.VISUALS, ID_DIST, "Player Distance", true, { parent = P })
     menu.add_checkbox(T, G.VISUALS, ID_WEAPON, "Player Weapon", false, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, ID_HP_TEXT, "Player Health Text", false, { parent = P })
 
     menu.add_multicombo(T, G.VISUALS, FILTERS, "ESP Filters", {
         "Team Check", "Skip Safezone", "Skip Downed",
     }, { false, false, false }, { parent = P })
-    set_multi_defaults(FILTERS, { true, true, true })
+    -- Default: team check only — Skip SZ/Downed hide the players those flags describe
+    set_multi_defaults(FILTERS, { true, false, false })
 
-    -- Dump-backed status tags (ChatController + StateAssetController).
     menu.add_multicombo(T, G.VISUALS, FLAGS, "ESP Flags", {
         "Downed", "Safezone", "VIP", "Staff", "Reviving",
     }, { false, false, false, false, false }, { parent = P })
     set_multi_defaults(FLAGS, { true, true, true, true, true })
 
-    if gpu_chams.available() then
-        menu.add_checkbox(T, G.VISUALS, CHAMS, "Player Engine Chams", false, { parent = P })
-        gpu_chams.add_mode_color_menu(T, G.VISUALS, P, CHAMS_MODE, CHAMS_COLOR,
-            "Player Chams Mode", "Player Chams Color")
-    end
-
     menu.add_slider_int(T, G.VISUALS, ID_RANGE, "Player Range", 50, 2000, 500, { parent = P })
     menu_util.gap(T, G.VISUALS)
 
     local children = {
-        ID_BOX, ID_HEALTH, ID_SKELETON, ID_OFFSCREEN,
-        ID_NAME, ID_CLAN, ID_CLAN_COLOR, ID_DIST, ID_WEAPON, ID_HP_TEXT,
+        ID_BOX, ID_HEALTH, ID_SKELETON,
+        ID_NAME, ID_CLAN, ID_CLAN_COLOR, ID_DIST, ID_WEAPON,
         FILTERS, FLAGS, ID_RANGE,
     }
-    if gpu_chams.available() then
-        children[#children + 1] = CHAMS
-        children[#children + 1] = CHAMS_MODE
-        children[#children + 1] = CHAMS_COLOR
-    end
     menu_util.bind_children(P, children)
 
+    -- Clear any previous player chams owner from older builds
     if gpu_chams.available() then
-        gpu_chams.register_owner("players", {
-            rescan_ms = 450,
-            is_active = players_chams_active,
-            style = function()
-                return gpu_chams.mode_index(CHAMS_MODE, 0), gpu_chams.color_index(CHAMS_COLOR, 0)
-            end,
-            collect = collect_player_chams,
-        })
-        gpu_chams.wire_style_controls("players", CHAMS_MODE, CHAMS_COLOR)
-        local function resync()
-            if players_chams_active() then
-                gpu_chams.sync_owner("players", true)
-            else
-                gpu_chams.clear_owner("players")
-            end
-        end
-        settings.on_change(CHAMS, resync)
-        settings.on_change(P, resync)
-        settings.on_change(FILTERS, resync)
+        pcall(function() gpu_chams.clear_owner("players") end)
     end
 end
 
@@ -233,7 +225,6 @@ local function collect_flags(p)
 end
 
 local function screen_bounds(p)
-    -- Prefer engine bounds when they look like a real body (not a speck / not inflated).
     if p.get_bounds then
         local gb = p:get_bounds()
         if gb and gb.valid and gb.w >= 4 and gb.h >= 8 then
@@ -252,16 +243,19 @@ local function screen_bounds(p)
     return nil
 end
 
+local function is_on_screen(bounds, pos)
+    if bounds and bounds.valid then
+        local sw, sh = draw_util.screen_size()
+        local cx = bounds.x + bounds.w * 0.5
+        local cy = bounds.y + bounds.h * 0.5
+        return cx > -20 and cy > -20 and cx < sw + 20 and cy < sh + 20
+    end
+    if not pos then return false end
+    local _, _, on = esp_util.w2s(pos.x, pos.y, pos.z)
+    return on == true
+end
+
 function M.update(_dt)
-    if not settings.enabled(P) then
-        if gpu_chams.available() then
-            gpu_chams.sync_owner("players")
-        end
-        return
-    end
-    if gpu_chams.available() then
-        gpu_chams.sync_owner("players")
-    end
 end
 
 function M.draw()
@@ -277,15 +271,12 @@ function M.draw()
 
     local show_health = settings.bool(ID_HEALTH, true)
     local show_skel = settings.bool(ID_SKELETON, false)
-    local show_off = settings.bool(ID_OFFSCREEN, false)
     local show_name = settings.bool(ID_NAME, true)
     local show_clan = settings.bool(ID_CLAN, true)
     local show_dist = settings.bool(ID_DIST, true)
     local show_wpn = settings.bool(ID_WEAPON, false)
-    local show_hp_text = settings.bool(ID_HP_TEXT, false)
 
     local skel_col = settings.color(ID_SKELETON, { 1, 1, 1, 0.92 })
-    local off_col = settings.color(ID_OFFSCREEN, { 1, 0.35, 0.35, 1 })
 
     for _, p in ipairs(entity.get_players()) do
         if not passes_player_filters(p, opts) then goto continue end
@@ -305,12 +296,9 @@ function M.draw()
 
         local col = resolve_color(p)
         local bounds = screen_bounds(p)
+        local on_screen = is_on_screen(bounds, pos)
 
-        if not bounds or not bounds.valid then
-            if show_off then
-                local arrow_col = settings.bool(ID_CLAN_COLOR, false) and (player_state.clan_color(p) or off_col) or off_col
-                esp_util.draw_offscreen_to(pos.x, pos.y, pos.z, arrow_col, 12)
-            end
+        if not bounds or not bounds.valid or not on_screen then
             goto continue
         end
 
@@ -322,7 +310,6 @@ function M.draw()
         local cx = bounds.x + bounds.w * 0.5
         local box_ok = bounds.w >= 6 and bounds.h >= 10
 
-        -- Top (above box): clan → name → flags → weapon/hp
         local top = {}
         if show_clan then
             local tag = player_state.clan_tag(p)
@@ -345,16 +332,10 @@ function M.draw()
             }
         end
         if show_wpn then
-            local wpn = p.tool_name or p.weapon
+            local wpn = held_weapon_name(p)
             if wpn and wpn ~= "" then
                 top[#top + 1] = { text = tostring(wpn), col = MUTED }
             end
-        end
-        if show_hp_text and p.health and p.max_health then
-            top[#top + 1] = {
-                text = string.format("%d/%d", math.floor(p.health + 0.5), math.floor(p.max_health + 0.5)),
-                col = MUTED,
-            }
         end
 
         if #top > 0 then
@@ -392,7 +373,6 @@ function M.draw()
             end
         end
 
-        -- Bottom (under box): distance
         if show_dist then
             draw_util.text_centered(
                 cx,

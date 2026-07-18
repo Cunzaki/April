@@ -34,30 +34,20 @@ function M.calculate_drop(bullet_speed, bullet_gravity, position, origin)
     return 0.5 * g * time * time
 end
 
--- Legacy lead+drop solver (movement prediction). Prefer hitpart_only + curve for silent.
+-- Movement lead + bullet drop (Fallen / legacy aimbot formula).
+-- MovePred = Velocity * (|Origin - Position| / BulletSpeed)
+-- Drop = 0.5 * g * t^2 on Y only (automatic from weapon stats).
 function M.calculate_target_position(bullet_speed, bullet_gravity, velocity, position, origin)
     local px, py, pz = vec3(position)
     local ox, oy, oz = vec3(origin)
     local vx, vy, vz = vec3(velocity)
 
     local speed = math.max(bullet_speed or 950, 1)
-    local g = M.gravity_accel(bullet_gravity)
+    local dist = math_util.distance3(ox - px, oy - py, oz - pz)
+    local time = dist / speed
 
-    local horiz_speed = math.sqrt(vx * vx + vz * vz)
-    if horiz_speed < 1.5 then
-        vx, vy, vz = 0, vy, 0
-    end
-    vy = math.max(-80, math.min(80, vy))
+    local drop = M.calculate_drop(bullet_speed, bullet_gravity, position, origin)
 
-    local time = math_util.distance3(px - ox, py - oy, pz - oz) / speed
-    for _ = 1, 6 do
-        local tx = px + vx * time
-        local ty = py + vy * time
-        local tz = pz + vz * time
-        time = math_util.distance3(tx - ox, ty - oy, tz - oz) / speed
-    end
-
-    local drop = 0.5 * g * time * time
     return {
         x = px + vx * time,
         y = py + vy * time + drop,
@@ -122,9 +112,9 @@ local function solve_flight_time(dx, dy, dz, speed, g)
     return math.max(t, 0.001)
 end
 
--- Ballistic arc that lands exactly on hitpart.
--- launch_dir is the unit Direction the game should fire (aim-up under gravity).
--- aim_far is a far world point along that launch so MouseRaycast → muzzle LookVector matches.
+-- Ballistic arc that lands exactly on hitpart (visual / debug path).
+-- launch_dir / aim_far describe the physical launch under gravity — do NOT feed
+-- aim_far into silent track_silent_target (hook projectiles are near-hitscan).
 function M.curve_to_hit(origin, hit, bullet_speed, bullet_gravity, steps)
     if not origin or not hit then return nil end
     steps = steps or 24
@@ -209,11 +199,12 @@ function M.curve_for_weapon(origin, hit, weapon_name, steps)
     return M.curve_to_hit(origin, hit, stats.speed, stats.gravity, steps)
 end
 
--- Far aim point for silent MouseRaycast so muzzle→point LookVector == launch_dir.
+-- Silent aim point is always the hitpart. Curve is for visuals only
+-- (silent hook projectiles are near-hitscan; aiming above the head misses).
 function M.silent_aim_point(muzzle, hit, weapon_name)
     local curve = M.curve_for_weapon(muzzle, hit, weapon_name, 24)
     if not curve then return hit, nil end
-    return curve.aim_far or hit, curve
+    return hit, curve
 end
 
 return M

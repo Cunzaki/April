@@ -6,12 +6,14 @@ local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
 local esp_util = April.require("core.esp_util")
 local theme = April.require("core.ui_theme")
+local panel_drag = April.require("core.panel_drag")
+local overlay_theme = April.require("core.overlay_theme")
 
 local M = {}
 local P = "april_mod_checker_enabled"
 local X_ID = "april_mod_checker_x"
 local Y_ID = "april_mod_checker_y"
-local W_ID = "april_mod_checker_w"
+local PANEL_W = 260
 local HEAD_OFFSET = 3.5
 local TITLE_H = 24
 
@@ -97,14 +99,7 @@ function M.register_menu()
     menu_util.section(T, G.MISC, "Mod Checker Scan")
     menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Scan Interval (ms)", 1000, 10000, 2500, root)
 
-    menu_util.section(T, G.MISC, "Mod Panel Layout")
-    menu.add_slider_int(T, G.MISC, X_ID, "Mod Panel Pos X", 0, 1920, 1600, root)
-    menu.add_slider_int(T, G.MISC, Y_ID, "Mod Panel Pos Y", 0, 1080, 72, root)
-    menu.add_slider_int(T, G.MISC, W_ID, "Mod Panel Width", 180, 420, 260, root)
-
-    menu_util.bind_master(P, {
-        "april_mod_checker_interval", X_ID, Y_ID, W_ID,
-    })
+    menu_util.bind_master(P, { "april_mod_checker_interval" })
 end
 
 function M.init()
@@ -301,28 +296,19 @@ local function build_staff_rows()
     return rows
 end
 
-local function clamp_layout(x, y, w, sw, sh)
-    w = math.max(180, math.min(420, math.floor(w or 260)))
-    x = math.max(0, math.min(math.max(0, sw - w), math.floor(x or 0)))
-    y = math.max(0, math.min(math.max(0, sh - 40), math.floor(y or 0)))
-    return x, y, w
-end
-
 local function draw_staff_panel(x, y, width, rows)
     if not draw or not draw.text then return end
 
+    overlay_theme.sync()
+    local accent = overlay_theme.accent()
     local pad = 10
     local row_h = 44
     local count = math.max(#rows, 1)
     local height = TITLE_H + count * row_h + 6
 
-    theme.draw_panel(x, y, width, height, {
-        bg = theme.alpha(theme.BG, 0.90),
-        border = theme.alpha(theme.BORDER, 0.45),
-        accent = theme.RED,
-        accent_w = 2,
-        rounding = theme.ROUND,
-    })
+    theme.draw_panel(x, y, width, height, overlay_theme.panel_opts())
+
+    overlay_theme.draw_accent_bar(x + 1, y, width - 2, 2)
 
     local title = "Staff In Lobby"
     if #rows > 1 then
@@ -338,21 +324,21 @@ local function draw_staff_panel(x, y, width, rows)
     local ry = div_y + 6
     if #rows == 0 then
         draw.text(x + pad + 12, ry, "No staff detected", theme.TEXT_MUTED, 11)
-        return
+        return height
     end
 
     local max_name = math.max(10, math.floor((width - pad * 2 - 12) / 7))
 
     for i = 1, #rows do
         local row = rows[i]
-        local accent = row.accent or theme.role_accent(row.role)
+        local row_accent = row.accent or theme.role_accent(row.role)
 
         if i > 1 and draw.line then
             draw.line(x + pad, ry - 4, x + width - pad, ry - 4, theme.alpha(theme.BORDER, 0.22), 1)
         end
 
         if draw.circle_filled then
-            draw.circle_filled(x + pad + 3, ry + 7, 3, accent, 8)
+            draw.circle_filled(x + pad + 3, ry + 7, 3, row_accent, 8)
         end
 
         local name = row.name or "?"
@@ -361,7 +347,7 @@ local function draw_staff_panel(x, y, width, rows)
 
         local role = row.role or "Staff"
         if #role > max_name then role = role:sub(1, math.max(1, max_name - 2)) .. ".." end
-        draw.text(x + pad + 12, ry + 15, role, accent, 11)
+        draw.text(x + pad + 12, ry + 15, role, row_accent, 11)
 
         if row.meta and row.meta ~= "" then
             draw.text(x + pad + 12, ry + 28, row.meta, theme.TEXT_MUTED, 10)
@@ -369,6 +355,8 @@ local function draw_staff_panel(x, y, width, rows)
 
         ry = ry + row_h
     end
+
+    return height
 end
 
 function M.draw()
@@ -379,14 +367,21 @@ function M.draw()
     M.reconcile_active()
 
     local sw, sh = draw_util.screen_size()
-    local x, y, panel_w = clamp_layout(
-        settings.num(X_ID, 1600),
-        settings.num(Y_ID, 72),
-        settings.num(W_ID, 260),
-        sw, sh
-    )
+    local rows = build_staff_rows()
+    local row_h = 44
+    local count = math.max(#rows, 1)
+    local height = TITLE_H + count * row_h + 6
 
-    draw_staff_panel(x, y, panel_w, build_staff_rows())
+    local x, y = panel_drag.update(
+        "mod_checker",
+        X_ID, Y_ID,
+        PANEL_W, TITLE_H,
+        sw, sh,
+        sw - PANEL_W - 16, 72
+    )
+    x, y = panel_drag.clamp(x, y, PANEL_W, height, sw, sh)
+
+    draw_staff_panel(x, y, PANEL_W, rows)
 end
 
 return M

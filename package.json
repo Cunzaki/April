@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/bundle.mjs",
+    "build:ui": "node scripts/bundle-ui.mjs",
+    "build:all": "node scripts/bundle.mjs && node scripts/bundle-ui.mjs",
     "extract-images": "node scripts/extract-item-images.mjs",
     "download-assets": "node scripts/download-assets.mjs",
     "download-missing": "node scripts/download-assets.mjs --missing-only --slow",

@@ -54,7 +54,9 @@ end
 
 local function apply_drop_aim(origin, hitpart, weapon, state, extra)
     local muzzle = origin or combat_origin.get_muzzle_origin()
-    local aim_far, curve = ballistic.silent_aim_point(muzzle, hitpart, weapon)
+    -- Visual drop arc only (path ends on hitpart). Silent API aims at hitpart —
+    -- hook projectiles are effectively hitscan-speed, so aim-up misses.
+    local curve = ballistic.curve_for_weapon(muzzle, hitpart, weapon, 24)
     local info = {
         state = state or "curve",
         peek = extra and extra.peek or nil,
@@ -68,7 +70,7 @@ local function apply_drop_aim(origin, hitpart, weapon, state, extra)
         extend_active = extra and extra.extend_active or false,
         scan_progress = extra and extra.scan_progress or 0,
     }
-    return muzzle, aim_far or hitpart, info
+    return muzzle, hitpart, info
 end
 
 local function apply_ray_aim(origin, aim, hitpart, weapon, state, extra, meta)

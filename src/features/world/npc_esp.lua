@@ -5,6 +5,7 @@ local esp_util = April.require("core.esp_util")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
 local npcs = April.require("game.npcs")
+local player_gear = April.require("game.player_gear")
 
 local M = {}
 local P = "april_npc_enabled"
@@ -26,17 +27,17 @@ function M.register_menu()
     menu.add_combo(T, G.WORLD, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 0, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_health", "NPC Health Bar", false, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "NPC Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_offscreen", "NPC Offscreen Arrows", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "NPC Show Name", true, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "NPC Show Distance", true, root)
+    menu.add_checkbox(T, G.WORLD, "april_npc_show_weapon", "NPC Weapon", false, root)
 
     menu_util.gap(T, G.WORLD)
     menu.add_slider_int(T, G.WORLD, "april_npc_range", "NPC Range", 50, 2000, 500, root)
 
     menu_util.bind_children(P, {
         "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode", "april_npc_health",
-        "april_npc_skeleton", "april_npc_offscreen", "april_npc_show_name", "april_npc_show_distance",
-        "april_npc_range",
+        "april_npc_skeleton", "april_npc_show_name", "april_npc_show_distance",
+        "april_npc_show_weapon", "april_npc_range",
     })
 end
 
@@ -292,9 +293,6 @@ function M.draw()
         else
             local sx, sy, vis = esp_util.w2s(lx, ly, lz)
             if not vis then
-                if settings.bool("april_npc_offscreen", false) then
-                    esp_util.draw_offscreen_to(lx, ly, lz, col, 12)
-                end
                 goto continue
             end
             label_y = sy
@@ -303,28 +301,39 @@ function M.draw()
         local label = entry.name or "NPC"
         local show_name = settings.bool("april_npc_show_name", true)
         local show_dist = settings.bool("april_npc_show_distance", true)
+        local show_wpn = settings.bool("april_npc_show_weapon", false)
 
-        if show_name or show_dist then
-            if show_dist and me_pos then
-                local dist_text = string.format("%dm", math.floor(math.sqrt(dist_sq)))
-                if show_name then
-                    label = label .. " [" .. dist_text .. "]"
-                else
-                    label = dist_text
-                end
-            elseif not show_name then
-                label = nil
+        local lines = {}
+        if show_name then
+            lines[#lines + 1] = label
+        end
+        if show_wpn then
+            local wpn = nil
+            if entry.entity then
+                pcall(function() wpn = player_gear.held_name(entry.entity) end)
             end
+            if (not wpn or wpn == "") and entry.inst then
+                pcall(function() wpn = player_gear.held_name_from_character(entry.inst) end)
+            end
+            if wpn and wpn ~= "" then
+                lines[#lines + 1] = tostring(wpn)
+            end
+        end
+        if show_dist and me_pos then
+            lines[#lines + 1] = string.format("%dm", math.floor(math.sqrt(dist_sq)))
+        end
 
-            if label then
-                local tx = bounds and bounds.valid and (bounds.x + bounds.w * 0.5) or lx
-                local ty = label_y - 14
-                if bounds and bounds.valid then
-                    draw_util.text_centered(tx, ty, label, col, text_size)
+        if #lines > 0 then
+            local tx = bounds and bounds.valid and (bounds.x + bounds.w * 0.5) or nil
+            local base_y = label_y - 4 - (#lines * (text_size + 1))
+            for i = 1, #lines do
+                local ty = base_y + (i - 1) * (text_size + 1)
+                if bounds and bounds.valid and tx then
+                    draw_util.text_centered(tx, ty, lines[i], col, text_size)
                 else
                     local sx, sy, vis = esp_util.w2s(lx, ly, lz)
                     if vis then
-                        draw_util.text_centered(sx, sy - 14, label, col, text_size)
+                        draw_util.text_centered(sx, sy - 14 + (i - 1) * (text_size + 1), lines[i], col, text_size)
                     end
                 end
             end

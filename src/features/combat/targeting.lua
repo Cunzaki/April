@@ -24,17 +24,8 @@ function M.is_npc_target(target)
 end
 
 local function npc_enabled(entry, prefix)
-    local targets = prefix .. "targets"
-    if not settings.multi(targets, 2, false) then
-        return false
-    end
-    if entry.kind == "soldier" then
-        return settings.multi(targets, 3, true)
-    end
-    if entry.kind == "boss" then
-        return settings.multi(targets, 4, true)
-    end
-    return false
+    if not entry then return false end
+    return settings.multi(prefix .. "targets", 2, false)
 end
 
 local function read_npc_health(model)
@@ -146,7 +137,7 @@ function M.passes_filters(target, prefix, aim, origin, opts)
         return true
     end
 
-    if not opts.ignore_whitelist and silent_whitelist.should_skip(target) then
+    if not opts.ignore_whitelist and silent_whitelist.should_skip(target, prefix) then
         return false
     end
 

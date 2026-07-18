@@ -14,8 +14,11 @@ Read this at the start of every session.
 | `dump/` | Game dump (gitignored — local only) |
 | `tools/` | GC / rbxlx utilities (local workspace) |
 | `docs/API.md` | Vector Lua Engine API — read every session |
+| `src/ui/` | Gamesense custom UI (wired to features via `menu_shim`) |
 
 **Build:** `npm run build`
+
+**Custom UI:** Main script uses the Gamesense menu only (no Vector April tabs). Toggle with **INSERT**. Feature `register_menu()` still runs but writes into `gs_state` through `ui/menu_shim.lua`.
 
 **GitHub:** [Cunzaki/April](https://github.com/Cunzaki/April)
 

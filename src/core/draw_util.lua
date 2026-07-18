@@ -103,6 +103,19 @@ function M.line(x1, y1, x2, y2, col, thick)
     draw.line(x1, y1, x2, y2, col, thick or 1)
 end
 
+--- Screen snapline from bottom-center to target (classic ESP style).
+function M.snapline(tx, ty, col, thick, sw, sh)
+    if not draw or not draw.line then return end
+    sw, sh = sw or M.screen_size()
+    col = col or { 1, 1, 1, 1 }
+    thick = thick or 1.5
+    local sx = sw * 0.5
+    local sy = sh - 1
+    local a = col[4] or 1
+    M.line(sx, sy, tx, ty, { 0, 0, 0, a * 0.9 }, thick + 1.5)
+    M.line(sx, sy, tx, ty, col, thick)
+end
+
 function M.circle(x, y, r, col, filled)
     if not draw then return end
     if filled and draw.circle_filled then

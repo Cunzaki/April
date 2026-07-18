@@ -82,18 +82,8 @@ local function disable_desync()
     end
 end
 
-local function compute_rates(t)
-    local phys, send = 0, 60
-
-    if settings.enabled("april_desync_autosend") then
-        local window = settings.num("april_desync_autosend_len", 0.3)
-        local cycle = window + 0.1
-        if (t % cycle) > window then
-            phys, send = 15, 60
-        end
-    end
-
-    return phys, send
+local function compute_rates(_t)
+    return 0, 60
 end
 
 local function draw_center_dot(wx, wy, wz, col)
@@ -123,17 +113,11 @@ function M.register_menu()
 
     menu_util.section(T, G.MISC, "Network")
     menu_util.register_keybind(T, G.MISC, P, "Desync", false)
-    menu.add_checkbox(T, G.MISC, "april_desync_autosend", "Desync Auto Send", false, root)
-    menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Desync Send Threshold", 0, 1, 0.3,
-        menu_util.parent("april_desync_autosend"))
     menu.add_checkbox(T, G.MISC, P_VIS, "Desync Visualize", false, menu_util.parent(P, {
         colorpicker = { 0.2, 0.85, 1, 0.9 },
     }))
 
-    menu_util.bind_children(P, {
-        "april_desync_autosend", "april_desync_autosend_len", P_VIS,
-    })
-    menu_util.bind_children("april_desync_autosend", { "april_desync_autosend_len" })
+    menu_util.bind_children(P, { P_VIS })
 end
 
 function M.update(_dt)

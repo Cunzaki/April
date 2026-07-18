@@ -1,20 +1,18 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-13T07:03:56.078Z
+    Built: 2026-07-18T04:20:44.698Z
+    UI: custom Gamesense menu (INSERT) — Vector menu tabs disabled
 ]]
 
 April = {
-    version = "3.75.9",
+    version = "3.85.5",
     debug = false,
     _mods = {},
     bundled = true,
+    custom_ui = true,
 }
 
--- Required first: Scripts > April uses "full" mode (2-column group grid)
-if menu and menu.add_tab then
-    menu.add_tab("April", "A", "full")
-end
 April._menu_tab_ready = true
 
 function April.require(path)
@@ -653,10 +651,7 @@ function M.enabled(id)
         return fb.active(id)
     end
 
-    if not menu or not menu.get then return false end
-    local v = menu.get(id)
-    if v == nil or v == false or v == 0 or v == "false" then return false end
-    return v == true or v == 1
+    return M.bool(id, false)
 end
 
 function M.num(id, default)
@@ -747,19 +742,51 @@ local settings = April.require("core.settings")
 
 local M = {}
 
-M.MODES = { "Toggle", "Hold" }
+-- Vector-style order: Always / Hold / Toggle
+M.MODES = { "Always", "Hold", "Toggle" }
 
 local registry = {}
 local last_down = {}
+local migrated = {}
+
+local function migrate_mode(mode_id)
+    if not mode_id or migrated[mode_id] then return end
+    migrated[mode_id] = true
+    -- Legacy 2-mode storage: 0 = Toggle, 1 = Hold
+    -- New: 0 = Always, 1 = Hold, 2 = Toggle
+    -- One-shot per mode id so a later Always (0) choice is kept.
+    local flag = mode_id .. "_v3m"
+    local state = nil
+    pcall(function()
+        state = April.require("ui.gs_state")
+    end)
+    if state and state.get(flag) then return end
+
+    local raw = tonumber(settings.get(mode_id, nil))
+    if raw == 0 then
+        if menu and menu.set then
+            pcall(menu.set, mode_id, 2)
+        end
+        if state then state.set(mode_id, 2) end
+    end
+    if state then
+        state.define(flag, true)
+        state.set(flag, true)
+    elseif menu and menu.set then
+        pcall(menu.set, flag, true)
+    end
+end
 
 function M.register(spec)
     if not spec or not spec.id then return end
+    local mode_id = spec.mode_id or (spec.id .. "_mode")
     registry[spec.id] = {
         id = spec.id,
         label = spec.label or spec.id,
-        mode_id = spec.mode_id or (spec.id .. "_mode"),
+        mode_id = mode_id,
         key_id = spec.key_id or spec.id,
     }
+    migrate_mode(mode_id)
 end
 
 function M.is_registered(id)
@@ -798,13 +825,37 @@ function M.get_key(id)
         local k = menu.get_key(key_id)
         if k and k > 0 then return k end
     end
+    local ok, gs = pcall(function()
+        return April.require("ui.gs_state")
+    end)
+    if ok and gs then
+        local k = gs.get_key(key_id)
+        if k and k > 0 then return k end
+    end
     return 0
 end
 
-function M.is_hold(id)
+function M.mode_index(id)
     local e = registry[id]
-    if not e then return false end
-    return settings.combo_index(e.mode_id, M.MODES, 0) == 1
+    if not e then return 2 end
+    migrate_mode(e.mode_id)
+    return settings.combo_index(e.mode_id, M.MODES, 2)
+end
+
+function M.mode_name(id)
+    return M.MODES[M.mode_index(id) + 1] or "Toggle"
+end
+
+function M.is_always(id)
+    return M.mode_index(id) == 0
+end
+
+function M.is_hold(id)
+    return M.mode_index(id) == 1
+end
+
+function M.is_toggle(id)
+    return M.mode_index(id) == 2
 end
 
 function M.armed(id)
@@ -816,13 +867,15 @@ function M.active(id)
         return settings.bool(id, false)
     end
 
-    if M.is_hold(id) then
+    local mode = M.mode_index(id)
+    if mode == 1 then -- Hold
         if not M.armed(id) then return false end
         local key = M.get_key(id)
         if key <= 0 then return false end
         return input and input.is_key_down and input.is_key_down(key)
     end
 
+    -- Always + Toggle: checkbox/armed state is the feature on-state
     return M.armed(id)
 end
 
@@ -830,12 +883,24 @@ function M.tick()
     if not input or not input.is_key_down then return end
 
     for id in pairs(registry) do
-        if M.is_hold(id) then
-            last_down[id] = input.is_key_down(M.get_key(id))
+        local mode = M.mode_index(id)
+        local key = M.get_key(id)
+
+        if mode == 0 then -- Always: ignore key edge
+            if key > 0 then
+                last_down[id] = input.is_key_down(key)
+            end
             goto continue
         end
 
-        local key = M.get_key(id)
+        if mode == 1 then -- Hold: no edge toggle
+            if key > 0 then
+                last_down[id] = input.is_key_down(key)
+            end
+            goto continue
+        end
+
+        -- Toggle
         if key <= 0 then goto continue end
 
         local down = input.is_key_down(key)
@@ -843,6 +908,10 @@ function M.tick()
             local cur = settings.bool(id, false)
             if menu and menu.set then
                 pcall(menu.set, id, not cur)
+            else
+                pcall(function()
+                    April.require("ui.gs_state").set(id, not cur)
+                end)
             end
             pcall(function()
                 April.require("core.menu_util").sync_master(id)
@@ -852,6 +921,67 @@ function M.tick()
 
         ::continue::
     end
+end
+
+return M
+
+end)()
+
+-- ── core/aim_key.lua ──
+April._mods["core.aim_key"] = (function()
+-- Aim-key state (Always / Hold / Toggle) separate from feature master toggle.
+local settings = April.require("core.settings")
+
+local M = {}
+
+M.MODES = { "Always", "Hold", "Toggle" }
+
+local toggled = {}
+local last_down = {}
+
+local function key_store()
+    return April.require("ui.gs_state")
+end
+
+function M.mode_index(mode_id)
+    return settings.combo_index(mode_id, M.MODES, 0)
+end
+
+function M.tick(key_id, mode_id)
+    if not input or not input.is_key_down then return end
+    local mode = M.mode_index(mode_id)
+    local vk = key_store().get_key(key_id)
+    if mode == 0 then
+        if vk > 0 then last_down[key_id] = input.is_key_down(vk) end
+        return
+    end
+    if vk <= 0 then return end
+    local down = input.is_key_down(vk)
+    if mode == 1 then
+        last_down[key_id] = down
+        return
+    end
+    -- Toggle
+    if down and not last_down[key_id] then
+        toggled[key_id] = not (toggled[key_id] == true)
+    end
+    last_down[key_id] = down
+end
+
+function M.active(key_id, mode_id)
+    local mode = M.mode_index(mode_id)
+    if mode == 0 then return true end
+    local vk = key_store().get_key(key_id)
+    if vk <= 0 then return mode == 0 end
+    if mode == 1 then
+        return input and input.is_key_down and input.is_key_down(vk)
+    end
+    return toggled[key_id] == true
+end
+
+function M.reset(key_id)
+    toggled[key_id] = false
+    last_down[key_id] = false
 end
 
 return M
@@ -965,6 +1095,19 @@ function M.line(x1, y1, x2, y2, col, thick)
     draw.line(x1, y1, x2, y2, col, thick or 1)
 end
 
+--- Screen snapline from bottom-center to target (classic ESP style).
+function M.snapline(tx, ty, col, thick, sw, sh)
+    if not draw or not draw.line then return end
+    sw, sh = sw or M.screen_size()
+    col = col or { 1, 1, 1, 1 }
+    thick = thick or 1.5
+    local sx = sw * 0.5
+    local sy = sh - 1
+    local a = col[4] or 1
+    M.line(sx, sy, tx, ty, { 0, 0, 0, a * 0.9 }, thick + 1.5)
+    M.line(sx, sy, tx, ty, col, thick)
+end
+
 function M.circle(x, y, r, col, filled)
     if not draw then return end
     if filled and draw.circle_filled then
@@ -1005,6 +1148,138 @@ function M.world_label(inst, text, col, max_dist)
     if vis then
         M.text_centered(sx, sy, text, col, 13)
     end
+end
+
+return M
+
+end)()
+
+-- ── core/vk_names.lua ──
+April._mods["core.vk_names"] = (function()
+-- Shared VK → label map (matches custom UI keybind chips).
+local M = {}
+
+M.NAMES = {
+    [0x01] = "M1", [0x02] = "M2", [0x04] = "M3",
+    [0x08] = "BS", [0x09] = "TAB", [0x0D] = "ENT",
+    [0x10] = "SHI", [0x11] = "CTL", [0x12] = "ALT",
+    [0x14] = "CAP", [0x1B] = "ESC", [0x20] = "SPC",
+    [0x25] = "LEFT", [0x26] = "UP", [0x27] = "RIGHT", [0x28] = "DOWN",
+    [0x2D] = "INS", [0x2E] = "DEL",
+    [0x30] = "0", [0x31] = "1", [0x32] = "2", [0x33] = "3", [0x34] = "4",
+    [0x35] = "5", [0x36] = "6", [0x37] = "7", [0x38] = "8", [0x39] = "9",
+    [0x41] = "A", [0x42] = "B", [0x43] = "C", [0x44] = "D", [0x45] = "E",
+    [0x46] = "F", [0x47] = "G", [0x48] = "H", [0x49] = "I", [0x4A] = "J",
+    [0x4B] = "K", [0x4C] = "L", [0x4D] = "M", [0x4E] = "N", [0x4F] = "O",
+    [0x50] = "P", [0x51] = "Q", [0x52] = "R", [0x53] = "S", [0x54] = "T",
+    [0x55] = "U", [0x56] = "V", [0x57] = "W", [0x58] = "X", [0x59] = "Y",
+    [0x5A] = "Z",
+    [0x70] = "F1", [0x71] = "F2", [0x72] = "F3", [0x73] = "F4",
+    [0x74] = "F5", [0x75] = "F6", [0x76] = "F7", [0x77] = "F8",
+    [0x78] = "F9", [0x79] = "F10", [0x7A] = "F11", [0x7B] = "F12",
+}
+
+function M.label(vk)
+    vk = tonumber(vk) or 0
+    if vk <= 0 then return "none" end
+    return M.NAMES[vk] or string.format("%02X", vk)
+end
+
+function M.chip(vk)
+    return "[" .. M.label(vk) .. "]"
+end
+
+return M
+
+end)()
+
+-- ── core/panel_drag.lua ──
+April._mods["core.panel_drag"] = (function()
+-- Draggable overlay panels (mod checker, keybind viewer). Position persists via menu/gs_state.
+local settings = April.require("core.settings")
+
+local M = {}
+
+local state = {}
+
+local function mouse_pos()
+    local mx, my = 0, 0
+    if utility and utility.get_mouse_pos then
+        mx, my = utility.get_mouse_pos()
+    elseif input and input.get_mouse_pos then
+        mx, my = input.get_mouse_pos()
+    end
+    return tonumber(mx) or 0, tonumber(my) or 0
+end
+
+local function lmb_down()
+    return input and input.is_key_down and input.is_key_down(0x01)
+end
+
+local function persist_num(id, value)
+    value = math.floor(tonumber(value) or 0)
+    if menu and menu.set then
+        pcall(menu.set, id, value)
+    end
+    pcall(function()
+        April.require("ui.gs_state").set(id, value)
+    end)
+end
+
+local function blocked()
+    local ok, widgets = pcall(function()
+        return April.require("ui.gs_widgets")
+    end)
+    if ok and widgets then
+        if widgets.listening_key then return true end
+        if widgets.dragging_window then return true end
+        if widgets.interacted then return true end
+    end
+    return false
+end
+
+function M.clamp(x, y, w, panel_h, sw, sh)
+    w = math.max(160, math.min(420, math.floor(w or 260)))
+    panel_h = math.max(40, math.floor(panel_h or 80))
+    x = math.max(0, math.min(math.max(0, sw - w), math.floor(x or 0)))
+    y = math.max(0, math.min(math.max(0, sh - panel_h), math.floor(y or 0)))
+    return x, y, w
+end
+
+--- Drag by title bar; returns clamped x, y after handling input this frame.
+function M.update(id, x_id, y_id, title_w, title_h, sw, sh, default_x, default_y)
+    local st = state[id]
+    if not st then
+        st = { was_lmb = false, dragging = false, off_x = 0, off_y = 0 }
+        state[id] = st
+    end
+
+    local x = settings.num(x_id, default_x)
+    local y = settings.num(y_id, default_y)
+    local mx, my = mouse_pos()
+    local lmb = lmb_down()
+    local over_title = mx >= x and my >= y
+        and mx <= x + title_w and my <= y + title_h
+
+    if lmb and not st.was_lmb and over_title and not blocked() then
+        st.dragging = true
+        st.off_x = mx - x
+        st.off_y = my - y
+    end
+
+    if st.dragging then
+        if lmb then
+            x = mx - st.off_x
+            y = my - st.off_y
+            persist_num(x_id, x)
+            persist_num(y_id, y)
+        else
+            st.dragging = false
+        end
+    end
+
+    st.was_lmb = lmb
+    return x, y
 end
 
 return M
@@ -1272,6 +1547,85 @@ function M.draw_staff_list(x, y, width, rows, max_rows)
 
         ry = ry + row_h
     end
+end
+
+return M
+
+end)()
+
+-- ── core/overlay_theme.lua ──
+April._mods["core.overlay_theme"] = (function()
+-- Theme helpers for draggable overlay panels (keybind viewer, mod checker).
+local ui_theme = April.require("core.ui_theme")
+
+local M = {}
+
+local function gs_theme()
+    local ok, theme = pcall(function()
+        return April.require("ui.gs_theme")
+    end)
+    if ok then return theme end
+    return nil
+end
+
+local function anim_mod()
+    local ok, anim = pcall(function()
+        return April.require("ui.gs_anim")
+    end)
+    if ok then return anim end
+    return nil
+end
+
+function M.sync()
+    local anim = anim_mod()
+    if anim and anim.sync_theme then
+        pcall(anim.sync_theme)
+    end
+end
+
+function M.accent()
+    local anim = anim_mod()
+    if anim and anim.colors_enabled and anim.colors_enabled() then
+        return anim.element_color(7, anim.COL_OVERLAY)
+    end
+    local gs = gs_theme()
+    if gs and gs.ACCENT then
+        return gs.ACCENT
+    end
+    return ui_theme.CYAN
+end
+
+function M.panel_bg()
+    local anim = anim_mod()
+    if anim and anim.colors_enabled and anim.colors_enabled() and anim.panel_bg then
+        return anim.panel_bg()
+    end
+    return ui_theme.alpha(ui_theme.BG, 0.90)
+end
+
+function M.draw_accent_bar(x, y, w, h)
+    h = h or 2
+    local anim = anim_mod()
+    if anim and anim.anim_enabled and anim.anim_enabled()
+        and anim.anim_target_enabled and anim.anim_target_enabled(anim.TARGET_OVERLAY) then
+        anim.draw_bar_h(x, y, w, h, anim.phase and (anim.phase() * 0.1) or 0,
+            anim.STYLE_OVERLAY, anim.COL_OVERLAY, anim.TARGET_OVERLAY)
+        return
+    end
+    if draw and draw.line then
+        local col = M.accent()
+        draw.line(x, y, x + w, y, col, h)
+    end
+end
+
+function M.panel_opts()
+    return {
+        bg = M.panel_bg(),
+        border = ui_theme.alpha(ui_theme.BORDER, 0.45),
+        rounding = ui_theme.ROUND,
+        accent = nil,
+        accent_w = 0,
+    }
 end
 
 return M
@@ -1880,19 +2234,47 @@ function M.draw_beacon(sx, sy, col, opts)
     end
 end
 
-function M.draw_offscreen_arrow(cx, cy, tx, ty, col, size)
+function M.draw_offscreen_arrow(cx, cy, tx, ty, col, size, style)
     size = size or 14
+    style = style or 0 -- 0 triangle, 1 chevron, 2 diamond
     local dx, dy = tx - cx, ty - cy
     local len = math.sqrt(dx * dx + dy * dy)
     if len < 1 then return end
     dx, dy = dx / len, dy / len
     local px, py = cx + dx * (size + 8), cy + dy * (size + 8)
     local lx, ly = -dy, dx
+
+    if style == 1 then
+        -- Chevron / open arrow
+        local thick = math.max(1.5, size * 0.18)
+        draw_util.line(px - dx * size + lx * size * 0.55, py - dy * size + ly * size * 0.55,
+            px + dx * size * 0.15, py + dy * size * 0.15, col, thick)
+        draw_util.line(px - dx * size - lx * size * 0.55, py - dy * size - ly * size * 0.55,
+            px + dx * size * 0.15, py + dy * size * 0.15, col, thick)
+        return
+    end
+
+    if style == 2 then
+        local tip = { px + dx * size, py + dy * size }
+        local back = { px - dx * size * 0.55, py - dy * size * 0.55 }
+        local left = { px + lx * size * 0.45, py + ly * size * 0.45 }
+        local right = { px - lx * size * 0.45, py - ly * size * 0.45 }
+        if draw and draw.poly_filled then
+            draw.poly_filled({ tip, left, back, right }, col)
+        else
+            draw_util.line(tip[1], tip[2], left[1], left[2], col, 2)
+            draw_util.line(left[1], left[2], back[1], back[2], col, 2)
+            draw_util.line(back[1], back[2], right[1], right[2], col, 2)
+            draw_util.line(right[1], right[2], tip[1], tip[2], col, 2)
+        end
+        return
+    end
+
     if draw and draw.poly_filled then
         draw.poly_filled({
             { px + dx * size, py + dy * size },
-            { px - dx * 4 + lx * size * 0.5, py - dy * 4 + ly * size * 0.5 },
-            { px - dx * 4 - lx * size * 0.5, py - dy * 4 - ly * size * 0.5 },
+            { px - dx * 4 + lx * size * 0.55, py - dy * 4 + ly * size * 0.55 },
+            { px - dx * 4 - lx * size * 0.55, py - dy * 4 - ly * size * 0.55 },
         }, col)
     else
         draw_util.line(px, py, px - dx * 8 + lx * 6, py - dy * 8 + ly * 6, col, 2)
@@ -1901,14 +2283,23 @@ function M.draw_offscreen_arrow(cx, cy, tx, ty, col, size)
 end
 
 -- Clamp a world point to the screen edge and draw an arrow pointing at it.
+-- opts: size, margin, style, label, label_col, outline
 -- Returns true if an arrow was drawn (target off-screen / outside margin).
-function M.draw_offscreen_to(wx, wy, wz, col, size, margin)
+function M.draw_offscreen_to(wx, wy, wz, col, size, margin, opts)
+    opts = opts or {}
+    if type(size) == "table" then
+        opts = size
+        size = opts.size
+        margin = opts.margin
+    end
+
     local sw, sh = draw_util.screen_size()
     if not sw or sw < 1 or not sh or sh < 1 then return false end
 
     local cx, cy = sw * 0.5, sh * 0.5
-    margin = margin or 28
-    size = size or 14
+    margin = margin or opts.margin or 36
+    size = size or opts.size or 14
+    local style = opts.style or 0
 
     local sx, sy, on = M.w2s(wx, wy, wz)
     sx = tonumber(sx) or cx
@@ -1919,7 +2310,6 @@ function M.draw_offscreen_to(wx, wy, wz, col, size, margin)
     end
 
     local dx, dy = sx - cx, sy - cy
-    -- Behind / degenerate projection: aim from look direction if available.
     if (dx * dx + dy * dy) < 1 then
         if camera and camera.get_look_vector then
             local look = camera.get_look_vector()
@@ -1936,7 +2326,6 @@ function M.draw_offscreen_to(wx, wy, wz, col, size, margin)
     local len = math.sqrt(dx * dx + dy * dy)
     dx, dy = dx / len, dy / len
 
-    -- Ray from center → edge of inset rect.
     local hw = (sw * 0.5) - margin
     local hh = (sh * 0.5) - margin
     local scale_x = (math.abs(dx) > 1e-6) and (hw / math.abs(dx)) or 1e9
@@ -1945,7 +2334,17 @@ function M.draw_offscreen_to(wx, wy, wz, col, size, margin)
     local ex = cx + dx * scale
     local ey = cy + dy * scale
 
-    M.draw_offscreen_arrow(cx, cy, ex, ey, col, size)
+    if opts.outline then
+        local oc = { 0, 0, 0, (col[4] or 1) * 0.85 }
+        M.draw_offscreen_arrow(cx, cy, ex, ey, oc, size + 2, style)
+    end
+    M.draw_offscreen_arrow(cx, cy, ex, ey, col, size, style)
+
+    if opts.label then
+        local lx = ex - dx * (size + 10)
+        local ly = ey - dy * (size + 10)
+        draw_util.text_centered(lx, ly - 6, tostring(opts.label), opts.label_col or col, opts.label_size or 11)
+    end
     return true
 end
 
@@ -2778,6 +3177,11 @@ end
 
 function M.ensure_tab()
     if M._tab_ready then return end
+    -- Custom UI mode: never create Vector menu tabs.
+    if April and April.custom_ui then
+        M._tab_ready = true
+        return
+    end
     if not (April and April._menu_tab_ready) and menu and menu.add_tab then
         menu.add_tab(M.TAB, "A", "full")
     end
@@ -2892,13 +3296,43 @@ local function master_visible(master_id)
     return settings_mod().bool(master_id, false)
 end
 
-function M.sync_masters()
-    for master_id in pairs(M._master_hooked) do
-        local show = master_visible(master_id)
-        for _, id in ipairs(M._master_children[master_id] or {}) do
-            set_visible(id, show)
+-- Child is visible only if every hooked master that lists it is on.
+local function effective_visible(id)
+    local any = false
+    for master_id, hooked in pairs(M._master_hooked) do
+        if hooked then
+            local kids = M._master_children[master_id]
+            if kids then
+                for i = 1, #kids do
+                    if kids[i] == id then
+                        any = true
+                        if not master_visible(master_id) then
+                            return false
+                        end
+                        break
+                    end
+                end
+            end
         end
     end
+    return true
+end
+
+local function apply_master_tree()
+    -- Collect every child id once, then apply AND of all parent masters
+    local seen = {}
+    for master_id in pairs(M._master_hooked) do
+        for _, id in ipairs(M._master_children[master_id] or {}) do
+            if not seen[id] then
+                seen[id] = true
+                set_visible(id, effective_visible(id))
+            end
+        end
+    end
+end
+
+function M.sync_masters()
+    apply_master_tree()
     for i = 1, #M._when_rules do
         local rule = M._when_rules[i]
         if rule.sync then rule.sync() end
@@ -2907,9 +3341,12 @@ end
 
 function M.sync_master(master_id)
     if not master_id or not M._master_hooked[master_id] then return end
-    local show = master_visible(master_id)
-    for _, id in ipairs(M._master_children[master_id] or {}) do
-        set_visible(id, show)
+    apply_master_tree()
+    for i = 1, #M._when_rules do
+        local rule = M._when_rules[i]
+        if rule.sync and rule.watch and rule.watch[master_id] then
+            rule.sync()
+        end
     end
 end
 
@@ -2917,18 +3354,19 @@ function M.bind_master(master_id, child_ids)
     if not master_id or not child_ids then return end
     M._master_children[master_id] = add_child_ids(M._master_children[master_id], child_ids)
 
-    if M._master_hooked[master_id] then return end
+    if M._master_hooked[master_id] then
+        apply_master_tree()
+        return
+    end
     M._master_hooked[master_id] = true
 
-    local function sync(new_val)
-        local show
-        if new_val == nil then
-            show = master_visible(master_id)
-        else
-            show = new_val == true or new_val == 1
-        end
-        for _, id in ipairs(M._master_children[master_id] or {}) do
-            set_visible(id, show)
+    local function sync()
+        apply_master_tree()
+        for i = 1, #M._when_rules do
+            local rule = M._when_rules[i]
+            if rule.sync and rule.watch and rule.watch[master_id] then
+                rule.sync()
+            end
         end
     end
 
@@ -2985,8 +3423,7 @@ function M.bind_children(master_id, extra_ids)
     M.bind_master(master_id, extra_ids or {})
 end
 
--- Custom Toggle / Hold bind (Vector's built-in Always/Hold/Toggle is unreliable).
--- Checkbox key is for display + our listener; Bind Mode combo is Toggle|Hold.
+-- Custom Always / Hold / Toggle bind (mode set via RMB on key chip in custom UI).
 -- Gate features with settings.enabled(id).
 function M.register_keybind(T, G, id, label, default, extra)
     extra = extra or {}
@@ -2998,7 +3435,7 @@ function M.register_keybind(T, G, id, label, default, extra)
 
     local mode_id = id .. "_mode"
     local mode_label = label .. " Bind Mode"
-    menu.add_combo(T, G, mode_id, mode_label, { "Toggle", "Hold" }, 0, M.parent(id))
+    menu.add_combo(T, G, mode_id, mode_label, { "Always", "Hold", "Toggle" }, 2, M.parent(id))
 
     April.require("core.feature_bind").register({
         id = id,
@@ -3053,30 +3490,20 @@ function M.calculate_drop(bullet_speed, bullet_gravity, position, origin)
     return 0.5 * g * time * time
 end
 
--- Legacy lead+drop solver (movement prediction). Prefer hitpart_only + curve for silent.
+-- Movement lead + bullet drop (Fallen / legacy aimbot formula).
+-- MovePred = Velocity * (|Origin - Position| / BulletSpeed)
+-- Drop = 0.5 * g * t^2 on Y only (automatic from weapon stats).
 function M.calculate_target_position(bullet_speed, bullet_gravity, velocity, position, origin)
     local px, py, pz = vec3(position)
     local ox, oy, oz = vec3(origin)
     local vx, vy, vz = vec3(velocity)
 
     local speed = math.max(bullet_speed or 950, 1)
-    local g = M.gravity_accel(bullet_gravity)
+    local dist = math_util.distance3(ox - px, oy - py, oz - pz)
+    local time = dist / speed
 
-    local horiz_speed = math.sqrt(vx * vx + vz * vz)
-    if horiz_speed < 1.5 then
-        vx, vy, vz = 0, vy, 0
-    end
-    vy = math.max(-80, math.min(80, vy))
+    local drop = M.calculate_drop(bullet_speed, bullet_gravity, position, origin)
 
-    local time = math_util.distance3(px - ox, py - oy, pz - oz) / speed
-    for _ = 1, 6 do
-        local tx = px + vx * time
-        local ty = py + vy * time
-        local tz = pz + vz * time
-        time = math_util.distance3(tx - ox, ty - oy, tz - oz) / speed
-    end
-
-    local drop = 0.5 * g * time * time
     return {
         x = px + vx * time,
         y = py + vy * time + drop,
@@ -3141,9 +3568,9 @@ local function solve_flight_time(dx, dy, dz, speed, g)
     return math.max(t, 0.001)
 end
 
--- Ballistic arc that lands exactly on hitpart.
--- launch_dir is the unit Direction the game should fire (aim-up under gravity).
--- aim_far is a far world point along that launch so MouseRaycast → muzzle LookVector matches.
+-- Ballistic arc that lands exactly on hitpart (visual / debug path).
+-- launch_dir / aim_far describe the physical launch under gravity — do NOT feed
+-- aim_far into silent track_silent_target (hook projectiles are near-hitscan).
 function M.curve_to_hit(origin, hit, bullet_speed, bullet_gravity, steps)
     if not origin or not hit then return nil end
     steps = steps or 24
@@ -3228,11 +3655,12 @@ function M.curve_for_weapon(origin, hit, weapon_name, steps)
     return M.curve_to_hit(origin, hit, stats.speed, stats.gravity, steps)
 end
 
--- Far aim point for silent MouseRaycast so muzzle→point LookVector == launch_dir.
+-- Silent aim point is always the hitpart. Curve is for visuals only
+-- (silent hook projectiles are near-hitscan; aiming above the head misses).
 function M.silent_aim_point(muzzle, hit, weapon_name)
     local curve = M.curve_for_weapon(muzzle, hit, weapon_name, 24)
     if not curve then return hit, nil end
-    return curve.aim_far or hit, curve
+    return hit, curve
 end
 
 return M
@@ -3393,8 +3821,8 @@ function M.track(origin, aim_point, shoot_vk, hitpart)
     return ok
 end
 
--- Ballistic silent: origin = muzzle/peek, aim_point = far along launch_dir.
--- Curve rebuilt muzzle→hitpart so path always ends on selected hitpart.
+-- Silent track straight to hitpart (API projectiles are near-hitscan speed).
+-- Still builds a muzzle→hitpart drop curve for visuals / target line.
 function M.track_curve(origin, aim_point, weapon_name, shoot_vk, hitpart)
     origin = origin or M.get_camera_origin()
     if not origin or not aim_point then
@@ -3405,13 +3833,10 @@ function M.track_curve(origin, aim_point, weapon_name, shoot_vk, hitpart)
 
     local hit = hitpart or aim_point
     local curve = ballistic.curve_for_weapon(origin, hit, weapon_name, 24)
-    if curve and curve.aim_far then
-        aim_point = curve.aim_far
-    end
 
-    local ok = M.track(origin, aim_point, shoot_vk)
+    -- Never aim above the hitpart — direction is always origin → selected hitpart.
+    local ok = M.track(origin, hit, shoot_vk, hit)
     M._last_curve = curve
-    -- Keep visual/debug target on the actual hitpart, not the far aim point.
     M._last_target = { x = hit.x, y = hit.y, z = hit.z }
     return ok
 end
@@ -4179,6 +4604,7 @@ end)()
 
 -- ── core/runservice.lua ──
 April._mods["core.runservice"] = (function()
+-- RunService sim hooks. Prefer Heartbeat:Connect; fall back to on_frame dispatch.
 local env = April.require("core.env")
 
 local M = {}
@@ -4186,10 +4612,15 @@ local M = {}
 local _svc = nil
 local _svc_checked = false
 local _sim_hooks = {}
+local _heartbeat_conn = nil
+local _uses_heartbeat = false
+local _last_hb_ms = 0
+local _dispatched_this_frame = false
 
 local function delta_time(fallback)
     if utility and utility.get_delta_time then
-        return utility.get_delta_time()
+        local dt = utility.get_delta_time()
+        if dt and dt > 0 then return math.min(dt, 0.1) end
     end
     return fallback or 0.016
 end
@@ -4201,6 +4632,34 @@ local function run_sim_hooks(dt)
             env.safe_call(hook, dt)
         end
     end
+end
+
+local function try_connect_heartbeat(svc)
+    if not svc then return false end
+
+    local hb = svc.Heartbeat or svc.heartbeat
+    if not hb then return false end
+
+    local connect = hb.Connect or hb.connect
+    if type(connect) ~= "function" then
+        -- Some mirrors expose the signal as callable / method on service
+        connect = svc.Heartbeat and (svc.Heartbeat.Connect or svc.Heartbeat.connect)
+    end
+    if type(connect) ~= "function" then return false end
+
+    local ok, conn = pcall(function()
+        return connect(hb, function(dt)
+            _uses_heartbeat = true
+            _last_hb_ms = utility and utility.get_tick_count and utility.get_tick_count() or 0
+            run_sim_hooks(tonumber(dt) or delta_time())
+        end)
+    end)
+    if ok and conn then
+        _heartbeat_conn = conn
+        _uses_heartbeat = true
+        return true
+    end
+    return false
 end
 
 function M.get()
@@ -4215,12 +4674,18 @@ function M.get()
 
     if ok and svc then
         _svc = svc
+        try_connect_heartbeat(svc)
     end
     return _svc
 end
 
 function M.available()
     return M.get() ~= nil
+end
+
+function M.uses_heartbeat()
+    M.get()
+    return _uses_heartbeat == true
 end
 
 function M.movement_allowed()
@@ -4231,10 +4696,19 @@ end
 function M.on_sim(fn)
     if type(fn) ~= "function" then return false end
     _sim_hooks[#_sim_hooks + 1] = fn
+    -- Ensure Heartbeat probe runs even if install happens before first get()
+    M.get()
     return true
 end
 
 function M.dispatch(dt)
+    -- Heartbeat is preferred, but keep on_frame dispatch as fallback if HB stalls.
+    if _uses_heartbeat then
+        local now = utility and utility.get_tick_count and utility.get_tick_count() or 0
+        if _last_hb_ms > 0 and (now - _last_hb_ms) < 40 then
+            return
+        end
+    end
     run_sim_hooks(dt or delta_time())
 end
 
@@ -4258,9 +4732,7 @@ end)()
 
 -- ── core/movement_ctrl.lua ──
 April._mods["core.movement_ctrl"] = (function()
--- Inf Fly / Slowfall — velocity-only, HRP-only.
--- Slowfall includes shoot-while-airborne bypass: force Humanoid Running so
--- ViewmodelController's v64 stays grounded (dump: StateChanged → v64 ≥ 1 freezes fire).
+-- Fly / Slowfall — HRP velocity on RunService Heartbeat (falls back to on_frame).
 
 local settings = April.require("core.settings")
 local env = April.require("core.env")
@@ -4274,14 +4746,14 @@ local P_SLOWFALL = "april_slowfall_enabled"
 
 local _installed = false
 local fly_active = false
+local fly_noclip = false
 local tracked_char_id = nil
-local last_ground_ms = 0
+local last_fly_zero_ms = 0
 
--- Slider 2–4 → modest studs/s
-local SPEED_SCALE = 16
-local MAX_FLY_SPEED = 72
-local VEL_BLEND = 0.28
-local GROUND_STATE_MS = 45
+-- Slider 1–20 studs/s
+local MIN_FLY_SPEED = 1
+local MAX_FLY_SPEED = 20
+local GROUND_DIST = 4.5
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -4326,57 +4798,31 @@ local function hum_alive(hum)
 end
 
 local function fly_speed()
-    local raw = settings.num(P_SPEED, 3)
-    if raw < 2 then raw = 2 end
-    if raw > 4 then raw = 4 end
-    local spd = raw * SPEED_SCALE
+    local spd = settings.num(P_SPEED, 5)
+    if spd < MIN_FLY_SPEED then spd = MIN_FLY_SPEED end
     if spd > MAX_FLY_SPEED then spd = MAX_FLY_SPEED end
     return spd
 end
 
--- Soft grounded spoof: keep State = Running (8) so ViewmodelController v64 stays 0.
--- Dump: Humanoid.StateChanged sets v64=0 on Landed/Running; v64≥1 freezes fire cooldown.
--- Prefer ChangeState (fires the signal); fall back to memory state write.
-local function keep_grounded_for_shoot(hum)
-    if not hum or not hum_alive(hum) then return end
-    local now = tick_ms()
-    if now - last_ground_ms < GROUND_STATE_MS then return end
-    last_ground_ms = now
+local function is_on_ground(root)
+    local pos = move.read_pos(root)
+    if not pos then return false end
+    local dist = move.ground_distance(pos.x, pos.y, pos.z)
+    if dist == nil then return false end
+    return dist <= GROUND_DIST
+end
 
-    pcall(function() hum.Jump = false end)
-    pcall(function() hum.jump = false end)
+local function has_move_input(mx, my, mz)
+    return mx ~= 0 or my ~= 0 or mz ~= 0
+end
 
-    -- ChangeState fires StateChanged → v64 = 0 in ViewmodelController
-    local changed = false
-    pcall(function()
-        if hum.ChangeState then
-            hum:ChangeState(8) -- Running
-            changed = true
-        elseif hum.change_state then
-            hum:change_state(8)
-            changed = true
-        end
-    end)
-
-    if not changed then
-        -- Memory write fallback (may not fire StateChanged on all builds)
-        move.humanoid_state(hum, 8)
-        -- Pulse Landed then Running to encourage a transition
-        if (now % 200) < GROUND_STATE_MS then
-            move.humanoid_state(hum, 7)
-        end
-    end
-
-    pcall(function()
-        local ws = hum.WalkSpeed or hum.walk_speed
-        if ws and hum.WalkspeedCheck ~= nil then
-            hum.WalkspeedCheck = ws
-        end
-    end)
+local function set_fly_noclip(char, enabled)
+    fly_noclip = enabled
+    if not char then return end
+    move.set_noclip_parts(char, enabled)
 end
 
 local function clear_swim_block()
-    -- WaterController.IsSwim also freezes fire (v127). Soft-clear when possible.
     local lp = env.get_local_player()
     local char = get_character(lp)
     if not char then return end
@@ -4392,58 +4838,76 @@ local function clear_swim_block()
     end)
 end
 
-local function tick_fly(root, hum, dt)
+local function apply_fly_velocity(root, mx, my, mz, speed)
+    local tx, ty, tz = 0, 0, 0
+    local mag = math.sqrt(mx * mx + my * my + mz * mz)
+    if mag >= 0.001 then
+        tx = mx / mag * speed
+        ty = my / mag * speed
+        tz = mz / mag * speed
+    end
+    move.set_velocity(root, tx, ty, tz)
+    move.set_angular_velocity(root, 0, 0, 0)
+end
+
+local function tick_fly(root, hum, char)
     if not hum_alive(hum) then return end
 
     local mx, my, mz = move.read_fly_input()
+    local on_ground = is_on_ground(root)
+    local moving = has_move_input(mx, my, mz)
+
+    -- On ground with no input: normal walk/jump.
+    if on_ground and not moving then
+        set_fly_noclip(char, false)
+        return
+    end
+
     local speed = fly_speed()
-
-    move.drive_root_velocity(root, mx, my, mz, speed, dt, {
-        blend = VEL_BLEND,
-        max_speed = speed * 1.08,
-        cancel_gravity = true,
-    })
-
-    -- Built-in shoot-while-fly: same grounded spoof as slowfall
-    keep_grounded_for_shoot(hum)
+    apply_fly_velocity(root, mx, my, mz, speed)
+    set_fly_noclip(char, not on_ground or moving)
     clear_swim_block()
 end
 
-local function tick_slowfall(root, hum, dt)
+local function tick_slowfall(root, hum, _dt)
     local raw = settings.num("april_slowfall_speed", 5)
     if raw < 1 then raw = 1 end
-    local cap = -(1.5 + (raw * 0.28))
+    local cap = -(0.8 + (raw * 0.22))
 
     local vx, vy, vz = move.read_velocity(root)
     if vy < cap then
-        local next_y = vy + (cap - vy) * math.min(1, dt * 10)
-        if next_y < cap then next_y = cap end
-        move.set_velocity(root, vx, next_y, vz)
+        move.set_velocity(root, vx, cap, vz)
     end
 
-    -- Shoot while jumping / falling bypass (core of this feature)
-    keep_grounded_for_shoot(hum)
     clear_swim_block()
 end
 
-local function abort_active()
+local function abort_active(root, char)
+    set_fly_noclip(char, false)
+    if fly_active and root then
+        local now = tick_ms()
+        if now - last_fly_zero_ms > 80 then
+            local vx, _, vz = move.read_velocity(root)
+            move.set_velocity(root, vx, 0, vz)
+            last_fly_zero_ms = now
+        end
+    end
     fly_active = false
 end
 
 function M.tick(_dt)
     local misc_gate = April.require("core.misc_gate")
     if not misc_gate.movement_allowed() then
-        abort_active()
+        abort_active(nil, nil)
         return
     end
 
     local fling = April.require("features.movement.fling")
     if fling.is_active and fling.is_active() then
-        abort_active()
+        abort_active(nil, nil)
         return
     end
 
-    local dt = move.delta_time()
     local lp = env.get_local_player()
     if not lp then return end
 
@@ -4457,19 +4921,23 @@ function M.tick(_dt)
     local cid = char_id(char)
     if cid ~= tracked_char_id then
         fly_active = false
+        fly_noclip = false
         tracked_char_id = cid
-        last_ground_ms = 0
     end
 
     local want_fly = settings.enabled(P_FLY)
 
     if want_fly then
         fly_active = true
-        tick_fly(root, hum, dt)
+        tick_fly(root, hum, char)
     else
-        fly_active = false
+        if fly_active then
+            abort_active(root, char)
+        else
+            set_fly_noclip(char, false)
+        end
         if settings.enabled(P_SLOWFALL) then
-            tick_slowfall(root, hum, dt)
+            tick_slowfall(root, hum, _dt)
         end
     end
 end
@@ -4512,9 +4980,9 @@ local MENU_KEYS = {
     "april_esp_text_size",
     "april_player_enabled", "april_player_enabled_mode",
     "april_player_box_mode",
-    "april_player_health", "april_player_skeleton", "april_player_offscreen",
+    "april_player_health", "april_player_skeleton",
     "april_player_show_name", "april_player_show_distance",
-    "april_player_show_weapon", "april_player_health_text",
+    "april_player_show_weapon",
     "april_player_clan_tag", "april_player_clan_color",
     "april_player_esp_filters", "april_player_esp_flags",
     "april_player_chams", "april_player_chams_mode", "april_player_chams_color",
@@ -4524,10 +4992,12 @@ local MENU_KEYS = {
     "april_crosshair_enabled", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
     "april_crosshair_thickness", "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
     "april_crosshair_rainbow", "april_crosshair_rainbow_speed",
-    "april_bullet_tracers", "april_bullet_tracers_color2",
-    "april_bullet_tracers_thick", "april_bullet_tracers_life",
-    "april_hitmarkers", "april_hitmarkers_head", "april_hitmarkers_style",
-    "april_hitmarkers_size", "april_hitmarkers_gap", "april_hitmarkers_life", "april_hitmarkers_thick",
+    "april_aimbot", "april_aim_key", "april_aim_key_mode",
+    "april_aim_target_type", "april_aim_bone",
+    "april_aim_filters", "april_aim_whitelist_ids",
+    "april_aim_targets", "april_aim_options",
+    "april_aim_draw_fov", "april_aim_fov_style", "april_aim_target_line",
+    "april_aim_max_dist", "april_aim_fov", "april_aim_smooth",
     "april_silent_aim", "april_silent_aim_mode",
     "april_silent_target_type", "april_silent_bone",
     "april_silent_filters", "april_silent_whitelist_ids",
@@ -4561,7 +5031,7 @@ local MENU_KEYS = {
     "april_loot_chams", "april_loot_chams_mode", "april_loot_chams_color",
     "april_npc_enabled", "april_npc_enabled_mode", "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode",
     "april_npc_health", "april_npc_skeleton",
-    "april_npc_offscreen", "april_npc_show_name", "april_npc_show_distance", "april_npc_range",
+    "april_npc_show_name", "april_npc_show_distance", "april_npc_show_weapon", "april_npc_range",
     "april_anti_afk",
     "april_base_enabled", "april_base_enabled_mode", "april_base_cabinet", "april_storage_cabinet", "april_small_box", "april_large_box",
     "april_sleeping_bag", "april_auto_turret", "april_auto_turret_ring", "april_shotgun_turret", "april_shotgun_turret_ring",
@@ -4581,22 +5051,21 @@ local MENU_KEYS = {
     "april_noclip_enabled", "april_noclip_enabled_mode", "april_noclip_speed",
     "april_slowfall_enabled", "april_slowfall_enabled_mode", "april_slowfall_speed",
     "april_fling_enabled", "april_fling_enabled_mode", "april_fling_fov", "april_fling_duration",
-    "april_desync_enabled", "april_desync_enabled_mode", "april_desync_autosend", "april_desync_autosend_len",
+    "april_desync_enabled", "april_desync_enabled_mode",
     "april_desync_visualizer",
     "april_bullet_manip_enabled", "april_bullet_manip_enabled_mode", "april_bullet_manip_range", "april_bullet_manip_speed",
     "april_bullet_manip_debug", "april_bullet_manip_console", "april_bullet_manip_vis",
     "april_bullet_manip_vis_style", "april_bullet_manip_vis_size",
     "april_bullet_manip_vis_link", "april_bullet_manip_vis_labels", "april_bullet_manip_vis_peek",
     "april_keybinds_enabled", "april_keybinds_active_only", "april_keybinds_show_unbound", "april_keybinds_show_mode",
-    "april_keybinds_x", "april_keybinds_y", "april_keybinds_w",
+    "april_keybinds_x", "april_keybinds_y",
     "april_mod_checker_enabled", "april_mod_checker_interval",
-    "april_mod_checker_x", "april_mod_checker_y", "april_mod_checker_w",
+    "april_mod_checker_x", "april_mod_checker_y",
 }
 
 local COLOR_KEYS = {
     "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
-    "april_bullet_tracers", "april_bullet_tracers_color2",
-    "april_hitmarkers", "april_hitmarkers_head",
+    "april_aimbot", "april_aim_draw_fov", "april_aim_target_line",
     "april_silent_aim", "april_silent_draw_fov", "april_silent_target_line", "april_silent_tp_ray_vis",
     "april_player_enabled",
     "april_stone_node", "april_metal_node", "april_phosphate_node", "april_corn_plant", "april_tomato_plant",
@@ -4606,7 +5075,7 @@ local COLOR_KEYS = {
     "april_timed_crate", "april_care_package", "april_btr_crate", "april_body_bag", "april_sleeper",
     "april_trash_can", "april_oil_barrel", "april_small_egg", "april_medium_egg", "april_large_egg",
     "april_wooden_boat", "april_military_boat", "april_flycopter",
-    "april_npc_soldiers", "april_npc_bosses", "april_npc_skeleton", "april_npc_offscreen",
+    "april_npc_soldiers", "april_npc_bosses", "april_npc_skeleton",
     "april_base_cabinet", "april_storage_cabinet", "april_small_box", "april_large_box",
     "april_sleeping_bag", "april_auto_turret", "april_auto_turret_ring", "april_shotgun_turret", "april_shotgun_turret_ring", "april_wooden_door",
     "april_wooden_double_door", "april_salvaged_door", "april_metal_door", "april_metal_double_door",
@@ -5851,7 +6320,7 @@ M.by_name = {
     ["Military Sniper Scope"] = "14764545466",
     ["Muzzle Boost"] = "15347030553",
     ["Salvaged Lasersight"] = "15347030437",
-    ["Salvaged Sight"] = "13816429173",
+    ["Salvaged Sight"] = "13816428922",
     ["Salvaged Sniper Scope"] = "14623616888",
     ["Silencer"] = "15347030257",
     ["Weapon Flashlight"] = "15360516663",
@@ -7452,6 +7921,7 @@ end)()
 
 -- ── game/gc_weapon_mods.lua ──
 April._mods["game.gc_weapon_mods"] = (function()
+-- GC weapon multipliers. Skip refreshgc when warm; rate-limit applygc.
 local debug = April.require("core.debug")
 local env = April.require("core.env")
 
@@ -7478,11 +7948,32 @@ M.ALLOWED = {
 }
 
 M._last_node_count = 0
+M._last_apply_ms = 0
+M._last_refresh_ms = 0
+M._fail_streak = 0
+M._session_token = nil
+
+local MIN_APPLY_GAP_MS = 280
+local MIN_REFRESH_GAP_MS = 4000
+local FAIL_BACKOFF_MS = 1200
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
 
 local function has_api()
     return type(refreshgc) == "function"
         and type(getgc) == "function"
         and type(applygc) == "function"
+end
+
+local function session_token()
+    if not game then return "none" end
+    local pid = game.place_id or 0
+    local gid = game.game_id or 0
+    local ws = game.workspace
+    local ws_addr = (ws and (ws.Address or ws.address)) or 0
+    return tostring(pid) .. ":" .. tostring(gid) .. ":" .. tostring(ws_addr)
 end
 
 function M.available()
@@ -7531,32 +8022,28 @@ local function warm_nodes(keys)
     return count
 end
 
-local function patch_count(keys, payload)
-    local patched = 0
-
-    local ok, result = pcall(applygc, keys, payload)
-    if ok and type(result) == "number" then
-        patched = result
+local function maybe_refresh(force)
+    local now = tick_ms()
+    local tok = session_token()
+    if tok ~= M._session_token then
+        M._session_token = tok
+        M._last_node_count = 0
+        force = true
     end
 
-    if patched <= 0 then
-        ok, result = pcall(applygc, M.WEAPON_FIND_KEYS, payload)
-        if ok and type(result) == "number" then
-            patched = result
-        end
+    if not force and M._last_node_count > 0 then
+        return
+    end
+    if not force and (now - M._last_refresh_ms) < MIN_REFRESH_GAP_MS then
+        return
     end
 
-    if patched <= 0 then
-        ok, result = pcall(applygc, payload)
-        if ok and type(result) == "number" then
-            patched = result
-        end
-    end
-
-    return patched
+    pcall(refreshgc)
+    M._last_refresh_ms = now
 end
 
-function M.apply_weapon(mods)
+function M.apply_weapon(mods, opts)
+    opts = opts or {}
     if not has_api() then
         return false, 0, "GC API unavailable"
     end
@@ -7570,20 +8057,57 @@ function M.apply_weapon(mods)
         return false, 0, "Enter a match first"
     end
 
-    pcall(refreshgc)
+    local now = tick_ms()
+    local gap = MIN_APPLY_GAP_MS
+    if M._fail_streak > 2 then
+        gap = FAIL_BACKOFF_MS
+    end
+    if not opts.force and (now - M._last_apply_ms) < gap then
+        return false, 0, "throttled"
+    end
+
+    maybe_refresh(opts.force_refresh == true or M._last_node_count <= 0)
 
     local patch_keys = keys_for_payload(payload)
-    warm_nodes(M.WEAPON_FIND_KEYS)
-    warm_nodes(patch_keys)
+    local warm = warm_nodes(patch_keys)
+    if warm <= 0 then
+        warm = warm_nodes(M.WEAPON_FIND_KEYS)
+    end
+    M._last_node_count = math.max(M._last_node_count, warm)
 
-    local patched = patch_count(patch_keys, payload)
-    M._last_node_count = math.max(M._last_node_count, patched, warm_nodes(patch_keys))
+    if warm <= 0 then
+        M._fail_streak = M._fail_streak + 1
+        debug.warn_once("gun_mods:nodes", "GC still warming — equip a gun, enable a mod option, keep master on")
+        return false, 0, "GC warming — equip gun and wait a moment"
+    end
+
+    local patched = 0
+    local ok, result = pcall(applygc, patch_keys, payload)
+    if ok and type(result) == "number" then
+        patched = result
+    end
+
+    -- One fallback only (avoid spam that correlates with long-session crashes)
+    if patched <= 0 then
+        ok, result = pcall(applygc, M.WEAPON_FIND_KEYS, payload)
+        if ok and type(result) == "number" then
+            patched = result
+        end
+    end
+
+    M._last_apply_ms = tick_ms()
 
     if patched > 0 then
+        M._last_node_count = math.max(M._last_node_count, patched)
+        M._fail_streak = 0
         return true, patched, string.format("%d node(s) patched", patched)
     end
 
-    debug.warn_once("gun_mods:nodes", "GC still warming — equip a gun, enable a mod option, keep master on")
+    M._fail_streak = M._fail_streak + 1
+    -- Cold miss: allow one forced refresh next call
+    if M._fail_streak == 1 then
+        M._last_node_count = 0
+    end
     return false, 0, "GC warming — equip gun and wait a moment"
 end
 
@@ -7592,7 +8116,7 @@ function M.apply(mods)
 end
 
 function M.apply_once(mods)
-    return M.apply_weapon(mods)
+    return M.apply_weapon(mods, { force = true })
 end
 
 function M.apply_cached(mods)
@@ -7605,8 +8129,7 @@ function M.refresh_cache()
         return 0
     end
 
-    pcall(refreshgc)
-    warm_nodes(M.WEAPON_FIND_KEYS)
+    maybe_refresh(true)
     local count = warm_nodes(M.WEAPON_FIND_KEYS)
     M._last_node_count = count
     return count
@@ -7872,7 +8395,7 @@ local M = {}
 M.GLOBAL_PROFILE_KEY = "__global__"
 M.GLOBAL_DISPLAY_NAME = "Global"
 M.MODE_ID = "april_gm_mode"
-M.MODES = { "Profile Based", "Global" }
+M.MODES = { "Live (save optional)", "Global" }
 
 local function pct_to_neg_mult(pct)
     pct = math.max(0, math.min(100, pct or 0))
@@ -8568,18 +9091,21 @@ local team_state = April.require("game.team_state")
 
 local M = {}
 
-local function inst_attr(inst, key)
-    if not inst then return nil end
-    -- Prefer snake_case (Vector); PascalCase second — a failing GetAttribute must not block get_attribute.
+local function read_attribute(inst, key)
+    if not inst or not key then return nil end
     local v = env.safe_call(function()
-        if inst.get_attribute then return inst:get_attribute(key) end
+        if inst.GetAttribute then return inst:GetAttribute(key) end
         return nil
     end)
     if v ~= nil then return v end
     return env.safe_call(function()
-        if inst.GetAttribute then return inst:GetAttribute(key) end
+        if inst.get_attribute then return inst:get_attribute(key) end
         return nil
     end)
+end
+
+local function inst_attr(inst, key)
+    return read_attribute(inst, key)
 end
 
 local function players_children()
@@ -8597,6 +9123,19 @@ function M.resolve_player_inst(player)
     end
 
     local uid = tonumber(player.user_id)
+    if uid and uid ~= 0 and game and game.players then
+        local pl = env.safe_call(function()
+            if game.players.GetPlayerByUserId then
+                return game.players:GetPlayerByUserId(uid)
+            end
+            if game.players.get_player_by_user_id then
+                return game.players:get_player_by_user_id(uid)
+            end
+            return nil
+        end)
+        if pl and env.is_valid(pl) then return pl end
+    end
+
     local want_name = player.name
     local kids = players_children()
     for i = 1, #kids do
@@ -8619,12 +9158,30 @@ function M.resolve_player_inst(player)
                 end
             end
         end
+        local by_name = env.safe_call(function()
+            if game.players.find_first_child then
+                return game.players:find_first_child(want_name)
+            end
+            if game.players.FindFirstChild then
+                return game.players:FindFirstChild(want_name)
+            end
+            return nil
+        end)
+        if by_name and env.is_valid(by_name) then return by_name end
     end
     return nil
 end
 
 function M.player_attr(player, key)
-    return inst_attr(M.resolve_player_inst(player), key)
+    local inst = M.resolve_player_inst(player)
+    if inst then
+        local v = read_attribute(inst, key)
+        if v ~= nil then return v end
+    end
+    if player and type(player) == "table" then
+        return read_attribute(player, key)
+    end
+    return nil
 end
 
 function M.char_attr(player, key)
@@ -8653,32 +9210,56 @@ function M.humanoid_attr(player, key)
     return inst_attr(hum, key)
 end
 
+local function truthy(v)
+    if v == true or v == 1 then return true end
+    if type(v) == "string" then
+        local s = v:lower()
+        return s == "true" or s == "1" or s == "yes"
+    end
+    return false
+end
+
 function M.is_safezone(player)
-    return M.player_attr(player, "SafeZone") == true
+    return truthy(M.player_attr(player, "SafeZone"))
 end
 
 function M.is_vip(player)
-    return M.player_attr(player, "VIP") == true
+    return truthy(M.player_attr(player, "VIP"))
 end
 
 -- ChatController staff tags (Owner / Admin / Mod).
 function M.staff_tag(player)
-    if M.player_attr(player, "HideTag") == true then return nil end
-    if M.player_attr(player, "Owner") == true then return "OWNER" end
-    if M.player_attr(player, "Admin") == true then return "ADMIN" end
-    if M.player_attr(player, "Mod") == true then return "MOD" end
+    if truthy(M.player_attr(player, "HideTag")) then return nil end
+    if truthy(M.player_attr(player, "Owner")) then return "OWNER" end
+    if truthy(M.player_attr(player, "Admin")) then return "ADMIN" end
+    if truthy(M.player_attr(player, "Mod")) then return "MOD" end
     return nil
 end
 
+local function find_char_child(char, name)
+    if not char or not env.is_valid(char) then return nil end
+    return env.safe_call(function()
+        if char.find_first_child then return char:find_first_child(name) end
+        return char:FindFirstChild(name)
+    end)
+end
+
 function M.is_reviving(player)
-    if M.humanoid_attr(player, "Reviving") == true then return true end
-    if M.char_attr(player, "Reviving") == true then return true end
+    if player and player.character and env.is_valid(player.character) then
+        local ic = find_char_child(player.character, "InteractController")
+        if ic and truthy(inst_attr(ic, "Reviving")) then
+            return true
+        end
+    end
+    if truthy(M.humanoid_attr(player, "Reviving")) then return true end
+    if truthy(M.char_attr(player, "Reviving")) then return true end
     return false
 end
 
 local function normalize_clan_tag(tag)
     if tag == nil or tag == false then return nil end
     if type(tag) == "string" then
+        tag = tag:match("^%[(.-)%]$") or tag
         tag = tag:match("^%s*(.-)%s*$") or tag
         if tag == "" then return nil end
         return tag
@@ -8711,7 +9292,6 @@ local function parse_color3(c)
     local g = c.G or c.g
     local b = c.B or c.b
     if r == nil or g == nil or b == nil then
-        -- Some builds expose Color3 only via tostring / components.
         r = env.safe_call(function() return c.R end) or env.safe_call(function() return c.r end)
         g = env.safe_call(function() return c.G end) or env.safe_call(function() return c.g end)
         b = env.safe_call(function() return c.B end) or env.safe_call(function() return c.b end)
@@ -8719,7 +9299,6 @@ local function parse_color3(c)
     if r == nil or g == nil or b == nil then return nil end
     r, g, b = tonumber(r), tonumber(g), tonumber(b)
     if not r or not g or not b then return nil end
-    -- ClanData uses 0–255 channels in places; attribute Color3 is 0–1.
     if r > 1 or g > 1 or b > 1 then
         r, g, b = r / 255, g / 255, b / 255
     end
@@ -8734,8 +9313,7 @@ end
 
 function M.is_downed(player)
     if not player then return false end
-    local down = M.humanoid_attr(player, "Downed")
-    return down == true
+    return truthy(M.humanoid_attr(player, "Downed"))
 end
 
 function M.is_combat_target(player)
@@ -8783,6 +9361,19 @@ April._mods["game.combat_target"] = (function()
 local M = {}
 
 function M.get()
+    local ok_cam, cam = pcall(function()
+        return April.require("features.combat.camera_aimbot")
+    end)
+    if ok_cam and cam and cam.get_target then
+        local t = cam.get_target()
+        if t then
+            local player_state = April.require("game.player_state")
+            if not player_state or not player_state.is_combat_target or player_state.is_combat_target(t) then
+                return t
+            end
+        end
+    end
+
     local ok, aimbot = pcall(function()
         return April.require("features.combat.aimbot")
     end)
@@ -9537,6 +10128,21 @@ end
 
 function M.is_empty_held_name(name)
     return is_empty_held_name(name)
+end
+
+function M.held_name(player)
+    if not player then return nil end
+    local char = resolve_character(player)
+    local name = select(1, resolve_held_weapon(player, char))
+    if name and is_valid_held_label(name) then return name end
+    return nil
+end
+
+function M.held_name_from_character(char)
+    if not char or not env.is_valid(char) then return nil end
+    local name = select(1, find_held_on_character(char))
+    if name and is_valid_held_label(name) then return name end
+    return nil
 end
 
 function M.scan_player(player)
@@ -10431,23 +11037,34 @@ end)()
 
 -- ── features/combat/silent_whitelist.lua ──
 April._mods["features.combat.silent_whitelist"] = (function()
--- Silent-aim player whitelist (middle-click toggle). Persists via menu input string.
+-- Player whitelist for combat aim (middle-click toggle). Prefix-aware for silent + camera aim.
 
 local settings = April.require("core.settings")
 local notify = April.require("core.notify")
 
 local M = {}
 
-local IDS_KEY = "april_silent_whitelist_ids"
-local FILTERS_KEY = "april_silent_filters"
 local FILTER_WHITELIST_IDX = 5
 local MMB = 0x04
+local DEFAULT_PREFIX = "april_silent_"
 
-local was_down = false
-local cache = { t = -1, set = {} }
+local was_down = {}
+local cache = {}
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function norm_prefix(prefix)
+    return prefix or DEFAULT_PREFIX
+end
+
+local function ids_key(prefix)
+    return norm_prefix(prefix) .. "whitelist_ids"
+end
+
+local function filters_key(prefix)
+    return norm_prefix(prefix) .. "filters"
 end
 
 local function parse_ids(raw)
@@ -10475,52 +11092,57 @@ local function serialize_ids(set)
     return table.concat(parts, ",")
 end
 
-local function read_set()
+local function read_set(prefix)
+    local p = norm_prefix(prefix)
     local now = tick_ms()
-    if cache.t == now then return cache.set end
-    cache.t = now
+    local c = cache[p]
+    if c and c.t == now then return c.set end
+
     local raw = ""
+    local key = ids_key(p)
     if menu and menu.get then
-        local ok, v = pcall(menu.get, IDS_KEY)
+        local ok, v = pcall(menu.get, key)
         if ok and type(v) == "string" then raw = v end
     end
     if raw == "" then
-        raw = tostring(settings.get(IDS_KEY) or "")
+        raw = tostring(settings.get(key) or "")
     end
-    cache.set = parse_ids(raw)
-    return cache.set
+    local set = parse_ids(raw)
+    cache[p] = { t = now, set = set }
+    return set
 end
 
-local function write_set(set)
-    cache.set = set
-    cache.t = tick_ms()
+local function write_set(prefix, set)
+    local p = norm_prefix(prefix)
+    cache[p] = { t = tick_ms(), set = set }
     local s = serialize_ids(set)
+    local key = ids_key(p)
     if menu and menu.set then
-        pcall(menu.set, IDS_KEY, s)
+        pcall(menu.set, key, s)
     end
 end
 
-function M.count()
+function M.count(prefix)
     local n = 0
-    for _ in pairs(read_set()) do
+    for _ in pairs(read_set(prefix)) do
         n = n + 1
     end
     return n
 end
 
-function M.is_whitelisted(player)
+function M.is_whitelisted(player, prefix)
     if not player then return false end
     local uid = tonumber(player.user_id)
     if not uid or uid == 0 then return false end
-    return read_set()[uid] == true
+    return read_set(prefix)[uid] == true
 end
 
-function M.toggle_player(player)
+function M.toggle_player(player, prefix)
     if not player or player.is_local then return false, nil end
     local uid = tonumber(player.user_id)
     if not uid or uid == 0 then return false, nil end
 
-    local set = read_set()
+    local set = read_set(prefix)
     local name = player.display_name or player.name or tostring(uid)
     local added
     if set[uid] then
@@ -10532,40 +11154,40 @@ function M.toggle_player(player)
         added = true
         notify.success("WL + " .. name, 2500)
     end
-    write_set(set)
+    write_set(prefix, set)
     return true, added
 end
 
-function M.clear()
-    write_set({})
+function M.clear(prefix)
+    write_set(prefix, {})
     notify.warning("Whitelist cleared", 2000)
 end
 
-function M.enabled()
-    return settings.multi(FILTERS_KEY, FILTER_WHITELIST_IDX, false)
+function M.enabled(prefix)
+    return settings.multi(filters_key(prefix), FILTER_WHITELIST_IDX, false)
 end
 
--- Skip target when whitelist filter is on and they are listed.
-function M.should_skip(player)
-    if not M.enabled() then return false end
-    return M.is_whitelisted(player)
+function M.should_skip(player, prefix)
+    if not M.enabled(prefix) then return false end
+    return M.is_whitelisted(player, prefix)
 end
 
-function M.tick(current_target)
-    if not M.enabled() then
-        was_down = false
+function M.tick(current_target, prefix)
+    prefix = norm_prefix(prefix)
+    if not M.enabled(prefix) then
+        was_down[prefix] = false
         return
     end
 
     local down = input and input.is_key_down and input.is_key_down(MMB) == true
-    local pressed = down and not was_down
-    was_down = down
+    local pressed = down and not was_down[prefix]
+    was_down[prefix] = down
 
     if not pressed then return end
     if not current_target then return end
     if current_target.is_npc or current_target._npc then return end
 
-    M.toggle_player(current_target)
+    M.toggle_player(current_target, prefix)
 end
 
 return M
@@ -10868,13 +11490,11 @@ M.FILTER_SAFEZONE = 4
 M.FILTER_WHITELIST = 5
 M.FILTER_SKIP_DOWNED = 6
 
--- april_silent_targets
+-- april_silent_targets / april_aim_targets (Players, NPCs)
 M.TARGET_PLAYERS = 1
 M.TARGET_NPCS = 2
-M.TARGET_NPC_SOLDIERS = 3
-M.TARGET_NPC_BOSSES = 4
 
--- april_silent_options
+-- april_silent_options / april_aim_options indices (1-based)
 M.OPT_STICKY = 1
 
 function M.bone_from_index(idx)
@@ -10899,10 +11519,10 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
         { parent = parent_id })
     menu.add_combo(T, G, p .. "bone", "Hitbox", M.SILENT_BONES, 0, { parent = parent_id })
     menu.add_multicombo(T, G, p .. "targets", "Aim At", {
-        "Players", "NPCs", "NPC Soldiers", "NPC Bosses",
-    }, { false, false, false, false }, { parent = parent_id })
+        "Players", "NPCs",
+    }, { false, false }, { parent = parent_id })
     if menu and menu.set then
-        pcall(menu.set, p .. "targets", { true, false, true, true })
+        pcall(menu.set, p .. "targets", { true, false })
     end
     menu.add_multicombo(T, G, p .. "filters", "Filters", {
         "Health Check",
@@ -10921,7 +11541,7 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     end
     menu.add_button(T, G, p .. "whitelist_clear", "Clear Whitelist", function()
         local wl = April.require("features.combat.silent_whitelist")
-        if wl and wl.clear then wl.clear() end
+        if wl and wl.clear then wl.clear(p) end
     end)
     menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, { parent = parent_id })
 
@@ -10960,6 +11580,58 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
         menu_util.parent(parent_id, { colorpicker = opts.line_color or { 1, 0.25, 0.25, 1 } }))
 end
 
+--- Camera aimbot: same targeting/filters as silent, without bullet TP/manip/hitscan.
+function M.register_aimbot(T, G, prefix, parent_id, opts)
+    opts = opts or {}
+    local p = prefix
+
+    menu_util.section(T, G, "Targeting")
+    menu.add_combo(T, G, p .. "target_type", "Target Type", { "Crosshair", "Distance" }, 0,
+        { parent = parent_id })
+    menu.add_combo(T, G, p .. "bone", "Hitbox", M.SILENT_BONES, 0, { parent = parent_id })
+    menu.add_multicombo(T, G, p .. "targets", "Aim At", {
+        "Players", "NPCs",
+    }, { false, false }, { parent = parent_id })
+    if menu and menu.set then
+        pcall(menu.set, p .. "targets", { true, false })
+    end
+    menu.add_multicombo(T, G, p .. "filters", "Filters", {
+        "Health Check",
+        "Visible Only",
+        "Team Check",
+        "Skip Safezone",
+        "Whitelist",
+        "Skip Downed",
+    }, { false, false, false, false, false, false }, { parent = parent_id })
+    if menu and menu.set then
+        pcall(menu.set, p .. "filters", { true, false, true, true, false, true })
+    end
+    menu.add_input(T, G, p .. "whitelist_ids", "Whitelist IDs", "")
+    if menu and menu.set_visible then
+        pcall(menu.set_visible, p .. "whitelist_ids", false)
+    end
+    menu.add_button(T, G, p .. "whitelist_clear", "Clear Whitelist", function()
+        local wl = April.require("features.combat.silent_whitelist")
+        if wl and wl.clear then wl.clear(p) end
+    end)
+    menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, { parent = parent_id })
+
+    menu_util.section(T, G, "Aim")
+    menu.add_multicombo(T, G, p .. "options", "Options", {
+        "Sticky Target",
+    }, { false }, { parent = parent_id })
+    menu.add_slider_int(T, G, p .. "smooth", "Smoothness", 1, 25, 10, { parent = parent_id })
+    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 120, { parent = parent_id })
+
+    menu_util.section(T, G, "Visuals")
+    menu.add_checkbox(T, G, p .. "draw_fov", "FOV Circle", false,
+        menu_util.parent(parent_id, { colorpicker = opts.fov_color or { 0.2, 1, 0.45, 1 } }))
+    menu.add_combo(T, G, p .. "fov_style", "FOV Style", { "Outline", "Filled Circle" }, 1,
+        menu_util.parent(p .. "draw_fov"))
+    menu.add_checkbox(T, G, p .. "target_line", "Target Line", false,
+        menu_util.parent(parent_id, { colorpicker = opts.line_color or { 0.2, 1, 0.45, 1 } }))
+end
+
 return M
 
 end)()
@@ -10992,17 +11664,8 @@ function M.is_npc_target(target)
 end
 
 local function npc_enabled(entry, prefix)
-    local targets = prefix .. "targets"
-    if not settings.multi(targets, 2, false) then
-        return false
-    end
-    if entry.kind == "soldier" then
-        return settings.multi(targets, 3, true)
-    end
-    if entry.kind == "boss" then
-        return settings.multi(targets, 4, true)
-    end
-    return false
+    if not entry then return false end
+    return settings.multi(prefix .. "targets", 2, false)
 end
 
 local function read_npc_health(model)
@@ -11114,7 +11777,7 @@ function M.passes_filters(target, prefix, aim, origin, opts)
         return true
     end
 
-    if not opts.ignore_whitelist and silent_whitelist.should_skip(target) then
+    if not opts.ignore_whitelist and silent_whitelist.should_skip(target, prefix) then
         return false
     end
 
@@ -11482,7 +12145,9 @@ end
 
 local function apply_drop_aim(origin, hitpart, weapon, state, extra)
     local muzzle = origin or combat_origin.get_muzzle_origin()
-    local aim_far, curve = ballistic.silent_aim_point(muzzle, hitpart, weapon)
+    -- Visual drop arc only (path ends on hitpart). Silent API aims at hitpart —
+    -- hook projectiles are effectively hitscan-speed, so aim-up misses.
+    local curve = ballistic.curve_for_weapon(muzzle, hitpart, weapon, 24)
     local info = {
         state = state or "curve",
         peek = extra and extra.peek or nil,
@@ -11496,7 +12161,7 @@ local function apply_drop_aim(origin, hitpart, weapon, state, extra)
         extend_active = extra and extra.extend_active or false,
         scan_progress = extra and extra.scan_progress or 0,
     }
-    return muzzle, aim_far or hitpart, info
+    return muzzle, hitpart, info
 end
 
 local function apply_ray_aim(origin, aim, hitpart, weapon, state, extra, meta)
@@ -11569,6 +12234,250 @@ function M.resolve_track(target, prefix, cx, cy)
     end
 
     return apply_drop_aim(muzzle, center, weapon, "curve", manip_extra)
+end
+
+return M
+
+end)()
+
+-- ── features/combat/camera_aimbot.lua ──
+April._mods["features.combat.camera_aimbot"] = (function()
+-- Camera aimbot: velocity + automatic bullet-drop prediction (weapon stats from dump/toolinfo).
+local settings = April.require("core.settings")
+local targeting = April.require("features.combat.targeting")
+local weapons = April.require("game.weapons")
+local combat_origin = April.require("game.combat_origin")
+local draw_util = April.require("core.draw_util")
+local menu_util = April.require("core.menu_util")
+local combat_menu = April.require("features.combat.combat_menu")
+local silent_whitelist = April.require("features.combat.silent_whitelist")
+local aim_key = April.require("core.aim_key")
+local theme = April.require("core.ui_theme")
+
+local M = {}
+
+local locked_target = nil
+local PREFIX = "april_aim_"
+local P_MASTER = "april_aimbot"
+local P_AIM_KEY = "april_aim_key"
+local P_AIM_KEY_MODE = "april_aim_key_mode"
+local TARGET_SCAN_MS = 33
+
+local cached_aim = nil
+local smoothed_aim = nil
+local last_target_scan = 0
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function w2s(x, y, z)
+    if draw and draw.world_to_screen then
+        return draw.world_to_screen(x, y, z)
+    end
+    if utility and utility.world_to_screen then
+        return utility.world_to_screen(x, y, z)
+    end
+    return 0, 0, false
+end
+
+local function holding_weapon()
+    if weapons.holding_ranged_weapon() then return true end
+    if weapons.get_held_ranged_weapon_name() then return true end
+    local lp = entity and entity.get_local_player and entity.get_local_player()
+    if lp and lp.tool_name and lp.tool_name ~= "" then
+        return weapons.is_ranged_weapon_name(lp.tool_name)
+    end
+    return false
+end
+
+local function enabled()
+    return settings.bool(P_MASTER, false)
+end
+
+local function aiming()
+    if not enabled() then return false end
+    aim_key.tick(P_AIM_KEY, P_AIM_KEY_MODE)
+    return aim_key.active(P_AIM_KEY, P_AIM_KEY_MODE)
+end
+
+local function smooth_alpha()
+    local n = settings.num(PREFIX .. "smooth", 10)
+    n = math.max(1, math.min(25, n))
+    return math.max(0.08, math.min(0.95, 1.25 / n))
+end
+
+local function blend_aim(prev, nxt)
+    if not nxt then return prev end
+    if not prev then return { x = nxt.x, y = nxt.y, z = nxt.z } end
+    local a = smooth_alpha()
+    return {
+        x = prev.x + (nxt.x - prev.x) * a,
+        y = prev.y + (nxt.y - prev.y) * a,
+        z = prev.z + (nxt.z - prev.z) * a,
+    }
+end
+
+local function update_target(cx, cy, fov)
+    local sticky = settings.multi(PREFIX .. "options", combat_menu.OPT_STICKY, false)
+    local now = tick_ms()
+
+    if sticky and locked_target then
+        if not targeting.is_target_valid(locked_target, PREFIX, cx, cy, fov) then
+            locked_target = nil
+        end
+    end
+
+    if locked_target and sticky then
+        return
+    end
+
+    if now - last_target_scan < TARGET_SCAN_MS then
+        return
+    end
+    last_target_scan = now
+    locked_target = targeting.find_target(cx, cy, fov, PREFIX)
+end
+
+local function resolve_aim_point(target, cx, cy)
+    local predict_origin = combat_origin.get_muzzle_origin()
+        or combat_origin.get_fire_origin()
+        or combat_origin.get_camera_origin()
+    return targeting.get_aim_point(target, PREFIX, nil, predict_origin, cx, cy, true)
+end
+
+function M.register_menu()
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.SILENT_AIM)
+
+    menu.add_checkbox(T, G, P_MASTER, "Enable Aimbot", false)
+
+    menu.add_combo(T, G, P_AIM_KEY_MODE, "Aim Key Mode", { "Always", "Hold", "Toggle" }, 1,
+        { parent = P_MASTER })
+    if menu.add_hotkey then
+        menu.add_hotkey(T, G, P_AIM_KEY, "Aim Key", 0, { parent = P_MASTER, default_mode = 1 })
+    end
+    if menu and menu.set_visible then
+        pcall(menu.set_visible, P_AIM_KEY_MODE, false)
+    end
+
+    combat_menu.register_aimbot(T, G.SILENT_AIM, PREFIX, P_MASTER, {
+        fov_default = 120,
+        fov_color = theme.GREEN or { 0.2, 1, 0.45, 1 },
+        line_color = { 0.2, 1, 0.45, 1 },
+    })
+
+    menu_util.bind_children(P_MASTER, {
+        P_AIM_KEY, P_AIM_KEY_MODE,
+        PREFIX .. "target_type", PREFIX .. "bone",
+        PREFIX .. "filters",
+        PREFIX .. "whitelist_ids", PREFIX .. "whitelist_clear",
+        PREFIX .. "targets", PREFIX .. "options",
+        PREFIX .. "smooth",
+        PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
+        PREFIX .. "max_dist", PREFIX .. "fov",
+    })
+
+    menu_util.bind_children(PREFIX .. "draw_fov", {
+        PREFIX .. "fov_style",
+    })
+end
+
+function M.update(_dt)
+    cached_aim = nil
+
+    if not enabled() then
+        locked_target = nil
+        smoothed_aim = nil
+        return
+    end
+
+    local sw, sh = targeting.screen_center()
+    local cx, cy = sw * 0.5, sh * 0.5
+    local fov = settings.num(PREFIX .. "fov", 120)
+
+    update_target(cx, cy, fov)
+
+    if holding_weapon() then
+        combat_origin.sync_weapon(weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name())
+
+        local wl_target = locked_target
+        if not wl_target or not targeting.is_aim_target(wl_target) then
+            wl_target = targeting.find_target(cx, cy, fov, PREFIX, { ignore_whitelist = true })
+        end
+        silent_whitelist.tick(wl_target, PREFIX)
+    end
+
+    if not locked_target or not targeting.is_aim_target(locked_target) then
+        smoothed_aim = nil
+        return
+    end
+
+    local aim = resolve_aim_point(locked_target, cx, cy)
+    if not aim then
+        smoothed_aim = nil
+        return
+    end
+
+    if aiming() and holding_weapon() then
+        smoothed_aim = blend_aim(smoothed_aim, aim)
+        cached_aim = smoothed_aim
+
+        if camera and camera.look_at then
+            local smooth_frames = math.max(1, math.floor(settings.num(PREFIX .. "smooth", 10)))
+            pcall(camera.look_at, smoothed_aim.x, smoothed_aim.y, smoothed_aim.z, smooth_frames)
+        end
+    else
+        -- Visuals (target line) use live aim point; camera only moves when aim key is active.
+        cached_aim = aim
+    end
+end
+
+function M.get_target()
+    return locked_target
+end
+
+function M.get_scoped_target()
+    if locked_target then return locked_target end
+    if not enabled() then return nil end
+    local sw, sh = targeting.screen_center()
+    local fov = settings.num(PREFIX .. "fov", 120)
+    return targeting.find_target(sw * 0.5, sh * 0.5, fov, PREFIX)
+end
+
+function M.draw()
+    if not enabled() then return end
+
+    local sw, sh = targeting.screen_center()
+    local cx, cy = sw * 0.5, sh * 0.5
+    local fov = settings.num(PREFIX .. "fov", 120)
+
+    if settings.bool(PREFIX .. "draw_fov", false) then
+        local col = settings.color(PREFIX .. "draw_fov", { 0.2, 1, 0.45, 1 })
+        local filled = settings.num(PREFIX .. "fov_style", 1) == 1
+
+        if filled and draw and draw.circle_filled then
+            local fill = settings.color(PREFIX .. "draw_fov", { 0.2, 1, 0.45, 0.12 })
+            local c = { fill[1], fill[2], fill[3], (fill[4] or 1) * 0.25 }
+            draw.circle_filled(cx, cy, fov, c, 64)
+        end
+        if draw and draw.circle then
+            draw.circle(cx, cy, fov, col, 64, 1)
+        else
+            draw_util.circle(cx, cy, fov, col, false)
+        end
+    end
+
+    if locked_target and settings.bool(PREFIX .. "target_line", false) then
+        local aim = cached_aim or smoothed_aim or resolve_aim_point(locked_target, cx, cy)
+        if aim then
+            local tx, ty, vis = w2s(aim.x, aim.y, aim.z)
+            if vis then
+                local col = settings.color(PREFIX .. "target_line", { 0.2, 1, 0.45, 1 })
+                draw_util.line(cx, cy, tx, ty, col, 1.5)
+            end
+        end
+    end
 end
 
 return M
@@ -11840,7 +12749,7 @@ function M.update(_dt)
     if not wl_target or not targeting.is_aim_target(wl_target) then
         wl_target = targeting.find_target(cx, cy, fov, PREFIX, { ignore_whitelist = true })
     end
-    silent_whitelist.tick(wl_target)
+    silent_whitelist.tick(wl_target, PREFIX)
 
     if not locked_target or not targeting.is_aim_target(locked_target) then
         silent_ray.stop()
@@ -11883,10 +12792,11 @@ function M.update(_dt)
 
     local info = cached_track.manip
     local ok_track = false
+    local hit = info.hitpart or aim
     if info.use_curve and silent_ray.track_curve then
-        -- Aim along ballistic launch (aim_far); arc lands on hitpart.
+        -- Track straight to hitpart; curve path is visual-only.
         ok_track = silent_ray.track_curve(
-            origin, aim, info.weapon, SHOOT_VK, info.hitpart or aim
+            origin, hit, info.weapon, SHOOT_VK, hit
         ) == true
         if not info.curve_path and silent_ray.last_curve then
             local curve = silent_ray.last_curve()
@@ -11895,8 +12805,9 @@ function M.update(_dt)
             end
         end
     else
-        ok_track = silent_ray.track(origin, aim, SHOOT_VK, info.hitpart or aim) == true
+        ok_track = silent_ray.track(origin, hit, SHOOT_VK, hit) == true
     end
+    cached_track.aim = hit
     cached_track.tracking = ok_track
 end
 
@@ -11912,6 +12823,17 @@ function M.get_scoped_target()
     local sw, sh = targeting.screen_center()
     local fov = settings.num(PREFIX .. "fov", 150)
     return targeting.find_target(sw * 0.5, sh * 0.5, fov, PREFIX)
+end
+
+local function snapline_aim_point(cx, cy)
+    if cached_track.aim then
+        return cached_track.aim
+    end
+    if not locked_target then
+        return nil
+    end
+    local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
+    return targeting.get_aim_point(locked_target, PREFIX, nil, origin, cx, cy, false)
 end
 
 function M.draw()
@@ -11946,12 +12868,12 @@ function M.draw()
     end
 
     if active() and locked_target and settings.bool(PREFIX .. "target_line", false) then
-        local aim = cached_track.aim
+        local col = settings.color(PREFIX .. "target_line", { 1, 0.25, 0.25, 1 })
+        local aim = snapline_aim_point(cx, cy)
         if aim then
             local tx, ty, vis = w2s(aim.x, aim.y, aim.z)
             if vis then
-                local col = settings.color(PREFIX .. "target_line", { 1, 0.25, 0.25, 1 })
-                draw_util.line(cx, cy, tx, ty, col, 1.5)
+                draw_util.snapline(tx, ty, col, 1.5, sw, sh)
             end
         end
     end
@@ -12221,8 +13143,9 @@ local M = {}
 local P = "april_gunmods_enabled"
 local HELD_ID = "april_gm_held_weapon"
 local REJOIN_GC_DELAY_MS = 20000
-local RETRY_MS = 750
-local RETRY_MAX_MS = 30000
+local RETRY_MS = 900
+local RETRY_MAX_MS = 12000
+local MIN_SCHEDULE_MS = 220
 
 M._apply_dirty = false
 M._force_apply = false
@@ -12260,7 +13183,8 @@ local function schedule_apply(delay_ms)
     M._apply_dirty = true
     M._force_apply = true
     local now = tick_ms()
-    local until_ms = now + (delay_ms or 400)
+    local wait = math.max(MIN_SCHEDULE_MS, delay_ms or 400)
+    local until_ms = now + wait
     if until_ms > M._defer_until then
         M._defer_until = until_ms
     end
@@ -12504,7 +13428,8 @@ function M.register_menu()
     for _, id in ipairs(editor_ids) do
         settings.on_change(id, function()
             if settings.enabled(P) then
-                schedule_apply(150)
+                -- Debounce slider spam — live editor applies without a saved profile
+                schedule_apply(280)
             end
         end)
     end
@@ -12718,12 +13643,14 @@ local draw_util = April.require("core.draw_util")
 local env = April.require("core.env")
 local esp_util = April.require("core.esp_util")
 local theme = April.require("core.ui_theme")
+local panel_drag = April.require("core.panel_drag")
+local overlay_theme = April.require("core.overlay_theme")
 
 local M = {}
 local P = "april_mod_checker_enabled"
 local X_ID = "april_mod_checker_x"
 local Y_ID = "april_mod_checker_y"
-local W_ID = "april_mod_checker_w"
+local PANEL_W = 260
 local HEAD_OFFSET = 3.5
 local TITLE_H = 24
 
@@ -12809,14 +13736,7 @@ function M.register_menu()
     menu_util.section(T, G.MISC, "Mod Checker Scan")
     menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Scan Interval (ms)", 1000, 10000, 2500, root)
 
-    menu_util.section(T, G.MISC, "Mod Panel Layout")
-    menu.add_slider_int(T, G.MISC, X_ID, "Mod Panel Pos X", 0, 1920, 1600, root)
-    menu.add_slider_int(T, G.MISC, Y_ID, "Mod Panel Pos Y", 0, 1080, 72, root)
-    menu.add_slider_int(T, G.MISC, W_ID, "Mod Panel Width", 180, 420, 260, root)
-
-    menu_util.bind_master(P, {
-        "april_mod_checker_interval", X_ID, Y_ID, W_ID,
-    })
+    menu_util.bind_master(P, { "april_mod_checker_interval" })
 end
 
 function M.init()
@@ -13013,28 +13933,19 @@ local function build_staff_rows()
     return rows
 end
 
-local function clamp_layout(x, y, w, sw, sh)
-    w = math.max(180, math.min(420, math.floor(w or 260)))
-    x = math.max(0, math.min(math.max(0, sw - w), math.floor(x or 0)))
-    y = math.max(0, math.min(math.max(0, sh - 40), math.floor(y or 0)))
-    return x, y, w
-end
-
 local function draw_staff_panel(x, y, width, rows)
     if not draw or not draw.text then return end
 
+    overlay_theme.sync()
+    local accent = overlay_theme.accent()
     local pad = 10
     local row_h = 44
     local count = math.max(#rows, 1)
     local height = TITLE_H + count * row_h + 6
 
-    theme.draw_panel(x, y, width, height, {
-        bg = theme.alpha(theme.BG, 0.90),
-        border = theme.alpha(theme.BORDER, 0.45),
-        accent = theme.RED,
-        accent_w = 2,
-        rounding = theme.ROUND,
-    })
+    theme.draw_panel(x, y, width, height, overlay_theme.panel_opts())
+
+    overlay_theme.draw_accent_bar(x + 1, y, width - 2, 2)
 
     local title = "Staff In Lobby"
     if #rows > 1 then
@@ -13050,21 +13961,21 @@ local function draw_staff_panel(x, y, width, rows)
     local ry = div_y + 6
     if #rows == 0 then
         draw.text(x + pad + 12, ry, "No staff detected", theme.TEXT_MUTED, 11)
-        return
+        return height
     end
 
     local max_name = math.max(10, math.floor((width - pad * 2 - 12) / 7))
 
     for i = 1, #rows do
         local row = rows[i]
-        local accent = row.accent or theme.role_accent(row.role)
+        local row_accent = row.accent or theme.role_accent(row.role)
 
         if i > 1 and draw.line then
             draw.line(x + pad, ry - 4, x + width - pad, ry - 4, theme.alpha(theme.BORDER, 0.22), 1)
         end
 
         if draw.circle_filled then
-            draw.circle_filled(x + pad + 3, ry + 7, 3, accent, 8)
+            draw.circle_filled(x + pad + 3, ry + 7, 3, row_accent, 8)
         end
 
         local name = row.name or "?"
@@ -13073,7 +13984,7 @@ local function draw_staff_panel(x, y, width, rows)
 
         local role = row.role or "Staff"
         if #role > max_name then role = role:sub(1, math.max(1, max_name - 2)) .. ".." end
-        draw.text(x + pad + 12, ry + 15, role, accent, 11)
+        draw.text(x + pad + 12, ry + 15, role, row_accent, 11)
 
         if row.meta and row.meta ~= "" then
             draw.text(x + pad + 12, ry + 28, row.meta, theme.TEXT_MUTED, 10)
@@ -13081,6 +13992,8 @@ local function draw_staff_panel(x, y, width, rows)
 
         ry = ry + row_h
     end
+
+    return height
 end
 
 function M.draw()
@@ -13091,14 +14004,21 @@ function M.draw()
     M.reconcile_active()
 
     local sw, sh = draw_util.screen_size()
-    local x, y, panel_w = clamp_layout(
-        settings.num(X_ID, 1600),
-        settings.num(Y_ID, 72),
-        settings.num(W_ID, 260),
-        sw, sh
-    )
+    local rows = build_staff_rows()
+    local row_h = 44
+    local count = math.max(#rows, 1)
+    local height = TITLE_H + count * row_h + 6
 
-    draw_staff_panel(x, y, panel_w, build_staff_rows())
+    local x, y = panel_drag.update(
+        "mod_checker",
+        X_ID, Y_ID,
+        PANEL_W, TITLE_H,
+        sw, sh,
+        sw - PANEL_W - 16, 72
+    )
+    x, y = panel_drag.clamp(x, y, PANEL_W, height, sw, sh)
+
+    draw_staff_panel(x, y, PANEL_W, rows)
 end
 
 return M
@@ -13114,6 +14034,7 @@ local esp_util = April.require("core.esp_util")
 local menu_util = April.require("core.menu_util")
 local gpu_chams = April.require("core.gpu_chams")
 local player_state = April.require("game.player_state")
+local player_gear = April.require("game.player_gear")
 local npcs = April.require("game.npcs")
 local mod_checker = April.require("features.utility.mod_checker")
 local mod_ids = April.require("game.mod_ids")
@@ -13129,19 +14050,15 @@ local FLAGS = "april_player_esp_flags"
 
 local ID_HEALTH = "april_player_health"
 local ID_SKELETON = "april_player_skeleton"
-local ID_OFFSCREEN = "april_player_offscreen"
 local ID_NAME = "april_player_show_name"
 local ID_DIST = "april_player_show_distance"
 local ID_WEAPON = "april_player_show_weapon"
-local ID_HP_TEXT = "april_player_health_text"
 local ID_CLAN = "april_player_clan_tag"
 local ID_CLAN_COLOR = "april_player_clan_color"
 local ID_BOX = "april_player_box_mode"
 local ID_RANGE = "april_player_range"
 
--- Filters
 local F_TEAM, F_SAFEZONE, F_SKIP_DOWNED = 1, 2, 3
--- Status flags (draw-only tags — not clan)
 local FL_DOWNED, FL_SAFEZONE, FL_VIP, FL_STAFF, FL_REVIVING = 1, 2, 3, 4, 5
 
 local MUTED = { 0.82, 0.84, 0.88, 0.92 }
@@ -13155,6 +14072,32 @@ local FLAG_COLS = {
     STAFF = { 1, 0.33, 0.33, 1 },
     REVIVE = { 0.45, 1, 0.55, 1 },
 }
+
+local _wpn_cache = {}
+local WPN_TTL_MS = 220
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function cache_key(p)
+    return tostring(p.user_id or 0) .. ":" .. tostring(p.name or "")
+end
+
+local function held_weapon_name(p)
+    local key = cache_key(p)
+    local now = tick_ms()
+    local ent = _wpn_cache[key]
+    if ent and (now - ent.t) < WPN_TTL_MS then
+        return ent.name
+    end
+    local name = nil
+    pcall(function()
+        name = player_gear.held_name(p)
+    end)
+    _wpn_cache[key] = { t = now, name = name }
+    return name
+end
 
 local function default_color()
     return settings.color(P, { 1, 0.35, 0.35, 1 })
@@ -13178,13 +14121,13 @@ local function players_chams_active()
 end
 
 local function filter_opts()
-    local downed = 1 -- allow
-    if settings.multi(FILTERS, F_SKIP_DOWNED, true) then
+    local downed = 1
+    if settings.multi(FILTERS, F_SKIP_DOWNED, false) then
         downed = 0
     end
     return {
         team = settings.multi(FILTERS, F_TEAM, true),
-        skip_sz = settings.multi(FILTERS, F_SAFEZONE, true),
+        skip_sz = settings.multi(FILTERS, F_SAFEZONE, false),
         downed = downed,
     }
 end
@@ -13248,67 +14191,36 @@ function M.register_menu()
     menu.add_checkbox(T, G.VISUALS, ID_HEALTH, "Player Health Bar", true, { parent = P })
     menu.add_checkbox(T, G.VISUALS, ID_SKELETON, "Player Skeleton", false,
         menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.92 } }))
-    menu.add_checkbox(T, G.VISUALS, ID_OFFSCREEN, "Player Offscreen Arrows", false,
-        menu_util.parent(P, { colorpicker = { 1, 0.35, 0.35, 1 } }))
     menu.add_checkbox(T, G.VISUALS, ID_NAME, "Player Name", true, { parent = P })
     menu.add_checkbox(T, G.VISUALS, ID_CLAN, "Player Clan Tag", true, { parent = P })
     menu.add_checkbox(T, G.VISUALS, ID_CLAN_COLOR, "Player Color By Clan", false, { parent = P })
     menu.add_checkbox(T, G.VISUALS, ID_DIST, "Player Distance", true, { parent = P })
     menu.add_checkbox(T, G.VISUALS, ID_WEAPON, "Player Weapon", false, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, ID_HP_TEXT, "Player Health Text", false, { parent = P })
 
     menu.add_multicombo(T, G.VISUALS, FILTERS, "ESP Filters", {
         "Team Check", "Skip Safezone", "Skip Downed",
     }, { false, false, false }, { parent = P })
-    set_multi_defaults(FILTERS, { true, true, true })
+    -- Default: team check only — Skip SZ/Downed hide the players those flags describe
+    set_multi_defaults(FILTERS, { true, false, false })
 
-    -- Dump-backed status tags (ChatController + StateAssetController).
     menu.add_multicombo(T, G.VISUALS, FLAGS, "ESP Flags", {
         "Downed", "Safezone", "VIP", "Staff", "Reviving",
     }, { false, false, false, false, false }, { parent = P })
     set_multi_defaults(FLAGS, { true, true, true, true, true })
 
-    if gpu_chams.available() then
-        menu.add_checkbox(T, G.VISUALS, CHAMS, "Player Engine Chams", false, { parent = P })
-        gpu_chams.add_mode_color_menu(T, G.VISUALS, P, CHAMS_MODE, CHAMS_COLOR,
-            "Player Chams Mode", "Player Chams Color")
-    end
-
     menu.add_slider_int(T, G.VISUALS, ID_RANGE, "Player Range", 50, 2000, 500, { parent = P })
     menu_util.gap(T, G.VISUALS)
 
     local children = {
-        ID_BOX, ID_HEALTH, ID_SKELETON, ID_OFFSCREEN,
-        ID_NAME, ID_CLAN, ID_CLAN_COLOR, ID_DIST, ID_WEAPON, ID_HP_TEXT,
+        ID_BOX, ID_HEALTH, ID_SKELETON,
+        ID_NAME, ID_CLAN, ID_CLAN_COLOR, ID_DIST, ID_WEAPON,
         FILTERS, FLAGS, ID_RANGE,
     }
-    if gpu_chams.available() then
-        children[#children + 1] = CHAMS
-        children[#children + 1] = CHAMS_MODE
-        children[#children + 1] = CHAMS_COLOR
-    end
     menu_util.bind_children(P, children)
 
+    -- Clear any previous player chams owner from older builds
     if gpu_chams.available() then
-        gpu_chams.register_owner("players", {
-            rescan_ms = 450,
-            is_active = players_chams_active,
-            style = function()
-                return gpu_chams.mode_index(CHAMS_MODE, 0), gpu_chams.color_index(CHAMS_COLOR, 0)
-            end,
-            collect = collect_player_chams,
-        })
-        gpu_chams.wire_style_controls("players", CHAMS_MODE, CHAMS_COLOR)
-        local function resync()
-            if players_chams_active() then
-                gpu_chams.sync_owner("players", true)
-            else
-                gpu_chams.clear_owner("players")
-            end
-        end
-        settings.on_change(CHAMS, resync)
-        settings.on_change(P, resync)
-        settings.on_change(FILTERS, resync)
+        pcall(function() gpu_chams.clear_owner("players") end)
     end
 end
 
@@ -13342,7 +14254,6 @@ local function collect_flags(p)
 end
 
 local function screen_bounds(p)
-    -- Prefer engine bounds when they look like a real body (not a speck / not inflated).
     if p.get_bounds then
         local gb = p:get_bounds()
         if gb and gb.valid and gb.w >= 4 and gb.h >= 8 then
@@ -13361,16 +14272,19 @@ local function screen_bounds(p)
     return nil
 end
 
+local function is_on_screen(bounds, pos)
+    if bounds and bounds.valid then
+        local sw, sh = draw_util.screen_size()
+        local cx = bounds.x + bounds.w * 0.5
+        local cy = bounds.y + bounds.h * 0.5
+        return cx > -20 and cy > -20 and cx < sw + 20 and cy < sh + 20
+    end
+    if not pos then return false end
+    local _, _, on = esp_util.w2s(pos.x, pos.y, pos.z)
+    return on == true
+end
+
 function M.update(_dt)
-    if not settings.enabled(P) then
-        if gpu_chams.available() then
-            gpu_chams.sync_owner("players")
-        end
-        return
-    end
-    if gpu_chams.available() then
-        gpu_chams.sync_owner("players")
-    end
 end
 
 function M.draw()
@@ -13386,15 +14300,12 @@ function M.draw()
 
     local show_health = settings.bool(ID_HEALTH, true)
     local show_skel = settings.bool(ID_SKELETON, false)
-    local show_off = settings.bool(ID_OFFSCREEN, false)
     local show_name = settings.bool(ID_NAME, true)
     local show_clan = settings.bool(ID_CLAN, true)
     local show_dist = settings.bool(ID_DIST, true)
     local show_wpn = settings.bool(ID_WEAPON, false)
-    local show_hp_text = settings.bool(ID_HP_TEXT, false)
 
     local skel_col = settings.color(ID_SKELETON, { 1, 1, 1, 0.92 })
-    local off_col = settings.color(ID_OFFSCREEN, { 1, 0.35, 0.35, 1 })
 
     for _, p in ipairs(entity.get_players()) do
         if not passes_player_filters(p, opts) then goto continue end
@@ -13414,12 +14325,9 @@ function M.draw()
 
         local col = resolve_color(p)
         local bounds = screen_bounds(p)
+        local on_screen = is_on_screen(bounds, pos)
 
-        if not bounds or not bounds.valid then
-            if show_off then
-                local arrow_col = settings.bool(ID_CLAN_COLOR, false) and (player_state.clan_color(p) or off_col) or off_col
-                esp_util.draw_offscreen_to(pos.x, pos.y, pos.z, arrow_col, 12)
-            end
+        if not bounds or not bounds.valid or not on_screen then
             goto continue
         end
 
@@ -13431,7 +14339,6 @@ function M.draw()
         local cx = bounds.x + bounds.w * 0.5
         local box_ok = bounds.w >= 6 and bounds.h >= 10
 
-        -- Top (above box): clan → name → flags → weapon/hp
         local top = {}
         if show_clan then
             local tag = player_state.clan_tag(p)
@@ -13454,16 +14361,10 @@ function M.draw()
             }
         end
         if show_wpn then
-            local wpn = p.tool_name or p.weapon
+            local wpn = held_weapon_name(p)
             if wpn and wpn ~= "" then
                 top[#top + 1] = { text = tostring(wpn), col = MUTED }
             end
-        end
-        if show_hp_text and p.health and p.max_health then
-            top[#top + 1] = {
-                text = string.format("%d/%d", math.floor(p.health + 0.5), math.floor(p.max_health + 0.5)),
-                col = MUTED,
-            }
         end
 
         if #top > 0 then
@@ -13501,7 +14402,6 @@ function M.draw()
             end
         end
 
-        -- Bottom (under box): distance
         if show_dist then
             draw_util.text_centered(
                 cx,
@@ -15617,6 +16517,7 @@ local esp_util = April.require("core.esp_util")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
 local npcs = April.require("game.npcs")
+local player_gear = April.require("game.player_gear")
 
 local M = {}
 local P = "april_npc_enabled"
@@ -15638,17 +16539,17 @@ function M.register_menu()
     menu.add_combo(T, G.WORLD, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 0, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_health", "NPC Health Bar", false, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "NPC Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_offscreen", "NPC Offscreen Arrows", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "NPC Show Name", true, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "NPC Show Distance", true, root)
+    menu.add_checkbox(T, G.WORLD, "april_npc_show_weapon", "NPC Weapon", false, root)
 
     menu_util.gap(T, G.WORLD)
     menu.add_slider_int(T, G.WORLD, "april_npc_range", "NPC Range", 50, 2000, 500, root)
 
     menu_util.bind_children(P, {
         "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode", "april_npc_health",
-        "april_npc_skeleton", "april_npc_offscreen", "april_npc_show_name", "april_npc_show_distance",
-        "april_npc_range",
+        "april_npc_skeleton", "april_npc_show_name", "april_npc_show_distance",
+        "april_npc_show_weapon", "april_npc_range",
     })
 end
 
@@ -15904,9 +16805,6 @@ function M.draw()
         else
             local sx, sy, vis = esp_util.w2s(lx, ly, lz)
             if not vis then
-                if settings.bool("april_npc_offscreen", false) then
-                    esp_util.draw_offscreen_to(lx, ly, lz, col, 12)
-                end
                 goto continue
             end
             label_y = sy
@@ -15915,28 +16813,39 @@ function M.draw()
         local label = entry.name or "NPC"
         local show_name = settings.bool("april_npc_show_name", true)
         local show_dist = settings.bool("april_npc_show_distance", true)
+        local show_wpn = settings.bool("april_npc_show_weapon", false)
 
-        if show_name or show_dist then
-            if show_dist and me_pos then
-                local dist_text = string.format("%dm", math.floor(math.sqrt(dist_sq)))
-                if show_name then
-                    label = label .. " [" .. dist_text .. "]"
-                else
-                    label = dist_text
-                end
-            elseif not show_name then
-                label = nil
+        local lines = {}
+        if show_name then
+            lines[#lines + 1] = label
+        end
+        if show_wpn then
+            local wpn = nil
+            if entry.entity then
+                pcall(function() wpn = player_gear.held_name(entry.entity) end)
             end
+            if (not wpn or wpn == "") and entry.inst then
+                pcall(function() wpn = player_gear.held_name_from_character(entry.inst) end)
+            end
+            if wpn and wpn ~= "" then
+                lines[#lines + 1] = tostring(wpn)
+            end
+        end
+        if show_dist and me_pos then
+            lines[#lines + 1] = string.format("%dm", math.floor(math.sqrt(dist_sq)))
+        end
 
-            if label then
-                local tx = bounds and bounds.valid and (bounds.x + bounds.w * 0.5) or lx
-                local ty = label_y - 14
-                if bounds and bounds.valid then
-                    draw_util.text_centered(tx, ty, label, col, text_size)
+        if #lines > 0 then
+            local tx = bounds and bounds.valid and (bounds.x + bounds.w * 0.5) or nil
+            local base_y = label_y - 4 - (#lines * (text_size + 1))
+            for i = 1, #lines do
+                local ty = base_y + (i - 1) * (text_size + 1)
+                if bounds and bounds.valid and tx then
+                    draw_util.text_centered(tx, ty, lines[i], col, text_size)
                 else
                     local sx, sy, vis = esp_util.w2s(lx, ly, lz)
                     if vis then
-                        draw_util.text_centered(sx, sy - 14, label, col, text_size)
+                        draw_util.text_centered(sx, sy - 14 + (i - 1) * (text_size + 1), lines[i], col, text_size)
                     end
                 end
             end
@@ -15989,9 +16898,9 @@ function M.register_menu()
         G.MISC,
         "april_noclip_speed",
         "Fly Speed",
-        2,
-        4,
-        3,
+        1,
+        20,
+        5,
         menu_util.parent("april_noclip_enabled")
     )
 
@@ -16777,18 +17686,8 @@ local function disable_desync()
     end
 end
 
-local function compute_rates(t)
-    local phys, send = 0, 60
-
-    if settings.enabled("april_desync_autosend") then
-        local window = settings.num("april_desync_autosend_len", 0.3)
-        local cycle = window + 0.1
-        if (t % cycle) > window then
-            phys, send = 15, 60
-        end
-    end
-
-    return phys, send
+local function compute_rates(_t)
+    return 0, 60
 end
 
 local function draw_center_dot(wx, wy, wz, col)
@@ -16818,17 +17717,11 @@ function M.register_menu()
 
     menu_util.section(T, G.MISC, "Network")
     menu_util.register_keybind(T, G.MISC, P, "Desync", false)
-    menu.add_checkbox(T, G.MISC, "april_desync_autosend", "Desync Auto Send", false, root)
-    menu.add_slider_float(T, G.MISC, "april_desync_autosend_len", "Desync Send Threshold", 0, 1, 0.3,
-        menu_util.parent("april_desync_autosend"))
     menu.add_checkbox(T, G.MISC, P_VIS, "Desync Visualize", false, menu_util.parent(P, {
         colorpicker = { 0.2, 0.85, 1, 0.9 },
     }))
 
-    menu_util.bind_children(P, {
-        "april_desync_autosend", "april_desync_autosend_len", P_VIS,
-    })
-    menu_util.bind_children("april_desync_autosend", { "april_desync_autosend_len" })
+    menu_util.bind_children(P, { P_VIS })
 end
 
 function M.update(_dt)
@@ -17322,84 +18215,22 @@ local menu_util = April.require("core.menu_util")
 local draw_util = April.require("core.draw_util")
 local theme = April.require("core.ui_theme")
 local feature_bind = April.require("core.feature_bind")
+local vk_names = April.require("core.vk_names")
+local panel_drag = April.require("core.panel_drag")
+local overlay_theme = April.require("core.overlay_theme")
 
 local M = {}
 
 local P = "april_keybinds_enabled"
 local X_ID = "april_keybinds_x"
 local Y_ID = "april_keybinds_y"
-local W_ID = "april_keybinds_w"
-
+local PANEL_W = 260
 local TITLE_H = 22
-
--- Full Win32 VK map (printable + modifiers + OEM + media/nav).
-local VK_NAMES = {
-    [0x01] = "M1", [0x02] = "M2", [0x04] = "M3", [0x05] = "M4", [0x06] = "M5",
-    [0x08] = "Backspace", [0x09] = "Tab", [0x0C] = "Clear", [0x0D] = "Enter",
-    [0x10] = "Shift", [0x11] = "Ctrl", [0x12] = "Alt",
-    [0x13] = "Pause", [0x14] = "Caps", [0x1B] = "Esc",
-    [0x20] = "Space",
-    [0x21] = "PgUp", [0x22] = "PgDn", [0x23] = "End", [0x24] = "Home",
-    [0x25] = "Left", [0x26] = "Up", [0x27] = "Right", [0x28] = "Down",
-    [0x29] = "Select", [0x2A] = "Print", [0x2B] = "Execute",
-    [0x2C] = "PrtSc", [0x2D] = "Ins", [0x2E] = "Del", [0x2F] = "Help",
-    [0x30] = "0", [0x31] = "1", [0x32] = "2", [0x33] = "3", [0x34] = "4",
-    [0x35] = "5", [0x36] = "6", [0x37] = "7", [0x38] = "8", [0x39] = "9",
-    [0x41] = "A", [0x42] = "B", [0x43] = "C", [0x44] = "D", [0x45] = "E",
-    [0x46] = "F", [0x47] = "G", [0x48] = "H", [0x49] = "I", [0x4A] = "J",
-    [0x4B] = "K", [0x4C] = "L", [0x4D] = "M", [0x4E] = "N", [0x4F] = "O",
-    [0x50] = "P", [0x51] = "Q", [0x52] = "R", [0x53] = "S", [0x54] = "T",
-    [0x55] = "U", [0x56] = "V", [0x57] = "W", [0x58] = "X", [0x59] = "Y",
-    [0x5A] = "Z",
-    [0x5B] = "LWin", [0x5C] = "RWin", [0x5D] = "Apps",
-    [0x60] = "Num0", [0x61] = "Num1", [0x62] = "Num2", [0x63] = "Num3",
-    [0x64] = "Num4", [0x65] = "Num5", [0x66] = "Num6", [0x67] = "Num7",
-    [0x68] = "Num8", [0x69] = "Num9",
-    [0x6A] = "Num*", [0x6B] = "Num+", [0x6C] = "Separator",
-    [0x6D] = "Num-", [0x6E] = "Num.", [0x6F] = "Num/",
-    [0x70] = "F1", [0x71] = "F2", [0x72] = "F3", [0x73] = "F4",
-    [0x74] = "F5", [0x75] = "F6", [0x76] = "F7", [0x77] = "F8",
-    [0x78] = "F9", [0x79] = "F10", [0x7A] = "F11", [0x7B] = "F12",
-    [0x7C] = "F13", [0x7D] = "F14", [0x7E] = "F15", [0x7F] = "F16",
-    [0x80] = "F17", [0x81] = "F18", [0x82] = "F19", [0x83] = "F20",
-    [0x84] = "F21", [0x85] = "F22", [0x86] = "F23", [0x87] = "F24",
-    [0x90] = "NumLock", [0x91] = "Scroll",
-    [0xA0] = "LShift", [0xA1] = "RShift",
-    [0xA2] = "LCtrl", [0xA3] = "RCtrl",
-    [0xA4] = "LAlt", [0xA5] = "RAlt",
-    [0xA6] = "BrowserBack", [0xA7] = "BrowserForward",
-    [0xA8] = "BrowserRefresh", [0xA9] = "BrowserStop",
-    [0xAA] = "BrowserSearch", [0xAB] = "BrowserFav",
-    [0xAC] = "BrowserHome",
-    [0xAD] = "Mute", [0xAE] = "Vol-", [0xAF] = "Vol+",
-    [0xB0] = "NextTrack", [0xB1] = "PrevTrack",
-    [0xB2] = "StopMedia", [0xB3] = "PlayPause",
-    [0xB4] = "Mail", [0xB5] = "MediaSelect",
-    [0xB6] = "App1", [0xB7] = "App2",
-    [0xBA] = ";", [0xBB] = "=", [0xBC] = ",", [0xBD] = "-",
-    [0xBE] = ".", [0xBF] = "/", [0xC0] = "`",
-    [0xDB] = "[", [0xDC] = "\\", [0xDD] = "]", [0xDE] = "'",
-    [0xDF] = "OEM8", [0xE2] = "OEM102",
-}
 
 local function strip_enable_prefix(label)
     if type(label) ~= "string" then return tostring(label or "?") end
     label = label:gsub("^Enable%s+", "")
     return label
-end
-
-local function vk_name(vk)
-    vk = tonumber(vk) or 0
-    if vk <= 0 then return "—" end
-
-    local named = VK_NAMES[vk]
-    if named then return named end
-
-    if vk >= 0x20 and vk <= 0x7E then
-        return string.char(vk)
-    end
-
-    return string.format("VK-%d", vk)
 end
 
 local function collect_rows()
@@ -17412,8 +18243,6 @@ local function collect_rows()
         local id = entry.id
         local key = feature_bind.get_key(id)
         local active = feature_bind.active(id)
-        local hold = feature_bind.is_hold(id)
-
         if key <= 0 and not show_unbound then
             goto continue
         end
@@ -17424,8 +18253,8 @@ local function collect_rows()
         rows[#rows + 1] = {
             id = id,
             label = strip_enable_prefix(entry.label or id),
-            key = vk_name(key),
-            mode = hold and "Hold" or "Toggle",
+            key = vk_names.chip(key),
+            mode = feature_bind.mode_name(id),
             active = active,
             show_mode = show_mode,
         }
@@ -17441,13 +18270,6 @@ local function collect_rows()
     return rows
 end
 
-local function clamp_layout(x, y, w, sw, sh)
-    w = math.max(160, math.min(480, math.floor(w or 260)))
-    x = math.max(0, math.min(math.max(0, sw - w), math.floor(x or 0)))
-    y = math.max(0, math.min(math.max(0, sh - 40), math.floor(y or 0)))
-    return x, y, w
-end
-
 function M.register_menu()
     local G = menu_util.G
     local T = menu_util.group(G.MISC)
@@ -17460,14 +18282,8 @@ function M.register_menu()
     menu.add_checkbox(T, G.MISC, "april_keybinds_show_unbound", "Show Unbound", true, root)
     menu.add_checkbox(T, G.MISC, "april_keybinds_show_mode", "Show Bind Mode", true, root)
 
-    menu_util.section(T, G.MISC, "Keybinds Layout")
-    menu.add_slider_int(T, G.MISC, X_ID, "Keybinds Pos X", 0, 1920, 16, root)
-    menu.add_slider_int(T, G.MISC, Y_ID, "Keybinds Pos Y", 0, 1080, 280, root)
-    menu.add_slider_int(T, G.MISC, W_ID, "Keybinds Width", 160, 480, 260, root)
-
     menu_util.bind_children(P, {
         "april_keybinds_active_only", "april_keybinds_show_unbound", "april_keybinds_show_mode",
-        X_ID, Y_ID, W_ID,
     })
 end
 
@@ -17477,27 +18293,27 @@ function M.draw()
     if not settings.enabled(P) then return end
     if not draw or not draw.text then return end
 
-    local sw, sh = draw_util.screen_size()
-    local x, y, panel_w = clamp_layout(
-        settings.num(X_ID, 16),
-        settings.num(Y_ID, 280),
-        settings.num(W_ID, 260),
-        sw, sh
-    )
+    overlay_theme.sync()
+    local accent = overlay_theme.accent()
 
+    local sw, sh = draw_util.screen_size()
     local rows = collect_rows()
     local pad = 10
     local row_h = 18
     local count = math.max(#rows, 1)
     local height = TITLE_H + count * row_h + 10
 
-    theme.draw_panel(x, y, panel_w, height, {
-        bg = theme.alpha(theme.BG, 0.88),
-        border = theme.alpha(theme.BORDER, 0.4),
-        accent = theme.CYAN,
-        accent_w = 2,
-        rounding = theme.ROUND,
-    })
+    local x, y = panel_drag.update(
+        "keybind_viewer",
+        X_ID, Y_ID,
+        PANEL_W, TITLE_H,
+        sw, sh,
+        16, 280
+    )
+    x, y = panel_drag.clamp(x, y, PANEL_W, height, sw, sh)
+
+    theme.draw_panel(x, y, PANEL_W, height, overlay_theme.panel_opts())
+    overlay_theme.draw_accent_bar(x + 1, y, PANEL_W - 2, 2)
 
     draw_util.text(x + pad, y + 5, "Keybinds", theme.TEXT, 12)
 
@@ -17507,12 +18323,12 @@ function M.draw()
         return
     end
 
-    local max_label = math.max(8, math.floor((panel_w - pad * 2) * 0.55 / 7))
+    local max_label = math.max(8, math.floor((PANEL_W - pad * 2) * 0.55 / 7))
 
     for i = 1, #rows do
         local row = rows[i]
         local name_col = row.active and theme.TEXT or theme.TEXT_MUTED
-        local key_col = row.active and theme.CYAN or theme.TEXT_DIM
+        local key_col = row.active and accent or theme.TEXT_DIM
 
         local label = row.label
         if #label > max_label then label = label:sub(1, math.max(1, max_label - 2)) .. ".." end
@@ -17523,7 +18339,7 @@ function M.draw()
             right = right .. " · " .. row.mode
         end
         local tw = theme.text_w(right, 11)
-        draw_util.text(x + panel_w - pad - tw, ry, right, key_col, 11)
+        draw_util.text(x + PANEL_W - pad - tw, ry, right, key_col, 11)
 
         ry = ry + row_h
     end
@@ -17717,6 +18533,3466 @@ return M
 
 end)()
 
+-- ── ui/gs_theme.lua ──
+April._mods["ui.gs_theme"] = (function()
+-- Refined dark-purple palette for the draw-only April UI.
+local M = {}
+
+M.BG = { 0.045, 0.047, 0.057, 0.985 }
+M.BG_INNER = { 0.063, 0.066, 0.080, 1 }
+M.PANEL = { 0.075, 0.079, 0.096, 0.985 }
+M.PANEL_ALT = { 0.092, 0.097, 0.118, 1 }
+M.PANEL_RAISED = { 0.105, 0.111, 0.136, 1 }
+M.OVERLAY = { 0.075, 0.078, 0.098, 0.995 }
+M.SHADOW = { 0, 0, 0, 0.34 }
+M.BORDER = { 0.20, 0.207, 0.245, 1 }
+M.BORDER_SOFT = { 0.145, 0.151, 0.185, 1 }
+M.BORDER_HOT = { 0.36, 0.29, 0.45, 1 }
+M.SIDEBAR = { 0.055, 0.058, 0.071, 1 }
+M.SIDEBAR_ACTIVE = { 0.13, 0.103, 0.16, 1 }
+
+M.TEXT = { 0.76, 0.775, 0.835, 1 }
+M.TEXT_DIM = { 0.43, 0.45, 0.52, 1 }
+M.TEXT_ACTIVE = { 0.94, 0.945, 0.98, 1 }
+M.TEXT_TITLE = { 0.80, 0.805, 0.87, 1 }
+
+-- Accent matches the reference (purple / magenta)
+M.ACCENT = { 0.78, 0.20, 0.92, 1 }
+M.ACCENT_DIM = { 0.36, 0.12, 0.48, 1 }
+M.CHECK_OFF = { 0.105, 0.11, 0.135, 1 }
+M.SLIDER_BG = { 0.115, 0.12, 0.15, 1 }
+M.BUTTON = { 0.105, 0.11, 0.135, 1 }
+M.BUTTON_HOVER = { 0.15, 0.145, 0.185, 1 }
+M.HOVER = { 0.12, 0.115, 0.15, 0.8 }
+M.FOCUS = { 0.78, 0.20, 0.92, 0.72 }
+
+M.RAINBOW = {
+    { 0.20, 0.90, 0.95, 1 },
+    { 0.55, 0.35, 0.95, 1 },
+    { 0.95, 0.85, 0.20, 1 },
+    { 0.95, 0.35, 0.55, 1 },
+    { 0.35, 0.95, 0.45, 1 },
+}
+
+M.FONT = 13
+M.FONT_SMALL = 12
+M.FONT_TITLE = 12
+M.FONT_CAPTION = 11
+
+M.WINDOW_W = 820
+M.WINDOW_H = 560
+M.SIDEBAR_W = 58
+M.TAB_H = 48
+M.GROUP_PAD = 12
+M.GROUP_GAP = 12
+M.GROUP_HEADER_H = 30
+M.ROW_H = 26
+M.ITEM_GAP = 8
+M.LABEL_H = 16
+M.LABEL_GAP = 8
+M.CTRL_H = 20
+M.CTRL_PAD = 4
+M.CHECK_SIZE = 13
+M.SLIDER_H = 6
+M.STACKED_ROW_H = M.LABEL_H + M.LABEL_GAP + M.CTRL_H + M.CTRL_PAD
+M.SLIDER_ROW_H = M.LABEL_H + M.LABEL_GAP + M.SLIDER_H + 10 + M.CTRL_PAD
+M.CORNER = 4
+M.CORNER_SMALL = 3
+
+function M.alpha(col, a)
+    return { col[1], col[2], col[3], a }
+end
+
+function M.lerp_color(a, b, t)
+    return {
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+        a[3] + (b[3] - a[3]) * t,
+        a[4] + (b[4] - a[4]) * t,
+    }
+end
+
+function M.rainbow_at(t)
+    local n = #M.RAINBOW
+    local x = (t % 1) * n
+    local i = math.floor(x) + 1
+    local j = (i % n) + 1
+    local f = x - math.floor(x)
+    return M.lerp_color(M.RAINBOW[i], M.RAINBOW[j], f)
+end
+
+return M
+
+end)()
+
+-- ── ui/gs_input.lua ──
+April._mods["ui.gs_input"] = (function()
+-- Mouse / key helpers. Raw cursor only — no windowed offset correction.
+-- Wheel: UserInputService InputChanged + engine getters + PlayerMouse signals.
+local M = {}
+
+local prev_keys = {}
+local prev_lmb = false
+local prev_rmb = false
+local prev_mmb = false
+
+M.mx = 0
+M.my = 0
+M.raw_mx = 0
+M.raw_my = 0
+M.lmb = false
+M.rmb = false
+M.mmb = false
+M.lmb_click = false
+M.rmb_click = false
+M.mmb_click = false
+M.lmb_release = false
+M.wheel = 0
+M._wheel_accum = 0
+M._scroll_ready = false
+M._scroll_hook_tries = 0
+M._uis_hooked = false
+M._game_cursor_hidden = false
+M._menu_open = false
+M.ui_x, M.ui_y, M.ui_w, M.ui_h = 0, 0, 0, 0
+
+local function on_wheel(dir)
+    if not dir or dir == 0 then return end
+    M._wheel_accum = (M._wheel_accum or 0) + dir
+end
+
+local function connect_signal(signal, fn)
+    if not signal then return false end
+    local connect = signal.Connect or signal.connect
+    if type(connect) ~= "function" then return false end
+    local ok = pcall(function()
+        connect(signal, fn)
+    end)
+    return ok
+end
+
+local function wheel_from_input_obj(inputObj)
+    if not inputObj then return 0 end
+    local typ = inputObj.UserInputType or inputObj.user_input_type
+    local name = tostring(typ):lower()
+    if not name:find("wheel") and not name:find("mousewheel") then
+        return 0
+    end
+    local pos = inputObj.Position or inputObj.position
+    local z = pos and (pos.Z or pos.z or pos[3]) or 0
+    if z == 0 then
+        local delta = inputObj.Delta or inputObj.delta
+        if delta then
+            z = delta.Z or delta.z or delta[3] or 0
+        end
+    end
+    if z == 0 then
+        local dz = inputObj.Z or inputObj.z
+        if dz then z = dz end
+    end
+    if z == 0 then return 0 end
+    return z > 0 and 1 or -1
+end
+
+local function hook_user_input_service()
+    if M._uis_hooked then return true end
+    if not game then return false end
+
+    local uis = nil
+    pcall(function()
+        if game.GetService then uis = game:GetService("UserInputService") end
+    end)
+    if not uis then
+        pcall(function()
+            if game.get_service then uis = game:get_service("UserInputService") end
+        end)
+    end
+    if not uis then return false end
+
+    local hooked = false
+    local function handle(inputObj)
+        if not M._menu_open then return end
+        local dir = wheel_from_input_obj(inputObj)
+        if dir ~= 0 then on_wheel(dir) end
+    end
+
+    if connect_signal(uis.InputChanged or uis.input_changed, handle) then
+        hooked = true
+    end
+    if connect_signal(uis.InputBegan or uis.input_began, handle) then
+        hooked = true
+    end
+
+    if hooked then
+        M._uis_hooked = true
+    end
+    return hooked
+end
+
+local function pcall_get_service(name)
+    local svc = nil
+    if not game then return nil end
+    pcall(function()
+        if game.GetService then svc = game:GetService(name) end
+    end)
+    if not svc then
+        pcall(function()
+            if game.get_service then svc = game:get_service(name) end
+        end)
+    end
+    return svc
+end
+
+local function hook_player_mouse()
+    local lp = game and game.local_player
+    if not lp then return false end
+    local mouse = nil
+    pcall(function()
+        if lp.GetMouse then mouse = lp:GetMouse()
+        elseif lp.get_mouse then mouse = lp:get_mouse()
+        elseif lp.Mouse then mouse = lp.Mouse
+        end
+    end)
+    if not mouse then return false end
+    local ok = false
+    if connect_signal(mouse.WheelForward or mouse.wheel_forward, function()
+        on_wheel(1)
+    end) then ok = true end
+    if connect_signal(mouse.WheelBackward or mouse.wheel_backward, function()
+        on_wheel(-1)
+    end) then ok = true end
+    return ok
+end
+
+local SCROLL_GETTERS = {
+    "get_scroll_delta", "get_mouse_wheel", "get_mouse_scroll",
+    "get_wheel_delta", "get_scroll", "scroll_delta",
+    "mouse_wheel_delta", "wheel_delta", "scroll_y",
+}
+
+local function poll_scroll_getters()
+    local tables = { input, utility, draw }
+    for ti = 1, #tables do
+        local tbl = tables[ti]
+        if type(tbl) == "table" then
+            for _, name in ipairs(SCROLL_GETTERS) do
+                local fn = tbl[name]
+                if type(fn) == "function" then
+                    local ok, v = pcall(fn)
+                    if ok and v ~= nil then
+                        local n = tonumber(v)
+                        if n and n ~= 0 then
+                            on_wheel(n > 0 and 1 or -1)
+                        elseif type(v) == "table" then
+                            local z = tonumber(v.z or v.Z or v[3])
+                            if z and z ~= 0 then
+                                on_wheel(z > 0 and 1 or -1)
+                            end
+                        end
+                    end
+                end
+                local prop = tbl[name]
+                if type(prop) == "number" and prop ~= 0 then
+                    on_wheel(prop > 0 and 1 or -1)
+                end
+            end
+        end
+    end
+end
+
+local function ensure_scroll_hooks()
+    if M._scroll_ready then return end
+    M._scroll_hook_tries = (M._scroll_hook_tries or 0) + 1
+    if hook_user_input_service() or hook_player_mouse() then
+        M._scroll_ready = true
+    elseif M._scroll_hook_tries > 240 then
+        M._scroll_ready = true
+    end
+end
+
+function M.set_ui_rect(x, y, w, h)
+    M.ui_x, M.ui_y, M.ui_w, M.ui_h = x, y, w, h
+end
+
+function M.set_menu_open(open)
+    M._menu_open = open == true
+    M.set_game_cursor_visible(not M._menu_open)
+end
+
+function M.set_game_cursor_visible(visible)
+    local sg = pcall_get_service("StarterGui")
+    if sg then
+        pcall(function()
+            if sg.SetCore then sg:SetCore("MouseIconEnabled", visible) end
+        end)
+        pcall(function()
+            if sg.set_core then sg:set_core("MouseIconEnabled", visible) end
+        end)
+    end
+
+    local uis = pcall_get_service("UserInputService")
+    if uis then
+        pcall(function() uis.MouseIconEnabled = visible end)
+        pcall(function() uis.mouse_icon_enabled = visible end)
+    end
+
+    pcall(function()
+        local lp = game and game.local_player
+        if not lp then return end
+        local mouse = lp.GetMouse and lp:GetMouse() or (lp.get_mouse and lp:get_mouse())
+        if not mouse then return end
+        if not visible then
+            mouse.Icon = "rbxassetid://0"
+            if mouse.icon ~= nil then mouse.icon = "rbxassetid://0" end
+        else
+            mouse.Icon = ""
+        end
+    end)
+
+    M._game_cursor_hidden = not visible
+end
+
+function M.mouse()
+    return M.mx, M.my
+end
+
+function M.key_down(vk)
+    return input and input.is_key_down and input.is_key_down(vk) or false
+end
+
+function M.key_pressed(vk)
+    local down = M.key_down(vk)
+    local was = prev_keys[vk] == true
+    prev_keys[vk] = down
+    return down and not was
+end
+
+function M.begin_frame()
+    ensure_scroll_hooks()
+
+    local amx, amy = 0, 0
+    if utility and utility.get_mouse_pos then
+        amx, amy = utility.get_mouse_pos()
+    elseif input and input.get_mouse_pos then
+        amx, amy = input.get_mouse_pos()
+    end
+    amx = tonumber(amx) or 0
+    amy = tonumber(amy) or 0
+    M.raw_mx, M.raw_my = amx, amy
+    M.mx, M.my = amx, amy
+
+    M.lmb = M.key_down(0x01)
+    M.rmb = M.key_down(0x02)
+    M.mmb = M.key_down(0x04)
+    M.lmb_click = M.lmb and not prev_lmb
+    M.rmb_click = M.rmb and not prev_rmb
+    M.mmb_click = M.mmb and not prev_mmb
+    M.lmb_release = (not M.lmb) and prev_lmb
+    prev_lmb = M.lmb
+    prev_rmb = M.rmb
+    prev_mmb = M.mmb
+
+    poll_scroll_getters()
+
+    if M._menu_open and M.hover(M.ui_x, M.ui_y, M.ui_w, M.ui_h) then
+        if M.key_pressed(0x21) then on_wheel(3) end
+        if M.key_pressed(0x22) then on_wheel(-3) end
+    end
+
+    local w = M._wheel_accum
+    M._wheel_accum = 0
+    if w > 0 then
+        M.wheel = math.max(1, math.floor(w + 0.5))
+    elseif w < 0 then
+        M.wheel = math.min(-1, math.ceil(w - 0.5))
+    else
+        M.wheel = 0
+    end
+end
+
+function M.hover(x, y, w, h)
+    return M.mx >= x and M.my >= y and M.mx <= x + w and M.my <= y + h
+end
+
+function M.clicked(x, y, w, h)
+    return M.lmb_click and M.hover(x, y, w, h)
+end
+
+function M.draw_cursor()
+    if not draw then return end
+    local show = true
+    pcall(function()
+        show = April.require("core.settings").bool("april_ui_show_cursor_dot", true)
+    end)
+    if not show then return end
+    local x, y = M.mx, M.my
+    local col = { 0.75, 0.15, 0.83, 1 }
+    if draw.circle_filled then
+        draw.circle_filled(x, y, 4.5, col, 14)
+    end
+    if draw.circle then
+        draw.circle(x, y, 5.5, { 1, 1, 1, 0.9 }, 16, 1.4)
+    end
+end
+
+return M
+
+end)()
+
+-- ── ui/gs_state.lua ──
+April._mods["ui.gs_state"] = (function()
+-- Shared settings store for the custom UI (backs menu shim + settings reads).
+local M = {}
+
+M.values = {}
+M.defaults = {}
+M.colors = {}
+M.keys = {}
+M.callbacks = {}
+M.menu_callback = {} -- id -> single fn (menu.set_callback replaces)
+M.buttons = {}
+M.visible = {} -- id -> bool (parent gating); nil means visible
+
+local function copy_table(t)
+    if type(t) ~= "table" then return t end
+    local out = {}
+    for k, v in pairs(t) do
+        out[k] = v
+    end
+    return out
+end
+
+function M.define(id, default)
+    if id == nil then return end
+    if M.defaults[id] == nil then
+        M.defaults[id] = copy_table(default)
+    end
+    if M.values[id] == nil then
+        M.values[id] = copy_table(default)
+    end
+end
+
+function M.get(id, fallback)
+    local v = M.values[id]
+    if v == nil then
+        return fallback
+    end
+    return v
+end
+
+local function fire_change(id, value)
+    local menu_cb = M.menu_callback[id]
+    if menu_cb then
+        pcall(menu_cb, value)
+    end
+    local cbs = M.callbacks[id]
+    if cbs then
+        for i = 1, #cbs do
+            pcall(cbs[i], value)
+        end
+    end
+end
+
+function M.set(id, value)
+    if id == nil then return end
+    M.values[id] = value
+    fire_change(id, value)
+end
+
+function M.toggle(id)
+    local v = not M.get(id, false)
+    M.set(id, v)
+    return v
+end
+
+function M.define_color(id, color)
+    if id == nil then return end
+    if M.colors[id] == nil then
+        M.colors[id] = copy_table(color or { 1, 1, 1, 1 })
+    end
+end
+
+function M.get_color(id, fallback)
+    return M.colors[id] or fallback or { 1, 1, 1, 1 }
+end
+
+function M.set_color(id, color)
+    if id == nil or type(color) ~= "table" then return end
+    M.colors[id] = copy_table(color)
+    fire_change(id, color)
+end
+
+function M.get_key(id)
+    return tonumber(M.keys[id]) or 0
+end
+
+function M.set_key(id, vk)
+    if id == nil then return end
+    M.keys[id] = tonumber(vk) or 0
+end
+
+function M.on_change(id, fn)
+    if not id or not fn then return end
+    M.callbacks[id] = M.callbacks[id] or {}
+    M.callbacks[id][#M.callbacks[id] + 1] = fn
+end
+
+function M.set_menu_callback(id, fn)
+    if id then
+        M.menu_callback[id] = fn
+    end
+end
+
+function M.set_button(id, fn)
+    if id then
+        M.buttons[id] = fn
+    end
+end
+
+function M.fire_button(id)
+    local fn = M.buttons[id]
+    if fn then
+        pcall(fn)
+        return true
+    end
+    return false
+end
+
+function M.set_visible(id, show)
+    if id then
+        M.visible[id] = show and true or false
+    end
+end
+
+function M.is_visible(id)
+    local v = M.visible[id]
+    if v == nil then return true end
+    return v
+end
+
+function M.reset(id)
+    local d = M.defaults[id]
+    if d == nil then return end
+    M.set(id, copy_table(d))
+end
+
+return M
+
+end)()
+
+-- ── ui/gs_anim.lua ──
+April._mods["ui.gs_anim"] = (function()
+-- Animated accent bars + per-element theme sync for the custom UI.
+local theme = April.require("ui.gs_theme")
+
+local M = {}
+
+M.MODES = { "Static", "Rainbow", "Pulse", "Wave", "Flow" }
+M.MODES_UI = { "Default", "Static", "Rainbow", "Pulse", "Wave", "Flow" }
+
+M.TARGET_TITLE = 1
+M.TARGET_SECTION = 2
+M.TARGET_SLIDER = 3
+M.TARGET_SCROLL = 4
+M.TARGET_SIDEBAR = 5
+M.TARGET_CHECKBOX = 6
+M.TARGET_HOVER = 7
+M.TARGET_OVERLAY = 8
+
+M.STYLE_TITLE = "april_ui_style_title"
+M.STYLE_SECTION = "april_ui_style_section"
+M.STYLE_SLIDER = "april_ui_style_slider"
+M.STYLE_SCROLL = "april_ui_style_scroll"
+M.STYLE_SIDEBAR = "april_ui_style_sidebar"
+M.STYLE_CHECKBOX = "april_ui_style_checkbox"
+M.STYLE_OVERLAY = "april_ui_style_overlay"
+
+M.COL_TITLE = "april_ui_col_title"
+M.COL_SECTION = "april_ui_col_section"
+M.COL_SLIDER = "april_ui_col_slider"
+M.COL_SCROLL = "april_ui_col_scroll"
+M.COL_SIDEBAR = "april_ui_col_sidebar"
+M.COL_CHECKBOX = "april_ui_col_checkbox"
+M.COL_OVERLAY = "april_ui_col_overlay"
+
+local DEFAULT_ACCENT = { 0.78, 0.20, 0.92, 1 }
+local transitions = {}
+
+local function clamp(v, a, b)
+    if v < a then return a end
+    if v > b then return b end
+    return v
+end
+
+function M.lerp(a, b, t)
+    t = clamp(t or 0, 0, 1)
+    return a + (b - a) * t
+end
+
+function M.ease_out_cubic(t)
+    t = clamp(t or 0, 0, 1)
+    local q = 1 - t
+    return 1 - q * q * q
+end
+
+-- Persistent transition value for hover/active UI elements.
+function M.transition(id, target, rate)
+    local now = M.now()
+    local entry = transitions[id]
+    if not entry then
+        entry = { value = target and 1 or 0, at = now }
+        transitions[id] = entry
+        return entry.value
+    end
+    local dt = math.min(math.max(now - (entry.at or now), 0), 0.1)
+    entry.at = now
+    local goal = target and 1 or 0
+    local speed = rate or 12
+    local alpha = 1 - math.exp(-speed * dt)
+    entry.value = M.lerp(entry.value or 0, goal, alpha)
+    return entry.value
+end
+
+function M.mix(a, b, t)
+    return theme.lerp_color(a, b, clamp(t or 0, 0, 1))
+end
+
+local function settings()
+    return April.require("core.settings")
+end
+
+local function hsv_to_rgb(h, s, v)
+    h = (h % 1) * 6
+    local i = math.floor(h)
+    local f = h - i
+    local p = v * (1 - s)
+    local q = v * (1 - f * s)
+    local t = v * (1 - (1 - f) * s)
+    if i == 0 then return v, t, p end
+    if i == 1 then return q, v, p end
+    if i == 2 then return p, v, t end
+    if i == 3 then return p, q, v end
+    if i == 4 then return t, p, v end
+    return v, p, q
+end
+
+function M.now()
+    if utility and utility.get_time then
+        return utility.get_time()
+    end
+    return 0
+end
+
+function M.speed()
+    local n = settings().num("april_ui_anim_speed", 40)
+    return clamp(n, 1, 100) * 0.028
+end
+
+function M.phase()
+    return M.now() * M.speed()
+end
+
+function M.colors_enabled()
+    return settings().bool("april_ui_custom_colors", false)
+end
+
+function M.anim_enabled()
+    return settings().bool("april_ui_custom_anim", false)
+end
+
+function M.global_mode()
+    local n = tonumber(settings().get("april_ui_accent_anim", 1)) or 1
+    return clamp(math.floor(n + 0.5), 0, #M.MODES - 1)
+end
+
+function M.resolve_mode(style_id)
+    if not M.anim_enabled() then
+        return 0
+    end
+    local pick = settings().combo_index(style_id, M.MODES_UI, 0)
+    if pick == 0 then
+        return M.global_mode()
+    end
+    return pick - 1
+end
+
+function M.base_accent()
+    if not M.colors_enabled() then
+        return DEFAULT_ACCENT
+    end
+    return settings().color("april_ui_accent", DEFAULT_ACCENT)
+end
+
+function M.color_override_enabled(target_index)
+    if not M.colors_enabled() then
+        return false
+    end
+    return settings().multi("april_ui_color_overrides", target_index, false)
+end
+
+function M.element_color(target_index, color_id)
+    if M.color_override_enabled(target_index) then
+        return settings().color(color_id, M.base_accent())
+    end
+    return M.base_accent()
+end
+
+function M.anim_target_enabled(target_index)
+    if not M.anim_enabled() then
+        return false
+    end
+    return settings().multi("april_ui_anim_targets", target_index, true)
+end
+
+function M.sync_theme()
+    local col = M.base_accent()
+    theme.ACCENT = { col[1], col[2], col[3], col[4] or 1 }
+    local pulse = 0.62 + 0.38 * math.sin(M.phase() * 2.2)
+    theme.ACCENT_DIM = {
+        col[1] * pulse * 0.55,
+        col[2] * pulse * 0.55,
+        col[3] * pulse * 0.55,
+        1,
+    }
+end
+
+function M.accent_at_mode(mode, base, t, alpha)
+    alpha = alpha or 1
+    local phase = M.phase()
+    t = (t or 0) % 1
+
+    if mode == 0 then
+        return { base[1], base[2], base[3], alpha }
+    end
+    if mode == 1 then
+        local hue = (t + phase * 0.14) % 1
+        local r, g, b = hsv_to_rgb(hue, 1, 1)
+        return { r, g, b, alpha }
+    end
+    if mode == 2 then
+        local p = 0.5 + 0.5 * math.sin(phase * 2.4 + t * 6.28318)
+        return { base[1] * p, base[2] * p, base[3] * p, alpha }
+    end
+    if mode == 3 then
+        local w = 0.45 + 0.55 * math.sin((t * 10 - phase * 2.8) * 6.28318)
+        return {
+            base[1] * (0.55 + 0.45 * w),
+            base[2] * (0.55 + 0.45 * w),
+            base[3] * (0.55 + 0.45 * w),
+            alpha,
+        }
+    end
+    local sweep_h = (t + phase * 0.18) % 1
+    local sr, sg, sb = hsv_to_rgb(sweep_h, 1, 1)
+    local mix = 0.35 + 0.65 * (0.5 + 0.5 * math.sin(t * 6.28318 + phase * 1.6))
+    local c = theme.lerp_color(base, { sr, sg, sb, 1 }, mix)
+    return { c[1], c[2], c[3], alpha }
+end
+
+function M.accent_at(t, alpha)
+    return M.accent_at_mode(M.global_mode(), M.base_accent(), t, alpha)
+end
+
+local function widget_clip()
+    local clip = nil
+    pcall(function()
+        clip = April.require("ui.gs_widgets").clip
+    end)
+    return clip
+end
+
+function M.rect(x, y, w, h, col, filled)
+    if not draw then return end
+    local c = widget_clip()
+    if c then
+        local x2, y2 = x + w, y + h
+        local cx, cy = c.x, c.y
+        local cx2, cy2 = c.x + c.w, c.y + c.h
+        if x2 <= cx or y2 <= cy or x >= cx2 or y >= cy2 then return end
+        if x < cx then w = w - (cx - x); x = cx end
+        if y < cy then h = h - (cy - y); y = cy end
+        if x + w > cx2 then w = cx2 - x end
+        if y + h > cy2 then h = cy2 - y end
+        if w <= 0 or h <= 0 then return end
+    end
+    if filled then
+        draw.rect_filled(x, y, w, h, col, 0)
+    else
+        draw.rect(x, y, w, h, col, 0, 1)
+    end
+end
+
+function M.draw_bar_h(x, y, w, h, scroll_t, style_id, color_id, color_target)
+    if w <= 0 or h <= 0 then return end
+    scroll_t = scroll_t or 0
+    local base = M.element_color(color_target, color_id)
+    local mode = M.resolve_mode(style_id)
+    if mode == 0 then
+        M.rect(x, y, w, h, base, true)
+        return
+    end
+    local segs = math.max(16, math.floor(w / 4))
+    local sw = w / segs
+    for i = 0, segs - 1 do
+        local t = (i / segs + scroll_t) % 1
+        M.rect(x + i * sw, y, sw + 0.75, h, M.accent_at_mode(mode, base, t, 1), true)
+    end
+end
+
+function M.draw_bar_v(x, y, w, h, scroll_t, style_id, color_id, color_target)
+    if w <= 0 or h <= 0 then return end
+    scroll_t = scroll_t or 0
+    local base = M.element_color(color_target, color_id)
+    local mode = M.resolve_mode(style_id)
+    if mode == 0 then
+        M.rect(x, y, w, h, base, true)
+        return
+    end
+    local segs = math.max(8, math.floor(h / 4))
+    local sh = h / segs
+    for i = 0, segs - 1 do
+        local t = (i / segs + scroll_t) % 1
+        M.rect(x, y + i * sh, w, sh + 0.75, M.accent_at_mode(mode, base, t, 1), true)
+    end
+end
+
+function M.draw_flat(x, y, w, h, style_id, color_id, color_target)
+    local base = M.element_color(color_target, color_id)
+    M.rect(x, y, w, h, base, true)
+end
+
+function M.section_scroll()
+    return M.phase() * 0.09
+end
+
+function M.draw_section_top(x, y, w)
+    if not M.anim_target_enabled(M.TARGET_SECTION) then
+        M.draw_flat(x, y, w, 2, M.STYLE_SECTION, M.COL_SECTION, M.TARGET_SECTION)
+        return
+    end
+    M.draw_bar_h(x, y, w, 2, M.section_scroll(), M.STYLE_SECTION, M.COL_SECTION, M.TARGET_SECTION)
+end
+
+function M.draw_title_bar(x, y, w, h)
+    if not M.anim_target_enabled(M.TARGET_TITLE) then
+        M.draw_flat(x, y, w, h, M.STYLE_TITLE, M.COL_TITLE, M.TARGET_TITLE)
+        return
+    end
+    M.draw_bar_h(x, y, w, h, M.phase() * 0.12, M.STYLE_TITLE, M.COL_TITLE, M.TARGET_TITLE)
+end
+
+function M.draw_slider_fill(x, y, w, h)
+    if not M.anim_target_enabled(M.TARGET_SLIDER) then
+        M.draw_flat(x, y, w, h, M.STYLE_SLIDER, M.COL_SLIDER, M.TARGET_SLIDER)
+        return
+    end
+    M.draw_bar_h(x, y, w, h, M.phase() * 0.06, M.STYLE_SLIDER, M.COL_SLIDER, M.TARGET_SLIDER)
+end
+
+function M.draw_scroll_thumb(x, y, w, h)
+    if not M.anim_target_enabled(M.TARGET_SCROLL) then
+        M.draw_flat(x, y, w, h, M.STYLE_SCROLL, M.COL_SCROLL, M.TARGET_SCROLL)
+        return
+    end
+    M.draw_bar_v(x, y, w, h, M.phase() * 0.05, M.STYLE_SCROLL, M.COL_SCROLL, M.TARGET_SCROLL)
+end
+
+function M.draw_tab_indicator(x, y, w, h)
+    if not M.anim_target_enabled(M.TARGET_SIDEBAR) then
+        M.draw_flat(x, y, w, h, M.STYLE_SIDEBAR, M.COL_SIDEBAR, M.TARGET_SIDEBAR)
+        return
+    end
+    M.draw_bar_v(x, y, w, h, M.phase() * 0.07, M.STYLE_SIDEBAR, M.COL_SIDEBAR, M.TARGET_SIDEBAR)
+end
+
+function M.tab_icon_color()
+    local base = M.element_color(M.TARGET_SIDEBAR, M.COL_SIDEBAR)
+    if not M.anim_target_enabled(M.TARGET_SIDEBAR) then
+        return base
+    end
+    return M.accent_at_mode(M.resolve_mode(M.STYLE_SIDEBAR), base, M.phase() * 0.03, 1)
+end
+
+function M.hover_tint(base, hot)
+    if not hot then return base end
+    if not M.anim_target_enabled(M.TARGET_HOVER) then
+        return base
+    end
+    local pulse = 0.88 + 0.12 * math.sin(M.phase() * 6)
+    return {
+        base[1] * pulse,
+        base[2] * pulse,
+        base[3] * pulse,
+        base[4] or 1,
+    }
+end
+
+function M.interactive_fill(id, base, hover, active)
+    local h = M.transition("hover:" .. tostring(id), hover, 15)
+    local a = M.transition("active:" .. tostring(id), active, 20)
+    local col = M.mix(base, hover and theme.BUTTON_HOVER or theme.HOVER, M.ease_out_cubic(h))
+    return M.mix(col, M.element_color(M.TARGET_CHECKBOX, M.COL_CHECKBOX), a * 0.16)
+end
+
+function M.checkbox_fill()
+    local base = M.element_color(M.TARGET_CHECKBOX, M.COL_CHECKBOX)
+    if not M.anim_target_enabled(M.TARGET_CHECKBOX) then
+        return base
+    end
+    return M.accent_at_mode(M.resolve_mode(M.STYLE_CHECKBOX), base, M.phase() * 0.04, 1)
+end
+
+function M.menu_fade()
+    if not M.colors_enabled() or not settings().bool("april_ui_menu_fade", false) then
+        return 1
+    end
+    return clamp(0.86 + math.sin(M.now() * 0.001) * 0.02, 0.86, 1)
+end
+
+function M.panel_bg()
+    if not M.colors_enabled() then
+        return theme.BG
+    end
+    local dim = settings().num("april_ui_bg_dim", 0)
+    dim = clamp(dim, 0, 40) * 0.01
+    local bg = theme.BG
+    return {
+        bg[1] - dim * 0.04,
+        bg[2] - dim * 0.04,
+        bg[3] - dim * 0.04,
+        bg[4] or 1,
+    }
+end
+
+return M
+
+end)()
+
+-- ── ui/menu_shim.lua ──
+April._mods["ui.menu_shim"] = (function()
+--[[
+  Replaces Vector's menu.* API with a store backed by ui.gs_state.
+  Feature register_menu() code keeps working; nothing is added to the Vector UI.
+]]
+
+local state = April.require("ui.gs_state")
+
+local M = {}
+M.installed = false
+M._real = nil
+
+local function as_bool_default(default)
+    return default == true
+end
+
+local shim = {}
+
+function shim.add_tab() end
+function shim.add_group() end
+function shim.add_separator() end
+function shim.add_label() end
+
+function shim.add_checkbox(_T, _G, id, _label, default, opts)
+    state.define(id, as_bool_default(default))
+    opts = opts or {}
+    if opts.colorpicker then
+        state.define_color(id, opts.colorpicker)
+    end
+    if opts.key and opts.key ~= 0 then
+        if state.get_key(id) == 0 then
+            state.set_key(id, opts.key)
+        end
+    end
+end
+
+function shim.add_slider_int(_T, _G, id, _label, _min, _max, default, _opts)
+    -- Some call sites pass format string as 8th arg then opts
+    state.define(id, tonumber(default) or 0)
+end
+
+function shim.add_slider_float(_T, _G, id, _label, _min, _max, default, _fmt, _opts)
+    state.define(id, tonumber(default) or 0)
+end
+
+function shim.add_combo(_T, _G, id, _label, _options, default, _opts)
+    state.define(id, tonumber(default) or 0)
+end
+
+function shim.add_multicombo(_T, _G, id, _label, options, defaults, _opts)
+    local def = {}
+    local n = type(options) == "table" and #options or 0
+    for i = 1, n do
+        def[i] = defaults and defaults[i] == true
+    end
+    state.define(id, def)
+end
+
+function shim.add_colorpicker(_T, _G, id, _label, default, _opts)
+    state.define_color(id, default or { 1, 1, 1, 1 })
+    -- Also mirror as value for config dumps that read get()
+    state.define(id, default or { 1, 1, 1, 1 })
+end
+
+function shim.add_input(_T, _G, id, _label, default)
+    state.define(id, default or "")
+end
+
+function shim.add_button(_T, _G, id, _label, callback)
+    if type(callback) == "function" then
+        state.set_button(id, callback)
+    end
+end
+
+function shim.add_hotkey(_T, _G, id, _label, default_vk, opts)
+    opts = opts or {}
+    if default_vk and default_vk ~= 0 and state.get_key(id) == 0 then
+        state.set_key(id, default_vk)
+    end
+    local mode_id = id .. "_mode"
+    state.define(mode_id, opts.default_mode or opts.mode_default or 1)
+end
+
+function shim.get(id)
+    return state.get(id, nil)
+end
+
+function shim.set(id, value)
+    state.set(id, value)
+end
+
+function shim.get_color(id)
+    return state.get_color(id, nil)
+end
+
+function shim.set_color(id, color)
+    state.set_color(id, color)
+end
+
+function shim.get_key(id)
+    return state.get_key(id)
+end
+
+function shim.set_key(id, vk)
+    state.set_key(id, vk)
+end
+
+function shim.set_callback(id, fn)
+    state.set_menu_callback(id, fn)
+end
+
+function shim.set_visible(id, show)
+    state.set_visible(id, show)
+end
+
+-- PascalCase / camelCase aliases (Vector registers all three styles)
+local aliases = {
+    AddTab = "add_tab",
+    AddGroup = "add_group",
+    AddSeparator = "add_separator",
+    AddLabel = "add_label",
+    AddCheckbox = "add_checkbox",
+    AddSliderInt = "add_slider_int",
+    AddSliderFloat = "add_slider_float",
+    AddCombo = "add_combo",
+    AddMulticombo = "add_multicombo",
+    AddColorpicker = "add_colorpicker",
+    AddInput = "add_input",
+    AddButton = "add_button",
+    AddHotkey = "add_hotkey",
+    Get = "get",
+    Set = "set",
+    GetColor = "get_color",
+    SetColor = "set_color",
+    GetKey = "get_key",
+    SetKey = "set_key",
+    SetCallback = "set_callback",
+    SetVisible = "set_visible",
+    addTab = "add_tab",
+    addGroup = "add_group",
+    addCheckbox = "add_checkbox",
+    addSliderInt = "add_slider_int",
+    addSliderFloat = "add_slider_float",
+    addCombo = "add_combo",
+    addMulticombo = "add_multicombo",
+    addColorpicker = "add_colorpicker",
+    addInput = "add_input",
+    addButton = "add_button",
+    addHotkey = "add_hotkey",
+    getColor = "get_color",
+    setColor = "set_color",
+    getKey = "get_key",
+    setKey = "set_key",
+    setCallback = "set_callback",
+    setVisible = "set_visible",
+}
+
+for alias, real in pairs(aliases) do
+    shim[alias] = shim[real]
+end
+
+function M.install()
+    if M.installed then return true end
+    -- Vector sandbox has no rawget; keep a reference then replace the global.
+    M._real = menu
+    April._vector_menu = M._real
+    April.custom_ui = true
+    menu = shim
+    M.installed = true
+    return true
+end
+
+function M.api()
+    return shim
+end
+
+return M
+
+end)()
+
+-- ── ui/combat_labels.lua ──
+April._mods["ui.combat_labels"] = (function()
+-- Label lists shared by the custom UI catalog (no feature / menu deps).
+local M = {}
+
+M.TP_METHODS = {
+    "Center",
+    "Random Ring",
+    "Random Sphere",
+    "Offset Grid",
+    "Camera Face",
+    "Away From Cam",
+    "Shuffle Valid",
+    "Dense Shuffle",
+}
+
+M.SILENT_BONES = {
+    "Head",
+    "Torso",
+    "Left Arm",
+    "Right Arm",
+    "Left Leg",
+    "Right Leg",
+    "Closest",
+}
+
+return M
+
+end)()
+
+-- ── ui/gs_icons.lua ──
+April._mods["ui.gs_icons"] = (function()
+-- Vector-drawn sidebar icons (sharper Gamesense-style glyphs).
+local theme = April.require("ui.gs_theme")
+
+local M = {}
+
+local function line(x1, y1, x2, y2, col, t)
+    if draw and draw.line then
+        draw.line(x1, y1, x2, y2, col, t or 1.6)
+    end
+end
+
+local function circle(x, y, r, col, filled, segs)
+    if not draw then return end
+    segs = segs or 20
+    if filled and draw.circle_filled then
+        draw.circle_filled(x, y, r, col, segs)
+    elseif draw.circle then
+        draw.circle(x, y, r, col, segs, 1.6)
+    end
+end
+
+local function rect(x, y, w, h, col, filled)
+    if not draw then return end
+    if filled then
+        draw.rect_filled(x, y, w, h, col, 0)
+    else
+        draw.rect(x, y, w, h, col, 0, 1.5)
+    end
+end
+
+local function poly(points, col, t)
+    if draw and draw.poly then
+        draw.poly(points, col, t or 1.5)
+    else
+        for i = 1, #points - 1 do
+            line(points[i][1], points[i][2], points[i + 1][1], points[i + 1][2], col, t)
+        end
+    end
+end
+
+local function ellipse_arc(cx, cy, rx, ry, a0, a1, col, steps)
+    steps = steps or 10
+    local pts = {}
+    for i = 0, steps do
+        local t = a0 + (a1 - a0) * (i / steps)
+        pts[#pts + 1] = { cx + math.cos(t) * rx, cy + math.sin(t) * ry }
+    end
+    poly(pts, col, 1.5)
+end
+
+function M.draw(name, cx, cy, col)
+    col = col or theme.TEXT
+
+    if name == "aim" then
+        -- Crosshair with outer brackets
+        circle(cx, cy, 5.5, col, false, 22)
+        circle(cx, cy, 1.4, col, true, 10)
+        line(cx - 9, cy, cx - 4, cy, col, 1.7)
+        line(cx + 4, cy, cx + 9, cy, col, 1.7)
+        line(cx, cy - 9, cx, cy - 4, col, 1.7)
+        line(cx, cy + 4, cx, cy + 9, col, 1.7)
+        -- corner ticks
+        line(cx - 8, cy - 8, cx - 5, cy - 8, col, 1.3)
+        line(cx - 8, cy - 8, cx - 8, cy - 5, col, 1.3)
+        line(cx + 8, cy - 8, cx + 5, cy - 8, col, 1.3)
+        line(cx + 8, cy - 8, cx + 8, cy - 5, col, 1.3)
+        line(cx - 8, cy + 8, cx - 5, cy + 8, col, 1.3)
+        line(cx - 8, cy + 8, cx - 8, cy + 5, col, 1.3)
+        line(cx + 8, cy + 8, cx + 5, cy + 8, col, 1.3)
+        line(cx + 8, cy + 8, cx + 8, cy + 5, col, 1.3)
+
+    elseif name == "visuals" then
+        -- Eye
+        ellipse_arc(cx, cy, 8, 4.5, math.pi, math.pi * 2, col, 12)
+        ellipse_arc(cx, cy, 8, 4.5, 0, math.pi, col, 12)
+        circle(cx, cy, 2.8, col, false, 14)
+        circle(cx + 0.6, cy - 0.4, 1.1, col, true, 8)
+
+    elseif name == "world" then
+        -- Globe with meridians
+        circle(cx, cy, 7, col, false, 24)
+        -- latitude
+        ellipse_arc(cx, cy, 7, 2.8, 0, math.pi * 2, col, 16)
+        -- longitude
+        ellipse_arc(cx, cy, 2.8, 7, 0, math.pi * 2, col, 16)
+        line(cx, cy - 7, cx, cy + 7, col, 1.2)
+
+    elseif name == "guns" then
+        -- Side-view rifle silhouette
+        -- barrel
+        rect(cx - 2, cy - 2.5, 10, 2.2, col, true)
+        -- receiver
+        rect(cx - 7, cy - 3.2, 7, 4.2, col, true)
+        -- stock
+        poly({
+            { cx - 7, cy - 2.5 },
+            { cx - 11, cy - 3.5 },
+            { cx - 11, cy + 2.5 },
+            { cx - 7, cy + 1.2 },
+        }, col, 1.6)
+        line(cx - 7, cy - 2.5, cx - 11, cy - 3.5, col, 1.6)
+        line(cx - 11, cy - 3.5, cx - 11, cy + 2.5, col, 1.6)
+        line(cx - 11, cy + 2.5, cx - 7, cy + 1.2, col, 1.6)
+        -- mag
+        rect(cx - 4.5, cy + 1, 2.4, 4, col, true)
+        -- front sight
+        line(cx + 6, cy - 2.5, cx + 6, cy - 5, col, 1.4)
+
+    elseif name == "misc" then
+        -- Three control sliders
+        for i = 0, 2 do
+            local yy = cy - 6 + i * 6
+            line(cx - 7, yy, cx + 7, yy, col, 1.4)
+            local knob = ({ -3, 3, 0 })[i + 1]
+            circle(cx + knob, yy, 2.2, col, true, 10)
+            circle(cx + knob, yy, 2.2, col, false, 10)
+        end
+
+    elseif name == "radar" then
+        -- Radar dish + sweep
+        circle(cx, cy, 7.5, col, false, 24)
+        circle(cx, cy, 4.5, col, false, 18)
+        circle(cx, cy, 1.5, col, true, 10)
+        line(cx, cy, cx + 6.5, cy - 3.5, col, 1.8)
+        -- blip
+        circle(cx + 3.5, cy + 2.5, 1.3, col, true, 8)
+        -- north tick
+        line(cx, cy - 7.5, cx, cy - 9.5, col, 1.5)
+
+    elseif name == "config" then
+        -- Gear
+        local teeth = 8
+        for i = 0, teeth - 1 do
+            local a = (i / teeth) * math.pi * 2
+            local c, s = math.cos(a), math.sin(a)
+            local x1, y1 = cx + c * 3.2, cy + s * 3.2
+            local x2, y2 = cx + c * 7.2, cy + s * 7.2
+            local px, py = -s * 1.5, c * 1.5
+            poly({
+                { x1 + px, y1 + py },
+                { x2 + px * 0.7, y2 + py * 0.7 },
+                { x2 - px * 0.7, y2 - py * 0.7 },
+                { x1 - px, y1 - py },
+                { x1 + px, y1 + py },
+            }, col, 1.35)
+        end
+        circle(cx, cy, 3.8, col, false, 16)
+        circle(cx, cy, 1.8, col, true, 10)
+
+    else
+        circle(cx, cy, 4, col, false)
+    end
+end
+
+return M
+
+end)()
+
+-- ── ui/gs_widgets.lua ──
+April._mods["ui.gs_widgets"] = (function()
+-- Gamesense-style widgets (draw API) backed by ui.gs_state.
+local theme = April.require("ui.gs_theme")
+local input = April.require("ui.gs_input")
+local state = April.require("ui.gs_state")
+local anim = April.require("ui.gs_anim")
+
+local M = {}
+
+M.active_slider = nil
+M.active_input = nil
+M.open_combo = nil
+M.open_multi = nil
+M.open_color = nil
+M.listening_key = nil
+M.drag_offset_x = 0
+M.drag_offset_y = 0
+M.dragging_window = false
+M.clip = nil -- { x, y, w, h }
+M.popup_used_click = false -- set when a popup consumes this frame's click
+M.interacted = false -- any widget captured LMB this frame
+M._hue_cache = {} -- id -> hue 0..1 for color picker
+M._list_scroll = {} -- id -> first visible option index (0-based)
+M.LIST_MAX_VISIBLE = 8
+M.wheel_consumed = false
+M.block_under = false -- true while pointer is over a floating popup (prior frame rect)
+-- Floating color picker (drawn after the menu so it doesn't expand sections)
+M._color_anchor = nil -- { id, x, y, w }
+M._color_hit = nil -- { x, y, w, h } last drawn picker rect
+M.open_bind_mode = nil -- keybind id whose Always/Hold/Toggle menu is open
+M._bind_mode_anchor = nil -- { id, x, y, w }
+M._bind_mode_hit = nil
+M._active_input_rect = nil -- { x, y, w, h } for click-outside blur
+M._input_repeat_at = 0
+M._input_repeat_vk = nil
+
+local LISTEN_SKIP = {
+    [0x01] = true, -- LMB used for UI
+    [0x2D] = true, -- INSERT menu toggle
+}
+
+local function clamp(v, a, b)
+    if v < a then return a end
+    if v > b then return b end
+    return v
+end
+
+local function text_w(str, size)
+    if draw and draw.get_text_size then
+        local w = draw.get_text_size(str, size or theme.FONT)
+        if type(w) == "number" then return w end
+    end
+    return #(tostring(str or "")) * 7
+end
+
+local function in_clip(y, h)
+    local c = M.clip
+    if not c then return true end
+    return y >= c.y and y + h <= c.y + c.h
+end
+
+local function stacked_metrics(y)
+    local label_y = y + 3
+    local ctrl_y = y + theme.LABEL_H + theme.LABEL_GAP
+    return label_y, ctrl_y, theme.CTRL_H, theme.STACKED_ROW_H
+end
+
+local function interactive(x, y, w, h)
+    if M.block_under then return false end
+    if not in_clip(y, h) then return false end
+    local c = M.clip
+    if c and not input.hover(c.x, c.y, c.w, c.h) then
+        return false
+    end
+    return true
+end
+
+local function ui_clicked(x, y, w, h)
+    if M.block_under then return false end
+    return input.clicked(x, y, w, h)
+end
+
+local function ui_rmb_clicked(x, y, w, h)
+    if M.block_under then return false end
+    return input.rmb_click and input.hover(x, y, w, h)
+end
+
+local function rgb_to_hsv(r, g, b)
+    local max = math.max(r, g, b)
+    local min = math.min(r, g, b)
+    local d = max - min
+    local h = 0
+    if d > 1e-6 then
+        if max == r then
+            h = ((g - b) / d) % 6
+        elseif max == g then
+            h = (b - r) / d + 2
+        else
+            h = (r - g) / d + 4
+        end
+        h = h / 6
+        if h < 0 then h = h + 1 end
+    end
+    local s = max <= 1e-6 and 0 or (d / max)
+    return h, s, max
+end
+
+local function hsv_to_rgb(h, s, v)
+    h = (h % 1) * 6
+    local i = math.floor(h)
+    local f = h - i
+    local p = v * (1 - s)
+    local q = v * (1 - f * s)
+    local t = v * (1 - (1 - f) * s)
+    if i == 0 then return v, t, p end
+    if i == 1 then return q, v, p end
+    if i == 2 then return p, v, t end
+    if i == 3 then return p, q, v end
+    if i == 4 then return t, p, v end
+    return v, p, q
+end
+
+function M.begin_popups()
+    M.popup_used_click = false
+    M.interacted = false
+    M.wheel_consumed = false
+    M._color_anchor = nil
+    M._bind_mode_anchor = nil
+    M._active_input_rect = nil
+
+    -- Block underlay widgets when the cursor is over last frame's popup rect
+    M.block_under = false
+    if M.open_color and M._color_hit then
+        local r = M._color_hit
+        if input.hover(r.x, r.y, r.w, r.h) then
+            M.block_under = true
+            if input.lmb or input.lmb_click or input.rmb or input.rmb_click then
+                M.interacted = true
+                M.popup_used_click = true
+            end
+        end
+    end
+    if M.open_bind_mode and M._bind_mode_hit then
+        local r = M._bind_mode_hit
+        if input.hover(r.x, r.y, r.w, r.h) then
+            M.block_under = true
+            if input.lmb or input.lmb_click or input.rmb or input.rmb_click then
+                M.interacted = true
+                M.popup_used_click = true
+            end
+        end
+    end
+end
+
+local function mark_interacted()
+    M.interacted = true
+    M.popup_used_click = true
+end
+
+local function open_color_popup(id, anchor_x, anchor_y, row_w)
+    if M.open_color == id then
+        M.open_color = nil
+        M._color_anchor = nil
+        M._color_hit = nil
+    else
+        M.open_color = id
+        M.open_combo = nil
+        M.open_multi = nil
+        M.open_bind_mode = nil
+        M._bind_mode_hit = nil
+        M._color_anchor = { id = id, x = anchor_x, y = anchor_y, w = row_w or 160 }
+    end
+end
+
+local function open_bind_mode_popup(id, anchor_x, anchor_y, chip_w)
+    if M.open_bind_mode == id then
+        M.open_bind_mode = nil
+        M._bind_mode_anchor = nil
+        M._bind_mode_hit = nil
+    else
+        M.open_bind_mode = id
+        M.open_combo = nil
+        M.open_multi = nil
+        M.open_color = nil
+        M._color_hit = nil
+        M._bind_mode_anchor = { id = id, x = anchor_x, y = anchor_y, w = chip_w or 56 }
+    end
+end
+
+local function list_scroll_for(id, count, max_vis)
+    max_vis = max_vis or M.LIST_MAX_VISIBLE
+    local max_off = math.max(0, count - max_vis)
+    local off = M._list_scroll[id] or 0
+    if off < 0 then off = 0 end
+    if off > max_off then off = max_off end
+    M._list_scroll[id] = off
+    return off, max_off, math.min(count, max_vis)
+end
+
+local function apply_list_wheel(id, count, max_vis, hot)
+    if not hot or input.wheel == 0 or M.wheel_consumed then return end
+    max_vis = max_vis or M.LIST_MAX_VISIBLE
+    local off, max_off = list_scroll_for(id, count, max_vis)
+    off = off - input.wheel
+    if off < 0 then off = 0 end
+    if off > max_off then off = max_off end
+    M._list_scroll[id] = off
+    M.wheel_consumed = true
+end
+
+function M.end_popups()
+    if input.lmb_click and M.active_input and M._active_input_rect then
+        local r = M._active_input_rect
+        if not input.hover(r.x, r.y, r.w, r.h) then
+            M.active_input = nil
+        end
+    end
+
+    if (input.lmb_click or input.rmb_click) and not M.popup_used_click then
+        if M.open_combo or M.open_multi or M.open_color or M.open_bind_mode then
+            M.open_combo = nil
+            M.open_multi = nil
+            M.open_color = nil
+            M.open_bind_mode = nil
+            M._color_anchor = nil
+            M._color_hit = nil
+            M._bind_mode_anchor = nil
+            M._bind_mode_hit = nil
+        end
+    end
+end
+
+--- Draw floating color picker on top of the whole menu (call after columns).
+function M.draw_color_overlay()
+    if not M.open_color then
+        M._color_hit = nil
+        return
+    end
+    local id = M.open_color
+    local col = state.get_color(id, { 1, 1, 1, 1 })
+    local pw, ph = 168, 138
+    local ax = M._color_anchor
+    local px, py
+    if ax and ax.id == id then
+        px = ax.x + (ax.w or 160) - pw
+        py = ax.y + theme.ROW_H + 2
+    else
+        px = input.mx + 12
+        py = input.my + 12
+    end
+    -- Keep on screen
+    local sw, sh = 1920, 1080
+    if draw and draw.get_screen_size then
+        sw, sh = draw.get_screen_size()
+    end
+    if px < 4 then px = 4 end
+    if py < 4 then py = 4 end
+    if px + pw > sw - 4 then px = sw - pw - 4 end
+    if py + ph > sh - 4 then py = sh - ph - 4 end
+
+    M._color_hit = { x = px, y = py, w = pw, h = ph }
+
+    -- Soft shadow / backdrop
+    M.rect(px + 3, py + 4, pw, ph, theme.SHADOW, true, theme.CORNER)
+    M.draw_color_picker(px, py, pw, ph, id, col)
+
+    if input.hover(px, py, pw, ph) then
+        if input.lmb or input.lmb_click or input.rmb or input.rmb_click then
+            mark_interacted()
+        end
+    end
+end
+
+--- Right-click keybind mode menu (Always / Hold / Toggle).
+function M.draw_bind_mode_overlay()
+    if not M.open_bind_mode then
+        M._bind_mode_hit = nil
+        return
+    end
+    local id = M.open_bind_mode
+    local modes = { "Always", "Hold", "Toggle" }
+    local mode_id = id .. "_mode"
+    local cur = tonumber(state.get(mode_id, 2)) or 2
+    local pw = 78
+    local row_h = 18
+    local ph = 4 + #modes * row_h
+    local ax = M._bind_mode_anchor
+    local px, py
+    if ax and ax.id == id then
+        px = ax.x + (ax.w or 56) - pw
+        py = ax.y + 18
+    else
+        px = input.mx
+        py = input.my + 8
+    end
+    local sw, sh = 1920, 1080
+    if draw and draw.get_screen_size then
+        sw, sh = draw.get_screen_size()
+    end
+    if px < 4 then px = 4 end
+    if py < 4 then py = 4 end
+    if px + pw > sw - 4 then px = sw - pw - 4 end
+    if py + ph > sh - 4 then py = sh - ph - 4 end
+
+    M._bind_mode_hit = { x = px, y = py, w = pw, h = ph }
+
+    M.rect(px + 3, py + 4, pw, ph, theme.SHADOW, true, theme.CORNER)
+    M.rect(px, py, pw, ph, theme.OVERLAY, true, theme.CORNER)
+    M.rect(px, py, pw, ph, theme.BORDER_HOT, false, theme.CORNER)
+
+    for i, name in ipairs(modes) do
+        local iy = py + 2 + (i - 1) * row_h
+        local selected = (cur == i - 1)
+        if input.hover(px, iy, pw, row_h) then
+            M.rect(px + 3, iy + 1, pw - 6, row_h - 2, theme.HOVER, true, theme.CORNER_SMALL)
+        end
+        if selected then
+            anim.draw_tab_indicator(px + 2, iy + 4, 3, row_h - 8)
+        end
+        M.text(px + 10, iy + 2, name, selected and theme.TEXT_ACTIVE or theme.TEXT, theme.FONT_SMALL)
+        if input.clicked(px, iy, pw, row_h) then
+            mark_interacted()
+            state.set(mode_id, i - 1)
+            M.open_bind_mode = nil
+            M._bind_mode_hit = nil
+        end
+    end
+
+    if input.hover(px, py, pw, ph) and (input.lmb_click or input.rmb_click) then
+        mark_interacted()
+    end
+end
+
+function M.vk_name(vk)
+    return April.require("core.vk_names").label(vk)
+end
+
+function M.rect(x, y, w, h, col, filled, rounding)
+    if not draw then return end
+    local c = M.clip
+    if c then
+        local x2 = x + w
+        local y2 = y + h
+        local cx = c.x
+        local cy = c.y
+        local cx2 = c.x + c.w
+        local cy2 = c.y + c.h
+        if x2 <= cx or y2 <= cy or x >= cx2 or y >= cy2 then return end
+        if x < cx then
+            w = w - (cx - x)
+            x = cx
+        end
+        if y < cy then
+            h = h - (cy - y)
+            y = cy
+        end
+        if x + w > cx2 then w = cx2 - x end
+        if y + h > cy2 then h = cy2 - y end
+        if w <= 0 or h <= 0 then return end
+    end
+    if filled then
+        draw.rect_filled(x, y, w, h, col, rounding or 0)
+    else
+        draw.rect(x, y, w, h, col, rounding or 0, 1)
+    end
+end
+
+function M.text(x, y, str, col, size)
+    if draw and draw.text then
+        draw.text(x, y, tostring(str), col, size or theme.FONT)
+    end
+end
+
+function M.rainbow_bar(x, y, w, h)
+    anim.draw_title_bar(x, y, w, h)
+end
+
+function M.group_box(x, y, w, h, title)
+    local c = M.clip
+    if c then
+        -- Only paint the portion inside the clip rect
+        local top = math.max(y, c.y)
+        local bot = math.min(y + h, c.y + c.h)
+        if bot <= top then return end
+        M.rect(x, top, w, bot - top, theme.PANEL, true)
+        M.rect(x, top, w, bot - top, theme.BORDER, false)
+        if y >= c.y - 2 and y < c.y + c.h then
+            M.text(x + 12, y + 5, title, theme.TEXT_ACTIVE, theme.FONT_TITLE)
+        end
+        return
+    end
+    M.rect(x, y, w, h, theme.PANEL, true)
+    M.rect(x, y, w, h, theme.BORDER, false)
+    M.text(x + 12, y + 5, title, theme.TEXT_ACTIVE, theme.FONT_TITLE)
+end
+
+local LISTEN_VKS = {
+    0x02, 0x04, 0x05, 0x06, 0x08, 0x09, 0x0D, 0x10, 0x11, 0x12, 0x14, 0x1B, 0x20,
+    0x25, 0x26, 0x27, 0x28, 0x2E,
+    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39,
+    0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D,
+    0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A,
+    0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B,
+    0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC0,
+}
+
+function M.tick_key_listen()
+    if not M.listening_key then return end
+    if input.key_pressed(0x1B) then
+        M.listening_key = nil
+        return
+    end
+    for i = 1, #LISTEN_VKS do
+        local vk = LISTEN_VKS[i]
+        if not LISTEN_SKIP[vk] and input.key_pressed(vk) then
+            state.set_key(M.listening_key, vk)
+            M.listening_key = nil
+            return
+        end
+    end
+end
+
+local INPUT_VKS = {
+    0x20,
+    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39,
+    0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D,
+    0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A,
+    0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC0, 0xDB, 0xDC, 0xDD, 0xDE,
+}
+
+local INPUT_SHIFT = {
+    [0x30] = ")", [0x31] = "!", [0x32] = "@", [0x33] = "#", [0x34] = "$",
+    [0x35] = "%", [0x36] = "^", [0x37] = "&", [0x38] = "*", [0x39] = "(",
+    [0xBA] = ":", [0xBB] = "+", [0xBC] = "<", [0xBD] = "_", [0xBE] = ">",
+    [0xBF] = "?", [0xC0] = "~", [0xDB] = "{", [0xDC] = "|", [0xDD] = "}",
+    [0xDE] = "\"",
+}
+
+local INPUT_PLAIN = {
+    [0x20] = " ",
+    [0x30] = "0", [0x31] = "1", [0x32] = "2", [0x33] = "3", [0x34] = "4",
+    [0x35] = "5", [0x36] = "6", [0x37] = "7", [0x38] = "8", [0x39] = "9",
+    [0xBA] = ";", [0xBB] = "=", [0xBC] = ",", [0xBD] = "-", [0xBE] = ".",
+    [0xBF] = "/", [0xC0] = "`", [0xDB] = "[", [0xDC] = "\\", [0xDD] = "]",
+    [0xDE] = "'",
+}
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function vk_to_char(vk)
+    local shift = input.key_down(0x10)
+    if vk >= 0x41 and vk <= 0x5A then
+        local ch = string.char(vk)
+        return shift and ch or string.lower(ch)
+    end
+    if shift then
+        return INPUT_SHIFT[vk] or INPUT_PLAIN[vk]
+    end
+    return INPUT_PLAIN[vk]
+end
+
+local function input_key_repeat(vk)
+    if input.key_pressed(vk) then
+        M._input_repeat_vk = vk
+        M._input_repeat_at = tick_ms() + 400
+        return true
+    end
+    if M._input_repeat_vk ~= vk or not input.key_down(vk) then
+        return false
+    end
+    local now = tick_ms()
+    if now >= M._input_repeat_at then
+        M._input_repeat_at = now + 35
+        return true
+    end
+    return false
+end
+
+local function focus_input(id)
+    M.active_input = id
+    M.open_combo = nil
+    M.open_multi = nil
+    M.open_color = nil
+    M.open_bind_mode = nil
+    M.listening_key = nil
+    M._input_repeat_vk = nil
+end
+
+function M.tick_text_input()
+    if not M.active_input or M.listening_key then return end
+    if input.key_down(0x11) or input.key_down(0x12) then return end
+
+    local id = M.active_input
+    local val = tostring(state.get(id, ""))
+
+    if input.key_pressed(0x1B) or input.key_pressed(0x0D) then
+        M.active_input = nil
+        M._input_repeat_vk = nil
+        return
+    end
+
+    if input_key_repeat(0x08) then
+        if #val > 0 then
+            state.set(id, val:sub(1, -2))
+        end
+        return
+    end
+
+    if input_key_repeat(0x2E) then
+        if #val > 0 then
+            state.set(id, val:sub(1, -2))
+        end
+        return
+    end
+
+    for i = 1, #INPUT_VKS do
+        local vk = INPUT_VKS[i]
+        if input.key_pressed(vk) then
+            local ch = vk_to_char(vk)
+            if ch then
+                state.set(id, val .. ch)
+            end
+            M._input_repeat_vk = nil
+            return
+        end
+    end
+end
+
+function M.checkbox(x, y, w, id, label, opts)
+    opts = opts or {}
+    if id and not state.is_visible(id) then
+        return 0
+    end
+    state.define(id, opts.default == true)
+    if opts.color then
+        state.define_color(id, opts.color)
+    end
+    local on = state.get(id, false)
+    local h = theme.ROW_H
+    if not in_clip(y, h) then return h end
+
+    local hovered = input.hover(x, y, w, h)
+    local active = on == true
+    local hover_fill = anim.transition("check-hover:" .. tostring(id), hovered, 16)
+    if hover_fill > 0.01 then
+        M.rect(x, y + 1, w, h - 2, theme.alpha(theme.HOVER, hover_fill), true, theme.CORNER_SMALL)
+    end
+
+    local bx = x + 4
+    local by = y + (h - theme.CHECK_SIZE) * 0.5
+    M.rect(bx, by, theme.CHECK_SIZE, theme.CHECK_SIZE, theme.CHECK_OFF, true, theme.CORNER_SMALL)
+    M.rect(bx, by, theme.CHECK_SIZE, theme.CHECK_SIZE,
+        active and theme.FOCUS or theme.BORDER_SOFT, false, theme.CORNER_SMALL)
+    if on then
+        M.rect(bx + 2, by + 2, theme.CHECK_SIZE - 4, theme.CHECK_SIZE - 4, anim.checkbox_fill(), true, 2)
+    end
+
+    M.text(bx + theme.CHECK_SIZE + 8, y + 4, label, on and theme.TEXT_ACTIVE or theme.TEXT, theme.FONT)
+
+    local has_color = opts.color or state.colors[id]
+    local swatch_clicked = false
+    if has_color then
+        local col = state.get_color(id, opts.color or { 1, 1, 1, 1 })
+        local cx = x + w - 18
+        M.rect(cx, by, 12, 12, col, true, 2)
+        M.rect(cx, by, 12, 12, theme.BORDER, false, 2)
+        if ui_clicked(cx - 2, by - 2, 16, 16) then
+            swatch_clicked = true
+            mark_interacted()
+            local hh = rgb_to_hsv(col[1] or 1, col[2] or 1, col[3] or 1)
+            M._hue_cache[id] = hh
+            open_color_popup(id, x, y, w)
+        elseif M.open_color == id then
+            -- Keep anchor updated while open so overlay tracks scroll
+            M._color_anchor = { id = id, x = x, y = y, w = w }
+        end
+    end
+
+    if not swatch_clicked and interactive(x, y, w, h) and ui_clicked(x, y, w - (has_color and 22 or 0), h) then
+        mark_interacted()
+        state.toggle(id)
+        pcall(function()
+            April.require("core.menu_util").sync_master(id)
+        end)
+    end
+    return h
+end
+
+function M.slider(x, y, w, id, label, minv, maxv, default, opts)
+    opts = opts or {}
+    if id and not state.is_visible(id) then return 0 end
+    local is_float = opts.float == true
+    state.define(id, default)
+    local val = tonumber(state.get(id, default)) or default
+    local h = theme.SLIDER_ROW_H
+    if not in_clip(y, h) then return h end
+
+    local hovered = input.hover(x, y, w, h)
+    local hover_fill = anim.transition("slider-hover:" .. tostring(id), hovered, 16)
+    if hover_fill > 0.01 then
+        M.rect(x, y + 1, w, h - 2, theme.alpha(theme.HOVER, hover_fill), true, theme.CORNER_SMALL)
+    end
+
+    local fmt = opts.fmt or (is_float and "%.2f" or "%d")
+    local shown = string.format(fmt, val)
+    M.text(x + 4, y + 3, label, theme.TEXT, theme.FONT)
+    local vw = text_w(shown, theme.FONT_SMALL)
+    M.text(x + w - vw - 6, y + 3, shown, theme.TEXT_DIM, theme.FONT_SMALL)
+
+    local sx = x + 4
+    local sy = y + theme.LABEL_H + theme.LABEL_GAP + 4
+    local sw = w - 8
+    M.rect(sx, sy, sw, theme.SLIDER_H, theme.SLIDER_BG, true, theme.SLIDER_H * 0.5)
+    local t = 0
+    if maxv > minv then
+        t = clamp((val - minv) / (maxv - minv), 0, 1)
+    end
+    if t > 0 then
+        anim.draw_slider_fill(sx, sy, math.max(2, sw * t), theme.SLIDER_H)
+    end
+    M.rect(sx, sy, sw, theme.SLIDER_H, theme.BORDER_SOFT, false, theme.SLIDER_H * 0.5)
+    local thumb_x = sx + sw * t
+    M.rect(thumb_x - 3, sy - 2, 6, theme.SLIDER_H + 4,
+        M.active_slider == id and theme.TEXT_ACTIVE or anim.checkbox_fill(), true, 3)
+
+    local hot = input.hover(sx, sy - 4, sw, theme.SLIDER_H + 8)
+    if interactive(x, y, w, h) and ((input.lmb_click and hot) or (input.lmb and M.active_slider == id)) then
+        M.active_slider = id
+        mark_interacted()
+        local nt = clamp((input.mx - sx) / sw, 0, 1)
+        local nv = minv + (maxv - minv) * nt
+        if not is_float then nv = math.floor(nv + 0.5) end
+        state.set(id, nv)
+    elseif M.active_slider == id and not input.lmb then
+        M.active_slider = nil
+    end
+    return h
+end
+
+function M.combo(x, y, w, id, label, options, default_idx)
+    if id and not state.is_visible(id) then return 0 end
+    state.define(id, default_idx or 0)
+    local idx = tonumber(state.get(id, default_idx or 0)) or 0
+    local label_y, ctrl_y, ctrl_h, h = stacked_metrics(y)
+    local open = M.open_combo == id
+    if not in_clip(y, h) and not open then return h end
+
+    M.text(x + 4, label_y, label, theme.TEXT, theme.FONT)
+    local bx, by, bw, bh = x + 4, ctrl_y, w - 8, ctrl_h
+    local hovered = input.hover(bx, by, bw, bh)
+    local fill = anim.interactive_fill("combo:" .. tostring(id), theme.BUTTON, hovered, open)
+    M.rect(bx, by, bw, bh, fill, true, theme.CORNER_SMALL)
+    M.rect(bx, by, bw, bh, open and theme.FOCUS or theme.BORDER_SOFT, false, theme.CORNER_SMALL)
+    local cur = options[idx + 1] or options[1] or "-"
+    M.text(bx + 6, by + math.floor((bh - 12) * 0.5), tostring(cur), theme.TEXT_ACTIVE, theme.FONT_SMALL)
+    M.text(bx + bw - 13, by + math.floor((bh - 12) * 0.5), open and "^" or "v", open and theme.TEXT_ACTIVE or theme.TEXT_DIM, theme.FONT_SMALL)
+
+    -- Header toggles open/closed (do not require clip hover — fixes "can't close")
+    if ui_clicked(bx, by, bw, bh) then
+        mark_interacted()
+        if open then
+            M.open_combo = nil
+        else
+            M.open_combo = id
+            M.open_multi = nil
+            M.open_color = nil
+            M.open_bind_mode = nil
+            M._list_scroll[id] = 0
+        end
+        open = M.open_combo == id
+    end
+
+    if open then
+        local n = #options
+        local off, max_off, vis = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
+        local list_h = vis * 18
+        local hot = input.hover(bx, by, bw, bh + list_h)
+        apply_list_wheel(id, n, M.LIST_MAX_VISIBLE, hot)
+        -- Drag-scroll the list when wheel is unavailable
+        if hot and input.lmb and max_off > 0 and not input.clicked(bx, by, bw, bh) then
+            if not M._list_drag or M._list_drag.id ~= id then
+                if input.lmb_click then
+                    M._list_drag = { id = id, last_y = input.my, off = off }
+                    mark_interacted()
+                end
+            end
+        end
+        if M._list_drag and M._list_drag.id == id then
+            if input.lmb then
+                local dy = input.my - M._list_drag.last_y
+                if math.abs(dy) >= 14 then
+                    local step = (dy > 0) and 1 or -1
+                    off = clamp((M._list_scroll[id] or 0) + step, 0, max_off)
+                    M._list_scroll[id] = off
+                    M._list_drag.last_y = input.my
+                end
+                mark_interacted()
+            else
+                M._list_drag = nil
+            end
+        end
+        off = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
+
+        M.rect(bx + 2, by + bh + 2, bw, list_h, theme.SHADOW, true, theme.CORNER_SMALL)
+        M.rect(bx, by + bh, bw, list_h, theme.OVERLAY, true, theme.CORNER_SMALL)
+        M.rect(bx, by + bh, bw, list_h, theme.BORDER_HOT, false, theme.CORNER_SMALL)
+        for row = 0, vis - 1 do
+            local i = off + row + 1
+            local opt = options[i]
+            if not opt then break end
+            local iy = by + bh + row * 18
+            if input.hover(bx, iy, bw, 18) then
+                M.rect(bx + 2, iy + 1, bw - 4, 16, theme.HOVER, true, theme.CORNER_SMALL)
+            end
+            if i - 1 == idx then
+                M.rect(bx + 3, iy + 4, 2, 10, anim.checkbox_fill(), true, 1)
+            end
+            M.text(bx + 10, iy + 2, tostring(opt), (i - 1 == idx) and theme.TEXT_ACTIVE or theme.TEXT, theme.FONT_SMALL)
+            if ui_clicked(bx, iy, bw, 18) then
+                mark_interacted()
+                state.set(id, i - 1)
+                M.open_combo = nil
+            end
+        end
+        if max_off > 0 then
+            local thumb_h = math.max(10, list_h * (vis / n))
+            local ty = by + bh + (list_h - thumb_h) * (off / math.max(1, max_off))
+            M.rect(bx + bw - 4, by + bh, 3, list_h, theme.SLIDER_BG, true)
+            anim.draw_scroll_thumb(bx + bw - 4, ty, 3, thumb_h)
+        end
+        if hot and input.lmb_click and not M.block_under then
+            mark_interacted()
+        end
+        return h + list_h
+    end
+    return h
+end
+
+function M.multi(x, y, w, id, label, options, defaults)
+    if id and not state.is_visible(id) then return 0 end
+    defaults = defaults or {}
+    local def = {}
+    for i = 1, #options do
+        def[i] = defaults[i] == true
+    end
+    state.define(id, def)
+    local vals = state.get(id, def)
+    if type(vals) ~= "table" then
+        vals = def
+        state.set(id, vals)
+    end
+
+    local h = theme.STACKED_ROW_H
+    local open = M.open_multi == id
+    if not in_clip(y, h) and not open then return h end
+
+    local label_y, ctrl_y, ctrl_h = stacked_metrics(y)
+    M.text(x + 4, label_y, label, theme.TEXT, theme.FONT)
+    local bx, by, bw, bh = x + 4, ctrl_y, w - 8, ctrl_h
+    local hovered = input.hover(bx, by, bw, bh)
+    local fill = anim.interactive_fill("multi:" .. tostring(id), theme.BUTTON, hovered, open)
+    M.rect(bx, by, bw, bh, fill, true, theme.CORNER_SMALL)
+    M.rect(bx, by, bw, bh, open and theme.FOCUS or theme.BORDER_SOFT, false, theme.CORNER_SMALL)
+
+    local parts = {}
+    for i, opt in ipairs(options) do
+        if vals[i] then parts[#parts + 1] = opt end
+    end
+    local summary = (#parts > 0) and table.concat(parts, ", ") or "None"
+    if #summary > 28 then summary = summary:sub(1, 26) .. ".." end
+    M.text(bx + 6, by + math.floor((bh - 12) * 0.5), summary, theme.TEXT_ACTIVE, theme.FONT_SMALL)
+
+    if ui_clicked(bx, by, bw, bh) then
+        mark_interacted()
+        if open then
+            M.open_multi = nil
+        else
+            M.open_multi = id
+            M.open_combo = nil
+            M.open_color = nil
+            M.open_bind_mode = nil
+            M._list_scroll[id] = 0
+        end
+        open = M.open_multi == id
+    end
+
+    if open then
+        local n = #options
+        local off, max_off, vis = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
+        local list_h = vis * 18
+        local hot = input.hover(bx, by, bw, bh + list_h)
+        apply_list_wheel(id, n, M.LIST_MAX_VISIBLE, hot)
+        if hot and input.lmb and max_off > 0 then
+            if M._list_drag and M._list_drag.id == id and input.lmb then
+                local dy = input.my - M._list_drag.last_y
+                if math.abs(dy) >= 14 then
+                    local step = (dy > 0) and 1 or -1
+                    M._list_scroll[id] = clamp((M._list_scroll[id] or 0) + step, 0, max_off)
+                    M._list_drag.last_y = input.my
+                end
+                mark_interacted()
+            elseif input.lmb_click then
+                M._list_drag = { id = id, last_y = input.my }
+                mark_interacted()
+            end
+        elseif M._list_drag and M._list_drag.id == id and not input.lmb then
+            M._list_drag = nil
+        end
+        off = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
+
+        M.rect(bx + 2, by + bh + 2, bw, list_h, theme.SHADOW, true, theme.CORNER_SMALL)
+        M.rect(bx, by + bh, bw, list_h, theme.OVERLAY, true, theme.CORNER_SMALL)
+        M.rect(bx, by + bh, bw, list_h, theme.BORDER_HOT, false, theme.CORNER_SMALL)
+        for row = 0, vis - 1 do
+            local i = off + row + 1
+            local opt = options[i]
+            if not opt then break end
+            local iy = by + bh + row * 18
+            local on = vals[i] == true
+            if input.hover(bx, iy, bw, 18) then
+                M.rect(bx + 2, iy + 1, bw - 4, 16, theme.HOVER, true, theme.CORNER_SMALL)
+            end
+            M.rect(bx + 5, iy + 3, 12, 12, theme.CHECK_OFF, true, 2)
+            if on then
+                M.rect(bx + 7, iy + 5, 8, 8, anim.checkbox_fill(), true, 2)
+            end
+            M.text(bx + 24, iy + 2, tostring(opt), on and theme.TEXT_ACTIVE or theme.TEXT, theme.FONT_SMALL)
+            if ui_clicked(bx, iy, bw, 18) then
+                mark_interacted()
+                vals[i] = not on
+                state.set(id, vals)
+            end
+        end
+        if max_off > 0 then
+            local thumb_h = math.max(10, list_h * (vis / n))
+            local ty = by + bh + (list_h - thumb_h) * (off / math.max(1, max_off))
+            M.rect(bx + bw - 4, by + bh, 3, list_h, theme.SLIDER_BG, true)
+            anim.draw_scroll_thumb(bx + bw - 4, ty, 3, thumb_h)
+        end
+        if hot and input.lmb_click and not M.block_under then
+            mark_interacted()
+        end
+        return h + list_h
+    end
+    return h
+end
+
+function M.button(x, y, w, id, label)
+    if id and not state.is_visible(id) then return 0 end
+    local h = 24
+    if not in_clip(y, h) then return h end
+    local hovered = input.hover(x, y, w, h)
+    M.rect(x + 1, y + 2, w, h, theme.SHADOW, true, theme.CORNER_SMALL)
+    M.rect(x, y, w, h, anim.interactive_fill("button:" .. tostring(id), theme.BUTTON, hovered, false), true, theme.CORNER_SMALL)
+    M.rect(x, y, w, h, hovered and theme.BORDER_HOT or theme.BORDER_SOFT, false, theme.CORNER_SMALL)
+    local tw = text_w(label, theme.FONT_SMALL)
+    M.text(x + (w - tw) * 0.5, y + 6, label, theme.TEXT_ACTIVE, theme.FONT_SMALL)
+    if interactive(x, y, w, h) and ui_clicked(x, y, w, h) then
+        mark_interacted()
+        state.fire_button(id)
+    end
+    return h
+end
+
+function M.label(x, y, w, text, dim)
+    local h = theme.ROW_H - 4
+    if not in_clip(y, h) then return h end
+    M.text(x + 4, y + 3, text, dim and theme.TEXT_DIM or theme.TEXT_TITLE, theme.FONT_SMALL)
+    return h
+end
+
+function M.separator(x, y, w)
+    local h = 18
+    if not in_clip(y, h) then return h end
+    M.rect(x + 5, y + 9, w - 10, 1, theme.BORDER_SOFT, true)
+    return h
+end
+
+function M.keybind(x, y, w, id, label, default_on)
+    if id and not state.is_visible(id) then return 0 end
+    state.define(id, default_on == true)
+    local mode_id = id .. "_mode"
+    state.define(mode_id, 2) -- default Toggle (Always=0, Hold=1, Toggle=2)
+
+    local h = theme.ROW_H
+    if not in_clip(y, h) then return h end
+
+    -- checkbox portion (leave room for key chip; mode is RMB popup)
+    local chip_w = 56
+    local cw = w - chip_w - 6
+    local used = M.checkbox(x, y, cw, id, label, { default = default_on })
+
+    -- key chip: LMB bind, RMB mode (Always / Hold / Toggle)
+    local kx = x + w - chip_w
+    local ky = y + 3
+    local listening = M.listening_key == id
+    local vk = state.get_key(id)
+    local klabel = listening and "..." or ("[" .. M.vk_name(vk) .. "]")
+    local mode_open = M.open_bind_mode == id
+    M.rect(kx, ky, chip_w, 16, (listening or mode_open) and theme.ACCENT_DIM or theme.BUTTON, true, 8)
+    M.rect(kx, ky, chip_w, 16, (listening or mode_open) and theme.FOCUS or theme.BORDER_SOFT, false, 8)
+    local tw = text_w(klabel, theme.FONT_SMALL)
+    M.text(kx + (chip_w - tw) * 0.5, ky + 1, klabel, theme.TEXT_ACTIVE, theme.FONT_SMALL)
+
+    if ui_rmb_clicked(kx, ky, chip_w, 16) then
+        mark_interacted()
+        M.listening_key = nil
+        open_bind_mode_popup(id, kx, ky, chip_w)
+    elseif ui_clicked(kx, ky, chip_w, 16) then
+        mark_interacted()
+        M.open_bind_mode = nil
+        M._bind_mode_hit = nil
+        M.listening_key = listening and nil or id
+    elseif mode_open then
+        M._bind_mode_anchor = { id = id, x = kx, y = ky, w = chip_w }
+    end
+
+    return used
+end
+
+function M.aim_key_row(x, y, w, key_id, mode_id, label)
+    if key_id and not state.is_visible(key_id) then return 0 end
+    mode_id = mode_id or (key_id .. "_mode")
+    state.define(mode_id, 1)
+
+    local h = theme.ROW_H
+    if not in_clip(y, h) then return h end
+
+    local chip_w = 56
+    M.text(x + 4, y + 3, label, theme.TEXT, theme.FONT)
+
+    local kx = x + w - chip_w
+    local ky = y + 3
+    local listening = M.listening_key == key_id
+    local vk = state.get_key(key_id)
+    local klabel = listening and "..." or ("[" .. M.vk_name(vk) .. "]")
+    local mode_open = M.open_bind_mode == key_id
+    M.rect(kx, ky, chip_w, 16, (listening or mode_open) and theme.ACCENT_DIM or theme.BUTTON, true, 8)
+    M.rect(kx, ky, chip_w, 16, (listening or mode_open) and theme.FOCUS or theme.BORDER_SOFT, false, 8)
+    local tw = text_w(klabel, theme.FONT_SMALL)
+    M.text(kx + (chip_w - tw) * 0.5, ky + 1, klabel, theme.TEXT_ACTIVE, theme.FONT_SMALL)
+
+    if ui_rmb_clicked(kx, ky, chip_w, 16) then
+        mark_interacted()
+        M.listening_key = nil
+        open_bind_mode_popup(key_id, kx, ky, chip_w)
+    elseif ui_clicked(kx, ky, chip_w, 16) then
+        mark_interacted()
+        M.open_bind_mode = nil
+        M._bind_mode_hit = nil
+        M.listening_key = listening and nil or key_id
+    elseif mode_open then
+        M._bind_mode_anchor = { id = key_id, x = kx, y = ky, w = chip_w }
+    end
+
+    return h
+end
+
+function M.color_row(x, y, w, id, label, default_col)
+    if id and not state.is_visible(id) then return 0 end
+    state.define_color(id, default_col or { 1, 1, 1, 1 })
+    local col = state.get_color(id, default_col)
+    local h = theme.ROW_H
+    if not in_clip(y, h) then return h end
+
+    M.text(x + 4, y + 3, label, theme.TEXT, theme.FONT)
+    local cx = x + w - 18
+    M.rect(cx, y + 4, 12, 12, col, true, 3)
+    M.rect(cx, y + 4, 12, 12, theme.BORDER, false, 3)
+
+    if ui_clicked(cx - 2, y + 2, 16, 16) then
+        mark_interacted()
+        M._hue_cache[id] = select(1, rgb_to_hsv(col[1] or 1, col[2] or 1, col[3] or 1))
+        open_color_popup(id, x, y, w)
+    elseif M.open_color == id then
+        M._color_anchor = { id = id, x = x, y = y, w = w }
+    end
+    return h
+end
+
+function M.draw_color_picker(px, py, pw, ph, id, col)
+    M.rect(px, py, pw, ph, theme.OVERLAY, true, theme.CORNER)
+    M.rect(px, py, pw, ph, theme.BORDER_HOT, false, theme.CORNER)
+
+    local hue = M._hue_cache[id]
+    if not hue then
+        hue = select(1, rgb_to_hsv(col[1] or 1, col[2] or 1, col[3] or 1))
+        M._hue_cache[id] = hue
+    end
+    local _, sat, val = rgb_to_hsv(col[1] or 1, col[2] or 1, col[3] or 1)
+    local alpha = col[4] or 1
+
+    local sq = 96
+    local sx, sy = px + 8, py + 8
+    -- Saturation / value square (sampled grid)
+    local steps = 12
+    local cell = sq / steps
+    for iy = 0, steps - 1 do
+        for ix = 0, steps - 1 do
+            local s = ix / (steps - 1)
+            local v = 1 - iy / (steps - 1)
+            local r, g, b = hsv_to_rgb(hue, s, v)
+            M.rect(sx + ix * cell, sy + iy * cell, cell + 0.5, cell + 0.5, { r, g, b, 1 }, true)
+        end
+    end
+    M.rect(sx, sy, sq, sq, theme.BORDER, false, theme.CORNER_SMALL)
+
+    -- Hue bar
+    local hx, hy, hw, hh = sx + sq + 8, sy, 14, sq
+    for i = 0, 23 do
+        local t = i / 23
+        local r, g, b = hsv_to_rgb(t, 1, 1)
+        M.rect(hx, hy + i * (hh / 24), hw, hh / 24 + 0.5, { r, g, b, 1 }, true)
+    end
+    M.rect(hx, hy, hw, hh, theme.BORDER, false, theme.CORNER_SMALL)
+
+    -- Alpha bar
+    local ax, ay, aw, ah = sx, sy + sq + 8, sq + 22, 10
+    M.rect(ax, ay, aw, ah, { 0.15, 0.15, 0.15, 1 }, true)
+    M.rect(ax, ay, aw * clamp(alpha, 0, 1), ah, { col[1], col[2], col[3], 1 }, true)
+    M.rect(ax, ay, aw, ah, theme.BORDER, false, theme.CORNER_SMALL)
+
+    -- Preview
+    local prx = ax + aw + 6
+    M.rect(prx, ay - 2, 18, 14, { col[1], col[2], col[3], alpha }, true)
+    M.rect(prx, ay - 2, 18, 14, theme.BORDER, false)
+
+    local function apply(s, v, a, new_hue)
+        if new_hue then
+            M._hue_cache[id] = new_hue
+            hue = new_hue
+        end
+        local r, g, b = hsv_to_rgb(hue, s, v)
+        state.set_color(id, { r, g, b, a })
+        if id == "april_ui_accent" then
+            anim.sync_theme()
+        end
+    end
+
+    if input.lmb and input.hover(sx, sy, sq, sq) then
+        M.popup_used_click = true
+        local ns = clamp((input.mx - sx) / sq, 0, 1)
+        local nv = clamp(1 - (input.my - sy) / sq, 0, 1)
+        apply(ns, nv, alpha, nil)
+    elseif input.lmb and input.hover(hx, hy, hw, hh) then
+        M.popup_used_click = true
+        local nh = clamp((input.my - hy) / hh, 0, 1)
+        apply(sat, val, alpha, nh)
+    elseif input.lmb and input.hover(ax, ay, aw, ah) then
+        M.popup_used_click = true
+        local na = clamp((input.mx - ax) / aw, 0, 1)
+        apply(sat, val, na, nil)
+    end
+
+    if input.hover(px, py, pw, ph) and input.lmb_click then
+        M.popup_used_click = true
+    end
+
+    -- Cursor marks
+    local mx = sx + sat * sq
+    local my = sy + (1 - val) * sq
+    M.rect(mx - 2, my - 2, 4, 4, { 1, 1, 1, 1 }, false)
+    M.rect(hx - 1, hy + hue * hh - 1, hw + 2, 3, { 1, 1, 1, 1 }, false)
+end
+
+function M.input_row(x, y, w, id, label, default)
+    if id and not state.is_visible(id) then return 0 end
+    state.define(id, default or "")
+    local val = tostring(state.get(id, default or ""))
+    local label_y, ctrl_y, ctrl_h, h = stacked_metrics(y)
+    if not in_clip(y, h) then return h end
+    M.text(x + 4, label_y, label, theme.TEXT, theme.FONT)
+    local bx, by, bw, bh = x + 4, ctrl_y, w - 8, ctrl_h
+    local focused = M.active_input == id
+    local hot = input.hover(bx, by, bw, bh)
+    if focused then
+        M._active_input_rect = { x = bx, y = by, w = bw, h = bh }
+    end
+    M.rect(bx, by, bw, bh, anim.interactive_fill("input:" .. tostring(id), theme.BUTTON, hot, focused), true, theme.CORNER_SMALL)
+    M.rect(bx, by, bw, bh, focused and theme.FOCUS or (hot and theme.BORDER_HOT or theme.BORDER_SOFT), false, theme.CORNER_SMALL)
+
+    local shown = val
+    local text_x = bx + 6
+    local max_w = bw - 12
+    local text_y = by + math.floor((bh - 12) * 0.5)
+    if shown == "" then
+        M.text(text_x, text_y, "...", theme.TEXT_DIM, theme.FONT_SMALL)
+    else
+        while #shown > 0 and text_w(shown, theme.FONT_SMALL) > max_w do
+            shown = shown:sub(2)
+        end
+        M.text(text_x, text_y, shown, focused and theme.TEXT_ACTIVE or theme.TEXT, theme.FONT_SMALL)
+    end
+
+    if focused then
+        local caret_x = text_x + text_w(shown ~= "" and shown or "", theme.FONT_SMALL)
+        local now = tick_ms()
+        if math.floor(now / 500) % 2 == 0 then
+            M.rect(caret_x, by + math.floor((bh - 10) * 0.5), 1, 10, theme.TEXT_ACTIVE, true)
+        end
+    end
+
+    if interactive(bx, by, bw, bh) and ui_clicked(bx, by, bw, bh) then
+        mark_interacted()
+        focus_input(id)
+    end
+    return h
+end
+
+function M.estimate_height(item)
+    local t = item.type
+    local extra = 0
+    -- Color pickers overlay — they do not expand layout height
+    if item.id and M.open_combo == item.id and item.options then
+        extra = math.min(#item.options, M.LIST_MAX_VISIBLE) * 18
+    elseif item.id and M.open_multi == item.id and item.options then
+        extra = math.min(#item.options, M.LIST_MAX_VISIBLE) * 18
+    end
+    if t == "slider" then
+        return theme.SLIDER_ROW_H + extra
+    elseif t == "combo" or t == "multi" or t == "input" then
+        return theme.STACKED_ROW_H + extra
+    elseif t == "separator" then
+        return 18
+    elseif t == "button" then
+        return 24
+    elseif t == "label" then
+        return theme.ROW_H - 4
+    elseif t == "color" then
+        return theme.ROW_H
+    elseif t == "checkbox" or t == "keybind" or t == "aim_key" then
+        return theme.ROW_H
+    end
+    return theme.ROW_H + extra
+end
+
+function M.draw_item(item, x, y, w)
+    local t = item.type
+    if t == "checkbox" then
+        return M.checkbox(x, y, w, item.id, item.label, item)
+    elseif t == "keybind" then
+        return M.keybind(x, y, w, item.id, item.label, item.default)
+    elseif t == "aim_key" then
+        return M.aim_key_row(x, y, w, item.id, item.mode_id, item.label)
+    elseif t == "slider" then
+        return M.slider(x, y, w, item.id, item.label, item.min, item.max, item.default, item)
+    elseif t == "combo" then
+        return M.combo(x, y, w, item.id, item.label, item.options, item.default)
+    elseif t == "multi" then
+        return M.multi(x, y, w, item.id, item.label, item.options, item.defaults)
+    elseif t == "button" then
+        return M.button(x + 4, y, w - 8, item.id, item.label)
+    elseif t == "label" then
+        return M.label(x, y, w, item.label, item.dim)
+    elseif t == "separator" then
+        return M.separator(x, y, w)
+    elseif t == "color" then
+        return M.color_row(x, y, w, item.id, item.label, item.default)
+    elseif t == "input" then
+        return M.input_row(x, y, w, item.id, item.label, item.default)
+    end
+    return 0
+end
+
+return M
+
+end)()
+
+-- ── ui/catalog.lua ──
+April._mods["ui.catalog"] = (function()
+--[[
+  Layout catalog for the custom Gamesense UI.
+  Values / callbacks come from feature register_menu() via ui.menu_shim.
+  Nested options use `gate` so they only appear under their parent toggle.
+]]
+
+local maps = April.require("game.esp_maps")
+local combat_menu = April.require("ui.combat_labels")
+
+local M = {}
+
+local function cb(id, label, default, color, gate)
+    return { type = "checkbox", id = id, label = label, default = default == true, color = color, gate = gate }
+end
+
+local function kb(id, label, default, gate)
+    return { type = "keybind", id = id, label = label, default = default == true, gate = gate }
+end
+
+local function sl(id, label, minv, maxv, default, float, gate)
+    return {
+        type = "slider",
+        id = id,
+        label = label,
+        min = minv,
+        max = maxv,
+        default = default,
+        float = float == true,
+        fmt = float and "%.2f" or "%d",
+        gate = gate,
+    }
+end
+
+local function combo(id, label, options, default, gate)
+    return { type = "combo", id = id, label = label, options = options, default = default or 0, gate = gate }
+end
+
+local function multi(id, label, options, defaults, gate)
+    return { type = "multi", id = id, label = label, options = options, defaults = defaults, gate = gate }
+end
+
+local function btn(id, label, gate)
+    return { type = "button", id = id, label = label, gate = gate }
+end
+
+local function sep(gate)
+    return { type = "separator", gate = gate }
+end
+
+local function label(text, dim, gate)
+    return { type = "label", label = text, dim = dim, gate = gate }
+end
+
+local function color(id, label_text, default, gate, override_idx)
+    return {
+        type = "color",
+        id = id,
+        label = label_text,
+        default = default,
+        gate = gate,
+        color_override_idx = override_idx,
+    }
+end
+
+local function input(id, label_text, default, gate)
+    return { type = "input", id = id, label = label_text, default = default or "", gate = gate }
+end
+
+local function ak(key_id, label, gate)
+    return { type = "aim_key", id = key_id, mode_id = key_id .. "_mode", label = label, gate = gate }
+end
+
+local function from_toggles(list, gate)
+    local out = {}
+    for _, t in ipairs(list) do
+        out[#out + 1] = cb(t.id, t.label, false, t.color, gate)
+        if t.ring_id then
+            out[#out + 1] = cb(t.ring_id, t.label .. " Range Ring", false, nil, gate)
+        end
+    end
+    return out
+end
+
+local function append(dst, src)
+    for _, v in ipairs(src) do
+        dst[#dst + 1] = v
+    end
+end
+
+M.TABS = {
+    { id = "aim", icon = "aim", title = "Aimbot" },
+    { id = "visuals", icon = "visuals", title = "Visuals" },
+    { id = "world", icon = "world", title = "World" },
+    { id = "guns", icon = "guns", title = "Gun Mods" },
+    { id = "misc", icon = "misc", title = "Misc" },
+    { id = "radar", icon = "radar", title = "Radar" },
+    { id = "config", icon = "config", title = "Config" },
+}
+
+local function build_aim()
+    local regular = {
+        title = "Aimbot",
+        master = "april_aimbot",
+        items = {
+            cb("april_aimbot", "Enable Aimbot", false),
+            ak("april_aim_key", "Aim Key"),
+            sep(),
+            label("Targeting", false),
+            combo("april_aim_target_type", "Target Type", { "Crosshair", "Distance" }, 0),
+            combo("april_aim_bone", "Hitbox", combat_menu.SILENT_BONES, 0),
+            multi("april_aim_targets", "Aim At", { "Players", "NPCs" }, { true, false }),
+            multi("april_aim_filters", "Filters", {
+                "Health Check", "Visible Only", "Team Check",
+                "Skip Safezone", "Whitelist", "Skip Downed",
+            }, { true, false, true, true, false, true }),
+            input("april_aim_whitelist_ids", "Whitelist IDs", ""),
+            btn("april_aim_whitelist_clear", "Clear Whitelist"),
+            sl("april_aim_max_dist", "Max Distance (m)", 50, 2000, 500),
+            sep(),
+            label("Aim", false),
+            multi("april_aim_options", "Options", { "Sticky Target" }, { false }),
+            sl("april_aim_smooth", "Smoothness", 1, 25, 10),
+            sl("april_aim_fov", "FOV Radius (px)", 20, 600, 120),
+            sep(),
+            label("Visuals", false),
+            cb("april_aim_draw_fov", "FOV Circle", false, { 0.2, 1, 0.45, 1 }),
+            combo("april_aim_fov_style", "FOV Style", { "Outline", "Filled Circle" }, 1, "april_aim_draw_fov"),
+            cb("april_aim_target_line", "Target Line", false, { 0.2, 1, 0.45, 1 }),
+        },
+    }
+
+    local silent = {
+        title = "Silent Aim",
+        master = "april_silent_aim",
+        items = {
+            kb("april_silent_aim", "Enable Silent Aim", false),
+            sep(),
+            label("Targeting", false),
+            combo("april_silent_target_type", "Target Type", { "Crosshair", "Distance" }, 0),
+            combo("april_silent_bone", "Hitbox", combat_menu.SILENT_BONES, 0),
+            multi("april_silent_targets", "Aim At", { "Players", "NPCs" }, { true, false }),
+            multi("april_silent_filters", "Filters", {
+                "Health Check", "Visible Only", "Team Check",
+                "Skip Safezone", "Whitelist", "Skip Downed",
+            }, { true, false, true, true, false, true }),
+            input("april_silent_whitelist_ids", "Whitelist IDs", ""),
+            btn("april_silent_whitelist_clear", "Clear Whitelist"),
+            sl("april_silent_max_dist", "Max Distance (m)", 50, 2000, 500),
+            sep(),
+            label("Aim", false),
+            multi("april_silent_options", "Options", { "Sticky Target" }, { false }),
+            sl("april_silent_hit_chance", "Hit Chance %", 1, 100, 100),
+            sl("april_silent_fov", "FOV Radius (px)", 20, 600, 150),
+            cb("april_silent_hitscan", "Hitscan", false),
+            sep(),
+            label("Visuals", false),
+            cb("april_silent_draw_fov", "FOV Circle", false, { 0.55, 0.2, 1, 1 }),
+            combo("april_silent_fov_style", "FOV Style", { "Outline", "Filled Circle" }, 1, "april_silent_draw_fov"),
+            cb("april_silent_target_line", "Snapline", false, { 1, 0.25, 0.25, 1 }),
+        },
+    }
+
+    local bullet = {
+        title = "Bullet",
+        master = "april_silent_aim",
+        items = {
+            label("Bullet TP", false),
+            cb("april_silent_bullet_tp", "Bullet TP", false),
+            combo("april_silent_tp_method", "TP Method", combat_menu.TP_METHODS, 0, "april_silent_bullet_tp"),
+            cb("april_silent_tp_ray_vis", "Visualize Ray Path", false, { 0.95, 0.45, 1, 0.9 }, "april_silent_bullet_tp"),
+            sep("april_silent_bullet_tp"),
+            label("Silent Bullet Manip", false),
+            cb("april_silent_bullet_manip", "Silent Bullet Manip", false),
+            sl("april_silent_manip_dist", "Manip Distance", 0.1, 1, 1, true, "april_silent_bullet_manip"),
+            cb("april_silent_manip_extend", "Extend", false, nil, "april_silent_bullet_manip"),
+            sl("april_silent_manip_extend_dist", "Extra Scan Distance", 1, 7, 7, true, "april_silent_manip_extend"),
+            cb("april_silent_manip_status", "Manip Status Bar", false, nil, "april_silent_bullet_manip"),
+            cb("april_silent_manip_peek_vis", "Manip Peek Visual", false, nil, "april_silent_bullet_manip"),
+        },
+    }
+
+    return { regular, silent, bullet }
+end
+
+local function build_visuals()
+    local left = {
+        title = "Player ESP",
+        master = "april_player_enabled",
+        items = {
+            kb("april_player_enabled", "Player ESP", false),
+            combo("april_player_box_mode", "Player Box", { "None", "2D", "Corner" }, 1),
+            cb("april_player_health", "Player Health Bar", true),
+            cb("april_player_skeleton", "Player Skeleton", false, { 1, 1, 1, 0.92 }),
+            cb("april_player_show_name", "Player Name", true),
+            cb("april_player_clan_tag", "Player Clan Tag", true),
+            cb("april_player_clan_color", "Player Color By Clan", false),
+            cb("april_player_show_distance", "Player Distance", true),
+            cb("april_player_show_weapon", "Player Weapon", false),
+            multi("april_player_esp_filters", "ESP Filters", {
+                "Team Check", "Skip Safezone", "Skip Downed",
+            }, { true, false, false }),
+            multi("april_player_esp_flags", "ESP Flags", {
+                "Downed", "Safezone", "VIP", "Staff", "Reviving",
+            }, { true, true, true, true, true }),
+            sl("april_player_range", "Player Range", 50, 2000, 500),
+        },
+    }
+
+    local right = {
+        title = "Overlays",
+        items = {
+            label("Target Overlay", false),
+            kb("april_target_overlay", "Target Overlay", false),
+            cb("april_target_overlay_fallback_fov", "Crosshair FOV Fallback", false, nil, "april_target_overlay"),
+            sl("april_target_overlay_fov", "Fallback FOV", 40, 400, 150, false, "april_target_overlay"),
+            sl("april_target_overlay_gear_size", "Gear Icon Size", 32, 64, 48, false, "april_target_overlay"),
+            sl("april_target_overlay_top", "Top Offset", 48, 160, 88, false, "april_target_overlay"),
+            sep(),
+            label("Crosshair", false),
+            cb("april_crosshair_enabled", "Custom Crosshair", false),
+            cb("april_crosshair_color", "Crosshair Color", true, { 0, 1, 0, 1 }, "april_crosshair_enabled"),
+            cb("april_crosshair_dot", "Center Dot", false, { 1, 1, 1, 1 }, "april_crosshair_enabled"),
+            cb("april_crosshair_outline", "Crosshair Outline", true, { 0, 0, 0, 1 }, "april_crosshair_enabled"),
+            cb("april_crosshair_rainbow", "Rainbow Crosshair", false, nil, "april_crosshair_enabled"),
+            sl("april_crosshair_rainbow_speed", "Rainbow Speed", 1, 100, 10, false, "april_crosshair_rainbow"),
+            sl("april_crosshair_size", "Crosshair Size", 1, 50, 10, false, "april_crosshair_enabled"),
+            sl("april_crosshair_gap", "Crosshair Gap", 0, 20, 5, false, "april_crosshair_enabled"),
+            sl("april_crosshair_thickness", "Crosshair Thickness", 1, 10, 2, false, "april_crosshair_enabled"),
+        },
+    }
+    return { left, right }
+end
+
+local function build_world()
+    local resources = {
+        title = "Resources",
+        master = "april_world_enabled",
+        items = {
+            kb("april_world_enabled", "Resource ESP", false),
+        },
+    }
+    append(resources.items, from_toggles(maps.WORLD_TOGGLES))
+    append(resources.items, {
+        cb("april_world_boxes", "Resource 3D Boxes", false),
+        cb("april_world_show_name", "Resource Show Name", true),
+        cb("april_world_show_distance", "Resource Show Distance", true),
+        sl("april_world_range", "Resource Range", 50, 2000, 500),
+        multi("april_world_chams", "Resource Chams", (function()
+            local labels = {}
+            for i, t in ipairs(maps.WORLD_TOGGLES) do labels[i] = t.label end
+            return labels
+        end)(), {}),
+        combo("april_world_chams_mode", "Resource Chams Mode", { "Flat", "Fresnel", "Glow" }, 0),
+        color("april_world_chams_color", "Resource Chams Color", { 0.4, 1, 0.4, 1 }),
+    })
+
+    local loot = {
+        title = "Loot",
+        master = "april_loot_enabled",
+        items = {
+            kb("april_loot_enabled", "Loot ESP", false),
+        },
+    }
+    append(loot.items, from_toggles(maps.LOOT_TOGGLES))
+    append(loot.items, {
+        cb("april_loot_boxes", "Loot 3D Boxes", false),
+        cb("april_loot_show_name", "Loot Show Name", true),
+        cb("april_loot_show_distance", "Loot Show Distance", true),
+        sl("april_loot_range", "Loot Range", 50, 2000, 300),
+        multi("april_loot_chams", "Loot Chams", (function()
+            local labels = {}
+            for i, t in ipairs(maps.LOOT_TOGGLES) do labels[i] = t.label end
+            return labels
+        end)(), {}),
+        combo("april_loot_chams_mode", "Loot Chams Mode", { "Flat", "Fresnel", "Glow" }, 0),
+        color("april_loot_chams_color", "Loot Chams Color", { 1, 0.85, 0.35, 1 }),
+    })
+
+    local bases = {
+        title = "Bases",
+        master = "april_base_enabled",
+        items = {
+            kb("april_base_enabled", "Base ESP", false),
+        },
+    }
+    append(bases.items, from_toggles(maps.BASE_TOGGLES))
+    append(bases.items, {
+        cb("april_base_boxes", "Base 3D Boxes", false),
+        cb("april_base_show_name", "Base Show Name", true),
+        cb("april_base_show_distance", "Base Show Distance", false),
+        sl("april_base_range", "Base Range", 50, 500, 150),
+        multi("april_base_chams", "Base Chams", (function()
+            local labels = {}
+            for i, t in ipairs(maps.BASE_TOGGLES) do labels[i] = t.label end
+            return labels
+        end)(), {}),
+        combo("april_base_chams_mode", "Base Chams Mode", { "Flat", "Fresnel", "Glow" }, 0),
+        color("april_base_chams_color", "Base Chams Color", { 0.55, 0.55, 1, 1 }),
+    })
+
+    local npcs = {
+        title = "NPCs",
+        master = "april_npc_enabled",
+        items = {
+            kb("april_npc_enabled", "NPC ESP", false),
+            cb("april_npc_soldiers", "Soldiers", false, { 1, 0.3, 0.3, 1 }),
+            cb("april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, { 1, 0.5, 0.1, 1 }),
+            cb("april_npc_health", "NPC Health Bar", false),
+            cb("april_npc_skeleton", "NPC Skeleton", false, { 1, 1, 1, 0.85 }),
+            cb("april_npc_show_name", "NPC Show Name", true),
+            cb("april_npc_show_distance", "NPC Show Distance", true),
+            cb("april_npc_show_weapon", "NPC Weapon", false),
+            sl("april_npc_range", "NPC Range", 50, 2000, 500),
+        },
+    }
+
+    return { resources, loot, npcs, bases }
+end
+
+local function build_guns()
+    return {
+        {
+            title = "Gun Mods",
+            master = "april_gunmods_enabled",
+            items = {
+                kb("april_gunmods_enabled", "Enable Gun Mods", false),
+                sep(),
+                label("Apply", false),
+                input("april_gm_held_weapon", "Held Weapon", "—"),
+                combo("april_gm_mode", "Apply Mode", { "Live (save optional)", "Global" }, 0),
+                combo("april_gm_weapon_select", "Edit Weapon", { "—", "AK", "M4", "MP5" }, 0),
+                sep(),
+                label("Modifiers", false),
+                cb("april_gm_recoil", "No Recoil", false),
+                sl("april_gm_recoil_pct", "Recoil Reduction %", 0, 100, 100, false, "april_gm_recoil"),
+                cb("april_gm_spread", "No Spread", false),
+                sl("april_gm_spread_pct", "Spread Reduction %", 0, 100, 100, false, "april_gm_spread"),
+                cb("april_gm_sway", "No Sway", false),
+                cb("april_gm_fire_rate", "Fire Rate", false),
+                sl("april_gm_fire_rate_mult", "Fire Rate Multiplier", 1, 3, 1.5, true, "april_gm_fire_rate"),
+                cb("april_gm_speed", "Bullet Speed", false),
+                sl("april_gm_speed_mult", "Speed Mult", 1, 100, 100, false, "april_gm_speed"),
+                cb("april_gm_range", "Gun Range", false),
+                sl("april_gm_range_mult", "Range Mult", 1, 20, 10, false, "april_gm_range"),
+                cb("april_gm_double_tap", "Double Tap", false),
+            },
+        },
+        {
+            title = "Profiles",
+            master = "april_gunmods_enabled",
+            items = {
+                btn("april_gm_save", "Save Profile"),
+                btn("april_gm_clear", "Clear Saved Profile"),
+            },
+        },
+    }
+end
+
+local function build_misc()
+    return {
+        {
+            title = "Movement",
+            items = {
+                kb("april_noclip_enabled", "Fly", false),
+                sl("april_noclip_speed", "Fly Speed", 1, 20, 5, false, "april_noclip_enabled"),
+                kb("april_slowfall_enabled", "Slowfall", false),
+                sl("april_slowfall_speed", "Fall Speed", 1, 50, 5, false, "april_slowfall_enabled"),
+                sep(),
+                kb("april_desync_enabled", "Desync", false),
+                cb("april_desync_visualizer", "Desync Visualize", false, { 0.2, 0.85, 1, 0.9 }, "april_desync_enabled"),
+                sep(),
+                kb("april_fling_enabled", "Fling", false),
+                sl("april_fling_fov", "Fling FOV", 20, 600, 150, false, "april_fling_enabled"),
+                sl("april_fling_duration", "Fling Duration", 2, 10, 2, false, "april_fling_enabled"),
+            },
+        },
+        {
+            title = "Utility",
+            items = {
+                kb("april_farm_helper", "Farm Helper", false),
+                cb("april_farm_silent", "Silent Farm", false, nil, "april_farm_helper"),
+                sl("april_farm_radius", "Farm Range (studs)", 1, 15, 5, false, "april_farm_helper"),
+                sl("april_farm_smooth", "Camera Smoothness", 1, 30, 8, false, "april_farm_helper"),
+                sep(),
+                cb("april_anti_afk", "Anti AFK", false),
+                cb("april_mod_checker_enabled", "Mod Checker", false),
+                sl("april_mod_checker_interval", "Scan Interval (ms)", 1000, 10000, 2500, false, "april_mod_checker_enabled"),
+                sep(),
+                cb("april_keybinds_enabled", "Keybind Viewer", false),
+                cb("april_keybinds_active_only", "Only Show Active", false, nil, "april_keybinds_enabled"),
+                cb("april_keybinds_show_unbound", "Show Unbound", true, nil, "april_keybinds_enabled"),
+                cb("april_keybinds_show_mode", "Show Bind Mode", true, nil, "april_keybinds_enabled"),
+            },
+        },
+    }
+end
+
+local function build_radar()
+    return {
+        {
+            title = "Tactical Map",
+            master = "april_map_enabled",
+            items = {
+                kb("april_map_enabled", "Tactical Map", false),
+                cb("april_map_show_players", "Radar Show Players", true),
+                cb("april_map_show_npcs", "Radar Show NPCs", false),
+                cb("april_map_show_loot", "Radar Show Loot", true),
+                cb("april_map_show_world", "Radar Show Resources", true),
+                cb("april_map_show_base", "Radar Show Base Parts", false),
+                cb("april_map_show_waypoints", "Radar Show Waypoints", true),
+                cb("april_map_labels", "Radar Show Labels", false),
+                color("april_map_bg", "Radar Background", { 0.05, 0.05, 0.07, 0.85 }),
+                color("april_map_grid", "Radar Grid", { 0.25, 0.25, 0.3, 0.5 }),
+                color("april_map_player_col", "Radar Players Color", { 1, 0.25, 0.25, 1 }),
+                color("april_map_npc_col", "Radar NPCs Color", { 1, 0.55, 0.15, 1 }),
+                color("april_map_loot_col", "Radar Loot Color", { 1, 0.85, 0.35, 1 }),
+                color("april_map_world_col", "Radar Resources Color", { 0.35, 0.9, 0.35, 1 }),
+                color("april_map_base_col", "Radar Base Color", { 0.55, 0.55, 1, 1 }),
+                color("april_map_wp_col", "Radar Waypoints Color", { 0.3, 0.9, 1, 1 }),
+                color("april_map_local", "Radar You Color", { 0.3, 0.9, 1, 1 }),
+                sl("april_map_zoom", "Radar Zoom Level", 0.05, 5, 1, true),
+                sl("april_map_size", "Radar Size", 140, 420, 240),
+                sl("april_map_icon_scale", "Radar Blip Size", 2, 6, 3),
+            },
+        },
+        {
+            title = "Waypoints",
+            master = "april_waypoints_enabled",
+            items = {
+                kb("april_waypoints_enabled", "Waypoints", false),
+                cb("april_wp_dist", "Waypoint Show Distance", false),
+                cb("april_wp_beacon", "Beacon Pillar", false),
+                sl("april_wp_beacon_h", "Beacon Height", 20, 200, 90, false, "april_wp_beacon"),
+                cb("april_wp_draw", "Draw Markers", false, { 0.2, 1, 0.8, 1 }),
+                sl("april_wp_slot", "Waypoint Active Slot", 1, 5, 1),
+                btn("april_wp_set", "Set Active Waypoint"),
+                btn("april_wp_clear", "Clear Active Waypoint"),
+                btn("april_wp_clear_all", "Clear All Waypoints"),
+            },
+        },
+    }
+end
+
+local function build_config()
+    local modes = { "Static", "Rainbow", "Pulse", "Wave", "Flow" }
+    local elem_modes = { "Default", "Static", "Rainbow", "Pulse", "Wave", "Flow" }
+    local COL = "april_ui_custom_colors"
+    local ANM = "april_ui_custom_anim"
+    local ELS = "april_ui_per_element"
+
+    local menu = {
+        title = "Menu",
+        items = {
+            cb("april_ui_custom_colors", "Color Options", false),
+            cb("april_ui_custom_anim", "Animation Options", false),
+            cb("april_ui_show_cursor_dot", "Show Cursor Dot", true),
+            sep(),
+            label("Colors", false, COL),
+            color("april_ui_accent", "Accent", { 0.78, 0.20, 0.92, 1 }, COL),
+            sl("april_ui_bg_dim", "Background Dim", 0, 40, 0, false, COL),
+            cb("april_ui_menu_fade", "Menu Fade Pulse", false, nil, COL),
+            multi("april_ui_color_overrides", "Override Colors For", {
+                "Title Bar", "Section Tops", "Sliders", "Scrollbars", "Sidebar", "Checkboxes", "Overlay Panels",
+            }, {}, COL),
+            color("april_ui_col_title", "Title Bar Color", { 0.78, 0.20, 0.92, 1 }, COL, 1),
+            color("april_ui_col_section", "Section Top Color", { 0.78, 0.20, 0.92, 1 }, COL, 2),
+            color("april_ui_col_slider", "Slider Color", { 0.78, 0.20, 0.92, 1 }, COL, 3),
+            color("april_ui_col_scroll", "Scrollbar Color", { 0.78, 0.20, 0.92, 1 }, COL, 4),
+            color("april_ui_col_sidebar", "Sidebar Color", { 0.78, 0.20, 0.92, 1 }, COL, 5),
+            color("april_ui_col_checkbox", "Checkbox Color", { 0.78, 0.20, 0.92, 1 }, COL, 6),
+            color("april_ui_col_overlay", "Overlay Panel Color", { 0.78, 0.20, 0.92, 1 }, COL, 7),
+            sep(COL),
+            label("Animation", false, ANM),
+            combo("april_ui_accent_anim", "Style", modes, 1, ANM),
+            sl("april_ui_anim_speed", "Speed", 1, 100, 40, false, ANM),
+            multi("april_ui_anim_targets", "Animate", {
+                "Title Bar", "Section Tops", "Sliders", "Scrollbars", "Sidebar", "Checkboxes", "Hover", "Overlay Panels",
+            }, { true, true, true, true, true, true, true, true }, ANM),
+            cb("april_ui_per_element", "Individual Styles", false, nil, ANM),
+            sep(ANM),
+            { type = "combo", id = "april_ui_style_title", label = "Title Bar", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+            { type = "combo", id = "april_ui_style_section", label = "Section Tops", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+            { type = "combo", id = "april_ui_style_slider", label = "Sliders", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+            { type = "combo", id = "april_ui_style_scroll", label = "Scrollbars", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+            { type = "combo", id = "april_ui_style_sidebar", label = "Sidebar", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+            { type = "combo", id = "april_ui_style_checkbox", label = "Checkboxes", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+            { type = "combo", id = "april_ui_style_overlay", label = "Overlay Panels", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+        },
+    }
+
+    local config_group = {
+        title = "Config",
+        items = {
+            label("Profiles", false),
+            input("april_cfg_profile_name", "Profile Name", "Default"),
+            sl("april_cfg_slot", "Active Slot (1-5)", 1, 5, 1),
+            btn("april_cfg_save", "Save to Active Slot"),
+            btn("april_cfg_load", "Load Active Slot"),
+            btn("april_cfg_delete", "Delete Active Slot"),
+            sep(),
+            label("Autoload", false),
+            cb("april_cfg_autoload", "Autoload on Start", false),
+            input("april_cfg_autoload_profile", "Autoload Profile Name", "", "april_cfg_autoload"),
+            sl("april_cfg_autoload_slot", "Autoload Slot", 1, 5, 1, false, "april_cfg_autoload"),
+            sep(),
+            label("Other", false),
+            sl("april_esp_text_size", "ESP Text Size", 8, 24, 13),
+            btn("april_reload_modules", "Reload Game Modules"),
+        },
+    }
+
+    return { menu, config_group }
+end
+
+function M.groups_for(tab_id)
+    if tab_id == "aim" then return build_aim() end
+    if tab_id == "visuals" then return build_visuals() end
+    if tab_id == "world" then return build_world() end
+    if tab_id == "guns" then return build_guns() end
+    if tab_id == "misc" then return build_misc() end
+    if tab_id == "radar" then return build_radar() end
+    if tab_id == "config" then return build_config() end
+    return {}
+end
+
+return M
+
+end)()
+
+-- ── ui/custom_menu.lua ──
+April._mods["ui.custom_menu"] = (function()
+--[[
+  Gamesense-style custom menu for April.
+  INSERT toggles. Scroll by dragging the scrollbar or click-dragging a column.
+]]
+
+local theme = April.require("ui.gs_theme")
+local gin = April.require("ui.gs_input")
+local widgets = April.require("ui.gs_widgets")
+local anim = April.require("ui.gs_anim")
+local icons = April.require("ui.gs_icons")
+local catalog = April.require("ui.catalog")
+local state = April.require("ui.gs_state")
+
+local M = {}
+
+local TOGGLE_VK = 0x2D
+local open = true
+local tab_index = 1
+local win_x, win_y = 80, 80
+local scroll = { left = 0, right = 0 }
+local scroll_drag = nil
+local panel_drag = nil -- { key, last_y }
+
+local function screen_size()
+    if draw and draw.get_screen_size then
+        return draw.get_screen_size()
+    end
+    if utility and utility.get_screen_size then
+        return utility.get_screen_size()
+    end
+    return 1920, 1080
+end
+
+local function clamp_window()
+    local sw, sh = screen_size()
+    win_x = math.max(0, math.min(win_x, sw - theme.WINDOW_W))
+    win_y = math.max(0, math.min(win_y, sh - 40))
+end
+
+local function master_on(id)
+    if not id then return true end
+    return state.get(id, false) == true
+end
+
+local function color_override_on(idx)
+    if not idx then return true end
+    local t = state.get("april_ui_color_overrides")
+    if type(t) ~= "table" then return false end
+    local v = t[idx]
+    if v == nil and idx >= 1 then
+        v = t[idx - 1]
+    end
+    return v == true or v == 1
+end
+
+local function item_visible(item, group)
+    if group and group.master then
+        if item.id == group.master then
+            return true
+        end
+        if not master_on(group.master) then
+            return false
+        end
+    end
+    if item.gate and not master_on(item.gate) then
+        return false
+    end
+    if item.gate2 and not master_on(item.gate2) then
+        return false
+    end
+    if item.color_override_idx and not color_override_on(item.color_override_idx) then
+        return false
+    end
+    if item.id and not state.is_visible(item.id) then
+        return false
+    end
+    return true
+end
+
+local function content_height(items, group)
+    local h = 0
+    local count = 0
+    for _, item in ipairs(items) do
+        if item_visible(item, group) then
+            h = h + widgets.estimate_height(item)
+            count = count + 1
+        end
+    end
+    if count > 1 then
+        h = h + (count - 1) * theme.ITEM_GAP
+    end
+    return h + 20
+end
+
+local function group_visible(group)
+    local items = group.items or {}
+    for _, item in ipairs(items) do
+        if item_visible(item, group) then
+            return true
+        end
+    end
+    return false
+end
+
+local function draw_sidebar(x, y, h)
+    widgets.rect(x, y, theme.SIDEBAR_W, h, theme.SIDEBAR, true)
+    widgets.rect(x + theme.SIDEBAR_W - 1, y, 1, h, theme.BORDER_SOFT, true)
+    widgets.rect(x + theme.SIDEBAR_W - 2, y + 8, 1, h - 16, { 0, 0, 0, 0.26 }, true)
+
+    local tabs = catalog.TABS
+    local count = #tabs
+    local total_h = count * theme.TAB_H
+    local start_y = y + math.max(0, (h - total_h) * 0.5)
+
+    for i, tab in ipairs(tabs) do
+        local ty = start_y + (i - 1) * theme.TAB_H
+        local active = i == tab_index
+        local hot = gin.hover(x + 4, ty + 2, theme.SIDEBAR_W - 9, theme.TAB_H - 8)
+        local emphasis = anim.transition("tab:" .. tab.id, active or hot, 14)
+        if active then
+            anim.draw_tab_indicator(x + 1, ty + 8, 2, theme.TAB_H - 16)
+        elseif emphasis > 0.01 then
+            -- Hover is intentionally limited to a small icon halo; active tabs
+            -- use only the icon and left indicator, not a filled selection tile.
+            widgets.rect(x + theme.SIDEBAR_W * 0.5 - 14, ty + theme.TAB_H * 0.5 - 14, 28, 28,
+                theme.alpha(theme.HOVER, emphasis * 0.45), true, theme.CORNER)
+        end
+
+        local col = active and anim.tab_icon_color() or anim.mix(theme.TEXT_DIM, theme.TEXT, emphasis * 0.45)
+        local cx = x + theme.SIDEBAR_W * 0.5
+        local cy = ty + theme.TAB_H * 0.5
+        icons.draw(tab.icon or tab.id, cx, cy, col)
+
+        if gin.clicked(x, ty, theme.SIDEBAR_W, theme.TAB_H) then
+            tab_index = i
+            scroll.left = 0
+            scroll.right = 0
+            widgets.open_combo = nil
+            widgets.open_multi = nil
+        end
+    end
+end
+
+local function clamp_scroll(key, content_h, view_h)
+    local max_scroll = math.max(0, content_h - view_h)
+    if scroll[key] < 0 then scroll[key] = 0 end
+    if scroll[key] > max_scroll then scroll[key] = max_scroll end
+    return max_scroll
+end
+
+local function draw_scrollbar(x, y, h, content_h, scroll_key)
+    local max_scroll = clamp_scroll(scroll_key, content_h, h)
+    if max_scroll <= 0 then
+        scroll[scroll_key] = 0
+        return
+    end
+
+    local thumb_h = math.max(34, h * (h / content_h))
+    local t = scroll[scroll_key] / max_scroll
+    local thumb_y = y + t * (h - thumb_h)
+
+    widgets.rect(x, y, 4, h, { 0, 0, 0, 0.26 }, true)
+    widgets.rect(x + 1, y + 1, 2, h - 2, theme.SLIDER_BG, true)
+    anim.draw_scroll_thumb(x, thumb_y, 4, thumb_h)
+
+    if gin.lmb_click and gin.hover(x - 4, y, 14, h) then
+        scroll_drag = scroll_key
+    end
+    if scroll_drag == scroll_key and gin.lmb then
+        local rel = (gin.my - y - thumb_h * 0.5) / math.max(1, h - thumb_h)
+        rel = math.max(0, math.min(1, rel))
+        scroll[scroll_key] = rel * max_scroll
+    elseif scroll_drag == scroll_key and not gin.lmb then
+        scroll_drag = nil
+    end
+end
+
+local function handle_column_scroll(x, y, w, h, scroll_key, content_h)
+    local max_scroll = clamp_scroll(scroll_key, content_h, h)
+    if max_scroll <= 0 then return end
+
+    local hot = gin.hover(x, y, w + 14, h)
+    if not hot then
+        if panel_drag and panel_drag.key == scroll_key then
+            if not gin.lmb and not gin.mmb and not gin.rmb then
+                panel_drag = nil
+            end
+        end
+        return
+    end
+
+    -- Mouse wheel (dropdowns set widgets.wheel_consumed while open + hovered)
+    if gin.wheel ~= 0 and not widgets.wheel_consumed then
+        scroll[scroll_key] = scroll[scroll_key] - gin.wheel * 48
+        clamp_scroll(scroll_key, content_h, h)
+        widgets.wheel_consumed = true
+    end
+
+    -- Drag-to-scroll: LMB on empty space, RMB anywhere in column, or MMB
+    local can_lmb_drag = gin.lmb_click and not widgets.interacted
+        and not widgets.block_under
+        and not widgets.active_slider and not widgets.active_input
+        and not widgets.open_combo
+        and not widgets.open_multi and not widgets.open_color
+        and not widgets.open_bind_mode
+        and not scroll_drag
+    local can_rmb_drag = gin.rmb_click and not widgets.interacted
+        and not widgets.block_under
+        and not widgets.open_bind_mode
+        and not widgets.listening_key
+    if can_lmb_drag or gin.mmb_click or can_rmb_drag then
+        panel_drag = {
+            key = scroll_key,
+            last_y = gin.my,
+            btn = gin.mmb_click and "mmb" or (can_rmb_drag and "rmb" or "lmb"),
+        }
+    end
+    if panel_drag and panel_drag.key == scroll_key then
+        local held = (panel_drag.btn == "lmb" and gin.lmb)
+            or (panel_drag.btn == "rmb" and gin.rmb)
+            or (panel_drag.btn == "mmb" and gin.mmb)
+        if held then
+            local dy = gin.my - panel_drag.last_y
+            scroll[scroll_key] = scroll[scroll_key] - dy
+            panel_drag.last_y = gin.my
+            clamp_scroll(scroll_key, content_h, h)
+        else
+            panel_drag = nil
+        end
+    end
+end
+
+local function draw_group_title(x, box_top, title)
+    widgets.text(x + 12, box_top + 7, title, theme.TEXT_ACTIVE, theme.FONT_TITLE)
+end
+
+local function draw_group_column(groups, x, y, w, h, scroll_key)
+    local pad = theme.GROUP_PAD
+    local visible_groups = {}
+    for _, group in ipairs(groups) do
+        if group_visible(group) then
+            visible_groups[#visible_groups + 1] = group
+        end
+    end
+
+    local total = 0
+    for _, group in ipairs(visible_groups) do
+        total = total + content_height(group.items or {}, group) + theme.GROUP_HEADER_H + theme.GROUP_GAP
+    end
+
+    clamp_scroll(scroll_key, total, h)
+
+    local gy = y + pad - scroll[scroll_key]
+    widgets.clip = { x = x, y = y, w = w, h = h }
+
+    for _, group in ipairs(visible_groups) do
+        local items = group.items or {}
+        local inner_h = content_height(items, group)
+        local box_h = inner_h + theme.GROUP_HEADER_H
+
+        local box_top = gy
+        local box_bot = gy + box_h
+        if box_bot > y and box_top < y + h then
+            local vis_y = math.max(box_top, y)
+            local vis_b = math.min(box_bot, y + h)
+            local vis_h = vis_b - vis_y
+            if vis_h > 1 then
+                widgets.rect(x + 2, vis_y + 2, w, vis_h, theme.SHADOW, true)
+                widgets.rect(x, vis_y, w, vis_h, theme.PANEL, true)
+                widgets.rect(x, vis_y, w, vis_h, theme.BORDER_SOFT, false)
+                if box_top >= y - 2 and box_top < y + h then
+                    widgets.rect(x + 1, box_top + 2, w - 2, theme.GROUP_HEADER_H - 3, theme.PANEL_ALT, true)
+                    anim.draw_section_top(x + 1, box_top, w - 2)
+                    draw_group_title(x, box_top, group.title)
+                end
+            end
+
+            local iy = gy + theme.GROUP_HEADER_H + 6
+            local ix = x + 7
+            local iw = w - 16
+            for _, item in ipairs(items) do
+                if item_visible(item, group) then
+                    local est = widgets.estimate_height(item)
+                    if iy >= y and iy + est <= y + h then
+                        local used = widgets.draw_item(item, ix, iy, iw)
+                        if used < 1 then used = est end
+                        iy = iy + used + theme.ITEM_GAP
+                    else
+                        iy = iy + est + theme.ITEM_GAP
+                    end
+                end
+            end
+        end
+
+        gy = gy + box_h + theme.GROUP_GAP
+    end
+
+    widgets.clip = nil
+    -- Wheel after widgets so open dropdowns can consume it first
+    handle_column_scroll(x, y, w, h, scroll_key, total)
+    draw_scrollbar(x + w + 2, y, h, total, scroll_key)
+end
+
+local function split_groups(groups, tab_id)
+    if tab_id == "aim" and #groups >= 3 then
+        return { groups[1] }, { groups[2], groups[3] }
+    end
+    if tab_id == "config" and #groups >= 2 then
+        return { groups[1] }, { groups[2] }
+    end
+    if #groups == 2 then
+        return { groups[1] }, { groups[2] }
+    end
+    local left, right = {}, {}
+    for i, g in ipairs(groups) do
+        if i % 2 == 1 then
+            left[#left + 1] = g
+        else
+            right[#right + 1] = g
+        end
+    end
+    return left, right
+end
+
+function M.init()
+    state.define("april_ui_custom_colors", false)
+    state.define("april_ui_custom_anim", false)
+    state.define("april_ui_per_element", false)
+    state.define("april_ui_show_cursor_dot", true)
+    state.define("april_ui_accent", theme.ACCENT)
+    state.define("april_ui_accent_anim", 1)
+    state.define("april_ui_anim_speed", 40)
+    state.define("april_ui_bg_dim", 0)
+    state.define("april_ui_menu_fade", false)
+    state.define("april_ui_anim_targets", {
+        true, true, true, true, true, true, true, true,
+    })
+    state.define("april_ui_color_overrides", {})
+    state.define("april_ui_style_title", 0)
+    state.define("april_ui_style_section", 0)
+    state.define("april_ui_style_slider", 0)
+    state.define("april_ui_style_scroll", 0)
+    state.define("april_ui_style_sidebar", 0)
+    state.define("april_ui_style_checkbox", 0)
+    state.define("april_ui_style_overlay", 0)
+    state.define_color("april_ui_col_title", theme.ACCENT)
+    state.define_color("april_ui_col_section", theme.ACCENT)
+    state.define_color("april_ui_col_slider", theme.ACCENT)
+    state.define_color("april_ui_col_scroll", theme.ACCENT)
+    state.define_color("april_ui_col_sidebar", theme.ACCENT)
+    state.define_color("april_ui_col_checkbox", theme.ACCENT)
+    state.define_color("april_ui_col_overlay", theme.ACCENT)
+    local sw, sh = screen_size()
+    win_x = math.floor((sw - theme.WINDOW_W) * 0.5)
+    win_y = math.floor((sh - theme.WINDOW_H) * 0.3)
+end
+
+function M.is_open()
+    return open
+end
+
+function M.draw()
+    if not draw then return end
+
+    gin.begin_frame()
+    anim.sync_theme()
+    widgets.begin_popups()
+    widgets.tick_key_listen()
+    widgets.tick_text_input()
+
+    if gin.key_pressed(TOGGLE_VK) and not widgets.listening_key and not widgets.active_input then
+        open = not open
+        gin.set_menu_open(open)
+    end
+
+    if not open then
+        if gin._menu_open or gin._game_cursor_hidden then
+            gin.set_menu_open(false)
+        end
+        return
+    end
+
+    gin.set_menu_open(true)
+    clamp_window()
+
+    local x, y = win_x, win_y
+    local w, h = theme.WINDOW_W, theme.WINDOW_H
+    gin.set_ui_rect(x, y, w, h)
+
+    -- Frame
+    local fade = anim.menu_fade()
+    widgets.rect(x, y, w, h, theme.alpha(anim.panel_bg(), fade), true)
+    widgets.rect(x, y, w, h, theme.BORDER, false)
+    widgets.rect(x + 1, y + 1, w - 2, 1, theme.BORDER_HOT, true)
+    anim.draw_title_bar(x + 1, y + 1, w - 2, 2)
+
+    local title_h = 28
+    widgets.rect(x + 1, y + 3, w - 2, title_h, theme.BG_INNER, true)
+    widgets.rect(x + 1, y + title_h + 3, w - 2, 1, theme.BORDER_SOFT, true)
+    local tab = catalog.TABS[tab_index]
+    widgets.text(x + 12, y + 10, "APRIL", theme.TEXT_ACTIVE, theme.FONT_TITLE)
+    widgets.text(x + 55, y + 10, "/  " .. (tab and tab.title or ""), theme.TEXT_TITLE, theme.FONT_TITLE)
+
+    if gin.lmb_click and gin.hover(x, y, w - theme.SIDEBAR_W, title_h + 5)
+        and not widgets.active_slider and not widgets.listening_key
+        and not widgets.active_input
+        and not widgets.block_under
+        and not widgets.open_combo and not widgets.open_multi and not widgets.open_color
+        and not widgets.open_bind_mode
+        and not scroll_drag and not panel_drag then
+        widgets.dragging_window = true
+        widgets.drag_offset_x = gin.mx - win_x
+        widgets.drag_offset_y = gin.my - win_y
+    end
+    if widgets.dragging_window then
+        if gin.lmb then
+            win_x = gin.mx - widgets.drag_offset_x
+            win_y = gin.my - widgets.drag_offset_y
+            clamp_window()
+        else
+            widgets.dragging_window = false
+        end
+    end
+
+    local body_y = y + title_h + 6
+    local body_h = h - title_h - 10
+
+    draw_sidebar(x + 1, body_y, body_h)
+
+    local content_x = x + theme.SIDEBAR_W + 12
+    local content_w = w - theme.SIDEBAR_W - 30
+    local col_w = math.floor((content_w - 16) * 0.5)
+    local groups = catalog.groups_for(tab and tab.id or "aim")
+    local left_groups, right_groups = split_groups(groups, tab and tab.id or "aim")
+
+    draw_group_column(left_groups, content_x, body_y + 2, col_w, body_h - 4, "left")
+    draw_group_column(right_groups, content_x + col_w + 12, body_y + 2, col_w, body_h - 4, "right")
+
+    -- Floating popups above all sections
+    widgets.draw_color_overlay()
+    widgets.draw_bind_mode_overlay()
+    widgets.end_popups()
+
+    gin.draw_cursor()
+end
+
+return M
+
+end)()
+
 -- ── menu/tabs.lua ──
 April._mods["menu.tabs"] = (function()
 local menu_util = April.require("core.menu_util")
@@ -17730,12 +22006,11 @@ M.features = {}
 M._menu_registered = false
 
 M.FEATURE_ORDER = {
+    "features.combat.camera_aimbot",
     "features.combat.aimbot",
     "features.combat.gun_mods",
     "features.visuals.target_overlay",
     "features.visuals.crosshair",
-    "features.visuals.hitmarkers",
-    "features.visuals.bullet_tracers",
     "features.visuals.player_esp",
     "features.world.world_esp",
     "features.world.loot_esp",
@@ -17865,11 +22140,16 @@ end
 
 function M.init()
     local env = April.require("core.env")
-    local ok, missing = env.require_apis({ "menu", "draw", "utility", "entity", "game" })
+    local ok, missing = env.require_apis({ "draw", "utility", "entity", "game" })
     if not ok then
         debug.error_once("init:apis", "Missing required API: " .. tostring(missing))
         return false
     end
+
+    -- Custom UI backend: feature register_menu() writes into gs_state, not Vector menu.
+    pcall(function()
+        April.require("ui.menu_shim").install()
+    end)
 
     M.register_all()
     M.setup_scans()
@@ -17903,6 +22183,7 @@ April._mods["app"] = (function()
 local tabs = April.require("menu.tabs")
 local debug = April.require("core.debug")
 local notify = April.require("core.notify")
+local custom_menu = April.require("ui.custom_menu")
 
 local M = {}
 local initialized = false
@@ -17910,6 +22191,9 @@ local initialized = false
 function M.init()
     if initialized then return true end
     initialized = tabs.init()
+    if initialized then
+        pcall(custom_menu.init)
+    end
     return initialized
 end
 
@@ -17920,6 +22204,9 @@ function M.on_frame()
     pcall(function()
         April.require("core.feature_bind").tick()
     end)
+    pcall(function()
+        April.require("core.aim_key").tick("april_aim_key", "april_aim_key_mode")
+    end)
 
     local dt = 0.016
     if utility and utility.get_delta_time then
@@ -17929,14 +22216,16 @@ function M.on_frame()
     debug.guard("tabs.update", tabs.update, dt)
     debug.guard("tabs.draw", tabs.draw)
     debug.guard("notify.draw", notify.draw)
+    debug.guard("custom_menu.draw", custom_menu.draw)
 end
 
 return M
 
 end)()
 
--- Vector requires menu registration from the script main chunk (not nested init).
+-- Install custom UI menu backend before any register_menu() calls.
 do
+    April.require("ui.menu_shim").install()
     April.require("menu.tabs").register_all()
 end
 
@@ -17956,6 +22245,7 @@ local ok, err = pcall(function()
     April.require("features.movement.fling").install()
 
     April._init_ok = true
+    print("[April] v" .. tostring(April.version) .. " — custom UI (INSERT to toggle)")
 
     local c = caps.probe()
     if c.fallen_gc then

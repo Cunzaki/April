@@ -261,7 +261,7 @@ function M.update(_dt)
     if not wl_target or not targeting.is_aim_target(wl_target) then
         wl_target = targeting.find_target(cx, cy, fov, PREFIX, { ignore_whitelist = true })
     end
-    silent_whitelist.tick(wl_target)
+    silent_whitelist.tick(wl_target, PREFIX)
 
     if not locked_target or not targeting.is_aim_target(locked_target) then
         silent_ray.stop()
@@ -304,10 +304,11 @@ function M.update(_dt)
 
     local info = cached_track.manip
     local ok_track = false
+    local hit = info.hitpart or aim
     if info.use_curve and silent_ray.track_curve then
-        -- Aim along ballistic launch (aim_far); arc lands on hitpart.
+        -- Track straight to hitpart; curve path is visual-only.
         ok_track = silent_ray.track_curve(
-            origin, aim, info.weapon, SHOOT_VK, info.hitpart or aim
+            origin, hit, info.weapon, SHOOT_VK, hit
         ) == true
         if not info.curve_path and silent_ray.last_curve then
             local curve = silent_ray.last_curve()
@@ -316,8 +317,9 @@ function M.update(_dt)
             end
         end
     else
-        ok_track = silent_ray.track(origin, aim, SHOOT_VK, info.hitpart or aim) == true
+        ok_track = silent_ray.track(origin, hit, SHOOT_VK, hit) == true
     end
+    cached_track.aim = hit
     cached_track.tracking = ok_track
 end
 
@@ -333,6 +335,17 @@ function M.get_scoped_target()
     local sw, sh = targeting.screen_center()
     local fov = settings.num(PREFIX .. "fov", 150)
     return targeting.find_target(sw * 0.5, sh * 0.5, fov, PREFIX)
+end
+
+local function snapline_aim_point(cx, cy)
+    if cached_track.aim then
+        return cached_track.aim
+    end
+    if not locked_target then
+        return nil
+    end
+    local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
+    return targeting.get_aim_point(locked_target, PREFIX, nil, origin, cx, cy, false)
 end
 
 function M.draw()
@@ -367,12 +380,12 @@ function M.draw()
     end
 
     if active() and locked_target and settings.bool(PREFIX .. "target_line", false) then
-        local aim = cached_track.aim
+        local col = settings.color(PREFIX .. "target_line", { 1, 0.25, 0.25, 1 })
+        local aim = snapline_aim_point(cx, cy)
         if aim then
             local tx, ty, vis = w2s(aim.x, aim.y, aim.z)
             if vis then
-                local col = settings.color(PREFIX .. "target_line", { 1, 0.25, 0.25, 1 })
-                draw_util.line(cx, cy, tx, ty, col, 1.5)
+                draw_util.snapline(tx, ty, col, 1.5, sw, sh)
             end
         end
     end

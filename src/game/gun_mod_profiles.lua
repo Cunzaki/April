@@ -7,7 +7,7 @@ local M = {}
 M.GLOBAL_PROFILE_KEY = "__global__"
 M.GLOBAL_DISPLAY_NAME = "Global"
 M.MODE_ID = "april_gm_mode"
-M.MODES = { "Profile Based", "Global" }
+M.MODES = { "Live (save optional)", "Global" }
 
 local function pct_to_neg_mult(pct)
     pct = math.max(0, math.min(100, pct or 0))

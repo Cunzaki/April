@@ -414,6 +414,21 @@ function M.is_empty_held_name(name)
     return is_empty_held_name(name)
 end
 
+function M.held_name(player)
+    if not player then return nil end
+    local char = resolve_character(player)
+    local name = select(1, resolve_held_weapon(player, char))
+    if name and is_valid_held_label(name) then return name end
+    return nil
+end
+
+function M.held_name_from_character(char)
+    if not char or not env.is_valid(char) then return nil end
+    local name = select(1, find_held_on_character(char))
+    if name and is_valid_held_label(name) then return name end
+    return nil
+end
+
 function M.scan_player(player)
     local out = {
         held = nil,

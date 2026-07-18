@@ -1,3 +1,4 @@
+-- GC weapon multipliers. Skip refreshgc when warm; rate-limit applygc.
 local debug = April.require("core.debug")
 local env = April.require("core.env")
 
@@ -24,11 +25,32 @@ M.ALLOWED = {
 }
 
 M._last_node_count = 0
+M._last_apply_ms = 0
+M._last_refresh_ms = 0
+M._fail_streak = 0
+M._session_token = nil
+
+local MIN_APPLY_GAP_MS = 280
+local MIN_REFRESH_GAP_MS = 4000
+local FAIL_BACKOFF_MS = 1200
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
 
 local function has_api()
     return type(refreshgc) == "function"
         and type(getgc) == "function"
         and type(applygc) == "function"
+end
+
+local function session_token()
+    if not game then return "none" end
+    local pid = game.place_id or 0
+    local gid = game.game_id or 0
+    local ws = game.workspace
+    local ws_addr = (ws and (ws.Address or ws.address)) or 0
+    return tostring(pid) .. ":" .. tostring(gid) .. ":" .. tostring(ws_addr)
 end
 
 function M.available()
@@ -77,32 +99,28 @@ local function warm_nodes(keys)
     return count
 end
 
-local function patch_count(keys, payload)
-    local patched = 0
-
-    local ok, result = pcall(applygc, keys, payload)
-    if ok and type(result) == "number" then
-        patched = result
+local function maybe_refresh(force)
+    local now = tick_ms()
+    local tok = session_token()
+    if tok ~= M._session_token then
+        M._session_token = tok
+        M._last_node_count = 0
+        force = true
     end
 
-    if patched <= 0 then
-        ok, result = pcall(applygc, M.WEAPON_FIND_KEYS, payload)
-        if ok and type(result) == "number" then
-            patched = result
-        end
+    if not force and M._last_node_count > 0 then
+        return
+    end
+    if not force and (now - M._last_refresh_ms) < MIN_REFRESH_GAP_MS then
+        return
     end
 
-    if patched <= 0 then
-        ok, result = pcall(applygc, payload)
-        if ok and type(result) == "number" then
-            patched = result
-        end
-    end
-
-    return patched
+    pcall(refreshgc)
+    M._last_refresh_ms = now
 end
 
-function M.apply_weapon(mods)
+function M.apply_weapon(mods, opts)
+    opts = opts or {}
     if not has_api() then
         return false, 0, "GC API unavailable"
     end
@@ -116,20 +134,57 @@ function M.apply_weapon(mods)
         return false, 0, "Enter a match first"
     end
 
-    pcall(refreshgc)
+    local now = tick_ms()
+    local gap = MIN_APPLY_GAP_MS
+    if M._fail_streak > 2 then
+        gap = FAIL_BACKOFF_MS
+    end
+    if not opts.force and (now - M._last_apply_ms) < gap then
+        return false, 0, "throttled"
+    end
+
+    maybe_refresh(opts.force_refresh == true or M._last_node_count <= 0)
 
     local patch_keys = keys_for_payload(payload)
-    warm_nodes(M.WEAPON_FIND_KEYS)
-    warm_nodes(patch_keys)
+    local warm = warm_nodes(patch_keys)
+    if warm <= 0 then
+        warm = warm_nodes(M.WEAPON_FIND_KEYS)
+    end
+    M._last_node_count = math.max(M._last_node_count, warm)
 
-    local patched = patch_count(patch_keys, payload)
-    M._last_node_count = math.max(M._last_node_count, patched, warm_nodes(patch_keys))
+    if warm <= 0 then
+        M._fail_streak = M._fail_streak + 1
+        debug.warn_once("gun_mods:nodes", "GC still warming — equip a gun, enable a mod option, keep master on")
+        return false, 0, "GC warming — equip gun and wait a moment"
+    end
+
+    local patched = 0
+    local ok, result = pcall(applygc, patch_keys, payload)
+    if ok and type(result) == "number" then
+        patched = result
+    end
+
+    -- One fallback only (avoid spam that correlates with long-session crashes)
+    if patched <= 0 then
+        ok, result = pcall(applygc, M.WEAPON_FIND_KEYS, payload)
+        if ok and type(result) == "number" then
+            patched = result
+        end
+    end
+
+    M._last_apply_ms = tick_ms()
 
     if patched > 0 then
+        M._last_node_count = math.max(M._last_node_count, patched)
+        M._fail_streak = 0
         return true, patched, string.format("%d node(s) patched", patched)
     end
 
-    debug.warn_once("gun_mods:nodes", "GC still warming — equip a gun, enable a mod option, keep master on")
+    M._fail_streak = M._fail_streak + 1
+    -- Cold miss: allow one forced refresh next call
+    if M._fail_streak == 1 then
+        M._last_node_count = 0
+    end
     return false, 0, "GC warming — equip gun and wait a moment"
 end
 
@@ -138,7 +193,7 @@ function M.apply(mods)
 end
 
 function M.apply_once(mods)
-    return M.apply_weapon(mods)
+    return M.apply_weapon(mods, { force = true })
 end
 
 function M.apply_cached(mods)
@@ -151,8 +206,7 @@ function M.refresh_cache()
         return 0
     end
 
-    pcall(refreshgc)
-    warm_nodes(M.WEAPON_FIND_KEYS)
+    maybe_refresh(true)
     local count = warm_nodes(M.WEAPON_FIND_KEYS)
     M._last_node_count = count
     return count

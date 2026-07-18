@@ -21,8 +21,12 @@ const ORDER = [
   "game/mod_ids.lua",
   "core/settings.lua",
   "core/feature_bind.lua",
+  "core/aim_key.lua",
   "core/draw_util.lua",
+  "core/vk_names.lua",
+  "core/panel_drag.lua",
   "core/ui_theme.lua",
+  "core/overlay_theme.lua",
   "core/notify.lua",
   "game/asset_urls.lua",
   "core/image_cache.lua",
@@ -73,6 +77,7 @@ const ORDER = [
   "features/combat/combat_menu.lua",
   "features/combat/targeting.lua",
   "features/combat/silent_resolve.lua",
+  "features/combat/camera_aimbot.lua",
   "features/combat/aimbot.lua",
   "features/combat/perfect_farm.lua",
   "features/combat/gun_mods.lua",
@@ -94,6 +99,16 @@ const ORDER = [
   "features/utility/keybind_viewer.lua",
   "features/utility/anti_afk.lua",
   "features/utility/config.lua",
+  "ui/gs_theme.lua",
+  "ui/gs_input.lua",
+  "ui/gs_state.lua",
+  "ui/gs_anim.lua",
+  "ui/menu_shim.lua",
+  "ui/combat_labels.lua",
+  "ui/gs_icons.lua",
+  "ui/gs_widgets.lua",
+  "ui/catalog.lua",
+  "ui/custom_menu.lua",
   "menu/tabs.lua",
   "app.lua",
 ];
@@ -102,19 +117,17 @@ const header = `--[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
     Built: ${new Date().toISOString()}
+    UI: custom Gamesense menu (INSERT) — Vector menu tabs disabled
 ]]
 
 April = {
-    version = "3.75.9",
+    version = "3.85.5",
     debug = false,
     _mods = {},
     bundled = true,
+    custom_ui = true,
 }
 
--- Required first: Scripts > April uses "full" mode (2-column group grid)
-if menu and menu.add_tab then
-    menu.add_tab("April", "A", "full")
-end
 April._menu_tab_ready = true
 
 function April.require(path)
@@ -128,8 +141,9 @@ end
 `;
 
 const footer = `
--- Vector requires menu registration from the script main chunk (not nested init).
+-- Install custom UI menu backend before any register_menu() calls.
 do
+    April.require("ui.menu_shim").install()
     April.require("menu.tabs").register_all()
 end
 
@@ -149,6 +163,7 @@ local ok, err = pcall(function()
     April.require("features.movement.fling").install()
 
     April._init_ok = true
+    print("[April] v" .. tostring(April.version) .. " — custom UI (INSERT to toggle)")
 
     local c = caps.probe()
     if c.fallen_gc then

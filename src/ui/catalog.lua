@@ -1,0 +1,526 @@
+--[[
+  Layout catalog for the custom Gamesense UI.
+  Values / callbacks come from feature register_menu() via ui.menu_shim.
+  Nested options use `gate` so they only appear under their parent toggle.
+]]
+
+local maps = April.require("game.esp_maps")
+local combat_menu = April.require("ui.combat_labels")
+
+local M = {}
+
+local function cb(id, label, default, color, gate)
+    return { type = "checkbox", id = id, label = label, default = default == true, color = color, gate = gate }
+end
+
+local function kb(id, label, default, gate)
+    return { type = "keybind", id = id, label = label, default = default == true, gate = gate }
+end
+
+local function sl(id, label, minv, maxv, default, float, gate)
+    return {
+        type = "slider",
+        id = id,
+        label = label,
+        min = minv,
+        max = maxv,
+        default = default,
+        float = float == true,
+        fmt = float and "%.2f" or "%d",
+        gate = gate,
+    }
+end
+
+local function combo(id, label, options, default, gate)
+    return { type = "combo", id = id, label = label, options = options, default = default or 0, gate = gate }
+end
+
+local function multi(id, label, options, defaults, gate)
+    return { type = "multi", id = id, label = label, options = options, defaults = defaults, gate = gate }
+end
+
+local function btn(id, label, gate)
+    return { type = "button", id = id, label = label, gate = gate }
+end
+
+local function sep(gate)
+    return { type = "separator", gate = gate }
+end
+
+local function label(text, dim, gate)
+    return { type = "label", label = text, dim = dim, gate = gate }
+end
+
+local function color(id, label_text, default, gate, override_idx)
+    return {
+        type = "color",
+        id = id,
+        label = label_text,
+        default = default,
+        gate = gate,
+        color_override_idx = override_idx,
+    }
+end
+
+local function input(id, label_text, default, gate)
+    return { type = "input", id = id, label = label_text, default = default or "", gate = gate }
+end
+
+local function ak(key_id, label, gate)
+    return { type = "aim_key", id = key_id, mode_id = key_id .. "_mode", label = label, gate = gate }
+end
+
+local function from_toggles(list, gate)
+    local out = {}
+    for _, t in ipairs(list) do
+        out[#out + 1] = cb(t.id, t.label, false, t.color, gate)
+        if t.ring_id then
+            out[#out + 1] = cb(t.ring_id, t.label .. " Range Ring", false, nil, gate)
+        end
+    end
+    return out
+end
+
+local function append(dst, src)
+    for _, v in ipairs(src) do
+        dst[#dst + 1] = v
+    end
+end
+
+M.TABS = {
+    { id = "aim", icon = "aim", title = "Aimbot" },
+    { id = "visuals", icon = "visuals", title = "Visuals" },
+    { id = "world", icon = "world", title = "World" },
+    { id = "guns", icon = "guns", title = "Gun Mods" },
+    { id = "misc", icon = "misc", title = "Misc" },
+    { id = "radar", icon = "radar", title = "Radar" },
+    { id = "config", icon = "config", title = "Config" },
+}
+
+local function build_aim()
+    local regular = {
+        title = "Aimbot",
+        master = "april_aimbot",
+        items = {
+            cb("april_aimbot", "Enable Aimbot", false),
+            ak("april_aim_key", "Aim Key"),
+            sep(),
+            label("Targeting", false),
+            combo("april_aim_target_type", "Target Type", { "Crosshair", "Distance" }, 0),
+            combo("april_aim_bone", "Hitbox", combat_menu.SILENT_BONES, 0),
+            multi("april_aim_targets", "Aim At", { "Players", "NPCs" }, { true, false }),
+            multi("april_aim_filters", "Filters", {
+                "Health Check", "Visible Only", "Team Check",
+                "Skip Safezone", "Whitelist", "Skip Downed",
+            }, { true, false, true, true, false, true }),
+            input("april_aim_whitelist_ids", "Whitelist IDs", ""),
+            btn("april_aim_whitelist_clear", "Clear Whitelist"),
+            sl("april_aim_max_dist", "Max Distance (m)", 50, 2000, 500),
+            sep(),
+            label("Aim", false),
+            multi("april_aim_options", "Options", { "Sticky Target" }, { false }),
+            sl("april_aim_smooth", "Smoothness", 1, 25, 10),
+            sl("april_aim_fov", "FOV Radius (px)", 20, 600, 120),
+            sep(),
+            label("Visuals", false),
+            cb("april_aim_draw_fov", "FOV Circle", false, { 0.2, 1, 0.45, 1 }),
+            combo("april_aim_fov_style", "FOV Style", { "Outline", "Filled Circle" }, 1, "april_aim_draw_fov"),
+            cb("april_aim_target_line", "Target Line", false, { 0.2, 1, 0.45, 1 }),
+        },
+    }
+
+    local silent = {
+        title = "Silent Aim",
+        master = "april_silent_aim",
+        items = {
+            kb("april_silent_aim", "Enable Silent Aim", false),
+            sep(),
+            label("Targeting", false),
+            combo("april_silent_target_type", "Target Type", { "Crosshair", "Distance" }, 0),
+            combo("april_silent_bone", "Hitbox", combat_menu.SILENT_BONES, 0),
+            multi("april_silent_targets", "Aim At", { "Players", "NPCs" }, { true, false }),
+            multi("april_silent_filters", "Filters", {
+                "Health Check", "Visible Only", "Team Check",
+                "Skip Safezone", "Whitelist", "Skip Downed",
+            }, { true, false, true, true, false, true }),
+            input("april_silent_whitelist_ids", "Whitelist IDs", ""),
+            btn("april_silent_whitelist_clear", "Clear Whitelist"),
+            sl("april_silent_max_dist", "Max Distance (m)", 50, 2000, 500),
+            sep(),
+            label("Aim", false),
+            multi("april_silent_options", "Options", { "Sticky Target" }, { false }),
+            sl("april_silent_hit_chance", "Hit Chance %", 1, 100, 100),
+            sl("april_silent_fov", "FOV Radius (px)", 20, 600, 150),
+            cb("april_silent_hitscan", "Hitscan", false),
+            sep(),
+            label("Visuals", false),
+            cb("april_silent_draw_fov", "FOV Circle", false, { 0.55, 0.2, 1, 1 }),
+            combo("april_silent_fov_style", "FOV Style", { "Outline", "Filled Circle" }, 1, "april_silent_draw_fov"),
+            cb("april_silent_target_line", "Snapline", false, { 1, 0.25, 0.25, 1 }),
+        },
+    }
+
+    local bullet = {
+        title = "Bullet",
+        master = "april_silent_aim",
+        items = {
+            label("Bullet TP", false),
+            cb("april_silent_bullet_tp", "Bullet TP", false),
+            combo("april_silent_tp_method", "TP Method", combat_menu.TP_METHODS, 0, "april_silent_bullet_tp"),
+            cb("april_silent_tp_ray_vis", "Visualize Ray Path", false, { 0.95, 0.45, 1, 0.9 }, "april_silent_bullet_tp"),
+            sep("april_silent_bullet_tp"),
+            label("Silent Bullet Manip", false),
+            cb("april_silent_bullet_manip", "Silent Bullet Manip", false),
+            sl("april_silent_manip_dist", "Manip Distance", 0.1, 1, 1, true, "april_silent_bullet_manip"),
+            cb("april_silent_manip_extend", "Extend", false, nil, "april_silent_bullet_manip"),
+            sl("april_silent_manip_extend_dist", "Extra Scan Distance", 1, 7, 7, true, "april_silent_manip_extend"),
+            cb("april_silent_manip_status", "Manip Status Bar", false, nil, "april_silent_bullet_manip"),
+            cb("april_silent_manip_peek_vis", "Manip Peek Visual", false, nil, "april_silent_bullet_manip"),
+        },
+    }
+
+    return { regular, silent, bullet }
+end
+
+local function build_visuals()
+    local left = {
+        title = "Player ESP",
+        master = "april_player_enabled",
+        items = {
+            kb("april_player_enabled", "Player ESP", false),
+            combo("april_player_box_mode", "Player Box", { "None", "2D", "Corner" }, 1),
+            cb("april_player_health", "Player Health Bar", true),
+            cb("april_player_skeleton", "Player Skeleton", false, { 1, 1, 1, 0.92 }),
+            cb("april_player_show_name", "Player Name", true),
+            cb("april_player_clan_tag", "Player Clan Tag", true),
+            cb("april_player_clan_color", "Player Color By Clan", false),
+            cb("april_player_show_distance", "Player Distance", true),
+            cb("april_player_show_weapon", "Player Weapon", false),
+            multi("april_player_esp_filters", "ESP Filters", {
+                "Team Check", "Skip Safezone", "Skip Downed",
+            }, { true, false, false }),
+            multi("april_player_esp_flags", "ESP Flags", {
+                "Downed", "Safezone", "VIP", "Staff", "Reviving",
+            }, { true, true, true, true, true }),
+            sl("april_player_range", "Player Range", 50, 2000, 500),
+        },
+    }
+
+    local right = {
+        title = "Overlays",
+        items = {
+            label("Target Overlay", false),
+            kb("april_target_overlay", "Target Overlay", false),
+            cb("april_target_overlay_fallback_fov", "Crosshair FOV Fallback", false, nil, "april_target_overlay"),
+            sl("april_target_overlay_fov", "Fallback FOV", 40, 400, 150, false, "april_target_overlay"),
+            sl("april_target_overlay_gear_size", "Gear Icon Size", 32, 64, 48, false, "april_target_overlay"),
+            sl("april_target_overlay_top", "Top Offset", 48, 160, 88, false, "april_target_overlay"),
+            sep(),
+            label("Crosshair", false),
+            cb("april_crosshair_enabled", "Custom Crosshair", false),
+            cb("april_crosshair_color", "Crosshair Color", true, { 0, 1, 0, 1 }, "april_crosshair_enabled"),
+            cb("april_crosshair_dot", "Center Dot", false, { 1, 1, 1, 1 }, "april_crosshair_enabled"),
+            cb("april_crosshair_outline", "Crosshair Outline", true, { 0, 0, 0, 1 }, "april_crosshair_enabled"),
+            cb("april_crosshair_rainbow", "Rainbow Crosshair", false, nil, "april_crosshair_enabled"),
+            sl("april_crosshair_rainbow_speed", "Rainbow Speed", 1, 100, 10, false, "april_crosshair_rainbow"),
+            sl("april_crosshair_size", "Crosshair Size", 1, 50, 10, false, "april_crosshair_enabled"),
+            sl("april_crosshair_gap", "Crosshair Gap", 0, 20, 5, false, "april_crosshair_enabled"),
+            sl("april_crosshair_thickness", "Crosshair Thickness", 1, 10, 2, false, "april_crosshair_enabled"),
+        },
+    }
+    return { left, right }
+end
+
+local function build_world()
+    local resources = {
+        title = "Resources",
+        master = "april_world_enabled",
+        items = {
+            kb("april_world_enabled", "Resource ESP", false),
+        },
+    }
+    append(resources.items, from_toggles(maps.WORLD_TOGGLES))
+    append(resources.items, {
+        cb("april_world_boxes", "Resource 3D Boxes", false),
+        cb("april_world_show_name", "Resource Show Name", true),
+        cb("april_world_show_distance", "Resource Show Distance", true),
+        sl("april_world_range", "Resource Range", 50, 2000, 500),
+        multi("april_world_chams", "Resource Chams", (function()
+            local labels = {}
+            for i, t in ipairs(maps.WORLD_TOGGLES) do labels[i] = t.label end
+            return labels
+        end)(), {}),
+        combo("april_world_chams_mode", "Resource Chams Mode", { "Flat", "Fresnel", "Glow" }, 0),
+        color("april_world_chams_color", "Resource Chams Color", { 0.4, 1, 0.4, 1 }),
+    })
+
+    local loot = {
+        title = "Loot",
+        master = "april_loot_enabled",
+        items = {
+            kb("april_loot_enabled", "Loot ESP", false),
+        },
+    }
+    append(loot.items, from_toggles(maps.LOOT_TOGGLES))
+    append(loot.items, {
+        cb("april_loot_boxes", "Loot 3D Boxes", false),
+        cb("april_loot_show_name", "Loot Show Name", true),
+        cb("april_loot_show_distance", "Loot Show Distance", true),
+        sl("april_loot_range", "Loot Range", 50, 2000, 300),
+        multi("april_loot_chams", "Loot Chams", (function()
+            local labels = {}
+            for i, t in ipairs(maps.LOOT_TOGGLES) do labels[i] = t.label end
+            return labels
+        end)(), {}),
+        combo("april_loot_chams_mode", "Loot Chams Mode", { "Flat", "Fresnel", "Glow" }, 0),
+        color("april_loot_chams_color", "Loot Chams Color", { 1, 0.85, 0.35, 1 }),
+    })
+
+    local bases = {
+        title = "Bases",
+        master = "april_base_enabled",
+        items = {
+            kb("april_base_enabled", "Base ESP", false),
+        },
+    }
+    append(bases.items, from_toggles(maps.BASE_TOGGLES))
+    append(bases.items, {
+        cb("april_base_boxes", "Base 3D Boxes", false),
+        cb("april_base_show_name", "Base Show Name", true),
+        cb("april_base_show_distance", "Base Show Distance", false),
+        sl("april_base_range", "Base Range", 50, 500, 150),
+        multi("april_base_chams", "Base Chams", (function()
+            local labels = {}
+            for i, t in ipairs(maps.BASE_TOGGLES) do labels[i] = t.label end
+            return labels
+        end)(), {}),
+        combo("april_base_chams_mode", "Base Chams Mode", { "Flat", "Fresnel", "Glow" }, 0),
+        color("april_base_chams_color", "Base Chams Color", { 0.55, 0.55, 1, 1 }),
+    })
+
+    local npcs = {
+        title = "NPCs",
+        master = "april_npc_enabled",
+        items = {
+            kb("april_npc_enabled", "NPC ESP", false),
+            cb("april_npc_soldiers", "Soldiers", false, { 1, 0.3, 0.3, 1 }),
+            cb("april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, { 1, 0.5, 0.1, 1 }),
+            cb("april_npc_health", "NPC Health Bar", false),
+            cb("april_npc_skeleton", "NPC Skeleton", false, { 1, 1, 1, 0.85 }),
+            cb("april_npc_show_name", "NPC Show Name", true),
+            cb("april_npc_show_distance", "NPC Show Distance", true),
+            cb("april_npc_show_weapon", "NPC Weapon", false),
+            sl("april_npc_range", "NPC Range", 50, 2000, 500),
+        },
+    }
+
+    return { resources, loot, npcs, bases }
+end
+
+local function build_guns()
+    return {
+        {
+            title = "Gun Mods",
+            master = "april_gunmods_enabled",
+            items = {
+                kb("april_gunmods_enabled", "Enable Gun Mods", false),
+                sep(),
+                label("Apply", false),
+                input("april_gm_held_weapon", "Held Weapon", "—"),
+                combo("april_gm_mode", "Apply Mode", { "Live (save optional)", "Global" }, 0),
+                combo("april_gm_weapon_select", "Edit Weapon", { "—", "AK", "M4", "MP5" }, 0),
+                sep(),
+                label("Modifiers", false),
+                cb("april_gm_recoil", "No Recoil", false),
+                sl("april_gm_recoil_pct", "Recoil Reduction %", 0, 100, 100, false, "april_gm_recoil"),
+                cb("april_gm_spread", "No Spread", false),
+                sl("april_gm_spread_pct", "Spread Reduction %", 0, 100, 100, false, "april_gm_spread"),
+                cb("april_gm_sway", "No Sway", false),
+                cb("april_gm_fire_rate", "Fire Rate", false),
+                sl("april_gm_fire_rate_mult", "Fire Rate Multiplier", 1, 3, 1.5, true, "april_gm_fire_rate"),
+                cb("april_gm_speed", "Bullet Speed", false),
+                sl("april_gm_speed_mult", "Speed Mult", 1, 100, 100, false, "april_gm_speed"),
+                cb("april_gm_range", "Gun Range", false),
+                sl("april_gm_range_mult", "Range Mult", 1, 20, 10, false, "april_gm_range"),
+                cb("april_gm_double_tap", "Double Tap", false),
+            },
+        },
+        {
+            title = "Profiles",
+            master = "april_gunmods_enabled",
+            items = {
+                btn("april_gm_save", "Save Profile"),
+                btn("april_gm_clear", "Clear Saved Profile"),
+            },
+        },
+    }
+end
+
+local function build_misc()
+    return {
+        {
+            title = "Movement",
+            items = {
+                kb("april_noclip_enabled", "Fly", false),
+                sl("april_noclip_speed", "Fly Speed", 1, 20, 5, false, "april_noclip_enabled"),
+                kb("april_slowfall_enabled", "Slowfall", false),
+                sl("april_slowfall_speed", "Fall Speed", 1, 50, 5, false, "april_slowfall_enabled"),
+                sep(),
+                kb("april_desync_enabled", "Desync", false),
+                cb("april_desync_visualizer", "Desync Visualize", false, { 0.2, 0.85, 1, 0.9 }, "april_desync_enabled"),
+                sep(),
+                kb("april_fling_enabled", "Fling", false),
+                sl("april_fling_fov", "Fling FOV", 20, 600, 150, false, "april_fling_enabled"),
+                sl("april_fling_duration", "Fling Duration", 2, 10, 2, false, "april_fling_enabled"),
+            },
+        },
+        {
+            title = "Utility",
+            items = {
+                kb("april_farm_helper", "Farm Helper", false),
+                cb("april_farm_silent", "Silent Farm", false, nil, "april_farm_helper"),
+                sl("april_farm_radius", "Farm Range (studs)", 1, 15, 5, false, "april_farm_helper"),
+                sl("april_farm_smooth", "Camera Smoothness", 1, 30, 8, false, "april_farm_helper"),
+                sep(),
+                cb("april_anti_afk", "Anti AFK", false),
+                cb("april_mod_checker_enabled", "Mod Checker", false),
+                sl("april_mod_checker_interval", "Scan Interval (ms)", 1000, 10000, 2500, false, "april_mod_checker_enabled"),
+                sep(),
+                cb("april_keybinds_enabled", "Keybind Viewer", false),
+                cb("april_keybinds_active_only", "Only Show Active", false, nil, "april_keybinds_enabled"),
+                cb("april_keybinds_show_unbound", "Show Unbound", true, nil, "april_keybinds_enabled"),
+                cb("april_keybinds_show_mode", "Show Bind Mode", true, nil, "april_keybinds_enabled"),
+            },
+        },
+    }
+end
+
+local function build_radar()
+    return {
+        {
+            title = "Tactical Map",
+            master = "april_map_enabled",
+            items = {
+                kb("april_map_enabled", "Tactical Map", false),
+                cb("april_map_show_players", "Radar Show Players", true),
+                cb("april_map_show_npcs", "Radar Show NPCs", false),
+                cb("april_map_show_loot", "Radar Show Loot", true),
+                cb("april_map_show_world", "Radar Show Resources", true),
+                cb("april_map_show_base", "Radar Show Base Parts", false),
+                cb("april_map_show_waypoints", "Radar Show Waypoints", true),
+                cb("april_map_labels", "Radar Show Labels", false),
+                color("april_map_bg", "Radar Background", { 0.05, 0.05, 0.07, 0.85 }),
+                color("april_map_grid", "Radar Grid", { 0.25, 0.25, 0.3, 0.5 }),
+                color("april_map_player_col", "Radar Players Color", { 1, 0.25, 0.25, 1 }),
+                color("april_map_npc_col", "Radar NPCs Color", { 1, 0.55, 0.15, 1 }),
+                color("april_map_loot_col", "Radar Loot Color", { 1, 0.85, 0.35, 1 }),
+                color("april_map_world_col", "Radar Resources Color", { 0.35, 0.9, 0.35, 1 }),
+                color("april_map_base_col", "Radar Base Color", { 0.55, 0.55, 1, 1 }),
+                color("april_map_wp_col", "Radar Waypoints Color", { 0.3, 0.9, 1, 1 }),
+                color("april_map_local", "Radar You Color", { 0.3, 0.9, 1, 1 }),
+                sl("april_map_zoom", "Radar Zoom Level", 0.05, 5, 1, true),
+                sl("april_map_size", "Radar Size", 140, 420, 240),
+                sl("april_map_icon_scale", "Radar Blip Size", 2, 6, 3),
+            },
+        },
+        {
+            title = "Waypoints",
+            master = "april_waypoints_enabled",
+            items = {
+                kb("april_waypoints_enabled", "Waypoints", false),
+                cb("april_wp_dist", "Waypoint Show Distance", false),
+                cb("april_wp_beacon", "Beacon Pillar", false),
+                sl("april_wp_beacon_h", "Beacon Height", 20, 200, 90, false, "april_wp_beacon"),
+                cb("april_wp_draw", "Draw Markers", false, { 0.2, 1, 0.8, 1 }),
+                sl("april_wp_slot", "Waypoint Active Slot", 1, 5, 1),
+                btn("april_wp_set", "Set Active Waypoint"),
+                btn("april_wp_clear", "Clear Active Waypoint"),
+                btn("april_wp_clear_all", "Clear All Waypoints"),
+            },
+        },
+    }
+end
+
+local function build_config()
+    local modes = { "Static", "Rainbow", "Pulse", "Wave", "Flow" }
+    local elem_modes = { "Default", "Static", "Rainbow", "Pulse", "Wave", "Flow" }
+    local COL = "april_ui_custom_colors"
+    local ANM = "april_ui_custom_anim"
+    local ELS = "april_ui_per_element"
+
+    local menu = {
+        title = "Menu",
+        items = {
+            cb("april_ui_custom_colors", "Color Options", false),
+            cb("april_ui_custom_anim", "Animation Options", false),
+            cb("april_ui_show_cursor_dot", "Show Cursor Dot", true),
+            sep(),
+            label("Colors", false, COL),
+            color("april_ui_accent", "Accent", { 0.78, 0.20, 0.92, 1 }, COL),
+            sl("april_ui_bg_dim", "Background Dim", 0, 40, 0, false, COL),
+            cb("april_ui_menu_fade", "Menu Fade Pulse", false, nil, COL),
+            multi("april_ui_color_overrides", "Override Colors For", {
+                "Title Bar", "Section Tops", "Sliders", "Scrollbars", "Sidebar", "Checkboxes", "Overlay Panels",
+            }, {}, COL),
+            color("april_ui_col_title", "Title Bar Color", { 0.78, 0.20, 0.92, 1 }, COL, 1),
+            color("april_ui_col_section", "Section Top Color", { 0.78, 0.20, 0.92, 1 }, COL, 2),
+            color("april_ui_col_slider", "Slider Color", { 0.78, 0.20, 0.92, 1 }, COL, 3),
+            color("april_ui_col_scroll", "Scrollbar Color", { 0.78, 0.20, 0.92, 1 }, COL, 4),
+            color("april_ui_col_sidebar", "Sidebar Color", { 0.78, 0.20, 0.92, 1 }, COL, 5),
+            color("april_ui_col_checkbox", "Checkbox Color", { 0.78, 0.20, 0.92, 1 }, COL, 6),
+            color("april_ui_col_overlay", "Overlay Panel Color", { 0.78, 0.20, 0.92, 1 }, COL, 7),
+            sep(COL),
+            label("Animation", false, ANM),
+            combo("april_ui_accent_anim", "Style", modes, 1, ANM),
+            sl("april_ui_anim_speed", "Speed", 1, 100, 40, false, ANM),
+            multi("april_ui_anim_targets", "Animate", {
+                "Title Bar", "Section Tops", "Sliders", "Scrollbars", "Sidebar", "Checkboxes", "Hover", "Overlay Panels",
+            }, { true, true, true, true, true, true, true, true }, ANM),
+            cb("april_ui_per_element", "Individual Styles", false, nil, ANM),
+            sep(ANM),
+            { type = "combo", id = "april_ui_style_title", label = "Title Bar", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+            { type = "combo", id = "april_ui_style_section", label = "Section Tops", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+            { type = "combo", id = "april_ui_style_slider", label = "Sliders", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+            { type = "combo", id = "april_ui_style_scroll", label = "Scrollbars", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+            { type = "combo", id = "april_ui_style_sidebar", label = "Sidebar", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+            { type = "combo", id = "april_ui_style_checkbox", label = "Checkboxes", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+            { type = "combo", id = "april_ui_style_overlay", label = "Overlay Panels", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+        },
+    }
+
+    local config_group = {
+        title = "Config",
+        items = {
+            label("Profiles", false),
+            input("april_cfg_profile_name", "Profile Name", "Default"),
+            sl("april_cfg_slot", "Active Slot (1-5)", 1, 5, 1),
+            btn("april_cfg_save", "Save to Active Slot"),
+            btn("april_cfg_load", "Load Active Slot"),
+            btn("april_cfg_delete", "Delete Active Slot"),
+            sep(),
+            label("Autoload", false),
+            cb("april_cfg_autoload", "Autoload on Start", false),
+            input("april_cfg_autoload_profile", "Autoload Profile Name", "", "april_cfg_autoload"),
+            sl("april_cfg_autoload_slot", "Autoload Slot", 1, 5, 1, false, "april_cfg_autoload"),
+            sep(),
+            label("Other", false),
+            sl("april_esp_text_size", "ESP Text Size", 8, 24, 13),
+            btn("april_reload_modules", "Reload Game Modules"),
+        },
+    }
+
+    return { menu, config_group }
+end
+
+function M.groups_for(tab_id)
+    if tab_id == "aim" then return build_aim() end
+    if tab_id == "visuals" then return build_visuals() end
+    if tab_id == "world" then return build_world() end
+    if tab_id == "guns" then return build_guns() end
+    if tab_id == "misc" then return build_misc() end
+    if tab_id == "radar" then return build_radar() end
+    if tab_id == "config" then return build_config() end
+    return {}
+end
+
+return M

@@ -3,6 +3,19 @@
 local M = {}
 
 function M.get()
+    local ok_cam, cam = pcall(function()
+        return April.require("features.combat.camera_aimbot")
+    end)
+    if ok_cam and cam and cam.get_target then
+        local t = cam.get_target()
+        if t then
+            local player_state = April.require("game.player_state")
+            if not player_state or not player_state.is_combat_target or player_state.is_combat_target(t) then
+                return t
+            end
+        end
+    end
+
     local ok, aimbot = pcall(function()
         return April.require("features.combat.aimbot")
     end)

@@ -9,12 +9,11 @@ M.features = {}
 M._menu_registered = false
 
 M.FEATURE_ORDER = {
+    "features.combat.camera_aimbot",
     "features.combat.aimbot",
     "features.combat.gun_mods",
     "features.visuals.target_overlay",
     "features.visuals.crosshair",
-    "features.visuals.hitmarkers",
-    "features.visuals.bullet_tracers",
     "features.visuals.player_esp",
     "features.world.world_esp",
     "features.world.loot_esp",
@@ -144,11 +143,16 @@ end
 
 function M.init()
     local env = April.require("core.env")
-    local ok, missing = env.require_apis({ "menu", "draw", "utility", "entity", "game" })
+    local ok, missing = env.require_apis({ "draw", "utility", "entity", "game" })
     if not ok then
         debug.error_once("init:apis", "Missing required API: " .. tostring(missing))
         return false
     end
+
+    -- Custom UI backend: feature register_menu() writes into gs_state, not Vector menu.
+    pcall(function()
+        April.require("ui.menu_shim").install()
+    end)
 
     M.register_all()
     M.setup_scans()

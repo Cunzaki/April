@@ -150,8 +150,8 @@ function M.track(origin, aim_point, shoot_vk, hitpart)
     return ok
 end
 
--- Ballistic silent: origin = muzzle/peek, aim_point = far along launch_dir.
--- Curve rebuilt muzzle→hitpart so path always ends on selected hitpart.
+-- Silent track straight to hitpart (API projectiles are near-hitscan speed).
+-- Still builds a muzzle→hitpart drop curve for visuals / target line.
 function M.track_curve(origin, aim_point, weapon_name, shoot_vk, hitpart)
     origin = origin or M.get_camera_origin()
     if not origin or not aim_point then
@@ -162,13 +162,10 @@ function M.track_curve(origin, aim_point, weapon_name, shoot_vk, hitpart)
 
     local hit = hitpart or aim_point
     local curve = ballistic.curve_for_weapon(origin, hit, weapon_name, 24)
-    if curve and curve.aim_far then
-        aim_point = curve.aim_far
-    end
 
-    local ok = M.track(origin, aim_point, shoot_vk)
+    -- Never aim above the hitpart — direction is always origin → selected hitpart.
+    local ok = M.track(origin, hit, shoot_vk, hit)
     M._last_curve = curve
-    -- Keep visual/debug target on the actual hitpart, not the far aim point.
     M._last_target = { x = hit.x, y = hit.y, z = hit.z }
     return ok
 end

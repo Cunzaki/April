@@ -254,19 +254,47 @@ function M.draw_beacon(sx, sy, col, opts)
     end
 end
 
-function M.draw_offscreen_arrow(cx, cy, tx, ty, col, size)
+function M.draw_offscreen_arrow(cx, cy, tx, ty, col, size, style)
     size = size or 14
+    style = style or 0 -- 0 triangle, 1 chevron, 2 diamond
     local dx, dy = tx - cx, ty - cy
     local len = math.sqrt(dx * dx + dy * dy)
     if len < 1 then return end
     dx, dy = dx / len, dy / len
     local px, py = cx + dx * (size + 8), cy + dy * (size + 8)
     local lx, ly = -dy, dx
+
+    if style == 1 then
+        -- Chevron / open arrow
+        local thick = math.max(1.5, size * 0.18)
+        draw_util.line(px - dx * size + lx * size * 0.55, py - dy * size + ly * size * 0.55,
+            px + dx * size * 0.15, py + dy * size * 0.15, col, thick)
+        draw_util.line(px - dx * size - lx * size * 0.55, py - dy * size - ly * size * 0.55,
+            px + dx * size * 0.15, py + dy * size * 0.15, col, thick)
+        return
+    end
+
+    if style == 2 then
+        local tip = { px + dx * size, py + dy * size }
+        local back = { px - dx * size * 0.55, py - dy * size * 0.55 }
+        local left = { px + lx * size * 0.45, py + ly * size * 0.45 }
+        local right = { px - lx * size * 0.45, py - ly * size * 0.45 }
+        if draw and draw.poly_filled then
+            draw.poly_filled({ tip, left, back, right }, col)
+        else
+            draw_util.line(tip[1], tip[2], left[1], left[2], col, 2)
+            draw_util.line(left[1], left[2], back[1], back[2], col, 2)
+            draw_util.line(back[1], back[2], right[1], right[2], col, 2)
+            draw_util.line(right[1], right[2], tip[1], tip[2], col, 2)
+        end
+        return
+    end
+
     if draw and draw.poly_filled then
         draw.poly_filled({
             { px + dx * size, py + dy * size },
-            { px - dx * 4 + lx * size * 0.5, py - dy * 4 + ly * size * 0.5 },
-            { px - dx * 4 - lx * size * 0.5, py - dy * 4 - ly * size * 0.5 },
+            { px - dx * 4 + lx * size * 0.55, py - dy * 4 + ly * size * 0.55 },
+            { px - dx * 4 - lx * size * 0.55, py - dy * 4 - ly * size * 0.55 },
         }, col)
     else
         draw_util.line(px, py, px - dx * 8 + lx * 6, py - dy * 8 + ly * 6, col, 2)
@@ -275,14 +303,23 @@ function M.draw_offscreen_arrow(cx, cy, tx, ty, col, size)
 end
 
 -- Clamp a world point to the screen edge and draw an arrow pointing at it.
+-- opts: size, margin, style, label, label_col, outline
 -- Returns true if an arrow was drawn (target off-screen / outside margin).
-function M.draw_offscreen_to(wx, wy, wz, col, size, margin)
+function M.draw_offscreen_to(wx, wy, wz, col, size, margin, opts)
+    opts = opts or {}
+    if type(size) == "table" then
+        opts = size
+        size = opts.size
+        margin = opts.margin
+    end
+
     local sw, sh = draw_util.screen_size()
     if not sw or sw < 1 or not sh or sh < 1 then return false end
 
     local cx, cy = sw * 0.5, sh * 0.5
-    margin = margin or 28
-    size = size or 14
+    margin = margin or opts.margin or 36
+    size = size or opts.size or 14
+    local style = opts.style or 0
 
     local sx, sy, on = M.w2s(wx, wy, wz)
     sx = tonumber(sx) or cx
@@ -293,7 +330,6 @@ function M.draw_offscreen_to(wx, wy, wz, col, size, margin)
     end
 
     local dx, dy = sx - cx, sy - cy
-    -- Behind / degenerate projection: aim from look direction if available.
     if (dx * dx + dy * dy) < 1 then
         if camera and camera.get_look_vector then
             local look = camera.get_look_vector()
@@ -310,7 +346,6 @@ function M.draw_offscreen_to(wx, wy, wz, col, size, margin)
     local len = math.sqrt(dx * dx + dy * dy)
     dx, dy = dx / len, dy / len
 
-    -- Ray from center → edge of inset rect.
     local hw = (sw * 0.5) - margin
     local hh = (sh * 0.5) - margin
     local scale_x = (math.abs(dx) > 1e-6) and (hw / math.abs(dx)) or 1e9
@@ -319,7 +354,17 @@ function M.draw_offscreen_to(wx, wy, wz, col, size, margin)
     local ex = cx + dx * scale
     local ey = cy + dy * scale
 
-    M.draw_offscreen_arrow(cx, cy, ex, ey, col, size)
+    if opts.outline then
+        local oc = { 0, 0, 0, (col[4] or 1) * 0.85 }
+        M.draw_offscreen_arrow(cx, cy, ex, ey, oc, size + 2, style)
+    end
+    M.draw_offscreen_arrow(cx, cy, ex, ey, col, size, style)
+
+    if opts.label then
+        local lx = ex - dx * (size + 10)
+        local ly = ey - dy * (size + 10)
+        draw_util.text_centered(lx, ly - 6, tostring(opts.label), opts.label_col or col, opts.label_size or 11)
+    end
     return true
 end
 

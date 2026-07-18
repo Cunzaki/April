@@ -26,10 +26,7 @@ function M.enabled(id)
         return fb.active(id)
     end
 
-    if not menu or not menu.get then return false end
-    local v = menu.get(id)
-    if v == nil or v == false or v == 0 or v == "false" then return false end
-    return v == true or v == 1
+    return M.bool(id, false)
 end
 
 function M.num(id, default)

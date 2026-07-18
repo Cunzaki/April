@@ -42,13 +42,11 @@ M.FILTER_SAFEZONE = 4
 M.FILTER_WHITELIST = 5
 M.FILTER_SKIP_DOWNED = 6
 
--- april_silent_targets
+-- april_silent_targets / april_aim_targets (Players, NPCs)
 M.TARGET_PLAYERS = 1
 M.TARGET_NPCS = 2
-M.TARGET_NPC_SOLDIERS = 3
-M.TARGET_NPC_BOSSES = 4
 
--- april_silent_options
+-- april_silent_options / april_aim_options indices (1-based)
 M.OPT_STICKY = 1
 
 function M.bone_from_index(idx)
@@ -73,10 +71,10 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
         { parent = parent_id })
     menu.add_combo(T, G, p .. "bone", "Hitbox", M.SILENT_BONES, 0, { parent = parent_id })
     menu.add_multicombo(T, G, p .. "targets", "Aim At", {
-        "Players", "NPCs", "NPC Soldiers", "NPC Bosses",
-    }, { false, false, false, false }, { parent = parent_id })
+        "Players", "NPCs",
+    }, { false, false }, { parent = parent_id })
     if menu and menu.set then
-        pcall(menu.set, p .. "targets", { true, false, true, true })
+        pcall(menu.set, p .. "targets", { true, false })
     end
     menu.add_multicombo(T, G, p .. "filters", "Filters", {
         "Health Check",
@@ -95,7 +93,7 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     end
     menu.add_button(T, G, p .. "whitelist_clear", "Clear Whitelist", function()
         local wl = April.require("features.combat.silent_whitelist")
-        if wl and wl.clear then wl.clear() end
+        if wl and wl.clear then wl.clear(p) end
     end)
     menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, { parent = parent_id })
 
@@ -132,6 +130,58 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
         menu_util.parent(p .. "draw_fov"))
     menu.add_checkbox(T, G, p .. "target_line", "Target Line", false,
         menu_util.parent(parent_id, { colorpicker = opts.line_color or { 1, 0.25, 0.25, 1 } }))
+end
+
+--- Camera aimbot: same targeting/filters as silent, without bullet TP/manip/hitscan.
+function M.register_aimbot(T, G, prefix, parent_id, opts)
+    opts = opts or {}
+    local p = prefix
+
+    menu_util.section(T, G, "Targeting")
+    menu.add_combo(T, G, p .. "target_type", "Target Type", { "Crosshair", "Distance" }, 0,
+        { parent = parent_id })
+    menu.add_combo(T, G, p .. "bone", "Hitbox", M.SILENT_BONES, 0, { parent = parent_id })
+    menu.add_multicombo(T, G, p .. "targets", "Aim At", {
+        "Players", "NPCs",
+    }, { false, false }, { parent = parent_id })
+    if menu and menu.set then
+        pcall(menu.set, p .. "targets", { true, false })
+    end
+    menu.add_multicombo(T, G, p .. "filters", "Filters", {
+        "Health Check",
+        "Visible Only",
+        "Team Check",
+        "Skip Safezone",
+        "Whitelist",
+        "Skip Downed",
+    }, { false, false, false, false, false, false }, { parent = parent_id })
+    if menu and menu.set then
+        pcall(menu.set, p .. "filters", { true, false, true, true, false, true })
+    end
+    menu.add_input(T, G, p .. "whitelist_ids", "Whitelist IDs", "")
+    if menu and menu.set_visible then
+        pcall(menu.set_visible, p .. "whitelist_ids", false)
+    end
+    menu.add_button(T, G, p .. "whitelist_clear", "Clear Whitelist", function()
+        local wl = April.require("features.combat.silent_whitelist")
+        if wl and wl.clear then wl.clear(p) end
+    end)
+    menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, { parent = parent_id })
+
+    menu_util.section(T, G, "Aim")
+    menu.add_multicombo(T, G, p .. "options", "Options", {
+        "Sticky Target",
+    }, { false }, { parent = parent_id })
+    menu.add_slider_int(T, G, p .. "smooth", "Smoothness", 1, 25, 10, { parent = parent_id })
+    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 120, { parent = parent_id })
+
+    menu_util.section(T, G, "Visuals")
+    menu.add_checkbox(T, G, p .. "draw_fov", "FOV Circle", false,
+        menu_util.parent(parent_id, { colorpicker = opts.fov_color or { 0.2, 1, 0.45, 1 } }))
+    menu.add_combo(T, G, p .. "fov_style", "FOV Style", { "Outline", "Filled Circle" }, 1,
+        menu_util.parent(p .. "draw_fov"))
+    menu.add_checkbox(T, G, p .. "target_line", "Target Line", false,
+        menu_util.parent(parent_id, { colorpicker = opts.line_color or { 0.2, 1, 0.45, 1 } }))
 end
 
 return M

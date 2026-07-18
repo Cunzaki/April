@@ -1,20 +1,31 @@
--- Silent-aim player whitelist (middle-click toggle). Persists via menu input string.
+-- Player whitelist for combat aim (middle-click toggle). Prefix-aware for silent + camera aim.
 
 local settings = April.require("core.settings")
 local notify = April.require("core.notify")
 
 local M = {}
 
-local IDS_KEY = "april_silent_whitelist_ids"
-local FILTERS_KEY = "april_silent_filters"
 local FILTER_WHITELIST_IDX = 5
 local MMB = 0x04
+local DEFAULT_PREFIX = "april_silent_"
 
-local was_down = false
-local cache = { t = -1, set = {} }
+local was_down = {}
+local cache = {}
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function norm_prefix(prefix)
+    return prefix or DEFAULT_PREFIX
+end
+
+local function ids_key(prefix)
+    return norm_prefix(prefix) .. "whitelist_ids"
+end
+
+local function filters_key(prefix)
+    return norm_prefix(prefix) .. "filters"
 end
 
 local function parse_ids(raw)
@@ -42,52 +53,57 @@ local function serialize_ids(set)
     return table.concat(parts, ",")
 end
 
-local function read_set()
+local function read_set(prefix)
+    local p = norm_prefix(prefix)
     local now = tick_ms()
-    if cache.t == now then return cache.set end
-    cache.t = now
+    local c = cache[p]
+    if c and c.t == now then return c.set end
+
     local raw = ""
+    local key = ids_key(p)
     if menu and menu.get then
-        local ok, v = pcall(menu.get, IDS_KEY)
+        local ok, v = pcall(menu.get, key)
         if ok and type(v) == "string" then raw = v end
     end
     if raw == "" then
-        raw = tostring(settings.get(IDS_KEY) or "")
+        raw = tostring(settings.get(key) or "")
     end
-    cache.set = parse_ids(raw)
-    return cache.set
+    local set = parse_ids(raw)
+    cache[p] = { t = now, set = set }
+    return set
 end
 
-local function write_set(set)
-    cache.set = set
-    cache.t = tick_ms()
+local function write_set(prefix, set)
+    local p = norm_prefix(prefix)
+    cache[p] = { t = tick_ms(), set = set }
     local s = serialize_ids(set)
+    local key = ids_key(p)
     if menu and menu.set then
-        pcall(menu.set, IDS_KEY, s)
+        pcall(menu.set, key, s)
     end
 end
 
-function M.count()
+function M.count(prefix)
     local n = 0
-    for _ in pairs(read_set()) do
+    for _ in pairs(read_set(prefix)) do
         n = n + 1
     end
     return n
 end
 
-function M.is_whitelisted(player)
+function M.is_whitelisted(player, prefix)
     if not player then return false end
     local uid = tonumber(player.user_id)
     if not uid or uid == 0 then return false end
-    return read_set()[uid] == true
+    return read_set(prefix)[uid] == true
 end
 
-function M.toggle_player(player)
+function M.toggle_player(player, prefix)
     if not player or player.is_local then return false, nil end
     local uid = tonumber(player.user_id)
     if not uid or uid == 0 then return false, nil end
 
-    local set = read_set()
+    local set = read_set(prefix)
     local name = player.display_name or player.name or tostring(uid)
     local added
     if set[uid] then
@@ -99,40 +115,40 @@ function M.toggle_player(player)
         added = true
         notify.success("WL + " .. name, 2500)
     end
-    write_set(set)
+    write_set(prefix, set)
     return true, added
 end
 
-function M.clear()
-    write_set({})
+function M.clear(prefix)
+    write_set(prefix, {})
     notify.warning("Whitelist cleared", 2000)
 end
 
-function M.enabled()
-    return settings.multi(FILTERS_KEY, FILTER_WHITELIST_IDX, false)
+function M.enabled(prefix)
+    return settings.multi(filters_key(prefix), FILTER_WHITELIST_IDX, false)
 end
 
--- Skip target when whitelist filter is on and they are listed.
-function M.should_skip(player)
-    if not M.enabled() then return false end
-    return M.is_whitelisted(player)
+function M.should_skip(player, prefix)
+    if not M.enabled(prefix) then return false end
+    return M.is_whitelisted(player, prefix)
 end
 
-function M.tick(current_target)
-    if not M.enabled() then
-        was_down = false
+function M.tick(current_target, prefix)
+    prefix = norm_prefix(prefix)
+    if not M.enabled(prefix) then
+        was_down[prefix] = false
         return
     end
 
     local down = input and input.is_key_down and input.is_key_down(MMB) == true
-    local pressed = down and not was_down
-    was_down = down
+    local pressed = down and not was_down[prefix]
+    was_down[prefix] = down
 
     if not pressed then return end
     if not current_target then return end
     if current_target.is_npc or current_target._npc then return end
 
-    M.toggle_player(current_target)
+    M.toggle_player(current_target, prefix)
 end
 
 return M
