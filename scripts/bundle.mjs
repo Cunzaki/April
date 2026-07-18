@@ -10,6 +10,8 @@ import { fileURLToPath } from "url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = path.join(ROOT, "src");
 const OUT = path.join(ROOT, "april.lua");
+const LOAD_OUT = path.join(ROOT, "load.lua");
+const SCRIPT1_OUT = path.join(ROOT, "Script 1.lua");
 
 const ORDER = [
   "core/env.lua",
@@ -121,7 +123,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.85.7",
+    version = "3.85.8",
     debug = false,
     _mods = {},
     bundled = true,
@@ -199,3 +201,36 @@ for (const rel of ORDER) {
 
 fs.writeFileSync(OUT, header + body + footer);
 console.log("Built", path.relative(ROOT, OUT), `(${(fs.statSync(OUT).size / 1024).toFixed(1)} KB)`);
+
+const VERSION = "3.85.8";
+const loader = `-- April loader — paste this into Vector as "Script 1.lua" (small file, always pulls latest build).
+local tick = 0
+pcall(function()
+    if utility and utility.get_tick_count then
+        tick = utility.get_tick_count()
+    end
+end)
+if tick == 0 then tick = os.time() end
+
+local urls = {
+    "https://cdn.jsdelivr.net/gh/Cunzaki/April@main/april.lua?v=${VERSION}&cb=" .. tostring(tick),
+    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/april.lua?v=${VERSION}&cb=" .. tostring(tick),
+}
+
+local load_fn = utility and (utility.load_url or utility.LoadUrl or utility.loadurl)
+if not load_fn then
+    print("[April] utility.load_url unavailable")
+    return
+end
+
+for i = 1, #urls do
+    local ok, err = pcall(load_fn, urls[i])
+    if ok then return end
+    print("[April] load failed (" .. i .. "): " .. tostring(err))
+end
+`;
+
+fs.writeFileSync(LOAD_OUT, loader);
+fs.writeFileSync(SCRIPT1_OUT, loader);
+console.log("Built", path.relative(ROOT, LOAD_OUT));
+console.log("Built", path.relative(ROOT, SCRIPT1_OUT), "(copy into Vector Scripts slot)");
