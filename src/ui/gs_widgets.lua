@@ -21,7 +21,6 @@ M.interacted = false -- any widget captured LMB this frame
 M._hue_cache = {} -- id -> hue 0..1 for color picker
 M._list_scroll = {} -- id -> first visible option index (0-based)
 M.LIST_MAX_VISIBLE = 8
-M.wheel_consumed = false
 M.block_under = false -- true while pointer is over a floating popup (prior frame rect)
 -- Floating color picker (drawn after the menu so it doesn't expand sections)
 M._color_anchor = nil -- { id, x, y, w }
@@ -128,7 +127,6 @@ end
 function M.begin_popups()
     M.popup_used_click = false
     M.interacted = false
-    M.wheel_consumed = false
     M._color_anchor = nil
     M._bind_mode_anchor = nil
     M._active_input_rect = nil
@@ -202,15 +200,23 @@ local function list_scroll_for(id, count, max_vis)
     return off, max_off, math.min(count, max_vis)
 end
 
-local function apply_list_wheel(id, count, max_vis, hot)
-    if not hot or input.wheel == 0 or M.wheel_consumed then return end
+local LIST_SCROLL_EDGE = 22
+
+local function apply_list_edge_scroll(id, count, max_vis, list_x, list_y, list_w, list_h)
     max_vis = max_vis or M.LIST_MAX_VISIBLE
-    local off, max_off = list_scroll_for(id, count, max_vis)
-    off = off - input.wheel
+    local max_off = math.max(0, count - max_vis)
+    if max_off <= 0 then return end
+    if not input.hover(list_x, list_y, list_w, list_h) then return end
+
+    local off = M._list_scroll[id] or 0
+    if input.my < list_y + LIST_SCROLL_EDGE then
+        off = off - 1
+    elseif input.my > list_y + list_h - LIST_SCROLL_EDGE then
+        off = off + 1
+    end
     if off < 0 then off = 0 end
     if off > max_off then off = max_off end
     M._list_scroll[id] = off
-    M.wheel_consumed = true
 end
 
 function M.end_popups()
@@ -681,31 +687,8 @@ function M.combo(x, y, w, id, label, options, default_idx)
         local n = #options
         local off, max_off, vis = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
         local list_h = vis * 18
-        local hot = input.hover(bx, by, bw, bh + list_h)
-        apply_list_wheel(id, n, M.LIST_MAX_VISIBLE, hot)
-        -- Drag-scroll the list when wheel is unavailable
-        if hot and input.lmb and max_off > 0 and not input.clicked(bx, by, bw, bh) then
-            if not M._list_drag or M._list_drag.id ~= id then
-                if input.lmb_click then
-                    M._list_drag = { id = id, last_y = input.my, off = off }
-                    mark_interacted()
-                end
-            end
-        end
-        if M._list_drag and M._list_drag.id == id then
-            if input.lmb then
-                local dy = input.my - M._list_drag.last_y
-                if math.abs(dy) >= 14 then
-                    local step = (dy > 0) and 1 or -1
-                    off = clamp((M._list_scroll[id] or 0) + step, 0, max_off)
-                    M._list_scroll[id] = off
-                    M._list_drag.last_y = input.my
-                end
-                mark_interacted()
-            else
-                M._list_drag = nil
-            end
-        end
+        local list_y = by + bh
+        apply_list_edge_scroll(id, n, M.LIST_MAX_VISIBLE, bx, list_y, bw, list_h)
         off = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
 
         M.rect(bx + 2, by + bh + 2, bw, list_h, theme.SHADOW, true, theme.CORNER_SMALL)
@@ -735,7 +718,7 @@ function M.combo(x, y, w, id, label, options, default_idx)
             M.rect(bx + bw - 4, by + bh, 3, list_h, theme.SLIDER_BG, true)
             anim.draw_scroll_thumb(bx + bw - 4, ty, 3, thumb_h)
         end
-        if hot and input.lmb_click and not M.block_under then
+        if input.hover(bx, by, bw, bh + list_h) and input.lmb_click and not M.block_under then
             mark_interacted()
         end
         return h + list_h
@@ -795,24 +778,8 @@ function M.multi(x, y, w, id, label, options, defaults)
         local n = #options
         local off, max_off, vis = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
         local list_h = vis * 18
-        local hot = input.hover(bx, by, bw, bh + list_h)
-        apply_list_wheel(id, n, M.LIST_MAX_VISIBLE, hot)
-        if hot and input.lmb and max_off > 0 then
-            if M._list_drag and M._list_drag.id == id and input.lmb then
-                local dy = input.my - M._list_drag.last_y
-                if math.abs(dy) >= 14 then
-                    local step = (dy > 0) and 1 or -1
-                    M._list_scroll[id] = clamp((M._list_scroll[id] or 0) + step, 0, max_off)
-                    M._list_drag.last_y = input.my
-                end
-                mark_interacted()
-            elseif input.lmb_click then
-                M._list_drag = { id = id, last_y = input.my }
-                mark_interacted()
-            end
-        elseif M._list_drag and M._list_drag.id == id and not input.lmb then
-            M._list_drag = nil
-        end
+        local list_y = by + bh
+        apply_list_edge_scroll(id, n, M.LIST_MAX_VISIBLE, bx, list_y, bw, list_h)
         off = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
 
         M.rect(bx + 2, by + bh + 2, bw, list_h, theme.SHADOW, true, theme.CORNER_SMALL)
@@ -844,7 +811,7 @@ function M.multi(x, y, w, id, label, options, defaults)
             M.rect(bx + bw - 4, by + bh, 3, list_h, theme.SLIDER_BG, true)
             anim.draw_scroll_thumb(bx + bw - 4, ty, 3, thumb_h)
         end
-        if hot and input.lmb_click and not M.block_under then
+        if input.hover(bx, by, bw, bh + list_h) and input.lmb_click and not M.block_under then
             mark_interacted()
         end
         return h + list_h

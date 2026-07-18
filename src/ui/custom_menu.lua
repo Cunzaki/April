@@ -1,6 +1,6 @@
 --[[
   Gamesense-style custom menu for April.
-  INSERT toggles by default (rebindable in Config → Menu). Scroll by dragging the scrollbar or click-dragging a column.
+  INSERT toggles by default (rebindable in Config → Menu). Scroll by hovering near the top or bottom of a column.
 ]]
 
 local theme = April.require("ui.gs_theme")
@@ -26,8 +26,9 @@ local open = true
 local tab_index = 1
 local win_x, win_y = 80, 80
 local scroll = { left = 0, right = 0 }
-local scroll_drag = nil
-local panel_drag = nil -- { key, last_y }
+
+local SCROLL_EDGE = 36
+local SCROLL_SPEED = 5
 
 local function screen_size()
     if draw and draw.get_screen_size then
@@ -170,17 +171,6 @@ local function draw_scrollbar(x, y, h, content_h, scroll_key)
     widgets.rect(x, y, 4, h, { 0, 0, 0, 0.26 }, true)
     widgets.rect(x + 1, y + 1, 2, h - 2, theme.SLIDER_BG, true)
     anim.draw_scroll_thumb(x, thumb_y, 4, thumb_h)
-
-    if gin.lmb_click and gin.hover(x - 4, y, 14, h) then
-        scroll_drag = scroll_key
-    end
-    if scroll_drag == scroll_key and gin.lmb then
-        local rel = (gin.my - y - thumb_h * 0.5) / math.max(1, h - thumb_h)
-        rel = math.max(0, math.min(1, rel))
-        scroll[scroll_key] = rel * max_scroll
-    elseif scroll_drag == scroll_key and not gin.lmb then
-        scroll_drag = nil
-    end
 end
 
 local function handle_column_scroll(x, y, w, h, scroll_key, content_h)
@@ -188,53 +178,17 @@ local function handle_column_scroll(x, y, w, h, scroll_key, content_h)
     if max_scroll <= 0 then return end
 
     local hot = gin.hover(x, y, w + 14, h)
-    if not hot then
-        if panel_drag and panel_drag.key == scroll_key then
-            if not gin.lmb and not gin.mmb and not gin.rmb then
-                panel_drag = nil
-            end
-        end
-        return
+    if not hot and scroll_key == "left" then
+        hot = gin.hover(gin.ui_x, y, theme.SIDEBAR_W + 8, h)
     end
+    if not hot then return end
 
-    -- Mouse wheel (dropdowns set widgets.wheel_consumed while open + hovered)
-    if gin.wheel ~= 0 and not widgets.wheel_consumed then
-        scroll[scroll_key] = scroll[scroll_key] - gin.wheel * 48
+    if gin.my < y + SCROLL_EDGE then
+        scroll[scroll_key] = scroll[scroll_key] - SCROLL_SPEED
         clamp_scroll(scroll_key, content_h, h)
-        widgets.wheel_consumed = true
-    end
-
-    -- Drag-to-scroll: LMB on empty space, RMB anywhere in column, or MMB
-    local can_lmb_drag = gin.lmb_click and not widgets.interacted
-        and not widgets.block_under
-        and not widgets.active_slider and not widgets.active_input
-        and not widgets.open_combo
-        and not widgets.open_multi and not widgets.open_color
-        and not widgets.open_bind_mode
-        and not scroll_drag
-    local can_rmb_drag = gin.rmb_click and not widgets.interacted
-        and not widgets.block_under
-        and not widgets.open_bind_mode
-        and not widgets.listening_key
-    if can_lmb_drag or gin.mmb_click or can_rmb_drag then
-        panel_drag = {
-            key = scroll_key,
-            last_y = gin.my,
-            btn = gin.mmb_click and "mmb" or (can_rmb_drag and "rmb" or "lmb"),
-        }
-    end
-    if panel_drag and panel_drag.key == scroll_key then
-        local held = (panel_drag.btn == "lmb" and gin.lmb)
-            or (panel_drag.btn == "rmb" and gin.rmb)
-            or (panel_drag.btn == "mmb" and gin.mmb)
-        if held then
-            local dy = gin.my - panel_drag.last_y
-            scroll[scroll_key] = scroll[scroll_key] - dy
-            panel_drag.last_y = gin.my
-            clamp_scroll(scroll_key, content_h, h)
-        else
-            panel_drag = nil
-        end
+    elseif gin.my > y + h - SCROLL_EDGE then
+        scroll[scroll_key] = scroll[scroll_key] + SCROLL_SPEED
+        clamp_scroll(scroll_key, content_h, h)
     end
 end
 
@@ -304,7 +258,6 @@ local function draw_group_column(groups, x, y, w, h, scroll_key)
     end
 
     widgets.clip = nil
-    -- Wheel after widgets so open dropdowns can consume it first
     handle_column_scroll(x, y, w, h, scroll_key, total)
     draw_scrollbar(x + w + 2, y, h, total, scroll_key)
 end
@@ -418,8 +371,7 @@ function M.draw()
         and not widgets.active_input
         and not widgets.block_under
         and not widgets.open_combo and not widgets.open_multi and not widgets.open_color
-        and not widgets.open_bind_mode
-        and not scroll_drag and not panel_drag then
+        and not widgets.open_bind_mode then
         widgets.dragging_window = true
         widgets.drag_offset_x = gin.mx - win_x
         widgets.drag_offset_y = gin.my - win_y

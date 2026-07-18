@@ -1,12 +1,12 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-18T04:30:56.793Z
+    Built: 2026-07-18T04:58:21.662Z
     UI: custom Gamesense menu (INSERT) — Vector menu tabs disabled
 ]]
 
 April = {
-    version = "3.85.8",
+    version = "3.85.13",
     debug = false,
     _mods = {},
     bundled = true,
@@ -18629,7 +18629,6 @@ end)()
 -- ── ui/gs_input.lua ──
 April._mods["ui.gs_input"] = (function()
 -- Mouse / key helpers. Raw cursor only — no windowed offset correction.
--- Wheel: UserInputService InputChanged + engine getters + PlayerMouse signals.
 local M = {}
 
 local prev_keys = {}
@@ -18648,86 +18647,17 @@ M.lmb_click = false
 M.rmb_click = false
 M.mmb_click = false
 M.lmb_release = false
-M.wheel = 0
-M._wheel_accum = 0
-M._scroll_ready = false
-M._scroll_hook_tries = 0
-M._uis_hooked = false
 M._game_cursor_hidden = false
 M._menu_open = false
 M.ui_x, M.ui_y, M.ui_w, M.ui_h = 0, 0, 0, 0
 
-local function on_wheel(dir)
-    if not dir or dir == 0 then return end
-    M._wheel_accum = (M._wheel_accum or 0) + dir
+function M.set_ui_rect(x, y, w, h)
+    M.ui_x, M.ui_y, M.ui_w, M.ui_h = x, y, w, h
 end
 
-local function connect_signal(signal, fn)
-    if not signal then return false end
-    local connect = signal.Connect or signal.connect
-    if type(connect) ~= "function" then return false end
-    local ok = pcall(function()
-        connect(signal, fn)
-    end)
-    return ok
-end
-
-local function wheel_from_input_obj(inputObj)
-    if not inputObj then return 0 end
-    local typ = inputObj.UserInputType or inputObj.user_input_type
-    local name = tostring(typ):lower()
-    if not name:find("wheel") and not name:find("mousewheel") then
-        return 0
-    end
-    local pos = inputObj.Position or inputObj.position
-    local z = pos and (pos.Z or pos.z or pos[3]) or 0
-    if z == 0 then
-        local delta = inputObj.Delta or inputObj.delta
-        if delta then
-            z = delta.Z or delta.z or delta[3] or 0
-        end
-    end
-    if z == 0 then
-        local dz = inputObj.Z or inputObj.z
-        if dz then z = dz end
-    end
-    if z == 0 then return 0 end
-    return z > 0 and 1 or -1
-end
-
-local function hook_user_input_service()
-    if M._uis_hooked then return true end
-    if not game then return false end
-
-    local uis = nil
-    pcall(function()
-        if game.GetService then uis = game:GetService("UserInputService") end
-    end)
-    if not uis then
-        pcall(function()
-            if game.get_service then uis = game:get_service("UserInputService") end
-        end)
-    end
-    if not uis then return false end
-
-    local hooked = false
-    local function handle(inputObj)
-        if not M._menu_open then return end
-        local dir = wheel_from_input_obj(inputObj)
-        if dir ~= 0 then on_wheel(dir) end
-    end
-
-    if connect_signal(uis.InputChanged or uis.input_changed, handle) then
-        hooked = true
-    end
-    if connect_signal(uis.InputBegan or uis.input_began, handle) then
-        hooked = true
-    end
-
-    if hooked then
-        M._uis_hooked = true
-    end
-    return hooked
+function M.set_menu_open(open)
+    M._menu_open = open == true
+    M.set_game_cursor_visible(not M._menu_open)
 end
 
 local function pcall_get_service(name)
@@ -18742,82 +18672,6 @@ local function pcall_get_service(name)
         end)
     end
     return svc
-end
-
-local function hook_player_mouse()
-    local lp = game and game.local_player
-    if not lp then return false end
-    local mouse = nil
-    pcall(function()
-        if lp.GetMouse then mouse = lp:GetMouse()
-        elseif lp.get_mouse then mouse = lp:get_mouse()
-        elseif lp.Mouse then mouse = lp.Mouse
-        end
-    end)
-    if not mouse then return false end
-    local ok = false
-    if connect_signal(mouse.WheelForward or mouse.wheel_forward, function()
-        on_wheel(1)
-    end) then ok = true end
-    if connect_signal(mouse.WheelBackward or mouse.wheel_backward, function()
-        on_wheel(-1)
-    end) then ok = true end
-    return ok
-end
-
-local SCROLL_GETTERS = {
-    "get_scroll_delta", "get_mouse_wheel", "get_mouse_scroll",
-    "get_wheel_delta", "get_scroll", "scroll_delta",
-    "mouse_wheel_delta", "wheel_delta", "scroll_y",
-}
-
-local function poll_scroll_getters()
-    local tables = { input, utility, draw }
-    for ti = 1, #tables do
-        local tbl = tables[ti]
-        if type(tbl) == "table" then
-            for _, name in ipairs(SCROLL_GETTERS) do
-                local fn = tbl[name]
-                if type(fn) == "function" then
-                    local ok, v = pcall(fn)
-                    if ok and v ~= nil then
-                        local n = tonumber(v)
-                        if n and n ~= 0 then
-                            on_wheel(n > 0 and 1 or -1)
-                        elseif type(v) == "table" then
-                            local z = tonumber(v.z or v.Z or v[3])
-                            if z and z ~= 0 then
-                                on_wheel(z > 0 and 1 or -1)
-                            end
-                        end
-                    end
-                end
-                local prop = tbl[name]
-                if type(prop) == "number" and prop ~= 0 then
-                    on_wheel(prop > 0 and 1 or -1)
-                end
-            end
-        end
-    end
-end
-
-local function ensure_scroll_hooks()
-    if M._scroll_ready then return end
-    M._scroll_hook_tries = (M._scroll_hook_tries or 0) + 1
-    if hook_user_input_service() or hook_player_mouse() then
-        M._scroll_ready = true
-    elseif M._scroll_hook_tries > 240 then
-        M._scroll_ready = true
-    end
-end
-
-function M.set_ui_rect(x, y, w, h)
-    M.ui_x, M.ui_y, M.ui_w, M.ui_h = x, y, w, h
-end
-
-function M.set_menu_open(open)
-    M._menu_open = open == true
-    M.set_game_cursor_visible(not M._menu_open)
 end
 
 function M.set_game_cursor_visible(visible)
@@ -18869,8 +18723,6 @@ function M.key_pressed(vk)
 end
 
 function M.begin_frame()
-    ensure_scroll_hooks()
-
     local amx, amy = 0, 0
     if utility and utility.get_mouse_pos then
         amx, amy = utility.get_mouse_pos()
@@ -18892,23 +18744,6 @@ function M.begin_frame()
     prev_lmb = M.lmb
     prev_rmb = M.rmb
     prev_mmb = M.mmb
-
-    poll_scroll_getters()
-
-    if M._menu_open and M.hover(M.ui_x, M.ui_y, M.ui_w, M.ui_h) then
-        if M.key_pressed(0x21) then on_wheel(3) end
-        if M.key_pressed(0x22) then on_wheel(-3) end
-    end
-
-    local w = M._wheel_accum
-    M._wheel_accum = 0
-    if w > 0 then
-        M.wheel = math.max(1, math.floor(w + 0.5))
-    elseif w < 0 then
-        M.wheel = math.min(-1, math.ceil(w - 0.5))
-    else
-        M.wheel = 0
-    end
 end
 
 function M.hover(x, y, w, h)
@@ -19865,7 +19700,6 @@ M.interacted = false -- any widget captured LMB this frame
 M._hue_cache = {} -- id -> hue 0..1 for color picker
 M._list_scroll = {} -- id -> first visible option index (0-based)
 M.LIST_MAX_VISIBLE = 8
-M.wheel_consumed = false
 M.block_under = false -- true while pointer is over a floating popup (prior frame rect)
 -- Floating color picker (drawn after the menu so it doesn't expand sections)
 M._color_anchor = nil -- { id, x, y, w }
@@ -19972,7 +19806,6 @@ end
 function M.begin_popups()
     M.popup_used_click = false
     M.interacted = false
-    M.wheel_consumed = false
     M._color_anchor = nil
     M._bind_mode_anchor = nil
     M._active_input_rect = nil
@@ -20046,15 +19879,23 @@ local function list_scroll_for(id, count, max_vis)
     return off, max_off, math.min(count, max_vis)
 end
 
-local function apply_list_wheel(id, count, max_vis, hot)
-    if not hot or input.wheel == 0 or M.wheel_consumed then return end
+local LIST_SCROLL_EDGE = 22
+
+local function apply_list_edge_scroll(id, count, max_vis, list_x, list_y, list_w, list_h)
     max_vis = max_vis or M.LIST_MAX_VISIBLE
-    local off, max_off = list_scroll_for(id, count, max_vis)
-    off = off - input.wheel
+    local max_off = math.max(0, count - max_vis)
+    if max_off <= 0 then return end
+    if not input.hover(list_x, list_y, list_w, list_h) then return end
+
+    local off = M._list_scroll[id] or 0
+    if input.my < list_y + LIST_SCROLL_EDGE then
+        off = off - 1
+    elseif input.my > list_y + list_h - LIST_SCROLL_EDGE then
+        off = off + 1
+    end
     if off < 0 then off = 0 end
     if off > max_off then off = max_off end
     M._list_scroll[id] = off
-    M.wheel_consumed = true
 end
 
 function M.end_popups()
@@ -20525,31 +20366,8 @@ function M.combo(x, y, w, id, label, options, default_idx)
         local n = #options
         local off, max_off, vis = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
         local list_h = vis * 18
-        local hot = input.hover(bx, by, bw, bh + list_h)
-        apply_list_wheel(id, n, M.LIST_MAX_VISIBLE, hot)
-        -- Drag-scroll the list when wheel is unavailable
-        if hot and input.lmb and max_off > 0 and not input.clicked(bx, by, bw, bh) then
-            if not M._list_drag or M._list_drag.id ~= id then
-                if input.lmb_click then
-                    M._list_drag = { id = id, last_y = input.my, off = off }
-                    mark_interacted()
-                end
-            end
-        end
-        if M._list_drag and M._list_drag.id == id then
-            if input.lmb then
-                local dy = input.my - M._list_drag.last_y
-                if math.abs(dy) >= 14 then
-                    local step = (dy > 0) and 1 or -1
-                    off = clamp((M._list_scroll[id] or 0) + step, 0, max_off)
-                    M._list_scroll[id] = off
-                    M._list_drag.last_y = input.my
-                end
-                mark_interacted()
-            else
-                M._list_drag = nil
-            end
-        end
+        local list_y = by + bh
+        apply_list_edge_scroll(id, n, M.LIST_MAX_VISIBLE, bx, list_y, bw, list_h)
         off = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
 
         M.rect(bx + 2, by + bh + 2, bw, list_h, theme.SHADOW, true, theme.CORNER_SMALL)
@@ -20579,7 +20397,7 @@ function M.combo(x, y, w, id, label, options, default_idx)
             M.rect(bx + bw - 4, by + bh, 3, list_h, theme.SLIDER_BG, true)
             anim.draw_scroll_thumb(bx + bw - 4, ty, 3, thumb_h)
         end
-        if hot and input.lmb_click and not M.block_under then
+        if input.hover(bx, by, bw, bh + list_h) and input.lmb_click and not M.block_under then
             mark_interacted()
         end
         return h + list_h
@@ -20639,24 +20457,8 @@ function M.multi(x, y, w, id, label, options, defaults)
         local n = #options
         local off, max_off, vis = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
         local list_h = vis * 18
-        local hot = input.hover(bx, by, bw, bh + list_h)
-        apply_list_wheel(id, n, M.LIST_MAX_VISIBLE, hot)
-        if hot and input.lmb and max_off > 0 then
-            if M._list_drag and M._list_drag.id == id and input.lmb then
-                local dy = input.my - M._list_drag.last_y
-                if math.abs(dy) >= 14 then
-                    local step = (dy > 0) and 1 or -1
-                    M._list_scroll[id] = clamp((M._list_scroll[id] or 0) + step, 0, max_off)
-                    M._list_drag.last_y = input.my
-                end
-                mark_interacted()
-            elseif input.lmb_click then
-                M._list_drag = { id = id, last_y = input.my }
-                mark_interacted()
-            end
-        elseif M._list_drag and M._list_drag.id == id and not input.lmb then
-            M._list_drag = nil
-        end
+        local list_y = by + bh
+        apply_list_edge_scroll(id, n, M.LIST_MAX_VISIBLE, bx, list_y, bw, list_h)
         off = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
 
         M.rect(bx + 2, by + bh + 2, bw, list_h, theme.SHADOW, true, theme.CORNER_SMALL)
@@ -20688,7 +20490,7 @@ function M.multi(x, y, w, id, label, options, defaults)
             M.rect(bx + bw - 4, by + bh, 3, list_h, theme.SLIDER_BG, true)
             anim.draw_scroll_thumb(bx + bw - 4, ty, 3, thumb_h)
         end
-        if hot and input.lmb_click and not M.block_under then
+        if input.hover(bx, by, bw, bh + list_h) and input.lmb_click and not M.block_under then
             mark_interacted()
         end
         return h + list_h
@@ -21592,7 +21394,7 @@ end)()
 April._mods["ui.custom_menu"] = (function()
 --[[
   Gamesense-style custom menu for April.
-  INSERT toggles by default (rebindable in Config → Menu). Scroll by dragging the scrollbar or click-dragging a column.
+  INSERT toggles by default (rebindable in Config → Menu). Scroll by hovering near the top or bottom of a column.
 ]]
 
 local theme = April.require("ui.gs_theme")
@@ -21618,8 +21420,9 @@ local open = true
 local tab_index = 1
 local win_x, win_y = 80, 80
 local scroll = { left = 0, right = 0 }
-local scroll_drag = nil
-local panel_drag = nil -- { key, last_y }
+
+local SCROLL_EDGE = 36
+local SCROLL_SPEED = 5
 
 local function screen_size()
     if draw and draw.get_screen_size then
@@ -21762,17 +21565,6 @@ local function draw_scrollbar(x, y, h, content_h, scroll_key)
     widgets.rect(x, y, 4, h, { 0, 0, 0, 0.26 }, true)
     widgets.rect(x + 1, y + 1, 2, h - 2, theme.SLIDER_BG, true)
     anim.draw_scroll_thumb(x, thumb_y, 4, thumb_h)
-
-    if gin.lmb_click and gin.hover(x - 4, y, 14, h) then
-        scroll_drag = scroll_key
-    end
-    if scroll_drag == scroll_key and gin.lmb then
-        local rel = (gin.my - y - thumb_h * 0.5) / math.max(1, h - thumb_h)
-        rel = math.max(0, math.min(1, rel))
-        scroll[scroll_key] = rel * max_scroll
-    elseif scroll_drag == scroll_key and not gin.lmb then
-        scroll_drag = nil
-    end
 end
 
 local function handle_column_scroll(x, y, w, h, scroll_key, content_h)
@@ -21780,53 +21572,17 @@ local function handle_column_scroll(x, y, w, h, scroll_key, content_h)
     if max_scroll <= 0 then return end
 
     local hot = gin.hover(x, y, w + 14, h)
-    if not hot then
-        if panel_drag and panel_drag.key == scroll_key then
-            if not gin.lmb and not gin.mmb and not gin.rmb then
-                panel_drag = nil
-            end
-        end
-        return
+    if not hot and scroll_key == "left" then
+        hot = gin.hover(gin.ui_x, y, theme.SIDEBAR_W + 8, h)
     end
+    if not hot then return end
 
-    -- Mouse wheel (dropdowns set widgets.wheel_consumed while open + hovered)
-    if gin.wheel ~= 0 and not widgets.wheel_consumed then
-        scroll[scroll_key] = scroll[scroll_key] - gin.wheel * 48
+    if gin.my < y + SCROLL_EDGE then
+        scroll[scroll_key] = scroll[scroll_key] - SCROLL_SPEED
         clamp_scroll(scroll_key, content_h, h)
-        widgets.wheel_consumed = true
-    end
-
-    -- Drag-to-scroll: LMB on empty space, RMB anywhere in column, or MMB
-    local can_lmb_drag = gin.lmb_click and not widgets.interacted
-        and not widgets.block_under
-        and not widgets.active_slider and not widgets.active_input
-        and not widgets.open_combo
-        and not widgets.open_multi and not widgets.open_color
-        and not widgets.open_bind_mode
-        and not scroll_drag
-    local can_rmb_drag = gin.rmb_click and not widgets.interacted
-        and not widgets.block_under
-        and not widgets.open_bind_mode
-        and not widgets.listening_key
-    if can_lmb_drag or gin.mmb_click or can_rmb_drag then
-        panel_drag = {
-            key = scroll_key,
-            last_y = gin.my,
-            btn = gin.mmb_click and "mmb" or (can_rmb_drag and "rmb" or "lmb"),
-        }
-    end
-    if panel_drag and panel_drag.key == scroll_key then
-        local held = (panel_drag.btn == "lmb" and gin.lmb)
-            or (panel_drag.btn == "rmb" and gin.rmb)
-            or (panel_drag.btn == "mmb" and gin.mmb)
-        if held then
-            local dy = gin.my - panel_drag.last_y
-            scroll[scroll_key] = scroll[scroll_key] - dy
-            panel_drag.last_y = gin.my
-            clamp_scroll(scroll_key, content_h, h)
-        else
-            panel_drag = nil
-        end
+    elseif gin.my > y + h - SCROLL_EDGE then
+        scroll[scroll_key] = scroll[scroll_key] + SCROLL_SPEED
+        clamp_scroll(scroll_key, content_h, h)
     end
 end
 
@@ -21896,7 +21652,6 @@ local function draw_group_column(groups, x, y, w, h, scroll_key)
     end
 
     widgets.clip = nil
-    -- Wheel after widgets so open dropdowns can consume it first
     handle_column_scroll(x, y, w, h, scroll_key, total)
     draw_scrollbar(x + w + 2, y, h, total, scroll_key)
 end
@@ -22010,8 +21765,7 @@ function M.draw()
         and not widgets.active_input
         and not widgets.block_under
         and not widgets.open_combo and not widgets.open_multi and not widgets.open_color
-        and not widgets.open_bind_mode
-        and not scroll_drag and not panel_drag then
+        and not widgets.open_bind_mode then
         widgets.dragging_window = true
         widgets.drag_offset_x = gin.mx - win_x
         widgets.drag_offset_y = gin.my - win_y
