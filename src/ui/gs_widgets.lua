@@ -35,8 +35,14 @@ M._input_repeat_vk = nil
 
 local LISTEN_SKIP = {
     [0x01] = true, -- LMB used for UI
-    [0x2D] = true, -- INSERT menu toggle
 }
+
+local function listen_skip_vk(vk)
+    if LISTEN_SKIP[vk] then return true end
+    local menu_vk = state.get_key("april_ui_menu_key")
+    if not menu_vk or menu_vk == 0 then menu_vk = 0x2D end
+    return vk == menu_vk
+end
 
 local function clamp(v, a, b)
     if v < a then return a end
@@ -411,7 +417,7 @@ function M.tick_key_listen()
     end
     for i = 1, #LISTEN_VKS do
         local vk = LISTEN_VKS[i]
-        if not LISTEN_SKIP[vk] and input.key_pressed(vk) then
+        if not listen_skip_vk(vk) and input.key_pressed(vk) then
             state.set_key(M.listening_key, vk)
             M.listening_key = nil
             return
@@ -957,6 +963,38 @@ function M.aim_key_row(x, y, w, key_id, mode_id, label)
     return h
 end
 
+function M.hotkey_row(x, y, w, id, label, default_vk)
+    if id and not state.is_visible(id) then return 0 end
+    if state.get_key(id) == 0 and default_vk and default_vk ~= 0 then
+        state.set_key(id, default_vk)
+    end
+
+    local h = theme.ROW_H
+    if not in_clip(y, h) then return h end
+
+    local chip_w = 56
+    M.text(x + 4, y + 4, label, theme.TEXT, theme.FONT)
+
+    local kx = x + w - chip_w
+    local ky = y + 4
+    local listening = M.listening_key == id
+    local vk = state.get_key(id)
+    local klabel = listening and "..." or ("[" .. M.vk_name(vk) .. "]")
+    M.rect(kx, ky, chip_w, 18, listening and theme.ACCENT_DIM or theme.BUTTON, true, 8)
+    M.rect(kx, ky, chip_w, 18, listening and theme.FOCUS or theme.BORDER_SOFT, false, 8)
+    local tw = text_w(klabel, theme.FONT_SMALL)
+    M.text(kx + (chip_w - tw) * 0.5, ky + 3, klabel, theme.TEXT_ACTIVE, theme.FONT_SMALL)
+
+    if ui_clicked(kx, ky, chip_w, 18) then
+        mark_interacted()
+        M.open_bind_mode = nil
+        M._bind_mode_hit = nil
+        M.listening_key = listening and nil or id
+    end
+
+    return h
+end
+
 function M.color_row(x, y, w, id, label, default_col)
     if id and not state.is_visible(id) then return 0 end
     state.define_color(id, default_col or { 1, 1, 1, 1 })
@@ -1129,7 +1167,7 @@ function M.estimate_height(item)
         return theme.ROW_H - 4
     elseif t == "color" then
         return theme.ROW_H
-    elseif t == "checkbox" or t == "keybind" or t == "aim_key" then
+    elseif t == "checkbox" or t == "keybind" or t == "aim_key" or t == "hotkey" then
         return theme.ROW_H
     end
     return theme.ROW_H + extra
@@ -1143,6 +1181,8 @@ function M.draw_item(item, x, y, w)
         return M.keybind(x, y, w, item.id, item.label, item.default)
     elseif t == "aim_key" then
         return M.aim_key_row(x, y, w, item.id, item.mode_id, item.label)
+    elseif t == "hotkey" then
+        return M.hotkey_row(x, y, w, item.id, item.label, item.default)
     elseif t == "slider" then
         return M.slider(x, y, w, item.id, item.label, item.min, item.max, item.default, item)
     elseif t == "combo" then

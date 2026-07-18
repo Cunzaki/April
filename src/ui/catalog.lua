@@ -70,6 +70,10 @@ local function ak(key_id, label, gate)
     return { type = "aim_key", id = key_id, mode_id = key_id .. "_mode", label = label, gate = gate }
 end
 
+local function hk(id, label, gate, default_vk)
+    return { type = "hotkey", id = id, label = label, gate = gate, default = default_vk or 0x2D }
+end
+
 local function from_toggles(list, gate)
     local out = {}
     for _, t in ipairs(list) do
@@ -451,6 +455,8 @@ local function build_config()
     local menu = {
         title = "Menu",
         items = {
+            hk("april_ui_menu_key", "Menu Toggle Key"),
+            sep(),
             cb("april_ui_custom_colors", "Color Options", false),
             cb("april_ui_custom_anim", "Animation Options", false),
             cb("april_ui_show_cursor_dot", "Show Cursor Dot", true),

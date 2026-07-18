@@ -163,6 +163,7 @@ local HOTKEY_KEYS = {
     "april_bullet_manip_enabled",
     "april_silent_aim",
     "april_player_enabled",
+    "april_ui_menu_key",
 }
 
 function M.get_config_path(name)

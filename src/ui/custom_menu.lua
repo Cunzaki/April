@@ -1,6 +1,6 @@
 --[[
   Gamesense-style custom menu for April.
-  INSERT toggles. Scroll by dragging the scrollbar or click-dragging a column.
+  INSERT toggles by default (rebindable in Config → Menu). Scroll by dragging the scrollbar or click-dragging a column.
 ]]
 
 local theme = April.require("ui.gs_theme")
@@ -13,7 +13,15 @@ local state = April.require("ui.gs_state")
 
 local M = {}
 
-local TOGGLE_VK = 0x2D
+local TOGGLE_VK_DEFAULT = 0x2D
+
+local function menu_toggle_vk()
+    local vk = state.get_key("april_ui_menu_key")
+    if not vk or vk == 0 then
+        vk = TOGGLE_VK_DEFAULT
+    end
+    return vk
+end
 local open = true
 local tab_index = 1
 local win_x, win_y = 80, 80
@@ -350,6 +358,9 @@ function M.init()
     state.define_color("april_ui_col_sidebar", theme.ACCENT)
     state.define_color("april_ui_col_checkbox", theme.ACCENT)
     state.define_color("april_ui_col_overlay", theme.ACCENT)
+    if state.get_key("april_ui_menu_key") == 0 then
+        state.set_key("april_ui_menu_key", TOGGLE_VK_DEFAULT)
+    end
     local sw, sh = screen_size()
     win_x = math.floor((sw - theme.WINDOW_W) * 0.5)
     win_y = math.floor((sh - theme.WINDOW_H) * 0.3)
@@ -365,13 +376,14 @@ function M.draw()
     gin.begin_frame()
     anim.sync_theme()
     widgets.begin_popups()
-    widgets.tick_key_listen()
-    widgets.tick_text_input()
 
-    if gin.key_pressed(TOGGLE_VK) and not widgets.listening_key and not widgets.active_input then
+    if gin.key_pressed(menu_toggle_vk()) and not widgets.listening_key and not widgets.active_input then
         open = not open
         gin.set_menu_open(open)
     end
+
+    widgets.tick_key_listen()
+    widgets.tick_text_input()
 
     if not open then
         if gin._menu_open or gin._game_cursor_hidden then
