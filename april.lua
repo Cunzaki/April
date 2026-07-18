@@ -1,12 +1,12 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-18T04:26:02.685Z
+    Built: 2026-07-18T04:28:22.599Z
     UI: custom Gamesense menu (INSERT) — Vector menu tabs disabled
 ]]
 
 April = {
-    version = "3.85.6",
+    version = "3.85.7",
     debug = false,
     _mods = {},
     bundled = true,
