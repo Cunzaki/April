@@ -28,6 +28,23 @@ local NAME_HINTS = {
     "candy cane", "carrot blade", "halloween scythe", "boulder",
 }
 
+-- MeleeChecks reach from ToolInfo dump (RaycastUtil MouseRaycast / HitMelee).
+local MELEE_RANGE = {
+    ["Stone Hatchet"] = 5,
+    ["Iron Shard Hatchet"] = 5,
+    ["Steel Axe"] = 5.5,
+    Chainsaw = 6.5,
+    ["Stone Pickaxe"] = 5,
+    ["Iron Shard Pickaxe"] = 5,
+    ["Steel Pickaxe"] = 5.5,
+    ["Mining Drill"] = 6.5,
+    ["Bone Tool"] = 5,
+    ["Candy Cane"] = 5,
+    ["Carrot Blade"] = 5,
+    ["Halloween Scythe"] = 5.5,
+    Boulder = 4.5,
+}
+
 local function inst_name(inst)
     if not inst then return nil end
     return inst.name or inst.Name
@@ -132,6 +149,47 @@ end
 
 function M.holding_farm_tool()
     return M.get_held_farm_tool_name() ~= nil
+end
+
+local function box_reach(box)
+    if not box then return nil end
+    local sz = box.Size or box.size
+    if sz then
+        local r = sz.X or sz.x
+        if r and r > 0 then return r end
+    end
+    local mag = box.Magnitude
+    if type(mag) == "number" and mag > 0 then
+        return mag
+    end
+    return nil
+end
+
+function M.melee_range(tool_name)
+    tool_name = normalize(tool_name)
+    if not tool_name then return 5 end
+
+    local cached = MELEE_RANGE[tool_name]
+    if cached then return cached end
+
+    local data = bootstrap.get_module("ToolInfo")
+    local entry = data and data[tool_name]
+    local checks = entry and entry.Melee and entry.Melee.MeleeChecks
+    if type(checks) == "table" then
+        local best = 0
+        for i = 1, #checks do
+            local row = checks[i]
+            local reach = row and box_reach(row[2])
+            if reach and reach > best then
+                best = reach
+            end
+        end
+        if best > 0 then
+            return best
+        end
+    end
+
+    return 5
 end
 
 function M.all_names()

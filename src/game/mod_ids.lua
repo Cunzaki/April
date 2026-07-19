@@ -1,9 +1,12 @@
 local M = {}
 
+M.GROUP_ID = 1154360
+M.MIN_STAFF_RANK = 6 -- above Fan (rank 5)
+
 -- Chunk Studios (1154360) staff ranks above Fan.
 -- Roles: OG, Game Tester, Game Moderator, Contribution, Developers,
 -- Lead Developer, Co-Founder, Founder. Excludes Guest / Member / Fan.
--- Synced from groups.roblox.com on 2026-07-09.
+-- Static fallback synced from groups.roblox.com; live roster via game.mod_group.
 M.ROLES = {
 
     -- Founder
@@ -266,13 +269,165 @@ function M.glyph_kind(role)
     return "staff"
 end
 
+local function normalize_uid(user_id)
+    local uid = tonumber(user_id)
+    if not uid or uid == 0 then return nil end
+    return uid
+end
+
+M._player_roles = {}
+
+function M.reset_session()
+    M._player_roles = {}
+    local group = mod_group()
+    if group.reset_session then
+        group.reset_session()
+    end
+end
+
+function M.clear_role_cache()
+    M._player_roles = {}
+end
+
+function M.invalidate_uid(user_id)
+    local uid = normalize_uid(user_id)
+    if uid then
+        M._player_roles[uid] = nil
+    end
+end
+
+local function cache_key(player)
+    local uid = normalize_uid(player.user_id)
+    if uid then return uid end
+    return player.name or player.display_name
+end
+
+local function read_cached_role(key)
+    if key == nil then return nil, false end
+    if M._player_roles[key] == nil then
+        return nil, false
+    end
+    local cached = M._player_roles[key]
+    if cached == false then return nil, true end
+    return cached, true
+end
+
+local function write_cached_role(key, role)
+    if key == nil then return end
+    M._player_roles[key] = role or false
+end
+
+local function mod_group()
+    return April.require("game.mod_group")
+end
+
+local function player_state()
+    return April.require("game.player_state")
+end
+
+local function role_from_game_tag(player)
+    local tag = player_state().staff_tag(player)
+    if tag == "OWNER" then return "Founder" end
+    if tag == "ADMIN" then return "Developers" end
+    if tag == "MOD" then return "Game Moderator" end
+    return nil
+end
+
 function M.role_for(user_id)
-    if not user_id then return nil end
-    return M.ROLES[user_id] or M.ROLES[tonumber(user_id)]
+    local uid = normalize_uid(user_id)
+    if not uid then return nil end
+
+    local group = mod_group()
+    if group.available() then
+        group.ensure_started()
+        local live = group.role_for(uid)
+        if live then return live end
+    end
+
+    return M.ROLES[uid]
+end
+
+function M.role_for_player(player, opts)
+    if not player or player.is_local then return nil end
+    opts = opts or {}
+
+    local key = cache_key(player)
+    local cached, hit = read_cached_role(key)
+    if hit then
+        return cached
+    end
+
+    local tag_role = role_from_game_tag(player)
+    if tag_role then
+        local uid = normalize_uid(player.user_id)
+        if uid then
+            local precise = M.role_for(uid)
+            if precise then
+                write_cached_role(key, precise)
+                return precise
+            end
+        end
+        write_cached_role(key, tag_role)
+        return tag_role
+    end
+
+    local uid = normalize_uid(player.user_id)
+    if not uid then
+        write_cached_role(key, false)
+        return nil
+    end
+
+    local group = mod_group()
+    if group.available() then
+        group.ensure_started()
+        local live = group.role_for(uid)
+        if live then
+            write_cached_role(key, live)
+            return live
+        end
+        if opts.queue_lookup then
+            group.queue_lookup(uid)
+        end
+    end
+
+    local static_role = M.ROLES[uid]
+    if static_role then
+        write_cached_role(key, static_role)
+        return static_role
+    end
+
+    if opts.mark_unknown then
+        write_cached_role(key, false)
+    end
+
+    return nil
 end
 
 function M.is_mod(user_id)
     return M.role_for(user_id) ~= nil
+end
+
+function M.is_staff_player(player)
+    return M.role_for_player(player) ~= nil
+end
+
+function M.ensure_started()
+    local group = mod_group()
+    if group.available() then
+        group.ensure_started()
+    end
+end
+
+function M.tick()
+    M.ensure_started()
+end
+
+function M.invalidate_player(player)
+    if not player then return end
+    local key = cache_key(player)
+    if key ~= nil then
+        M._player_roles[key] = nil
+    end
 end
 
 return M

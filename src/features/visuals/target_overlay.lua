@@ -1,13 +1,11 @@
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
-local esp_util = April.require("core.esp_util")
 local menu_util = April.require("core.menu_util")
 local image_cache = April.require("core.image_cache")
 local items = April.require("game.items")
 local player_gear = April.require("game.player_gear")
 local player_state = April.require("game.player_state")
-local combat_target = April.require("game.combat_target")
-local math_util = April.require("core.math_util")
+local targeting = April.require("features.combat.targeting")
 local text_util = April.require("core.text_util")
 
 local M = {}
@@ -75,36 +73,38 @@ local function crosshair_center()
     return sw * 0.5, sh * 0.5
 end
 
-local function find_crosshair_target(fov_px)
-    if not entity or not entity.get_players then return nil end
+local function overlay_aim_config()
+    local silent_on = settings.enabled("april_silent_aim")
+    local aim_on = settings.enabled("april_aimbot")
+    local silent_fov = silent_on and settings.num("april_silent_fov", 150) or nil
+    local aim_fov = aim_on and settings.num("april_aim_fov", 120) or nil
+
+    if not silent_fov and not aim_fov then
+        return nil, nil
+    end
+    if silent_fov and aim_fov then
+        if silent_fov >= aim_fov then
+            return silent_fov, "april_silent_"
+        end
+        return aim_fov, "april_aim_"
+    end
+    if silent_fov then
+        return silent_fov, "april_silent_"
+    end
+    return aim_fov, "april_aim_"
+end
+
+local function find_overlay_target()
+    local fov, prefix = overlay_aim_config()
+    if not fov or not prefix then return nil end
 
     local cx, cy = crosshair_center()
-    local best, best_dist = nil, fov_px
-
-    for _, p in ipairs(entity.get_players()) do
-        if not player_state.is_combat_target(p) then goto continue end
-
-        local pos = p.head_position or p.position
-        if not pos then goto continue end
-
-        local px = pos.x or pos[1]
-        local py = pos.y or pos[2]
-        local pz = pos.z or pos[3]
-        if not px then goto continue end
-
-        local sx, sy, vis = esp_util.w2s(px, py, pz)
-        if not vis then goto continue end
-
-        local dist = math_util.screen_fov_dist(sx, sy, cx, cy)
-        if dist <= fov_px and dist < best_dist then
-            best_dist = dist
-            best = p
-        end
-
-        ::continue::
-    end
-
-    return best
+    return targeting.find_target(cx, cy, fov, prefix, {
+        ignore_whitelist = true,
+        ignore_visible = true,
+        players_only = true,
+        force_crosshair_priority = true,
+    })
 end
 
 local function get_gear(player)
@@ -396,17 +396,12 @@ function M.register_menu()
     menu_util.register_keybind(T, G.VISUALS, P, "Target Gear", false)
 
     local root = menu_util.parent(P)
-    menu.add_checkbox(T, G.VISUALS, P .. "_fallback_fov", "Crosshair FOV Fallback", false, root)
-    menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Fallback FOV", 40, 400, 150,
-        menu_util.parent(P .. "_fallback_fov"))
     menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, root)
 
     menu_util.bind_children(P, {
-        P .. "_fallback_fov", P .. "_fov",
         P .. "_gear_size", P .. "_top",
     })
-    menu_util.bind_children(P .. "_fallback_fov", { P .. "_fov" })
 end
 
 function M.refresh_target()
@@ -418,10 +413,7 @@ function M.refresh_target()
 
     local gear_sz = settings.num(P .. "_gear_size", 48)
 
-    local target = combat_target.get()
-    if not target and settings.bool(P .. "_fallback_fov", false) then
-        target = find_crosshair_target(settings.num(P .. "_fov", 150))
-    end
+    local target = find_overlay_target()
 
     if not target or not player_state.is_combat_target(target) then
         M._target = nil

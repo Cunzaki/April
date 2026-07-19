@@ -16,13 +16,18 @@ local Y_ID = "april_mod_checker_y"
 local PANEL_W = 260
 local HEAD_OFFSET = 3.5
 local TITLE_H = 24
+local SCAN_MS = 2500
+local META_REFRESH_MS = 1000
+local LOOKUP_BUDGET = 2
 
 local seen = {}
 local active = {}
+local panel_rows = {}
 local last_scan = -1
-local SCAN_MS = 2500
+local last_meta_refresh = 0
 M._session = nil
 M._was_enabled = false
+M._group_started = false
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -33,13 +38,27 @@ local function session_id()
     local pid = game.place_id or 0
     local ws = game.workspace
     local ws_addr = (ws and (ws.Address or ws.address)) or 0
-    return pid .. ":" .. ws_addr
+    local job = (game.job_id or game.JobId or "")
+    return tostring(pid) .. ":" .. tostring(ws_addr) .. ":" .. tostring(job)
+end
+
+local function player_uid(p)
+    local uid = tonumber(p.user_id)
+    if uid and uid ~= 0 then return uid end
+    return p.name or p.display_name
 end
 
 function M.reset_state()
     seen = {}
     active = {}
+    panel_rows = {}
     last_scan = -1
+    last_meta_refresh = 0
+end
+
+function M.on_session_changed()
+    M.reset_state()
+    mod_ids.reset_session()
 end
 
 function M.tick_session()
@@ -51,7 +70,7 @@ function M.tick_session()
     end
     if sid ~= M._session then
         M._session = sid
-        M.reset_state()
+        M.on_session_changed()
     end
 end
 
@@ -103,12 +122,15 @@ function M.register_menu()
 end
 
 function M.init()
-    last_scan = -1
+    M.on_session_changed()
+    M._session = session_id()
+    mod_ids.ensure_started()
+    M._group_started = true
 end
 
 function M.track_player(p, role)
-    local uid = p.user_id
-    if not uid or uid == 0 then return end
+    local uid = player_uid(p)
+    if not uid or uid == "" then return end
 
     local now = tick_ms()
     if not active[uid] then
@@ -118,50 +140,94 @@ function M.track_player(p, role)
             username = p.name or "?",
             role = role,
             first_seen = now,
+            player = p,
         }
     else
         local entry = active[uid]
         entry.label = player_label(p)
         entry.username = p.name or entry.username
         entry.role = role
+        entry.player = p
     end
 end
 
-function M.check_player(p)
-    if not settings.enabled(P) then return end
-    if not p or p.is_local then return end
+function M.check_player(p, lookup_budget)
+    if not settings.enabled(P) then return lookup_budget end
+    if not p or p.is_local then return lookup_budget end
 
-    local uid = p.user_id
-    if not uid or uid == 0 then return end
+    local queue = lookup_budget and lookup_budget > 0
+    local role = mod_ids.role_for_player(p, {
+        queue_lookup = queue,
+        mark_unknown = not queue,
+    })
+    if queue and role == nil then
+        local uid = tonumber(p.user_id)
+        if uid and uid ~= 0 then
+            lookup_budget = lookup_budget - 1
+        end
+    end
+    if not role then return lookup_budget end
 
-    local role = mod_ids.role_for(uid)
-    if not role then return end
+    local uid = player_uid(p)
+    if not uid or uid == "" then return lookup_budget end
 
     M.track_player(p, role)
 
-    if seen[uid] then return end
+    if seen[uid] then return lookup_budget end
     seen[uid] = true
-    local label = player_label(p)
-    notify.warning(string.format("%s: %s (%s)", mod_ids.short_label(role), label, p.name or "?"), 6000)
+    notify.warning(string.format("%s: %s (%s)", mod_ids.short_label(role), player_label(p), p.name or "?"), 6000)
+    return lookup_budget
 end
 
-function M.reconcile_active()
-    if not entity or not entity.get_players then return end
+local function rebuild_panel_rows(now)
+    local rows = {}
+    local me = env.get_local_player()
 
-    local players = entity.get_players()
-    if #players == 0 then return end
+    for uid, entry in pairs(active) do
+        local p = entry.player
+        local dist = nil
+        if p and me and me.position and p.position then
+            local dx = p.position.x - me.position.x
+            local dy = p.position.y - me.position.y
+            local dz = p.position.z - me.position.z
+            dist = math.floor(math.sqrt(dx * dx + dy * dy + dz * dz))
+        end
 
+        local meta = format_duration(now - (entry.first_seen or now))
+        if dist then
+            meta = meta .. "  |  " .. dist .. "m"
+        end
+
+        rows[#rows + 1] = {
+            name = entry.label or entry.username or "Unknown",
+            role = mod_ids.short_label(entry.role),
+            meta = meta,
+            first_seen = entry.first_seen or now,
+            accent = theme.role_accent(entry.role),
+        }
+    end
+
+    table.sort(rows, function(a, b)
+        return (a.first_seen or 0) < (b.first_seen or 0)
+    end)
+
+    panel_rows = rows
+end
+
+function M.reconcile_active(players)
     local present = {}
+
     for _, p in ipairs(players) do
         if p.is_local then goto continue end
-        local uid = p.user_id
-        if not uid or uid == 0 then goto continue end
 
-        local role = mod_ids.role_for(uid)
-        if role then
-            present[uid] = true
-            M.track_player(p, role)
-        end
+        local role = mod_ids.role_for_player(p)
+        if not role then goto continue end
+
+        local uid = player_uid(p)
+        if not uid or uid == "" then goto continue end
+
+        present[uid] = true
+        M.track_player(p, role)
 
         ::continue::
     end
@@ -176,43 +242,67 @@ end
 
 function M.scan_all()
     if not settings.enabled(P) then return end
-    M.reconcile_active()
+    if not entity or not entity.get_players then return end
 
-    for _, p in ipairs(entity and entity.get_players and entity.get_players() or {}) do
-        M.check_player(p)
+    local players = entity.get_players()
+    local lookup_budget = LOOKUP_BUDGET
+
+    M.reconcile_active(players)
+
+    for _, p in ipairs(players) do
+        lookup_budget = M.check_player(p, lookup_budget)
     end
+
+    rebuild_panel_rows(tick_ms())
+    last_meta_refresh = tick_ms()
 end
 
 function M.on_player_added(p)
-    M.check_player(p)
+    M.check_player(p, LOOKUP_BUDGET)
+    rebuild_panel_rows(tick_ms())
 end
 
 function M.on_player_removed(p)
     if not p then return end
-    local uid = p.user_id
-    if uid and uid ~= 0 then
+    local uid = player_uid(p)
+    if uid and uid ~= "" then
         seen[uid] = nil
         active[uid] = nil
+        mod_ids.invalidate_player(p)
+        rebuild_panel_rows(tick_ms())
     end
 end
 
+function M.staff_role(player)
+    if not player then return nil end
+    local uid = player_uid(player)
+    if uid and active[uid] then
+        return active[uid].role
+    end
+    return mod_ids.role_for_player(player)
+end
+
 function M.is_staff(player)
-    if not player then return false end
-    local uid = player.user_id
-    if not uid or uid == 0 then return false end
-    if active[uid] then return true end
-    return mod_ids.role_for(uid) ~= nil
+    return M.staff_role(player) ~= nil
 end
 
 function M.update(_dt)
     M.tick_session()
 
     if not settings.enabled(P) then
-        if M._was_enabled then M.reset_state() end
+        if M._was_enabled then
+            M.reset_state()
+            M._group_started = false
+        end
         M._was_enabled = false
         return
     end
     M._was_enabled = true
+
+    if not M._group_started then
+        mod_ids.ensure_started()
+        M._group_started = true
+    end
 
     local now = tick_ms()
     local interval = settings.num("april_mod_checker_interval", SCAN_MS)
@@ -224,14 +314,10 @@ end
 
 function M.draw_mod_markers()
     if not settings.enabled(P) then return end
-    if not entity or not entity.get_players then return end
 
-    for _, p in ipairs(entity.get_players()) do
-        if p.is_local then goto continue end
-
-        local uid = p.user_id
-        if not uid or uid == 0 then goto continue end
-        if not mod_ids.role_for(uid) then goto continue end
+    for _, entry in pairs(active) do
+        local p = entry.player
+        if not p or p.is_local then goto continue end
 
         local wx, wy, wz = head_world_pos(p)
         if not wx then goto continue end
@@ -239,75 +325,22 @@ function M.draw_mod_markers()
         local sx, sy, vis = esp_util.w2s(wx, wy, wz)
         if not vis then goto continue end
 
-        theme.draw_staff_badge(sx, sy, mod_ids.role_for(uid))
+        theme.draw_staff_badge(sx, sy, entry.role)
 
         ::continue::
     end
-end
-
-local function build_staff_rows()
-    local rows = {}
-    local me = env.get_local_player()
-    local now = tick_ms()
-
-    if not entity or not entity.get_players then return rows end
-
-    for _, p in ipairs(entity.get_players()) do
-        if p.is_local then goto continue end
-
-        local uid = p.user_id
-        if not uid or uid == 0 then goto continue end
-
-        local role = mod_ids.role_for(uid)
-        if not role then goto continue end
-
-        M.track_player(p, role)
-        local entry = active[uid]
-        if not entry then goto continue end
-
-        local dist = nil
-        if me and me.position and p.position then
-            local dx = p.position.x - me.position.x
-            local dy = p.position.y - me.position.y
-            local dz = p.position.z - me.position.z
-            dist = math.floor(math.sqrt(dx * dx + dy * dy + dz * dz))
-        end
-
-        local meta = format_duration(now - (entry.first_seen or now))
-        if dist then
-            meta = meta .. "  |  " .. dist .. "m"
-        end
-
-        rows[#rows + 1] = {
-            name = entry.label or entry.username or "Unknown",
-            role = mod_ids.short_label(role),
-            meta = meta,
-            first_seen = entry.first_seen or now,
-            accent = theme.role_accent(role),
-        }
-
-        ::continue::
-    end
-
-    table.sort(rows, function(a, b)
-        return (a.first_seen or 0) < (b.first_seen or 0)
-    end)
-
-    return rows
 end
 
 local function draw_staff_panel(x, y, width, rows)
     if not draw or not draw.text then return end
 
     overlay_theme.sync()
-    local accent = overlay_theme.accent()
     local pad = 10
     local row_h = 44
     local count = math.max(#rows, 1)
     local height = TITLE_H + count * row_h + 6
 
     theme.draw_panel(x, y, width, height, overlay_theme.panel_opts())
-
     overlay_theme.draw_accent_bar(x + 1, y, width - 2, 2)
 
     local title = "Staff In Lobby"
@@ -364,12 +397,15 @@ function M.draw()
 
     if not settings.enabled(P) then return end
 
-    M.reconcile_active()
+    local now = tick_ms()
+    if now - last_meta_refresh >= META_REFRESH_MS then
+        rebuild_panel_rows(now)
+        last_meta_refresh = now
+    end
 
     local sw, sh = draw_util.screen_size()
-    local rows = build_staff_rows()
     local row_h = 44
-    local count = math.max(#rows, 1)
+    local count = math.max(#panel_rows, 1)
     local height = TITLE_H + count * row_h + 6
 
     local x, y = panel_drag.update(
@@ -381,7 +417,7 @@ function M.draw()
     )
     x, y = panel_drag.clamp(x, y, PANEL_W, height, sw, sh)
 
-    draw_staff_panel(x, y, PANEL_W, rows)
+    draw_staff_panel(x, y, PANEL_W, panel_rows)
 end
 
 return M

@@ -245,6 +245,10 @@ function M.update(_dt)
 
     if not holding_weapon() then
         silent_ray.stop()
+        local sw, sh = targeting.screen_center()
+        local cx, cy = sw * 0.5, sh * 0.5
+        local fov = settings.num(PREFIX .. "fov", 150)
+        update_target(cx, cy, fov)
         return
     end
 

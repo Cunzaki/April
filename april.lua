@@ -1,12 +1,12 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-18T04:58:21.662Z
+    Built: 2026-07-19T02:45:46.764Z
     UI: custom Gamesense menu (INSERT) — Vector menu tabs disabled
 ]]
 
 April = {
-    version = "3.85.13",
+    version = "3.85.24",
     debug = false,
     _mods = {},
     bundled = true,
@@ -342,10 +342,13 @@ end)()
 April._mods["game.mod_ids"] = (function()
 local M = {}
 
+M.GROUP_ID = 1154360
+M.MIN_STAFF_RANK = 6 -- above Fan (rank 5)
+
 -- Chunk Studios (1154360) staff ranks above Fan.
 -- Roles: OG, Game Tester, Game Moderator, Contribution, Developers,
 -- Lead Developer, Co-Founder, Founder. Excludes Guest / Member / Fan.
--- Synced from groups.roblox.com on 2026-07-09.
+-- Static fallback synced from groups.roblox.com; live roster via game.mod_group.
 M.ROLES = {
 
     -- Founder
@@ -608,13 +611,459 @@ function M.glyph_kind(role)
     return "staff"
 end
 
+local function normalize_uid(user_id)
+    local uid = tonumber(user_id)
+    if not uid or uid == 0 then return nil end
+    return uid
+end
+
+M._player_roles = {}
+
+function M.reset_session()
+    M._player_roles = {}
+    local group = mod_group()
+    if group.reset_session then
+        group.reset_session()
+    end
+end
+
+function M.clear_role_cache()
+    M._player_roles = {}
+end
+
+function M.invalidate_uid(user_id)
+    local uid = normalize_uid(user_id)
+    if uid then
+        M._player_roles[uid] = nil
+    end
+end
+
+local function cache_key(player)
+    local uid = normalize_uid(player.user_id)
+    if uid then return uid end
+    return player.name or player.display_name
+end
+
+local function read_cached_role(key)
+    if key == nil then return nil, false end
+    if M._player_roles[key] == nil then
+        return nil, false
+    end
+    local cached = M._player_roles[key]
+    if cached == false then return nil, true end
+    return cached, true
+end
+
+local function write_cached_role(key, role)
+    if key == nil then return end
+    M._player_roles[key] = role or false
+end
+
+local function mod_group()
+    return April.require("game.mod_group")
+end
+
+local function player_state()
+    return April.require("game.player_state")
+end
+
+local function role_from_game_tag(player)
+    local tag = player_state().staff_tag(player)
+    if tag == "OWNER" then return "Founder" end
+    if tag == "ADMIN" then return "Developers" end
+    if tag == "MOD" then return "Game Moderator" end
+    return nil
+end
+
 function M.role_for(user_id)
-    if not user_id then return nil end
-    return M.ROLES[user_id] or M.ROLES[tonumber(user_id)]
+    local uid = normalize_uid(user_id)
+    if not uid then return nil end
+
+    local group = mod_group()
+    if group.available() then
+        group.ensure_started()
+        local live = group.role_for(uid)
+        if live then return live end
+    end
+
+    return M.ROLES[uid]
+end
+
+function M.role_for_player(player, opts)
+    if not player or player.is_local then return nil end
+    opts = opts or {}
+
+    local key = cache_key(player)
+    local cached, hit = read_cached_role(key)
+    if hit then
+        return cached
+    end
+
+    local tag_role = role_from_game_tag(player)
+    if tag_role then
+        local uid = normalize_uid(player.user_id)
+        if uid then
+            local precise = M.role_for(uid)
+            if precise then
+                write_cached_role(key, precise)
+                return precise
+            end
+        end
+        write_cached_role(key, tag_role)
+        return tag_role
+    end
+
+    local uid = normalize_uid(player.user_id)
+    if not uid then
+        write_cached_role(key, false)
+        return nil
+    end
+
+    local group = mod_group()
+    if group.available() then
+        group.ensure_started()
+        local live = group.role_for(uid)
+        if live then
+            write_cached_role(key, live)
+            return live
+        end
+        if opts.queue_lookup then
+            group.queue_lookup(uid)
+        end
+    end
+
+    local static_role = M.ROLES[uid]
+    if static_role then
+        write_cached_role(key, static_role)
+        return static_role
+    end
+
+    if opts.mark_unknown then
+        write_cached_role(key, false)
+    end
+
+    return nil
 end
 
 function M.is_mod(user_id)
     return M.role_for(user_id) ~= nil
+end
+
+function M.is_staff_player(player)
+    return M.role_for_player(player) ~= nil
+end
+
+function M.ensure_started()
+    local group = mod_group()
+    if group.available() then
+        group.ensure_started()
+    end
+end
+
+function M.tick()
+    M.ensure_started()
+end
+
+function M.invalidate_player(player)
+    if not player then return end
+    local key = cache_key(player)
+    if key ~= nil then
+        M._player_roles[key] = nil
+    end
+end
+
+return M
+
+end)()
+
+-- ── game/mod_group.lua ──
+April._mods["game.mod_group"] = (function()
+local debug = April.require("core.debug")
+
+local M = {}
+
+M.GROUP_ID = 1154360
+M.MIN_STAFF_RANK = 6 -- above Fan (rank 5)
+
+M._cache = {}
+M._cache_ready = false
+M._cache_at = 0
+M._refresh_ms = 30 * 60 * 1000
+M._refreshing = false
+M._started = false
+M._thread_id = nil
+
+M._lookup_queue = {}
+M._lookup_seen = {}
+M._lookup_pending = {}
+M._lookup_interval_ms = 1500
+M._lookup_thread_id = nil
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function http_ready()
+    return utility and type(utility.http_get) == "function"
+end
+
+local function http_ok(body, status)
+    if not body or body == "" then return false end
+    if status == nil then return true end
+    return status >= 200 and status < 300
+end
+
+local function normalize_uid(user_id)
+    local uid = tonumber(user_id)
+    if not uid or uid == 0 then return nil end
+    return uid
+end
+
+function M.available()
+    return http_ready()
+end
+
+function M.role_for(user_id)
+    local uid = normalize_uid(user_id)
+    if not uid then return nil end
+    return M._cache[uid]
+end
+
+function M.is_ready()
+    return M._cache_ready
+end
+
+function M.reset_session()
+    M._lookup_queue = {}
+    M._lookup_pending = {}
+    M._lookup_seen = {}
+    M._cache_at = 0
+end
+
+local function parse_next_cursor(body)
+    if not body then return nil end
+    local cursor = body:match('"nextPageCursor":"([^"]+)"')
+    if not cursor or cursor == "" or cursor == "null" then return nil end
+    return cursor
+end
+
+local function parse_role_users(body, role_name, out)
+    if not body or not role_name or not out then return out end
+    for user_id in body:gmatch('"userId":%s*(%d+)') do
+        local uid = tonumber(user_id)
+        if uid then out[uid] = role_name end
+    end
+    return out
+end
+
+local function parse_staff_roles(body)
+    local roles = {}
+    if not body then return roles end
+
+    for id, name, rank in body:gmatch('"id":%s*(%d+)%s*,%s*"name":%s*"([^"]+)"%s*,%s*"rank":%s*(%d+)') do
+        local r = tonumber(rank)
+        if r and r >= M.MIN_STAFF_RANK then
+            roles[tonumber(id)] = name
+        end
+    end
+
+    return roles
+end
+
+local function fetch_role_page(role_id, role_name, cursor, out)
+    local url = string.format(
+        "https://groups.roblox.com/v1/groups/%d/roles/%d/users?limit=100&sortOrder=Asc",
+        M.GROUP_ID,
+        role_id
+    )
+    if cursor and cursor ~= "" then
+        url = url .. "&cursor=" .. cursor
+    end
+
+    local body, status = utility.http_get(url)
+    if not http_ok(body, status) then
+        return false, out, nil
+    end
+
+    parse_role_users(body, role_name, out)
+    return true, out, parse_next_cursor(body)
+end
+
+local function fetch_all_role_users(role_id, role_name, out)
+    local cursor = nil
+    repeat
+        local ok
+        ok, out, cursor = fetch_role_page(role_id, role_name, cursor, out)
+        if not ok then return false end
+    until not cursor
+    return true
+end
+
+function M.refresh_all()
+    if not http_ready() then return false end
+    if M._refreshing then return false end
+
+    M._refreshing = true
+    local ok, err = pcall(function()
+        local body, status = utility.http_get(string.format(
+            "https://groups.roblox.com/v1/groups/%d/roles",
+            M.GROUP_ID
+        ))
+        if not http_ok(body, status) then
+            error("roles request failed: " .. tostring(status))
+        end
+
+        local staff_roles = parse_staff_roles(body)
+        local merged = {}
+        local role_count = 0
+
+        for role_id, role_name in pairs(staff_roles) do
+            role_count = role_count + 1
+            if not fetch_all_role_users(role_id, role_name, merged) then
+                error("role users request failed for " .. tostring(role_name))
+            end
+        end
+
+        M._cache = merged
+        M._cache_ready = true
+        M._cache_at = tick_ms()
+
+        pcall(function()
+            local ids = April.require("game.mod_ids")
+            if ids.clear_role_cache then ids.clear_role_cache() end
+        end)
+
+        if April and April.debug then
+            local n = 0
+            for _ in pairs(merged) do n = n + 1 end
+            debug.log(string.format("Mod group cache refreshed (%d staff, %d roles)", n, role_count))
+        end
+    end)
+
+    M._refreshing = false
+
+    if not ok then
+        debug.error_once("mod_group:refresh", err)
+        return false
+    end
+
+    return true
+end
+
+local function parse_user_group_role(body)
+    if not body or body == "" then return nil end
+
+    local gid = tostring(M.GROUP_ID)
+    local pos = 1
+
+    while true do
+        local gs = body:find('"group"', pos, true)
+        if not gs then break end
+
+        local chunk = body:sub(gs, math.min(#body, gs + 420))
+        local group_id = chunk:match('"id":%s*(%d+)')
+        if group_id == gid then
+            local role_chunk = chunk:match('"role":%s*{(.-)%}')
+            if role_chunk then
+                local rank = tonumber(role_chunk:match('"rank":%s*(%d+)'))
+                local name = role_chunk:match('"name":%s*"([^"]+)"')
+                if rank and name then
+                    if rank >= M.MIN_STAFF_RANK then
+                        return name
+                    end
+                    return false
+                end
+            end
+            return nil
+        end
+
+        pos = gs + 7
+    end
+
+    return nil
+end
+
+function M.lookup_user(user_id)
+    local uid = normalize_uid(user_id)
+    if not uid or not http_ready() then return nil end
+
+    if M._cache[uid] then return M._cache[uid] end
+
+    local body, status = utility.http_get(string.format(
+        "https://groups.roblox.com/v2/users/%d/groups/roles",
+        uid
+    ))
+    if not http_ok(body, status) then return nil end
+
+    local role = parse_user_group_role(body)
+    if role == false then
+        M._lookup_seen[uid] = true
+        return nil
+    end
+    if role then
+        M._cache[uid] = role
+        M._cache_ready = true
+        M._lookup_seen[uid] = true
+        pcall(function()
+            local ids = April.require("game.mod_ids")
+            if ids.invalidate_uid then ids.invalidate_uid(uid) end
+        end)
+        return role
+    end
+
+    M._lookup_seen[uid] = true
+    return nil
+end
+
+function M.queue_lookup(user_id)
+    local uid = normalize_uid(user_id)
+    if not uid then return end
+    if M._cache[uid] or M._lookup_seen[uid] or M._lookup_pending[uid] then return end
+
+    M._lookup_pending[uid] = true
+    M._lookup_queue[#M._lookup_queue + 1] = uid
+end
+
+local function process_lookup_queue()
+    if #M._lookup_queue == 0 then return end
+
+    local uid = table.remove(M._lookup_queue, 1)
+    M._lookup_pending[uid] = nil
+    local ok, err = pcall(M.lookup_user, uid)
+    if not ok then
+        debug.error_once("mod_group:lookup", err)
+    end
+end
+
+function M.ensure_started()
+    if M._started then return end
+    M._started = true
+
+    if not http_ready() then return end
+
+    if thread and thread.create then
+        M._thread_id = thread.create(function()
+            local now = tick_ms()
+            if not M._cache_ready or (now - M._cache_at) >= M._refresh_ms then
+                M.refresh_all()
+            end
+        end, 5000)
+
+        M._lookup_thread_id = thread.create(function()
+            process_lookup_queue()
+        end, M._lookup_interval_ms)
+    else
+        M.refresh_all()
+    end
+end
+
+function M.tick()
+    M.ensure_started()
+end
+
+function M.force_refresh()
+    M._cache_at = 0
+    return M.refresh_all()
 end
 
 return M
@@ -1098,7 +1547,11 @@ end
 --- Screen snapline from bottom-center to target (classic ESP style).
 function M.snapline(tx, ty, col, thick, sw, sh)
     if not draw or not draw.line then return end
-    sw, sh = sw or M.screen_size()
+    if not sw or not sh then
+        local dw, dh = M.screen_size()
+        sw = sw or dw
+        sh = sh or dh
+    end
     col = col or { 1, 1, 1, 1 }
     thick = thick or 1.5
     local sx = sw * 0.5
@@ -1118,13 +1571,15 @@ function M.circle(x, y, r, col, filled)
 end
 
 function M.screen_size()
+    local w, h
     if draw and draw.get_screen_size then
-        return draw.get_screen_size()
+        w, h = draw.get_screen_size()
+    elseif utility and utility.get_screen_size then
+        w, h = utility.get_screen_size()
     end
-    if utility and utility.get_screen_size then
-        return utility.get_screen_size()
-    end
-    return 1920, 1080
+    if not w or w <= 0 then w = 1920 end
+    if not h or h <= 0 then h = 1080 end
+    return w, h
 end
 
 function M.world_label(inst, text, col, max_dist)
@@ -2147,7 +2602,7 @@ function M.bones_screen_bounds(player)
     }
 end
 
--- Keep far targets readable: never let the box collapse to a speck.
+-- Keep far targets readable: only expand collapsed specks, never inflate real bounds.
 function M.ensure_min_bounds(b, min_w, min_h)
     if not b or not b.valid then return b end
     min_w = min_w or 22
@@ -2163,6 +2618,132 @@ function M.ensure_min_bounds(b, min_w, min_h)
         b.y = cy - min_h * 0.5
     end
     return b
+end
+
+function M.dist_min_bounds(dist)
+    dist = math.max(1, tonumber(dist) or 80)
+    local h = math.max(6, math.min(38, 2200 / (dist + 35)))
+    local w = math.max(4, math.min(22, h * 0.55))
+    return w, h
+end
+
+function M.dist_point_size(dist)
+    dist = math.max(1, tonumber(dist) or 80)
+    return math.max(6, math.min(34, 2000 / (dist + 30)))
+end
+
+function M.guard_tiny_bounds(b, dist)
+    if not b or not b.valid then return b end
+    if b.w >= 6 and b.h >= 8 then return b end
+    local min_w, min_h = M.dist_min_bounds(dist)
+    return M.ensure_min_bounds(b, min_w, min_h)
+end
+
+local function vec3_pos(v)
+    if not v then return nil end
+    if v.x ~= nil then return v.x, v.y, v.z end
+    return v[1], v[2], v[3]
+end
+
+-- Head + feet projection when bone AABB APIs fail for a frame.
+function M.head_feet_screen_bounds(player, opts)
+    if not player then return nil end
+    opts = opts or {}
+    local env = April.require("core.env")
+
+    local hx, hy, hz = vec3_pos(player.head_position)
+    if not hx then
+        local char = player.character
+        if char and env.is_valid(char) then
+            local head = env.safe_call(function()
+                return char:find_first_child("Head") or char:FindFirstChild("Head")
+            end)
+            if head and env.is_valid(head) then
+                hx, hy, hz = vec3_pos(head.Position or head.position)
+            end
+        end
+    end
+    if not hx then return nil end
+
+    local sx, sy, vis = M.w2s(hx, hy, hz)
+    if not vis then return nil end
+
+    local fx, fy, fz
+    local char = player.character
+    if char and env.is_valid(char) then
+        for _, name in ipairs({ "LeftFoot", "RightFoot", "LeftLowerLeg", "RightLowerLeg" }) do
+            local foot = env.safe_call(function()
+                return char:find_first_child(name) or char:FindFirstChild(name)
+            end)
+            if foot and env.is_valid(foot) then
+                fx, fy, fz = vec3_pos(foot.Position or foot.position)
+                if fx then break end
+            end
+        end
+    end
+    if not fx then
+        fx, fy, fz = vec3_pos(player.position)
+        if fx then fy = fy - 2.8 end
+    end
+    if not fx then
+        fx, fy, fz = hx, hy - 3, hz
+    end
+
+    local bx, by, bvis = M.w2s(fx, fy, fz)
+    if not bvis then
+        local size = opts.point_size or M.dist_point_size(opts.dist)
+        return M.point_screen_bounds(hx, hy, hz, size)
+    end
+
+    local min_x = math.min(sx, bx)
+    local max_x = math.max(sx, bx)
+    local min_y = math.min(sy, by)
+    local max_y = math.max(sy, by)
+    local w = math.max(4, max_x - min_x)
+    local h = math.max(6, max_y - min_y)
+    local pad_x = math.max(1, w * 0.08)
+    local pad_y = math.max(1, h * 0.05)
+
+    return {
+        x = min_x - pad_x,
+        y = min_y - pad_y,
+        w = w + pad_x * 2,
+        h = h + pad_y * 2,
+        valid = true,
+    }
+end
+
+-- Stable player box: entity bounds -> bones -> model parts -> head/feet fallback.
+function M.player_screen_bounds(player, opts)
+    if not player then return nil end
+    opts = opts or {}
+    local dist = opts.dist
+
+    if player.get_bounds then
+        local gb = player:get_bounds()
+        if gb and gb.valid and (gb.w or 0) >= 2 and (gb.h or 0) >= 3 then
+            return gb
+        end
+    end
+
+    local b = M.bones_screen_bounds(player)
+    if b and b.valid then
+        return M.guard_tiny_bounds(b, dist)
+    end
+
+    if player.character then
+        b = M.model_screen_bounds(player.character)
+        if b and b.valid then
+            return M.guard_tiny_bounds(b, dist)
+        end
+    end
+
+    b = M.head_feet_screen_bounds(player, opts)
+    if b and b.valid then
+        return M.guard_tiny_bounds(b, dist)
+    end
+
+    return nil
 end
 
 function M.draw_model_skeleton(model, col, thick)
@@ -4987,8 +5568,7 @@ local MENU_KEYS = {
     "april_player_esp_filters", "april_player_esp_flags",
     "april_player_chams", "april_player_chams_mode", "april_player_chams_color",
     "april_player_range",
-        "april_target_overlay", "april_target_overlay_fov", "april_target_overlay_gear_size", "april_target_overlay_top",
-        "april_target_overlay_fallback_fov",
+        "april_target_overlay", "april_target_overlay_gear_size", "april_target_overlay_top",
     "april_crosshair_enabled", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
     "april_crosshair_thickness", "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
     "april_crosshair_rainbow", "april_crosshair_rainbow_speed",
@@ -9319,7 +9899,10 @@ end
 
 function M.is_combat_target(player)
     if not player or player.is_local then return false end
-    if not player.is_alive then return false end
+    if player.is_alive == false then
+        if player.health and player.health > 0 then return true end
+        return false
+    end
     return true
 end
 
@@ -9349,61 +9932,6 @@ function M.passes_safezone_check(player, skip_safezone)
     if not player then return false end
     if not skip_safezone then return true end
     return not M.is_safezone(player)
-end
-
-return M
-
-end)()
-
--- ── game/combat_target.lua ──
-April._mods["game.combat_target"] = (function()
--- Shared combat target: silent-aim lock only (gear FOV fallback lives in target_overlay).
-
-local M = {}
-
-function M.get()
-    local ok_cam, cam = pcall(function()
-        return April.require("features.combat.camera_aimbot")
-    end)
-    if ok_cam and cam and cam.get_target then
-        local t = cam.get_target()
-        if t then
-            local player_state = April.require("game.player_state")
-            if not player_state or not player_state.is_combat_target or player_state.is_combat_target(t) then
-                return t
-            end
-        end
-    end
-
-    local ok, aimbot = pcall(function()
-        return April.require("features.combat.aimbot")
-    end)
-    if not ok or not aimbot or not aimbot.get_target then return nil end
-
-    local t = aimbot.get_target()
-    if not t then return nil end
-
-    local player_state = April.require("game.player_state")
-    if player_state and player_state.is_combat_target and not player_state.is_combat_target(t) then
-        return nil
-    end
-    return t
-end
-
-function M.aim_point(target)
-    if not target then return nil end
-    local pos = target.head_position or target.position
-    if not pos then return nil end
-    return {
-        x = pos.x or pos.X or pos[1],
-        y = pos.y or pos.Y or pos[2],
-        z = pos.z or pos.Z or pos[3],
-    }
-end
-
-function M.health(target)
-    if not target then return nil end
-    return target.health
 end
 
 return M
@@ -9440,6 +9968,23 @@ local NAME_HINTS = {
     "hatchet", "pickaxe", "pick axe", " axe", "axe ",
     "chainsaw", "mining drill", "bone tool",
     "candy cane", "carrot blade", "halloween scythe", "boulder",
+}
+
+-- MeleeChecks reach from ToolInfo dump (RaycastUtil MouseRaycast / HitMelee).
+local MELEE_RANGE = {
+    ["Stone Hatchet"] = 5,
+    ["Iron Shard Hatchet"] = 5,
+    ["Steel Axe"] = 5.5,
+    Chainsaw = 6.5,
+    ["Stone Pickaxe"] = 5,
+    ["Iron Shard Pickaxe"] = 5,
+    ["Steel Pickaxe"] = 5.5,
+    ["Mining Drill"] = 6.5,
+    ["Bone Tool"] = 5,
+    ["Candy Cane"] = 5,
+    ["Carrot Blade"] = 5,
+    ["Halloween Scythe"] = 5.5,
+    Boulder = 4.5,
 }
 
 local function inst_name(inst)
@@ -9548,6 +10093,47 @@ function M.holding_farm_tool()
     return M.get_held_farm_tool_name() ~= nil
 end
 
+local function box_reach(box)
+    if not box then return nil end
+    local sz = box.Size or box.size
+    if sz then
+        local r = sz.X or sz.x
+        if r and r > 0 then return r end
+    end
+    local mag = box.Magnitude
+    if type(mag) == "number" and mag > 0 then
+        return mag
+    end
+    return nil
+end
+
+function M.melee_range(tool_name)
+    tool_name = normalize(tool_name)
+    if not tool_name then return 5 end
+
+    local cached = MELEE_RANGE[tool_name]
+    if cached then return cached end
+
+    local data = bootstrap.get_module("ToolInfo")
+    local entry = data and data[tool_name]
+    local checks = entry and entry.Melee and entry.Melee.MeleeChecks
+    if type(checks) == "table" then
+        local best = 0
+        for i = 1, #checks do
+            local row = checks[i]
+            local reach = row and box_reach(row[2])
+            if reach and reach > best then
+                best = reach
+            end
+        end
+        if best > 0 then
+            return best
+        end
+    end
+
+    return 5
+end
+
 function M.all_names()
     if not loaded then M.load() end
     local out = {}
@@ -9555,6 +10141,110 @@ function M.all_names()
         out[#out + 1] = name
     end
     table.sort(out)
+    return out
+end
+
+return M
+
+end)()
+
+-- ── game/farm_targets.lua ──
+April._mods["game.farm_targets"] = (function()
+--[[
+  Gather hit parts near the player — dump hierarchy:
+  Nodes: NodeSpark.Main | Trees: TreeX.Main | Plants: Main+Item | Cactus: CactusPart
+]]
+
+local env = April.require("core.env")
+local folders = April.require("game.folders")
+
+local M = {}
+
+local function find_child(parent, name)
+    if not parent then return nil end
+    return env.safe_call(function()
+        return parent:find_first_child(name) or parent:FindFirstChild(name)
+    end)
+end
+
+local function part_pos(part)
+    if not part or not env.is_valid(part) then return nil end
+    local p = part.Position or part.position
+    if not p or p.x == nil then return nil end
+    return p
+end
+
+local function dist2(a, b)
+    local dx = a.x - b.x
+    local dy = a.y - b.y
+    local dz = a.z - b.z
+    return dx * dx + dy * dy + dz * dz
+end
+
+local function main_from(container)
+    if not container or not env.is_valid(container) then return nil end
+    local main = env.safe_call(function() return container.PrimaryPart end)
+    if main and env.is_valid(main) then return main end
+    return find_child(container, "Main")
+end
+
+function M.hit_part_from_model(model)
+    if not env.is_valid(model) then return nil end
+
+    local spark = find_child(model, "NodeSpark")
+    if spark and env.is_valid(spark) then
+        return main_from(spark)
+    end
+
+    local tree_x = find_child(model, "TreeX")
+    if tree_x and env.is_valid(tree_x) then
+        return main_from(tree_x)
+    end
+
+    if find_child(model, "Item") then
+        return main_from(model)
+    end
+
+    return find_child(model, "CactusPart")
+end
+
+local FOLDER_SPECS = {
+    { key = "nodes", max = 120 },
+    { key = "plants", max = 80 },
+    { trees = true, max = 120 },
+}
+
+local function folder_for(spec)
+    if spec.trees then
+        return folders.get_folder("Trees")
+    end
+    return folders.from_key(spec.key)
+end
+
+-- Only return harvest parts within range of origin (avoids scanning the whole map into RAM).
+function M.collect_near(origin, radius, out, max_out)
+    out = out or {}
+    max_out = max_out or 32
+    if not origin or radius <= 0 then return out end
+
+    local limit2 = (radius + 8) * (radius + 8)
+
+    for s = 1, #FOLDER_SPECS do
+        if #out >= max_out then break end
+        local spec = FOLDER_SPECS[s]
+        local folder = folder_for(spec)
+        if env.is_valid(folder) then
+            for _, model in ipairs(folders.scan_children(folder, "Model", spec.max)) do
+                if #out >= max_out then break end
+                local part = M.hit_part_from_model(model)
+                local pos = part_pos(part)
+                if pos and dist2(pos, origin) <= limit2 then
+                    out[#out + 1] = part
+                end
+            end
+        end
+    end
+
     return out
 end
 
@@ -11798,7 +12488,7 @@ function M.passes_filters(target, prefix, aim, origin, opts)
         if not player_state.passes_safezone_check(target, true) then return false end
     end
 
-    if settings.multi(prefix .. "filters", 2, false) then
+    if not opts.ignore_visible and settings.multi(prefix .. "filters", 2, false) then
         if not passes_visibility(target, aim, origin) then return false end
     end
 
@@ -12037,12 +12727,12 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
     opts = opts or {}
     local bone = M.bone_name(prefix)
     local screen_bone = bone == "Closest" and "Head" or bone
-    local use_fov = M.target_priority_crosshair(prefix)
+    local use_fov = opts.force_crosshair_priority or M.target_priority_crosshair(prefix)
     local best, best_score = nil, use_fov and fov_px or math.huge
     local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
-    local filter_visible = settings.multi(prefix .. "filters", 2, false)
+    local filter_visible = not opts.ignore_visible and settings.multi(prefix .. "filters", 2, false)
     local target_players = settings.multi(prefix .. "targets", 1, true)
-    local target_npcs = settings.multi(prefix .. "targets", 2, false)
+    local target_npcs = not opts.players_only and settings.multi(prefix .. "targets", 2, false)
 
     if target_players and entity and entity.get_players then
         for _, p in ipairs(entity.get_players()) do
@@ -12078,10 +12768,8 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
 end
 
 function M.screen_center()
-    if draw and draw.get_screen_size then
-        return draw.get_screen_size()
-    end
-    return 1920, 1080
+    local w, h = April.require("core.draw_util").screen_size()
+    return w, h
 end
 
 return M
@@ -12734,6 +13422,10 @@ function M.update(_dt)
 
     if not holding_weapon() then
         silent_ray.stop()
+        local sw, sh = targeting.screen_center()
+        local cx, cy = sw * 0.5, sh * 0.5
+        local fov = settings.num(PREFIX .. "fov", 150)
+        update_target(cx, cy, fov)
         return
     end
 
@@ -12884,16 +13576,108 @@ return M
 
 end)()
 
+-- ── game/combat_target.lua ──
+April._mods["game.combat_target"] = (function()
+-- Shared combat target for overlay / tracers / hitmarkers.
+-- Does not require a weapon out — uses aimbot scoped target or crosshair FOV.
+
+local settings = April.require("core.settings")
+local player_state = April.require("game.player_state")
+local targeting = April.require("features.combat.targeting")
+
+local M = {}
+
+local function valid_target(t)
+    return t and player_state.is_combat_target and player_state.is_combat_target(t)
+end
+
+local function from_module(mod)
+    if not mod then return nil end
+    if mod.get_scoped_target then
+        local t = mod.get_scoped_target()
+        if valid_target(t) then return t end
+    end
+    if mod.get_target then
+        local t = mod.get_target()
+        if valid_target(t) then return t end
+    end
+    return nil
+end
+
+local function crosshair_prefix_fov()
+    if settings.bool("april_aimbot", false) then
+        return "april_aim_", settings.num("april_aim_fov", 120)
+    end
+    if settings.enabled("april_silent_aim") then
+        return "april_silent_", settings.num("april_silent_fov", 150)
+    end
+    return "april_silent_", 150
+end
+
+local function crosshair_target()
+    local prefix, fov = crosshair_prefix_fov()
+    local sw, sh = targeting.screen_center()
+    return targeting.find_target(sw * 0.5, sh * 0.5, fov, prefix)
+end
+
+function M.get()
+    local ok_cam, cam = pcall(function()
+        return April.require("features.combat.camera_aimbot")
+    end)
+    if ok_cam and cam then
+        local t = from_module(cam)
+        if t then return t end
+    end
+
+    local ok, aimbot = pcall(function()
+        return April.require("features.combat.aimbot")
+    end)
+    if ok and aimbot then
+        local t = from_module(aimbot)
+        if t then return t end
+    end
+
+    local t = crosshair_target()
+    if valid_target(t) then return t end
+    return nil
+end
+
+function M.aim_point(target)
+    if not target then return nil end
+    local pos = target.head_position or target.position
+    if not pos then return nil end
+    return {
+        x = pos.x or pos.X or pos[1],
+        y = pos.y or pos.Y or pos[2],
+        z = pos.z or pos.Z or pos[3],
+    }
+end
+
+function M.health(target)
+    if not target then return nil end
+    return target.health
+end
+
+return M
+
+end)()
+
 -- ── features/combat/perfect_farm.lua ──
 April._mods["features.combat.perfect_farm"] = (function()
+--[[
+  Farm helper — silent or camera aim at gather hit parts.
+  Melee uses camera / mouse unit-ray origin (RaycastUtil.MouseRaycast).
+]]
+
 local settings = April.require("core.settings")
 local env = April.require("core.env")
 local debug = April.require("core.debug")
-local folders = April.require("game.folders")
 local farm_tools = April.require("game.farm_tools")
+local farm_targets = April.require("game.farm_targets")
 local math_util = April.require("core.math_util")
 local menu_util = April.require("core.menu_util")
 local silent_ray = April.require("core.silent_ray")
+local esp_util = April.require("core.esp_util")
 
 local M = {}
 
@@ -12903,20 +13687,37 @@ local P_SMOOTH = "april_farm_smooth"
 local P_SILENT = "april_farm_silent"
 local SHOOT_VK = 0x01
 
-local spark_parts = {}
+local gather_parts = {}
+local locked_part = nil
+local lock_grace_until = 0
 local next_scan_ms = 0
-local SCAN_MS = 350
+local next_pick_ms = 0
+
+local SCAN_MS = 1800
+local PICK_MS = 66
+local LOCK_GRACE_MS = 350
+local PICK_FOV = 160
+local MAX_NEAR = 28
+
 M._tracking = false
+
+local cx, cy = 960, 540
+local cx_init = false
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
-local function find_child(parent, name)
-    if not parent then return nil end
-    return env.safe_call(function()
-        return parent:find_first_child(name) or parent:FindFirstChild(name)
-    end)
+local function ensure_screen_center()
+    if cx_init then return end
+    if draw and draw.get_screen_size then
+        cx, cy = draw.get_screen_size()
+        cx, cy = cx * 0.5, cy * 0.5
+    elseif utility and utility.get_screen_size then
+        cx, cy = utility.get_screen_size()
+        cx, cy = cx * 0.5, cy * 0.5
+    end
+    cx_init = true
 end
 
 local function part_position(part)
@@ -12926,116 +13727,112 @@ local function part_position(part)
     return pos
 end
 
-local function vec3_position(value)
-    if not value then return nil end
-    if value.x ~= nil then
-        return { x = value.x, y = value.y, z = value.z }
-    end
-    if value[1] then
-        return { x = value[1], y = value[2], z = value[3] }
-    end
-    return nil
+local function dist2(a, b)
+    local dx = a.x - b.x
+    local dy = a.y - b.y
+    local dz = a.z - b.z
+    return dx * dx + dy * dy + dz * dz
 end
 
-local function camera_controller()
-    local lp = env.get_local_player()
-    local char = lp and lp.character
-    if not char or not env.is_valid(char) then return nil end
-    return find_child(char, "CameraController")
-end
-
-local function viewmodel_origin()
-    local cc = camera_controller()
-    if cc and env.is_valid(cc) then
-        local cf = env.safe_call(function() return cc:GetAttribute("ViewmodelCFrame") end)
-        local pos = vec3_position(cf and (cf.Position or cf.position))
-        if pos then return pos end
-    end
-
-    if camera and camera.get_position then
-        local cam = camera.get_position()
-        return vec3_position(cam)
-    end
-
-    return nil
-end
-
-local function spark_part_from_model(model)
-    if not env.is_valid(model) then return nil end
-
-    local spark = find_child(model, "NodeSpark") or find_child(model, "TreeX")
-    if not spark or not env.is_valid(spark) then return nil end
-
-    local main = env.safe_call(function() return spark.PrimaryPart end)
-    if main and env.is_valid(main) then return main end
-
-    main = find_child(spark, "Main")
-    if main and env.is_valid(main) then return main end
-
-    return nil
-end
-
-local function scan_folder(folder, out)
-    if not env.is_valid(folder) then return end
-    for _, model in ipairs(folders.scan_children(folder, "Model", 250)) do
-        local part = spark_part_from_model(model)
-        if part then
-            table.insert(out, part)
-        end
-    end
-end
-
-local function refresh_sparks()
+local function refresh_near(origin, radius)
     local now = tick_ms()
     if now < next_scan_ms then return end
     next_scan_ms = now + SCAN_MS
 
     local out = {}
-    scan_folder(folders.from_key("nodes"), out)
-    scan_folder(folders.from_key("plants"), out)
-    scan_folder(folders.get_folder("Trees"), out)
-    spark_parts = out
+    farm_targets.collect_near(origin, radius, out, MAX_NEAR)
+    gather_parts = out
 end
 
-local function player_position(lp)
-    if not lp then return nil end
-
-    if lp.position and lp.position.x ~= nil then
-        return lp.position
-    end
-
-    local char = lp.character
-    if not char and game and game.local_player then
-        char = game.local_player.character
-    end
-    if not char then return nil end
-
-    local root = find_child(char, "HumanoidRootPart")
-    return part_position(root)
+local function ray_origin()
+    return silent_ray.get_camera_origin()
 end
 
-local function nearest_spark(player_pos, radius)
+local function effective_radius(tool_name)
+    local tool_range = farm_tools.melee_range(tool_name)
+    local slider = settings.num(P_RADIUS, 7)
+    if slider <= 0 then return 0 end
+    return math.min(slider, tool_range + 0.15)
+end
+
+local function target_valid(part, origin, radius, loose)
+    if not env.is_valid(part) then return false end
+    local pos = part_position(part)
+    if not pos or not origin then return false end
+    local limit = loose and (radius * 1.25) or radius
+    return dist2(pos, origin) <= limit * limit
+end
+
+local function pick_target(origin, radius)
+    ensure_screen_center()
+
     local best_part = nil
-    local best_dist = radius
+    local best_score = math.huge
+    local best_fov = math.huge
+    local nearest_part = nil
+    local nearest_d2 = math.huge
+    local r2 = radius * radius
 
-    for i = 1, #spark_parts do
-        local part = spark_parts[i]
+    for i = 1, #gather_parts do
+        local part = gather_parts[i]
         if env.is_valid(part) then
             local pos = part_position(part)
             if pos then
-                local dx = pos.x - player_pos.x
-                local dy = pos.y - player_pos.y
-                local dz = pos.z - player_pos.z
-                local dist = math_util.distance3(dx, dy, dz)
-                if dist < best_dist then
-                    best_dist = dist
-                    best_part = part
+                local d2 = dist2(pos, origin)
+                if d2 <= r2 then
+                    if d2 < nearest_d2 then
+                        nearest_d2 = d2
+                        nearest_part = part
+                    end
+
+                    local sx, sy, on_screen = esp_util.w2s(pos.x, pos.y, pos.z)
+                    if on_screen then
+                        local fov = math_util.screen_fov_dist(sx, sy, cx, cy)
+                        local score = fov + d2 * 1.5e-4
+                        if score < best_score then
+                            best_score = score
+                            best_fov = fov
+                            best_part = part
+                        end
+                    end
                 end
             end
         end
     end
 
-    return best_part
+    if best_part and best_fov <= PICK_FOV then
+        return best_part
+    end
+    return nearest_part
+end
+
+local function resolve_target(origin, radius, force_pick)
+    local now = tick_ms()
+
+    if locked_part and target_valid(locked_part, origin, radius, true) then
+        lock_grace_until = now + LOCK_GRACE_MS
+        return locked_part
+    end
+
+    if locked_part and now < lock_grace_until and env.is_valid(locked_part) and part_position(locked_part) then
+        return locked_part
+    end
+
+    if not force_pick and now < next_pick_ms then
+        return locked_part
+    end
+    next_pick_ms = now + PICK_MS
+
+    local picked = pick_target(origin, radius)
+    if picked then
+        locked_part = picked
+        lock_grace_until = now + LOCK_GRACE_MS
+        return picked
+    end
+
+    locked_part = nil
+    lock_grace_until = 0
+    return nil
 end
 
 local function silent_mode()
@@ -13048,6 +13845,14 @@ local function stop_silent()
     M._tracking = false
 end
 
+local function clear_lock()
+    locked_part = nil
+    lock_grace_until = 0
+    gather_parts = {}
+    next_scan_ms = 0
+    next_pick_ms = 0
+end
+
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.MISC)
@@ -13057,7 +13862,7 @@ function M.register_menu()
     menu_util.register_keybind(T, G.MISC, P, "Farm Helper", false)
     menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", false, root)
     menu_util.gap(T, G.MISC)
-    menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
+    menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 10, 7, root)
     menu.add_slider_int(T, G.MISC, P_SMOOTH, "Camera Smoothness", 1, 30, 8, root)
     menu_util.bind_children(P, { P_SILENT, P_RADIUS, P_SMOOTH })
 end
@@ -13065,31 +13870,38 @@ end
 function M.update(_dt)
     if not settings.enabled(P) then
         stop_silent()
+        clear_lock()
         return
     end
 
     farm_tools.load()
-    if not farm_tools.holding_farm_tool() then
+    local tool_name = farm_tools.get_held_farm_tool_name()
+    if not tool_name then
         stop_silent()
+        clear_lock()
         return
     end
 
-    local lp = env.get_local_player()
-    local pos = player_position(lp)
-    if not pos then
+    local origin = ray_origin()
+    if not origin then
         stop_silent()
+        clear_lock()
         return
     end
 
-    refresh_sparks()
-
-    local radius = settings.num(P_RADIUS, 5)
+    local radius = effective_radius(tool_name)
     if radius <= 0 then
         stop_silent()
+        clear_lock()
         return
     end
 
-    local target = nearest_spark(pos, radius)
+    local locked_ok = locked_part and target_valid(locked_part, origin, radius, true)
+    if not locked_ok then
+        refresh_near(origin, radius)
+    end
+
+    local target = resolve_target(origin, radius, locked_ok ~= true)
     if not target then
         stop_silent()
         return
@@ -13102,13 +13914,8 @@ function M.update(_dt)
     end
 
     if silent_mode() then
-        local origin = viewmodel_origin()
-        if not origin then
-            stop_silent()
-            return
-        end
-
-        if silent_ray.track(origin, aim, SHOOT_VK) then
+        silent_ray.ensure_hook()
+        if silent_ray.track(origin, aim, SHOOT_VK, aim) then
             M._tracking = true
         else
             debug.error_once("farm:silent", "Silent farm hook unavailable — toggle Silent Farm off for camera aim")
@@ -13118,9 +13925,7 @@ function M.update(_dt)
     end
 
     stop_silent()
-
     if not camera or not camera.look_at then return end
-
     local smooth = math.max(1, settings.num(P_SMOOTH, 8))
     pcall(camera.look_at, aim.x, aim.y, aim.z, smooth)
 end
@@ -13654,13 +14459,18 @@ local Y_ID = "april_mod_checker_y"
 local PANEL_W = 260
 local HEAD_OFFSET = 3.5
 local TITLE_H = 24
+local SCAN_MS = 2500
+local META_REFRESH_MS = 1000
+local LOOKUP_BUDGET = 2
 
 local seen = {}
 local active = {}
+local panel_rows = {}
 local last_scan = -1
-local SCAN_MS = 2500
+local last_meta_refresh = 0
 M._session = nil
 M._was_enabled = false
+M._group_started = false
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -13671,13 +14481,27 @@ local function session_id()
     local pid = game.place_id or 0
     local ws = game.workspace
     local ws_addr = (ws and (ws.Address or ws.address)) or 0
-    return pid .. ":" .. ws_addr
+    local job = (game.job_id or game.JobId or "")
+    return tostring(pid) .. ":" .. tostring(ws_addr) .. ":" .. tostring(job)
+end
+
+local function player_uid(p)
+    local uid = tonumber(p.user_id)
+    if uid and uid ~= 0 then return uid end
+    return p.name or p.display_name
 end
 
 function M.reset_state()
     seen = {}
     active = {}
+    panel_rows = {}
     last_scan = -1
+    last_meta_refresh = 0
+end
+
+function M.on_session_changed()
+    M.reset_state()
+    mod_ids.reset_session()
 end
 
 function M.tick_session()
@@ -13689,7 +14513,7 @@ function M.tick_session()
     end
     if sid ~= M._session then
         M._session = sid
-        M.reset_state()
+        M.on_session_changed()
     end
 end
 
@@ -13741,12 +14565,15 @@ function M.register_menu()
 end
 
 function M.init()
-    last_scan = -1
+    M.on_session_changed()
+    M._session = session_id()
+    mod_ids.ensure_started()
+    M._group_started = true
 end
 
 function M.track_player(p, role)
-    local uid = p.user_id
-    if not uid or uid == 0 then return end
+    local uid = player_uid(p)
+    if not uid or uid == "" then return end
 
     local now = tick_ms()
     if not active[uid] then
@@ -13756,50 +14583,94 @@ function M.track_player(p, role)
             username = p.name or "?",
             role = role,
             first_seen = now,
+            player = p,
         }
     else
         local entry = active[uid]
         entry.label = player_label(p)
         entry.username = p.name or entry.username
         entry.role = role
+        entry.player = p
     end
 end
 
-function M.check_player(p)
-    if not settings.enabled(P) then return end
-    if not p or p.is_local then return end
+function M.check_player(p, lookup_budget)
+    if not settings.enabled(P) then return lookup_budget end
+    if not p or p.is_local then return lookup_budget end
 
-    local uid = p.user_id
-    if not uid or uid == 0 then return end
+    local queue = lookup_budget and lookup_budget > 0
+    local role = mod_ids.role_for_player(p, {
+        queue_lookup = queue,
+        mark_unknown = not queue,
+    })
+    if queue and role == nil then
+        local uid = tonumber(p.user_id)
+        if uid and uid ~= 0 then
+            lookup_budget = lookup_budget - 1
+        end
+    end
+    if not role then return lookup_budget end
 
-    local role = mod_ids.role_for(uid)
-    if not role then return end
+    local uid = player_uid(p)
+    if not uid or uid == "" then return lookup_budget end
 
     M.track_player(p, role)
 
-    if seen[uid] then return end
+    if seen[uid] then return lookup_budget end
     seen[uid] = true
-    local label = player_label(p)
-    notify.warning(string.format("%s: %s (%s)", mod_ids.short_label(role), label, p.name or "?"), 6000)
+    notify.warning(string.format("%s: %s (%s)", mod_ids.short_label(role), player_label(p), p.name or "?"), 6000)
+    return lookup_budget
 end
 
-function M.reconcile_active()
-    if not entity or not entity.get_players then return end
+local function rebuild_panel_rows(now)
+    local rows = {}
+    local me = env.get_local_player()
 
-    local players = entity.get_players()
-    if #players == 0 then return end
+    for uid, entry in pairs(active) do
+        local p = entry.player
+        local dist = nil
+        if p and me and me.position and p.position then
+            local dx = p.position.x - me.position.x
+            local dy = p.position.y - me.position.y
+            local dz = p.position.z - me.position.z
+            dist = math.floor(math.sqrt(dx * dx + dy * dy + dz * dz))
+        end
 
+        local meta = format_duration(now - (entry.first_seen or now))
+        if dist then
+            meta = meta .. "  |  " .. dist .. "m"
+        end
+
+        rows[#rows + 1] = {
+            name = entry.label or entry.username or "Unknown",
+            role = mod_ids.short_label(entry.role),
+            meta = meta,
+            first_seen = entry.first_seen or now,
+            accent = theme.role_accent(entry.role),
+        }
+    end
+
+    table.sort(rows, function(a, b)
+        return (a.first_seen or 0) < (b.first_seen or 0)
+    end)
+
+    panel_rows = rows
+end
+
+function M.reconcile_active(players)
     local present = {}
+
     for _, p in ipairs(players) do
         if p.is_local then goto continue end
-        local uid = p.user_id
-        if not uid or uid == 0 then goto continue end
 
-        local role = mod_ids.role_for(uid)
-        if role then
-            present[uid] = true
-            M.track_player(p, role)
-        end
+        local role = mod_ids.role_for_player(p)
+        if not role then goto continue end
+
+        local uid = player_uid(p)
+        if not uid or uid == "" then goto continue end
+
+        present[uid] = true
+        M.track_player(p, role)
 
         ::continue::
     end
@@ -13814,43 +14685,67 @@ end
 
 function M.scan_all()
     if not settings.enabled(P) then return end
-    M.reconcile_active()
+    if not entity or not entity.get_players then return end
 
-    for _, p in ipairs(entity and entity.get_players and entity.get_players() or {}) do
-        M.check_player(p)
+    local players = entity.get_players()
+    local lookup_budget = LOOKUP_BUDGET
+
+    M.reconcile_active(players)
+
+    for _, p in ipairs(players) do
+        lookup_budget = M.check_player(p, lookup_budget)
     end
+
+    rebuild_panel_rows(tick_ms())
+    last_meta_refresh = tick_ms()
 end
 
 function M.on_player_added(p)
-    M.check_player(p)
+    M.check_player(p, LOOKUP_BUDGET)
+    rebuild_panel_rows(tick_ms())
 end
 
 function M.on_player_removed(p)
     if not p then return end
-    local uid = p.user_id
-    if uid and uid ~= 0 then
+    local uid = player_uid(p)
+    if uid and uid ~= "" then
         seen[uid] = nil
         active[uid] = nil
+        mod_ids.invalidate_player(p)
+        rebuild_panel_rows(tick_ms())
     end
 end
 
+function M.staff_role(player)
+    if not player then return nil end
+    local uid = player_uid(player)
+    if uid and active[uid] then
+        return active[uid].role
+    end
+    return mod_ids.role_for_player(player)
+end
+
 function M.is_staff(player)
-    if not player then return false end
-    local uid = player.user_id
-    if not uid or uid == 0 then return false end
-    if active[uid] then return true end
-    return mod_ids.role_for(uid) ~= nil
+    return M.staff_role(player) ~= nil
 end
 
 function M.update(_dt)
     M.tick_session()
 
     if not settings.enabled(P) then
-        if M._was_enabled then M.reset_state() end
+        if M._was_enabled then
+            M.reset_state()
+            M._group_started = false
+        end
         M._was_enabled = false
         return
     end
     M._was_enabled = true
+
+    if not M._group_started then
+        mod_ids.ensure_started()
+        M._group_started = true
+    end
 
     local now = tick_ms()
     local interval = settings.num("april_mod_checker_interval", SCAN_MS)
@@ -13862,14 +14757,10 @@ end
 
 function M.draw_mod_markers()
     if not settings.enabled(P) then return end
-    if not entity or not entity.get_players then return end
 
-    for _, p in ipairs(entity.get_players()) do
-        if p.is_local then goto continue end
-
-        local uid = p.user_id
-        if not uid or uid == 0 then goto continue end
-        if not mod_ids.role_for(uid) then goto continue end
+    for _, entry in pairs(active) do
+        local p = entry.player
+        if not p or p.is_local then goto continue end
 
         local wx, wy, wz = head_world_pos(p)
         if not wx then goto continue end
@@ -13877,75 +14768,22 @@ function M.draw_mod_markers()
         local sx, sy, vis = esp_util.w2s(wx, wy, wz)
         if not vis then goto continue end
 
-        theme.draw_staff_badge(sx, sy, mod_ids.role_for(uid))
+        theme.draw_staff_badge(sx, sy, entry.role)
 
         ::continue::
     end
-end
-
-local function build_staff_rows()
-    local rows = {}
-    local me = env.get_local_player()
-    local now = tick_ms()
-
-    if not entity or not entity.get_players then return rows end
-
-    for _, p in ipairs(entity.get_players()) do
-        if p.is_local then goto continue end
-
-        local uid = p.user_id
-        if not uid or uid == 0 then goto continue end
-
-        local role = mod_ids.role_for(uid)
-        if not role then goto continue end
-
-        M.track_player(p, role)
-        local entry = active[uid]
-        if not entry then goto continue end
-
-        local dist = nil
-        if me and me.position and p.position then
-            local dx = p.position.x - me.position.x
-            local dy = p.position.y - me.position.y
-            local dz = p.position.z - me.position.z
-            dist = math.floor(math.sqrt(dx * dx + dy * dy + dz * dz))
-        end
-
-        local meta = format_duration(now - (entry.first_seen or now))
-        if dist then
-            meta = meta .. "  |  " .. dist .. "m"
-        end
-
-        rows[#rows + 1] = {
-            name = entry.label or entry.username or "Unknown",
-            role = mod_ids.short_label(role),
-            meta = meta,
-            first_seen = entry.first_seen or now,
-            accent = theme.role_accent(role),
-        }
-
-        ::continue::
-    end
-
-    table.sort(rows, function(a, b)
-        return (a.first_seen or 0) < (b.first_seen or 0)
-    end)
-
-    return rows
 end
 
 local function draw_staff_panel(x, y, width, rows)
     if not draw or not draw.text then return end
 
     overlay_theme.sync()
-    local accent = overlay_theme.accent()
     local pad = 10
     local row_h = 44
     local count = math.max(#rows, 1)
     local height = TITLE_H + count * row_h + 6
 
     theme.draw_panel(x, y, width, height, overlay_theme.panel_opts())
-
     overlay_theme.draw_accent_bar(x + 1, y, width - 2, 2)
 
     local title = "Staff In Lobby"
@@ -14002,12 +14840,15 @@ function M.draw()
 
     if not settings.enabled(P) then return end
 
-    M.reconcile_active()
+    local now = tick_ms()
+    if now - last_meta_refresh >= META_REFRESH_MS then
+        rebuild_panel_rows(now)
+        last_meta_refresh = now
+    end
 
     local sw, sh = draw_util.screen_size()
-    local rows = build_staff_rows()
     local row_h = 44
-    local count = math.max(#rows, 1)
+    local count = math.max(#panel_rows, 1)
     local height = TITLE_H + count * row_h + 6
 
     local x, y = panel_drag.update(
@@ -14019,7 +14860,7 @@ function M.draw()
     )
     x, y = panel_drag.clamp(x, y, PANEL_W, height, sw, sh)
 
-    draw_staff_panel(x, y, PANEL_W, rows)
+    draw_staff_panel(x, y, PANEL_W, panel_rows)
 end
 
 return M
@@ -14075,7 +14916,9 @@ local FLAG_COLS = {
 }
 
 local _wpn_cache = {}
+local _bounds_cache = {}
 local WPN_TTL_MS = 220
+local BOUNDS_TTL_MS = 600
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -14105,8 +14948,9 @@ local function default_color()
 end
 
 local function resolve_color(p)
-    if mod_checker.is_staff(p) then
-        return theme.role_accent(mod_ids.role_for(p.user_id))
+    local role = mod_checker.staff_role(p)
+    if role then
+        return theme.role_accent(role)
     end
     if settings.bool(ID_CLAN_COLOR, false) then
         local cc = player_state.clan_color(p)
@@ -14240,12 +15084,14 @@ local function collect_flags(p)
         local tag = player_state.staff_tag(p)
         if tag then
             out[#out + 1] = { text = tag, col = FLAG_COLS[tag] or FLAG_COLS.STAFF }
-        elseif mod_checker.is_staff(p) then
-            local role = mod_ids.role_for(p.user_id)
-            out[#out + 1] = {
-                text = mod_ids.short_label(role),
-                col = theme.role_accent(role),
-            }
+        else
+            local role = mod_checker.staff_role(p)
+            if role then
+                out[#out + 1] = {
+                    text = mod_ids.short_label(role),
+                    col = theme.role_accent(role),
+                }
+            end
         end
     end
     if settings.multi(FLAGS, FL_REVIVING, true) and player_state.is_reviving(p) then
@@ -14254,22 +15100,45 @@ local function collect_flags(p)
     return out
 end
 
-local function screen_bounds(p)
-    if p.get_bounds then
-        local gb = p:get_bounds()
-        if gb and gb.valid and gb.w >= 4 and gb.h >= 8 then
-            return { x = gb.x, y = gb.y, w = gb.w, h = gb.h, valid = true }
+local function prune_bounds_cache(now)
+    for key, ent in pairs(_bounds_cache) do
+        if not ent or (now - (ent.t or 0)) > BOUNDS_TTL_MS * 3 then
+            _bounds_cache[key] = nil
+        end
+    end
+end
+
+local function resolve_bounds(p, pos, dist)
+    local key = cache_key(p)
+    local now = tick_ms()
+
+    local bounds = esp_util.player_screen_bounds(p, {
+        dist = dist,
+        point_size = esp_util.dist_point_size(dist),
+    })
+
+    if bounds and bounds.valid then
+        _bounds_cache[key] = { bounds = bounds, t = now, dist = dist }
+        return bounds
+    end
+
+    local cached = _bounds_cache[key]
+    if cached and cached.bounds and (now - cached.t) < BOUNDS_TTL_MS then
+        local cd = cached.dist or dist
+        if not dist or not cd or math.abs(dist - cd) < 40 then
+            return cached.bounds
         end
     end
 
-    local b = esp_util.bones_screen_bounds(p)
-    if b and b.valid and b.w >= 3 and b.h >= 6 then
-        return b
+    if pos then
+        local size = esp_util.dist_point_size(dist)
+        bounds = esp_util.point_screen_bounds(pos.x, pos.y, pos.z, size)
+        if bounds and bounds.valid then
+            _bounds_cache[key] = { bounds = bounds, t = now, dist = dist }
+            return bounds
+        end
     end
 
-    if p.character then
-        return esp_util.model_screen_bounds(p.character)
-    end
     return nil
 end
 
@@ -14278,7 +15147,8 @@ local function is_on_screen(bounds, pos)
         local sw, sh = draw_util.screen_size()
         local cx = bounds.x + bounds.w * 0.5
         local cy = bounds.y + bounds.h * 0.5
-        return cx > -20 and cy > -20 and cx < sw + 20 and cy < sh + 20
+        local margin = 80
+        return cx > -margin and cy > -margin and cx < sw + margin and cy < sh + margin
     end
     if not pos then return false end
     local _, _, on = esp_util.w2s(pos.x, pos.y, pos.z)
@@ -14291,6 +15161,9 @@ end
 function M.draw()
     if not settings.enabled(P) then return end
     if not entity or not entity.get_players then return end
+
+    local now = tick_ms()
+    prune_bounds_cache(now)
 
     local range = settings.num(ID_RANGE, 500)
     local range_sq = range * range
@@ -14325,10 +15198,8 @@ function M.draw()
         end
 
         local col = resolve_color(p)
-        local bounds = screen_bounds(p)
-        local on_screen = is_on_screen(bounds, pos)
-
-        if not bounds or not bounds.valid or not on_screen then
+        local bounds = resolve_bounds(p, pos, dist)
+        if not bounds or not bounds.valid or not is_on_screen(bounds, pos) then
             goto continue
         end
 
@@ -14338,7 +15209,7 @@ function M.draw()
         end
 
         local cx = bounds.x + bounds.w * 0.5
-        local box_ok = bounds.w >= 6 and bounds.h >= 10
+        local box_ok = bounds.w >= 4 and bounds.h >= 8
 
         local top = {}
         if show_clan then
@@ -14425,14 +15296,12 @@ end)()
 April._mods["features.visuals.target_overlay"] = (function()
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
-local esp_util = April.require("core.esp_util")
 local menu_util = April.require("core.menu_util")
 local image_cache = April.require("core.image_cache")
 local items = April.require("game.items")
 local player_gear = April.require("game.player_gear")
 local player_state = April.require("game.player_state")
-local combat_target = April.require("game.combat_target")
-local math_util = April.require("core.math_util")
+local targeting = April.require("features.combat.targeting")
 local text_util = April.require("core.text_util")
 
 local M = {}
@@ -14500,36 +15369,38 @@ local function crosshair_center()
     return sw * 0.5, sh * 0.5
 end
 
-local function find_crosshair_target(fov_px)
-    if not entity or not entity.get_players then return nil end
+local function overlay_aim_config()
+    local silent_on = settings.enabled("april_silent_aim")
+    local aim_on = settings.enabled("april_aimbot")
+    local silent_fov = silent_on and settings.num("april_silent_fov", 150) or nil
+    local aim_fov = aim_on and settings.num("april_aim_fov", 120) or nil
+
+    if not silent_fov and not aim_fov then
+        return nil, nil
+    end
+    if silent_fov and aim_fov then
+        if silent_fov >= aim_fov then
+            return silent_fov, "april_silent_"
+        end
+        return aim_fov, "april_aim_"
+    end
+    if silent_fov then
+        return silent_fov, "april_silent_"
+    end
+    return aim_fov, "april_aim_"
+end
+
+local function find_overlay_target()
+    local fov, prefix = overlay_aim_config()
+    if not fov or not prefix then return nil end
 
     local cx, cy = crosshair_center()
-    local best, best_dist = nil, fov_px
-
-    for _, p in ipairs(entity.get_players()) do
-        if not player_state.is_combat_target(p) then goto continue end
-
-        local pos = p.head_position or p.position
-        if not pos then goto continue end
-
-        local px = pos.x or pos[1]
-        local py = pos.y or pos[2]
-        local pz = pos.z or pos[3]
-        if not px then goto continue end
-
-        local sx, sy, vis = esp_util.w2s(px, py, pz)
-        if not vis then goto continue end
-
-        local dist = math_util.screen_fov_dist(sx, sy, cx, cy)
-        if dist <= fov_px and dist < best_dist then
-            best_dist = dist
-            best = p
-        end
-
-        ::continue::
-    end
-
-    return best
+    return targeting.find_target(cx, cy, fov, prefix, {
+        ignore_whitelist = true,
+        ignore_visible = true,
+        players_only = true,
+        force_crosshair_priority = true,
+    })
 end
 
 local function get_gear(player)
@@ -14821,17 +15692,12 @@ function M.register_menu()
     menu_util.register_keybind(T, G.VISUALS, P, "Target Gear", false)
 
     local root = menu_util.parent(P)
-    menu.add_checkbox(T, G.VISUALS, P .. "_fallback_fov", "Crosshair FOV Fallback", false, root)
-    menu.add_slider_int(T, G.VISUALS, P .. "_fov", "Fallback FOV", 40, 400, 150,
-        menu_util.parent(P .. "_fallback_fov"))
     menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, root)
 
     menu_util.bind_children(P, {
-        P .. "_fallback_fov", P .. "_fov",
         P .. "_gear_size", P .. "_top",
     })
-    menu_util.bind_children(P .. "_fallback_fov", { P .. "_fov" })
 end
 
 function M.refresh_target()
@@ -14843,10 +15709,7 @@ function M.refresh_target()
 
     local gear_sz = settings.num(P .. "_gear_size", 48)
 
-    local target = combat_target.get()
-    if not target and settings.bool(P .. "_fallback_fov", false) then
-        target = find_crosshair_target(settings.num(P .. "_fov", 150))
-    end
+    local target = find_overlay_target()
 
     if not target or not player_state.is_combat_target(target) then
         M._target = nil
@@ -21072,8 +21935,6 @@ local function build_visuals()
         items = {
             label("Target Overlay", false),
             kb("april_target_overlay", "Target Overlay", false),
-            cb("april_target_overlay_fallback_fov", "Crosshair FOV Fallback", false, nil, "april_target_overlay"),
-            sl("april_target_overlay_fov", "Fallback FOV", 40, 400, 150, false, "april_target_overlay"),
             sl("april_target_overlay_gear_size", "Gear Icon Size", 32, 64, 48, false, "april_target_overlay"),
             sl("april_target_overlay_top", "Top Offset", 48, 160, 88, false, "april_target_overlay"),
             sep(),
@@ -21240,7 +22101,7 @@ local function build_misc()
             items = {
                 kb("april_farm_helper", "Farm Helper", false),
                 cb("april_farm_silent", "Silent Farm", false, nil, "april_farm_helper"),
-                sl("april_farm_radius", "Farm Range (studs)", 1, 15, 5, false, "april_farm_helper"),
+                sl("april_farm_radius", "Farm Range (studs)", 1, 10, 7, false, "april_farm_helper"),
                 sl("april_farm_smooth", "Camera Smoothness", 1, 30, 8, false, "april_farm_helper"),
                 sep(),
                 cb("april_anti_afk", "Anti AFK", false),

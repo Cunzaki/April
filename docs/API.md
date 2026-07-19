@@ -1088,7 +1088,9 @@ menu.add_combo(T, G, "april_loot_chams_color", "Loot Chams Color", COLORS, 0, pa
 
 ### Farm helper
 
-- `features/combat/perfect_farm.lua` — `camera.look_at` for nodes/trees
+- `features/combat/perfect_farm.lua` — aims at gather hit parts from dump hierarchy (`NodeSpark.Main`, `TreeX.Main`, plant `Main`, `CactusPart`)
+- **Silent farm** uses **camera / mouse unit-ray origin** (same path as `RaycastUtil.MouseRaycast`), not weapon muzzle
+- Range capped per tool `MeleeChecks` from ToolInfo (e.g. Stone Hatchet 5, Chainsaw 6.5, Steel Axe 5.5 studs)
 - Independent of gun mods master toggle
 
 ### Bundle order (critical)

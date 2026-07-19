@@ -106,7 +106,11 @@ end
 --- Screen snapline from bottom-center to target (classic ESP style).
 function M.snapline(tx, ty, col, thick, sw, sh)
     if not draw or not draw.line then return end
-    sw, sh = sw or M.screen_size()
+    if not sw or not sh then
+        local dw, dh = M.screen_size()
+        sw = sw or dw
+        sh = sh or dh
+    end
     col = col or { 1, 1, 1, 1 }
     thick = thick or 1.5
     local sx = sw * 0.5
@@ -126,13 +130,15 @@ function M.circle(x, y, r, col, filled)
 end
 
 function M.screen_size()
+    local w, h
     if draw and draw.get_screen_size then
-        return draw.get_screen_size()
+        w, h = draw.get_screen_size()
+    elseif utility and utility.get_screen_size then
+        w, h = utility.get_screen_size()
     end
-    if utility and utility.get_screen_size then
-        return utility.get_screen_size()
-    end
-    return 1920, 1080
+    if not w or w <= 0 then w = 1920 end
+    if not h or h <= 0 then h = 1080 end
+    return w, h
 end
 
 function M.world_label(inst, text, col, max_dist)

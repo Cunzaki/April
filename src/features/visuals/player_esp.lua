@@ -45,7 +45,9 @@ local FLAG_COLS = {
 }
 
 local _wpn_cache = {}
+local _bounds_cache = {}
 local WPN_TTL_MS = 220
+local BOUNDS_TTL_MS = 600
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -75,8 +77,9 @@ local function default_color()
 end
 
 local function resolve_color(p)
-    if mod_checker.is_staff(p) then
-        return theme.role_accent(mod_ids.role_for(p.user_id))
+    local role = mod_checker.staff_role(p)
+    if role then
+        return theme.role_accent(role)
     end
     if settings.bool(ID_CLAN_COLOR, false) then
         local cc = player_state.clan_color(p)
@@ -210,12 +213,14 @@ local function collect_flags(p)
         local tag = player_state.staff_tag(p)
         if tag then
             out[#out + 1] = { text = tag, col = FLAG_COLS[tag] or FLAG_COLS.STAFF }
-        elseif mod_checker.is_staff(p) then
-            local role = mod_ids.role_for(p.user_id)
-            out[#out + 1] = {
-                text = mod_ids.short_label(role),
-                col = theme.role_accent(role),
-            }
+        else
+            local role = mod_checker.staff_role(p)
+            if role then
+                out[#out + 1] = {
+                    text = mod_ids.short_label(role),
+                    col = theme.role_accent(role),
+                }
+            end
         end
     end
     if settings.multi(FLAGS, FL_REVIVING, true) and player_state.is_reviving(p) then
@@ -224,22 +229,45 @@ local function collect_flags(p)
     return out
 end
 
-local function screen_bounds(p)
-    if p.get_bounds then
-        local gb = p:get_bounds()
-        if gb and gb.valid and gb.w >= 4 and gb.h >= 8 then
-            return { x = gb.x, y = gb.y, w = gb.w, h = gb.h, valid = true }
+local function prune_bounds_cache(now)
+    for key, ent in pairs(_bounds_cache) do
+        if not ent or (now - (ent.t or 0)) > BOUNDS_TTL_MS * 3 then
+            _bounds_cache[key] = nil
+        end
+    end
+end
+
+local function resolve_bounds(p, pos, dist)
+    local key = cache_key(p)
+    local now = tick_ms()
+
+    local bounds = esp_util.player_screen_bounds(p, {
+        dist = dist,
+        point_size = esp_util.dist_point_size(dist),
+    })
+
+    if bounds and bounds.valid then
+        _bounds_cache[key] = { bounds = bounds, t = now, dist = dist }
+        return bounds
+    end
+
+    local cached = _bounds_cache[key]
+    if cached and cached.bounds and (now - cached.t) < BOUNDS_TTL_MS then
+        local cd = cached.dist or dist
+        if not dist or not cd or math.abs(dist - cd) < 40 then
+            return cached.bounds
         end
     end
 
-    local b = esp_util.bones_screen_bounds(p)
-    if b and b.valid and b.w >= 3 and b.h >= 6 then
-        return b
+    if pos then
+        local size = esp_util.dist_point_size(dist)
+        bounds = esp_util.point_screen_bounds(pos.x, pos.y, pos.z, size)
+        if bounds and bounds.valid then
+            _bounds_cache[key] = { bounds = bounds, t = now, dist = dist }
+            return bounds
+        end
     end
 
-    if p.character then
-        return esp_util.model_screen_bounds(p.character)
-    end
     return nil
 end
 
@@ -248,7 +276,8 @@ local function is_on_screen(bounds, pos)
         local sw, sh = draw_util.screen_size()
         local cx = bounds.x + bounds.w * 0.5
         local cy = bounds.y + bounds.h * 0.5
-        return cx > -20 and cy > -20 and cx < sw + 20 and cy < sh + 20
+        local margin = 80
+        return cx > -margin and cy > -margin and cx < sw + margin and cy < sh + margin
     end
     if not pos then return false end
     local _, _, on = esp_util.w2s(pos.x, pos.y, pos.z)
@@ -261,6 +290,9 @@ end
 function M.draw()
     if not settings.enabled(P) then return end
     if not entity or not entity.get_players then return end
+
+    local now = tick_ms()
+    prune_bounds_cache(now)
 
     local range = settings.num(ID_RANGE, 500)
     local range_sq = range * range
@@ -295,10 +327,8 @@ function M.draw()
         end
 
         local col = resolve_color(p)
-        local bounds = screen_bounds(p)
-        local on_screen = is_on_screen(bounds, pos)
-
-        if not bounds or not bounds.valid or not on_screen then
+        local bounds = resolve_bounds(p, pos, dist)
+        if not bounds or not bounds.valid or not is_on_screen(bounds, pos) then
             goto continue
         end
 
@@ -308,7 +338,7 @@ function M.draw()
         end
 
         local cx = bounds.x + bounds.w * 0.5
-        local box_ok = bounds.w >= 6 and bounds.h >= 10
+        local box_ok = bounds.w >= 4 and bounds.h >= 8
 
         local top = {}
         if show_clan then

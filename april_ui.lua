@@ -1010,8 +1010,6 @@ local function build_visuals()
         items = {
             label("Target Overlay", false),
             kb("april_target_overlay", "Target Overlay", false),
-            cb("april_target_overlay_fallback_fov", "Crosshair FOV Fallback", false),
-            sl("april_target_overlay_fov", "Fallback FOV", 40, 400, 150),
             sl("april_target_overlay_gear_size", "Gear Icon Size", 32, 64, 48),
             sl("april_target_overlay_top", "Top Offset", 48, 160, 88),
             sep(),

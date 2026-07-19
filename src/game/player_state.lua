@@ -230,7 +230,10 @@ end
 
 function M.is_combat_target(player)
     if not player or player.is_local then return false end
-    if not player.is_alive then return false end
+    if player.is_alive == false then
+        if player.health and player.health > 0 then return true end
+        return false
+    end
     return true
 end
 

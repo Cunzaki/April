@@ -8,8 +8,8 @@ end)
 if tick == 0 then tick = os.time() end
 
 local urls = {
-    "https://cdn.jsdelivr.net/gh/Cunzaki/April@main/april.lua?v=3.85.13&cb=" .. tostring(tick),
-    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/april.lua?v=3.85.13&cb=" .. tostring(tick),
+    "https://cdn.jsdelivr.net/gh/Cunzaki/April@main/april.lua?v=3.85.24&cb=" .. tostring(tick),
+    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/april.lua?v=3.85.24&cb=" .. tostring(tick),
 }
 
 local load_fn = utility and (utility.load_url or utility.LoadUrl or utility.loadurl)

@@ -167,7 +167,7 @@ function M.bones_screen_bounds(player)
     }
 end
 
--- Keep far targets readable: never let the box collapse to a speck.
+-- Keep far targets readable: only expand collapsed specks, never inflate real bounds.
 function M.ensure_min_bounds(b, min_w, min_h)
     if not b or not b.valid then return b end
     min_w = min_w or 22
@@ -183,6 +183,132 @@ function M.ensure_min_bounds(b, min_w, min_h)
         b.y = cy - min_h * 0.5
     end
     return b
+end
+
+function M.dist_min_bounds(dist)
+    dist = math.max(1, tonumber(dist) or 80)
+    local h = math.max(6, math.min(38, 2200 / (dist + 35)))
+    local w = math.max(4, math.min(22, h * 0.55))
+    return w, h
+end
+
+function M.dist_point_size(dist)
+    dist = math.max(1, tonumber(dist) or 80)
+    return math.max(6, math.min(34, 2000 / (dist + 30)))
+end
+
+function M.guard_tiny_bounds(b, dist)
+    if not b or not b.valid then return b end
+    if b.w >= 6 and b.h >= 8 then return b end
+    local min_w, min_h = M.dist_min_bounds(dist)
+    return M.ensure_min_bounds(b, min_w, min_h)
+end
+
+local function vec3_pos(v)
+    if not v then return nil end
+    if v.x ~= nil then return v.x, v.y, v.z end
+    return v[1], v[2], v[3]
+end
+
+-- Head + feet projection when bone AABB APIs fail for a frame.
+function M.head_feet_screen_bounds(player, opts)
+    if not player then return nil end
+    opts = opts or {}
+    local env = April.require("core.env")
+
+    local hx, hy, hz = vec3_pos(player.head_position)
+    if not hx then
+        local char = player.character
+        if char and env.is_valid(char) then
+            local head = env.safe_call(function()
+                return char:find_first_child("Head") or char:FindFirstChild("Head")
+            end)
+            if head and env.is_valid(head) then
+                hx, hy, hz = vec3_pos(head.Position or head.position)
+            end
+        end
+    end
+    if not hx then return nil end
+
+    local sx, sy, vis = M.w2s(hx, hy, hz)
+    if not vis then return nil end
+
+    local fx, fy, fz
+    local char = player.character
+    if char and env.is_valid(char) then
+        for _, name in ipairs({ "LeftFoot", "RightFoot", "LeftLowerLeg", "RightLowerLeg" }) do
+            local foot = env.safe_call(function()
+                return char:find_first_child(name) or char:FindFirstChild(name)
+            end)
+            if foot and env.is_valid(foot) then
+                fx, fy, fz = vec3_pos(foot.Position or foot.position)
+                if fx then break end
+            end
+        end
+    end
+    if not fx then
+        fx, fy, fz = vec3_pos(player.position)
+        if fx then fy = fy - 2.8 end
+    end
+    if not fx then
+        fx, fy, fz = hx, hy - 3, hz
+    end
+
+    local bx, by, bvis = M.w2s(fx, fy, fz)
+    if not bvis then
+        local size = opts.point_size or M.dist_point_size(opts.dist)
+        return M.point_screen_bounds(hx, hy, hz, size)
+    end
+
+    local min_x = math.min(sx, bx)
+    local max_x = math.max(sx, bx)
+    local min_y = math.min(sy, by)
+    local max_y = math.max(sy, by)
+    local w = math.max(4, max_x - min_x)
+    local h = math.max(6, max_y - min_y)
+    local pad_x = math.max(1, w * 0.08)
+    local pad_y = math.max(1, h * 0.05)
+
+    return {
+        x = min_x - pad_x,
+        y = min_y - pad_y,
+        w = w + pad_x * 2,
+        h = h + pad_y * 2,
+        valid = true,
+    }
+end
+
+-- Stable player box: entity bounds -> bones -> model parts -> head/feet fallback.
+function M.player_screen_bounds(player, opts)
+    if not player then return nil end
+    opts = opts or {}
+    local dist = opts.dist
+
+    if player.get_bounds then
+        local gb = player:get_bounds()
+        if gb and gb.valid and (gb.w or 0) >= 2 and (gb.h or 0) >= 3 then
+            return gb
+        end
+    end
+
+    local b = M.bones_screen_bounds(player)
+    if b and b.valid then
+        return M.guard_tiny_bounds(b, dist)
+    end
+
+    if player.character then
+        b = M.model_screen_bounds(player.character)
+        if b and b.valid then
+            return M.guard_tiny_bounds(b, dist)
+        end
+    end
+
+    b = M.head_feet_screen_bounds(player, opts)
+    if b and b.valid then
+        return M.guard_tiny_bounds(b, dist)
+    end
+
+    return nil
 end
 
 function M.draw_model_skeleton(model, col, thick)

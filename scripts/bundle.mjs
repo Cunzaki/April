@@ -21,6 +21,7 @@ const ORDER = [
   "core/capabilities.lua",
   "core/debug.lua",
   "game/mod_ids.lua",
+  "game/mod_group.lua",
   "core/settings.lua",
   "core/feature_bind.lua",
   "core/aim_key.lua",
@@ -65,8 +66,8 @@ const ORDER = [
   "game/combat_origin.lua",
   "game/team_state.lua",
   "game/player_state.lua",
-  "game/combat_target.lua",
   "game/farm_tools.lua",
+  "game/farm_targets.lua",
   "game/inventory.lua",
   "game/player_gear.lua",
   "game/npcs.lua",
@@ -81,6 +82,7 @@ const ORDER = [
   "features/combat/silent_resolve.lua",
   "features/combat/camera_aimbot.lua",
   "features/combat/aimbot.lua",
+  "game/combat_target.lua",
   "features/combat/perfect_farm.lua",
   "features/combat/gun_mods.lua",
   "features/utility/mod_checker.lua",
@@ -123,7 +125,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.85.13",
+    version = "3.85.24",
     debug = false,
     _mods = {},
     bundled = true,
@@ -202,7 +204,7 @@ for (const rel of ORDER) {
 fs.writeFileSync(OUT, header + body + footer);
 console.log("Built", path.relative(ROOT, OUT), `(${(fs.statSync(OUT).size / 1024).toFixed(1)} KB)`);
 
-const VERSION = "3.85.13";
+const VERSION = "3.85.24";
 const loader = `-- April loader — paste this into Vector as "Script 1.lua" (small file, always pulls latest build).
 local tick = 0
 pcall(function()

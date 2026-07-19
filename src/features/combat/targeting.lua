@@ -157,7 +157,7 @@ function M.passes_filters(target, prefix, aim, origin, opts)
         if not player_state.passes_safezone_check(target, true) then return false end
     end
 
-    if settings.multi(prefix .. "filters", 2, false) then
+    if not opts.ignore_visible and settings.multi(prefix .. "filters", 2, false) then
         if not passes_visibility(target, aim, origin) then return false end
     end
 
@@ -396,12 +396,12 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
     opts = opts or {}
     local bone = M.bone_name(prefix)
     local screen_bone = bone == "Closest" and "Head" or bone
-    local use_fov = M.target_priority_crosshair(prefix)
+    local use_fov = opts.force_crosshair_priority or M.target_priority_crosshair(prefix)
     local best, best_score = nil, use_fov and fov_px or math.huge
     local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
-    local filter_visible = settings.multi(prefix .. "filters", 2, false)
+    local filter_visible = not opts.ignore_visible and settings.multi(prefix .. "filters", 2, false)
     local target_players = settings.multi(prefix .. "targets", 1, true)
-    local target_npcs = settings.multi(prefix .. "targets", 2, false)
+    local target_npcs = not opts.players_only and settings.multi(prefix .. "targets", 2, false)
 
     if target_players and entity and entity.get_players then
         for _, p in ipairs(entity.get_players()) do
@@ -437,10 +437,8 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
 end
 
 function M.screen_center()
-    if draw and draw.get_screen_size then
-        return draw.get_screen_size()
-    end
-    return 1920, 1080
+    local w, h = April.require("core.draw_util").screen_size()
+    return w, h
 end
 
 return M

@@ -215,8 +215,6 @@ local function build_visuals()
         items = {
             label("Target Overlay", false),
             kb("april_target_overlay", "Target Overlay", false),
-            cb("april_target_overlay_fallback_fov", "Crosshair FOV Fallback", false, nil, "april_target_overlay"),
-            sl("april_target_overlay_fov", "Fallback FOV", 40, 400, 150, false, "april_target_overlay"),
             sl("april_target_overlay_gear_size", "Gear Icon Size", 32, 64, 48, false, "april_target_overlay"),
             sl("april_target_overlay_top", "Top Offset", 48, 160, 88, false, "april_target_overlay"),
             sep(),
@@ -383,7 +381,7 @@ local function build_misc()
             items = {
                 kb("april_farm_helper", "Farm Helper", false),
                 cb("april_farm_silent", "Silent Farm", false, nil, "april_farm_helper"),
-                sl("april_farm_radius", "Farm Range (studs)", 1, 15, 5, false, "april_farm_helper"),
+                sl("april_farm_radius", "Farm Range (studs)", 1, 10, 7, false, "april_farm_helper"),
                 sl("april_farm_smooth", "Camera Smoothness", 1, 30, 8, false, "april_farm_helper"),
                 sep(),
                 cb("april_anti_afk", "Anti AFK", false),

@@ -1,11 +1,17 @@
+--[[
+  Farm helper — silent or camera aim at gather hit parts.
+  Melee uses camera / mouse unit-ray origin (RaycastUtil.MouseRaycast).
+]]
+
 local settings = April.require("core.settings")
 local env = April.require("core.env")
 local debug = April.require("core.debug")
-local folders = April.require("game.folders")
 local farm_tools = April.require("game.farm_tools")
+local farm_targets = April.require("game.farm_targets")
 local math_util = April.require("core.math_util")
 local menu_util = April.require("core.menu_util")
 local silent_ray = April.require("core.silent_ray")
+local esp_util = April.require("core.esp_util")
 
 local M = {}
 
@@ -15,20 +21,37 @@ local P_SMOOTH = "april_farm_smooth"
 local P_SILENT = "april_farm_silent"
 local SHOOT_VK = 0x01
 
-local spark_parts = {}
+local gather_parts = {}
+local locked_part = nil
+local lock_grace_until = 0
 local next_scan_ms = 0
-local SCAN_MS = 350
+local next_pick_ms = 0
+
+local SCAN_MS = 1800
+local PICK_MS = 66
+local LOCK_GRACE_MS = 350
+local PICK_FOV = 160
+local MAX_NEAR = 28
+
 M._tracking = false
+
+local cx, cy = 960, 540
+local cx_init = false
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
-local function find_child(parent, name)
-    if not parent then return nil end
-    return env.safe_call(function()
-        return parent:find_first_child(name) or parent:FindFirstChild(name)
-    end)
+local function ensure_screen_center()
+    if cx_init then return end
+    if draw and draw.get_screen_size then
+        cx, cy = draw.get_screen_size()
+        cx, cy = cx * 0.5, cy * 0.5
+    elseif utility and utility.get_screen_size then
+        cx, cy = utility.get_screen_size()
+        cx, cy = cx * 0.5, cy * 0.5
+    end
+    cx_init = true
 end
 
 local function part_position(part)
@@ -38,116 +61,112 @@ local function part_position(part)
     return pos
 end
 
-local function vec3_position(value)
-    if not value then return nil end
-    if value.x ~= nil then
-        return { x = value.x, y = value.y, z = value.z }
-    end
-    if value[1] then
-        return { x = value[1], y = value[2], z = value[3] }
-    end
-    return nil
+local function dist2(a, b)
+    local dx = a.x - b.x
+    local dy = a.y - b.y
+    local dz = a.z - b.z
+    return dx * dx + dy * dy + dz * dz
 end
 
-local function camera_controller()
-    local lp = env.get_local_player()
-    local char = lp and lp.character
-    if not char or not env.is_valid(char) then return nil end
-    return find_child(char, "CameraController")
-end
-
-local function viewmodel_origin()
-    local cc = camera_controller()
-    if cc and env.is_valid(cc) then
-        local cf = env.safe_call(function() return cc:GetAttribute("ViewmodelCFrame") end)
-        local pos = vec3_position(cf and (cf.Position or cf.position))
-        if pos then return pos end
-    end
-
-    if camera and camera.get_position then
-        local cam = camera.get_position()
-        return vec3_position(cam)
-    end
-
-    return nil
-end
-
-local function spark_part_from_model(model)
-    if not env.is_valid(model) then return nil end
-
-    local spark = find_child(model, "NodeSpark") or find_child(model, "TreeX")
-    if not spark or not env.is_valid(spark) then return nil end
-
-    local main = env.safe_call(function() return spark.PrimaryPart end)
-    if main and env.is_valid(main) then return main end
-
-    main = find_child(spark, "Main")
-    if main and env.is_valid(main) then return main end
-
-    return nil
-end
-
-local function scan_folder(folder, out)
-    if not env.is_valid(folder) then return end
-    for _, model in ipairs(folders.scan_children(folder, "Model", 250)) do
-        local part = spark_part_from_model(model)
-        if part then
-            table.insert(out, part)
-        end
-    end
-end
-
-local function refresh_sparks()
+local function refresh_near(origin, radius)
     local now = tick_ms()
     if now < next_scan_ms then return end
     next_scan_ms = now + SCAN_MS
 
     local out = {}
-    scan_folder(folders.from_key("nodes"), out)
-    scan_folder(folders.from_key("plants"), out)
-    scan_folder(folders.get_folder("Trees"), out)
-    spark_parts = out
+    farm_targets.collect_near(origin, radius, out, MAX_NEAR)
+    gather_parts = out
 end
 
-local function player_position(lp)
-    if not lp then return nil end
-
-    if lp.position and lp.position.x ~= nil then
-        return lp.position
-    end
-
-    local char = lp.character
-    if not char and game and game.local_player then
-        char = game.local_player.character
-    end
-    if not char then return nil end
-
-    local root = find_child(char, "HumanoidRootPart")
-    return part_position(root)
+local function ray_origin()
+    return silent_ray.get_camera_origin()
 end
 
-local function nearest_spark(player_pos, radius)
+local function effective_radius(tool_name)
+    local tool_range = farm_tools.melee_range(tool_name)
+    local slider = settings.num(P_RADIUS, 7)
+    if slider <= 0 then return 0 end
+    return math.min(slider, tool_range + 0.15)
+end
+
+local function target_valid(part, origin, radius, loose)
+    if not env.is_valid(part) then return false end
+    local pos = part_position(part)
+    if not pos or not origin then return false end
+    local limit = loose and (radius * 1.25) or radius
+    return dist2(pos, origin) <= limit * limit
+end
+
+local function pick_target(origin, radius)
+    ensure_screen_center()
+
     local best_part = nil
-    local best_dist = radius
+    local best_score = math.huge
+    local best_fov = math.huge
+    local nearest_part = nil
+    local nearest_d2 = math.huge
+    local r2 = radius * radius
 
-    for i = 1, #spark_parts do
-        local part = spark_parts[i]
+    for i = 1, #gather_parts do
+        local part = gather_parts[i]
         if env.is_valid(part) then
             local pos = part_position(part)
             if pos then
-                local dx = pos.x - player_pos.x
-                local dy = pos.y - player_pos.y
-                local dz = pos.z - player_pos.z
-                local dist = math_util.distance3(dx, dy, dz)
-                if dist < best_dist then
-                    best_dist = dist
-                    best_part = part
+                local d2 = dist2(pos, origin)
+                if d2 <= r2 then
+                    if d2 < nearest_d2 then
+                        nearest_d2 = d2
+                        nearest_part = part
+                    end
+
+                    local sx, sy, on_screen = esp_util.w2s(pos.x, pos.y, pos.z)
+                    if on_screen then
+                        local fov = math_util.screen_fov_dist(sx, sy, cx, cy)
+                        local score = fov + d2 * 1.5e-4
+                        if score < best_score then
+                            best_score = score
+                            best_fov = fov
+                            best_part = part
+                        end
+                    end
                 end
             end
         end
     end
 
-    return best_part
+    if best_part and best_fov <= PICK_FOV then
+        return best_part
+    end
+    return nearest_part
+end
+
+local function resolve_target(origin, radius, force_pick)
+    local now = tick_ms()
+
+    if locked_part and target_valid(locked_part, origin, radius, true) then
+        lock_grace_until = now + LOCK_GRACE_MS
+        return locked_part
+    end
+
+    if locked_part and now < lock_grace_until and env.is_valid(locked_part) and part_position(locked_part) then
+        return locked_part
+    end
+
+    if not force_pick and now < next_pick_ms then
+        return locked_part
+    end
+    next_pick_ms = now + PICK_MS
+
+    local picked = pick_target(origin, radius)
+    if picked then
+        locked_part = picked
+        lock_grace_until = now + LOCK_GRACE_MS
+        return picked
+    end
+
+    locked_part = nil
+    lock_grace_until = 0
+    return nil
 end
 
 local function silent_mode()
@@ -160,6 +179,14 @@ local function stop_silent()
     M._tracking = false
 end
 
+local function clear_lock()
+    locked_part = nil
+    lock_grace_until = 0
+    gather_parts = {}
+    next_scan_ms = 0
+    next_pick_ms = 0
+end
+
 function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.MISC)
@@ -169,7 +196,7 @@ function M.register_menu()
     menu_util.register_keybind(T, G.MISC, P, "Farm Helper", false)
     menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", false, root)
     menu_util.gap(T, G.MISC)
-    menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 15, 5, root)
+    menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 10, 7, root)
     menu.add_slider_int(T, G.MISC, P_SMOOTH, "Camera Smoothness", 1, 30, 8, root)
     menu_util.bind_children(P, { P_SILENT, P_RADIUS, P_SMOOTH })
 end
@@ -177,31 +204,38 @@ end
 function M.update(_dt)
     if not settings.enabled(P) then
         stop_silent()
+        clear_lock()
         return
     end
 
     farm_tools.load()
-    if not farm_tools.holding_farm_tool() then
+    local tool_name = farm_tools.get_held_farm_tool_name()
+    if not tool_name then
         stop_silent()
+        clear_lock()
         return
     end
 
-    local lp = env.get_local_player()
-    local pos = player_position(lp)
-    if not pos then
+    local origin = ray_origin()
+    if not origin then
         stop_silent()
+        clear_lock()
         return
     end
 
-    refresh_sparks()
-
-    local radius = settings.num(P_RADIUS, 5)
+    local radius = effective_radius(tool_name)
     if radius <= 0 then
         stop_silent()
+        clear_lock()
         return
     end
 
-    local target = nearest_spark(pos, radius)
+    local locked_ok = locked_part and target_valid(locked_part, origin, radius, true)
+    if not locked_ok then
+        refresh_near(origin, radius)
+    end
+
+    local target = resolve_target(origin, radius, locked_ok ~= true)
     if not target then
         stop_silent()
         return
@@ -214,13 +248,8 @@ function M.update(_dt)
     end
 
     if silent_mode() then
-        local origin = viewmodel_origin()
-        if not origin then
-            stop_silent()
-            return
-        end
-
-        if silent_ray.track(origin, aim, SHOOT_VK) then
+        silent_ray.ensure_hook()
+        if silent_ray.track(origin, aim, SHOOT_VK, aim) then
             M._tracking = true
         else
             debug.error_once("farm:silent", "Silent farm hook unavailable — toggle Silent Farm off for camera aim")
@@ -230,9 +259,7 @@ function M.update(_dt)
     end
 
     stop_silent()
-
     if not camera or not camera.look_at then return end
-
     local smooth = math.max(1, settings.num(P_SMOOTH, 8))
     pcall(camera.look_at, aim.x, aim.y, aim.z, smooth)
 end
