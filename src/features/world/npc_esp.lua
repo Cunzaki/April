@@ -27,9 +27,12 @@ function M.register_menu()
     menu.add_combo(T, G.WORLD, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 0, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_health", "NPC Health Bar", false, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "NPC Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "NPC Show Name", true, root)
-    menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "NPC Show Distance", true, root)
-    menu.add_checkbox(T, G.WORLD, "april_npc_show_weapon", "NPC Weapon", false, root)
+    menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "NPC Show Name", true,
+        menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "NPC Show Distance", true,
+        menu_util.parent(P, { colorpicker = { 0.82, 0.84, 0.88, 0.92 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_show_weapon", "NPC Weapon", false,
+        menu_util.parent(P, { colorpicker = { 0.82, 0.84, 0.88, 0.92 } }))
 
     menu_util.gap(T, G.WORLD)
     menu.add_slider_int(T, G.WORLD, "april_npc_range", "NPC Range", 50, 2000, 500, root)
@@ -305,7 +308,10 @@ function M.draw()
 
         local lines = {}
         if show_name then
-            lines[#lines + 1] = label
+            lines[#lines + 1] = {
+                text = label,
+                col = settings.color("april_npc_show_name", col),
+            }
         end
         if show_wpn then
             local wpn = nil
@@ -316,11 +322,17 @@ function M.draw()
                 pcall(function() wpn = player_gear.held_name_from_character(entry.inst) end)
             end
             if wpn and wpn ~= "" then
-                lines[#lines + 1] = tostring(wpn)
+                lines[#lines + 1] = {
+                    text = tostring(wpn),
+                    col = settings.color("april_npc_show_weapon", { 0.82, 0.84, 0.88, 0.92 }),
+                }
             end
         end
         if show_dist and me_pos then
-            lines[#lines + 1] = string.format("%dm", math.floor(math.sqrt(dist_sq)))
+            lines[#lines + 1] = {
+                text = string.format("%dm", math.floor(math.sqrt(dist_sq))),
+                col = settings.color("april_npc_show_distance", { 0.82, 0.84, 0.88, 0.92 }),
+            }
         end
 
         if #lines > 0 then
@@ -328,12 +340,13 @@ function M.draw()
             local base_y = label_y - 4 - (#lines * (text_size + 1))
             for i = 1, #lines do
                 local ty = base_y + (i - 1) * (text_size + 1)
+                local line_col = lines[i].col or col
                 if bounds and bounds.valid and tx then
-                    draw_util.text_centered(tx, ty, lines[i], col, text_size)
+                    draw_util.text_centered(tx, ty, lines[i].text, line_col, text_size)
                 else
                     local sx, sy, vis = esp_util.w2s(lx, ly, lz)
                     if vis then
-                        draw_util.text_centered(sx, sy - 14 + (i - 1) * (text_size + 1), lines[i], col, text_size)
+                        draw_util.text_centered(sx, sy - 14 + (i - 1) * (text_size + 1), lines[i].text, line_col, text_size)
                     end
                 end
             end

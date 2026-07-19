@@ -79,8 +79,9 @@ local function overlay_aim_config()
     local silent_fov = silent_on and settings.num("april_silent_fov", 150) or nil
     local aim_fov = aim_on and settings.num("april_aim_fov", 120) or nil
 
+    -- No aimbot FOVs on: still pick nearest in a quiet 100px radius (no FOV circle drawn).
     if not silent_fov and not aim_fov then
-        return nil, nil
+        return 100, "april_silent_"
     end
     if silent_fov and aim_fov then
         if silent_fov >= aim_fov then

@@ -9,7 +9,6 @@ local player_gear = April.require("game.player_gear")
 local npcs = April.require("game.npcs")
 local mod_checker = April.require("features.utility.mod_checker")
 local mod_ids = April.require("game.mod_ids")
-local theme = April.require("core.ui_theme")
 
 local M = {}
 local P = "april_player_enabled"
@@ -25,21 +24,25 @@ local ID_NAME = "april_player_show_name"
 local ID_DIST = "april_player_show_distance"
 local ID_WEAPON = "april_player_show_weapon"
 local ID_CLAN = "april_player_clan_tag"
-local ID_CLAN_COLOR = "april_player_clan_color"
 local ID_BOX = "april_player_box_mode"
 local ID_RANGE = "april_player_range"
+local ID_FLAG_DOWN = "april_player_flag_downed"
+local ID_FLAG_SZ = "april_player_flag_safezone"
+local ID_FLAG_VIP = "april_player_flag_vip"
+local ID_FLAG_STAFF = "april_player_flag_staff"
+local ID_FLAG_REVIVE = "april_player_flag_reviving"
 
 local F_TEAM, F_SAFEZONE, F_SKIP_DOWNED = 1, 2, 3
 local FL_DOWNED, FL_SAFEZONE, FL_VIP, FL_STAFF, FL_REVIVING = 1, 2, 3, 4, 5
 
-local MUTED = { 0.82, 0.84, 0.88, 0.92 }
-local FLAG_COLS = {
-    VIP = { 1, 0.78, 0.15, 1 },
-    SZ = { 0.35, 0.85, 1, 1 },
+local DEFAULT_BOX = { 1, 0.35, 0.35, 1 }
+local DEFAULT_TEXT = { 1, 0.35, 0.35, 1 }
+local DEFAULT_CLAN = { 0.84, 0.31, 0.80, 1 }
+local DEFAULT_MUTED = { 0.82, 0.84, 0.88, 0.92 }
+local DEFAULT_FLAG = {
     DOWN = { 1, 0.35, 0.35, 1 },
-    OWNER = { 0, 0.62, 1, 1 },
-    ADMIN = { 1, 0.4, 0.05, 1 },
-    MOD = { 1, 0.33, 0.33, 1 },
+    SZ = { 0.35, 0.85, 1, 1 },
+    VIP = { 1, 0.78, 0.15, 1 },
     STAFF = { 1, 0.33, 0.33, 1 },
     REVIVE = { 0.45, 1, 0.55, 1 },
 }
@@ -68,24 +71,19 @@ local function held_weapon_name(p)
     pcall(function()
         name = player_gear.held_name(p)
     end)
+    if name and player_gear.is_empty_held_name and player_gear.is_empty_held_name(name) then
+        name = nil
+    end
     _wpn_cache[key] = { t = now, name = name }
     return name
 end
 
-local function default_color()
-    return settings.color(P, { 1, 0.35, 0.35, 1 })
+local function box_color()
+    return settings.color(P, DEFAULT_BOX)
 end
 
-local function resolve_color(p)
-    local role = mod_checker.staff_role(p)
-    if role then
-        return theme.role_accent(role)
-    end
-    if settings.bool(ID_CLAN_COLOR, false) then
-        local cc = player_state.clan_color(p)
-        if cc then return cc end
-    end
-    return default_color()
+local function resolve_color(_p)
+    return box_color()
 end
 
 local function players_chams_active()
@@ -107,12 +105,17 @@ local function filter_opts()
 end
 
 local function passes_player_filters(p, opts)
-    if not player_state.is_combat_target(p) then return false end
-    if npcs.kind(p.name) then return false end
+    if not p or p.is_local then return false end
     if p.is_workspace_entity or (p.user_id or 0) == 0 then return false end
+    if npcs.kind(p.name) then return false end
+    if not player_state.is_combat_target(p) then return false end
     if opts.team and not player_state.passes_team_check(p) then return false end
-    if not player_state.passes_downed_check(p, opts.downed) then return false end
-    if not player_state.passes_safezone_check(p, opts.skip_sz) then return false end
+    if opts.downed ~= 1 and not player_state.passes_downed_check(p, opts.downed) then
+        return false
+    end
+    if opts.skip_sz and not player_state.passes_safezone_check(p, true) then
+        return false
+    end
     return true
 end
 
@@ -157,7 +160,7 @@ function M.register_menu()
 
     menu_util.section(T, G.VISUALS, "Player ESP")
     menu_util.register_keybind(T, G.VISUALS, P, "Player ESP", false, {
-        colorpicker = { 1, 0.35, 0.35, 1 },
+        colorpicker = DEFAULT_BOX,
     })
 
     menu.add_combo(T, G.VISUALS, ID_BOX, "Player Box", { "None", "2D", "Corner" }, 1, { parent = P })
@@ -165,16 +168,18 @@ function M.register_menu()
     menu.add_checkbox(T, G.VISUALS, ID_HEALTH, "Player Health Bar", true, { parent = P })
     menu.add_checkbox(T, G.VISUALS, ID_SKELETON, "Player Skeleton", false,
         menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.92 } }))
-    menu.add_checkbox(T, G.VISUALS, ID_NAME, "Player Name", true, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, ID_CLAN, "Player Clan Tag", true, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, ID_CLAN_COLOR, "Player Color By Clan", false, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, ID_DIST, "Player Distance", true, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, ID_WEAPON, "Player Weapon", false, { parent = P })
+    menu.add_checkbox(T, G.VISUALS, ID_NAME, "Player Name", true,
+        menu_util.parent(P, { colorpicker = DEFAULT_TEXT }))
+    menu.add_checkbox(T, G.VISUALS, ID_CLAN, "Player Clan Tag", true,
+        menu_util.parent(P, { colorpicker = DEFAULT_CLAN }))
+    menu.add_checkbox(T, G.VISUALS, ID_DIST, "Player Distance", true,
+        menu_util.parent(P, { colorpicker = DEFAULT_MUTED }))
+    menu.add_checkbox(T, G.VISUALS, ID_WEAPON, "Player Weapon", false,
+        menu_util.parent(P, { colorpicker = DEFAULT_MUTED }))
 
     menu.add_multicombo(T, G.VISUALS, FILTERS, "ESP Filters", {
         "Team Check", "Skip Safezone", "Skip Downed",
     }, { false, false, false }, { parent = P })
-    -- Default: team check only — Skip SZ/Downed hide the players those flags describe
     set_multi_defaults(FILTERS, { true, false, false })
 
     menu.add_multicombo(T, G.VISUALS, FLAGS, "ESP Flags", {
@@ -182,50 +187,77 @@ function M.register_menu()
     }, { false, false, false, false, false }, { parent = P })
     set_multi_defaults(FLAGS, { true, true, true, true, true })
 
+    menu.add_colorpicker(T, G.VISUALS, ID_FLAG_DOWN, "Flag Downed Color", DEFAULT_FLAG.DOWN, { parent = P })
+    menu.add_colorpicker(T, G.VISUALS, ID_FLAG_SZ, "Flag Safezone Color", DEFAULT_FLAG.SZ, { parent = P })
+    menu.add_colorpicker(T, G.VISUALS, ID_FLAG_VIP, "Flag VIP Color", DEFAULT_FLAG.VIP, { parent = P })
+    menu.add_colorpicker(T, G.VISUALS, ID_FLAG_STAFF, "Flag Staff Color", DEFAULT_FLAG.STAFF, { parent = P })
+    menu.add_colorpicker(T, G.VISUALS, ID_FLAG_REVIVE, "Flag Reviving Color", DEFAULT_FLAG.REVIVE, { parent = P })
+
     menu.add_slider_int(T, G.VISUALS, ID_RANGE, "Player Range", 50, 2000, 500, { parent = P })
     menu_util.gap(T, G.VISUALS)
 
     local children = {
         ID_BOX, ID_HEALTH, ID_SKELETON,
-        ID_NAME, ID_CLAN, ID_CLAN_COLOR, ID_DIST, ID_WEAPON,
-        FILTERS, FLAGS, ID_RANGE,
+        ID_NAME, ID_CLAN, ID_DIST, ID_WEAPON,
+        FILTERS, FLAGS,
+        ID_FLAG_DOWN, ID_FLAG_SZ, ID_FLAG_VIP, ID_FLAG_STAFF, ID_FLAG_REVIVE,
+        ID_RANGE,
     }
     menu_util.bind_children(P, children)
 
-    -- Clear any previous player chams owner from older builds
     if gpu_chams.available() then
         pcall(function() gpu_chams.clear_owner("players") end)
     end
 end
 
-local function collect_flags(p)
+local function clan_tag_color(snap, menu_col)
+    local cc = snap and snap.clan_color
+    if cc and cc[1] then return cc end
+    return menu_col
+end
+
+local function flag_on(index)
+    return settings.multi(FLAGS, index, true)
+end
+
+local function collect_side_tags(p, snap, show_clan, clan_menu_col, flag_cols)
     local out = {}
-    if settings.multi(FLAGS, FL_VIP, true) and player_state.is_vip(p) then
-        out[#out + 1] = { text = "VIP", col = FLAG_COLS.VIP }
+    snap = snap or player_state.esp_state(p)
+    if not snap then return out end
+
+    if show_clan and snap.clan_tag then
+        out[#out + 1] = {
+            text = "[" .. snap.clan_tag .. "]",
+            col = clan_tag_color(snap, clan_menu_col),
+        }
     end
-    if settings.multi(FLAGS, FL_SAFEZONE, true) and player_state.is_safezone(p) then
-        out[#out + 1] = { text = "SZ", col = FLAG_COLS.SZ }
+
+    if flag_on(FL_VIP) and snap.vip then
+        out[#out + 1] = { text = "[VIP]", col = flag_cols.vip }
     end
-    if settings.multi(FLAGS, FL_DOWNED, true) and player_state.is_downed(p) then
-        out[#out + 1] = { text = "DOWN", col = FLAG_COLS.DOWN }
+    if flag_on(FL_SAFEZONE) and snap.safezone then
+        out[#out + 1] = { text = "[SZ]", col = flag_cols.sz }
     end
-    if settings.multi(FLAGS, FL_STAFF, true) then
-        local tag = player_state.staff_tag(p)
-        if tag then
-            out[#out + 1] = { text = tag, col = FLAG_COLS[tag] or FLAG_COLS.STAFF }
+    if flag_on(FL_DOWNED) and snap.downed then
+        out[#out + 1] = { text = "[DOWN]", col = flag_cols.down }
+    end
+    if flag_on(FL_STAFF) then
+        if snap.staff then
+            out[#out + 1] = { text = "[" .. snap.staff .. "]", col = flag_cols.staff }
         else
             local role = mod_checker.staff_role(p)
             if role then
                 out[#out + 1] = {
-                    text = mod_ids.short_label(role),
-                    col = theme.role_accent(role),
+                    text = "[" .. mod_ids.short_label(role) .. "]",
+                    col = flag_cols.staff,
                 }
             end
         end
     end
-    if settings.multi(FLAGS, FL_REVIVING, true) and player_state.is_reviving(p) then
-        out[#out + 1] = { text = "REVIVE", col = FLAG_COLS.REVIVE }
+    if flag_on(FL_REVIVING) and snap.reviving then
+        out[#out + 1] = { text = "[REVIVE]", col = flag_cols.revive }
     end
+
     return out
 end
 
@@ -309,6 +341,17 @@ function M.draw()
     local show_wpn = settings.bool(ID_WEAPON, false)
 
     local skel_col = settings.color(ID_SKELETON, { 1, 1, 1, 0.92 })
+    local name_col = settings.color(ID_NAME, DEFAULT_TEXT)
+    local clan_menu_col = settings.color(ID_CLAN, DEFAULT_CLAN)
+    local dist_col = settings.color(ID_DIST, DEFAULT_MUTED)
+    local wpn_col = settings.color(ID_WEAPON, DEFAULT_MUTED)
+    local flag_cols = {
+        down = settings.color(ID_FLAG_DOWN, DEFAULT_FLAG.DOWN),
+        sz = settings.color(ID_FLAG_SZ, DEFAULT_FLAG.SZ),
+        vip = settings.color(ID_FLAG_VIP, DEFAULT_FLAG.VIP),
+        staff = settings.color(ID_FLAG_STAFF, DEFAULT_FLAG.STAFF),
+        revive = settings.color(ID_FLAG_REVIVE, DEFAULT_FLAG.REVIVE),
+    }
 
     for _, p in ipairs(entity.get_players()) do
         if not passes_player_filters(p, opts) then goto continue end
@@ -326,6 +369,7 @@ function M.draw()
             dist = math.sqrt(dist_sq)
         end
 
+        local snap = player_state.esp_state(p)
         local col = resolve_color(p)
         local bounds = resolve_bounds(p, pos, dist)
         if not bounds or not bounds.valid or not is_on_screen(bounds, pos) then
@@ -340,31 +384,15 @@ function M.draw()
         local cx = bounds.x + bounds.w * 0.5
         local box_ok = bounds.w >= 4 and bounds.h >= 8
 
+        -- Top: name + weapon only (never clan — clan is on the right with tags)
         local top = {}
-        if show_clan then
-            local tag = player_state.clan_tag(p)
-            if tag then
-                top[#top + 1] = { text = "[" .. tag .. "]", col = player_state.clan_color(p) or col }
-            end
-        end
         if show_name then
-            top[#top + 1] = { text = p.name or "?", col = col }
-        end
-        local flags = collect_flags(p)
-        if #flags > 0 then
-            local parts = {}
-            for i = 1, #flags do
-                parts[#parts + 1] = flags[i].text
-            end
-            top[#top + 1] = {
-                text = "[" .. table.concat(parts, "][") .. "]",
-                col = (#flags == 1) and flags[1].col or MUTED,
-            }
+            top[#top + 1] = { text = p.name or "?", col = name_col }
         end
         if show_wpn then
             local wpn = held_weapon_name(p)
             if wpn and wpn ~= "" then
-                top[#top + 1] = { text = tostring(wpn), col = MUTED }
+                top[#top + 1] = { text = tostring(wpn), col = wpn_col }
             end
         end
 
@@ -372,6 +400,22 @@ function M.draw()
             local ty = bounds.y - 4 - (#top * (ts + 1))
             for i = 1, #top do
                 draw_util.text_centered(cx, ty + (i - 1) * (ts + 1), top[i].text, top[i].col, ts)
+            end
+        end
+
+        -- Right: clan tag + attribute flags (VIP / SZ / DOWN / staff / revive)
+        local side = collect_side_tags(p, snap, show_clan, clan_menu_col, flag_cols)
+        if #side > 0 then
+            local rx = bounds.x + bounds.w + 4
+            local ry = bounds.y
+            for i = 1, #side do
+                draw_util.text(
+                    rx,
+                    ry + (i - 1) * (ts + 1),
+                    side[i].text,
+                    side[i].col,
+                    ts
+                )
             end
         end
 
@@ -395,11 +439,10 @@ function M.draw()
         end
 
         if show_skel then
-            local sc = settings.bool(ID_CLAN_COLOR, false) and (player_state.clan_color(p) or skel_col) or skel_col
             if p.get_bones_screen then
-                esp_util.draw_player_skeleton(p, sc, 1)
+                esp_util.draw_player_skeleton(p, skel_col, 1)
             elseif p.character then
-                esp_util.draw_model_skeleton(p.character, sc, 1)
+                esp_util.draw_model_skeleton(p.character, skel_col, 1)
             end
         end
 
@@ -408,7 +451,7 @@ function M.draw()
                 cx,
                 bounds.y + bounds.h + 3,
                 string.format("%dm", math.floor(dist + 0.5)),
-                MUTED,
+                dist_col,
                 ts
             )
         end

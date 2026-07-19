@@ -125,7 +125,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.85.24",
+    version = "3.85.36",
     debug = false,
     _mods = {},
     bundled = true,
@@ -204,7 +204,7 @@ for (const rel of ORDER) {
 fs.writeFileSync(OUT, header + body + footer);
 console.log("Built", path.relative(ROOT, OUT), `(${(fs.statSync(OUT).size / 1024).toFixed(1)} KB)`);
 
-const VERSION = "3.85.24";
+const VERSION = "3.85.36";
 const loader = `-- April loader — paste this into Vector as "Script 1.lua" (small file, always pulls latest build).
 local tick = 0
 pcall(function()

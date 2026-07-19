@@ -1,12 +1,12 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-19T02:45:46.764Z
+    Built: 2026-07-19T03:50:15.328Z
     UI: custom Gamesense menu (INSERT) — Vector menu tabs disabled
 ]]
 
 April = {
-    version = "3.85.24",
+    version = "3.85.36",
     debug = false,
     _mods = {},
     bundled = true,
@@ -1126,12 +1126,14 @@ function M.multi(id, index, default)
     if type(t) ~= "table" then
         return default == true
     end
-    -- Prefer 1-based; some builds expose 0-based arrays.
-    local v = t[index]
-    if v == nil and index >= 1 then
-        v = t[index - 1]
+    -- Prefer 1-based. Only fall back to 0-based when the 1-based slot is absent.
+    if t[index] ~= nil then
+        return as_bool(t[index], default)
     end
-    return as_bool(v, default)
+    if index >= 1 and t[index - 1] ~= nil then
+        return as_bool(t[index - 1], default)
+    end
+    return default == true
 end
 
 function M.combo_index(id, labels, default)
@@ -5564,7 +5566,9 @@ local MENU_KEYS = {
     "april_player_health", "april_player_skeleton",
     "april_player_show_name", "april_player_show_distance",
     "april_player_show_weapon",
-    "april_player_clan_tag", "april_player_clan_color",
+    "april_player_clan_tag",
+    "april_player_flag_downed", "april_player_flag_safezone", "april_player_flag_vip",
+    "april_player_flag_staff", "april_player_flag_reviving",
     "april_player_esp_filters", "april_player_esp_flags",
     "april_player_chams", "april_player_chams_mode", "april_player_chams_color",
     "april_player_range",
@@ -5647,7 +5651,10 @@ local COLOR_KEYS = {
     "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
     "april_aimbot", "april_aim_draw_fov", "april_aim_target_line",
     "april_silent_aim", "april_silent_draw_fov", "april_silent_target_line", "april_silent_tp_ray_vis",
-    "april_player_enabled",
+    "april_player_enabled", "april_player_skeleton", "april_player_show_name", "april_player_clan_tag",
+    "april_player_show_distance", "april_player_show_weapon",
+    "april_player_flag_downed", "april_player_flag_safezone", "april_player_flag_vip",
+    "april_player_flag_staff", "april_player_flag_reviving",
     "april_stone_node", "april_metal_node", "april_phosphate_node", "april_corn_plant", "april_tomato_plant",
     "april_pumpkin_plant", "april_lemon_plant", "april_raspberry_plant", "april_blueberry_plant",
     "april_wool_plant", "april_hemp_plant", "april_deer", "april_boar", "april_wolf",
@@ -5656,6 +5663,7 @@ local COLOR_KEYS = {
     "april_trash_can", "april_oil_barrel", "april_small_egg", "april_medium_egg", "april_large_egg",
     "april_wooden_boat", "april_military_boat", "april_flycopter",
     "april_npc_soldiers", "april_npc_bosses", "april_npc_skeleton",
+    "april_npc_show_name", "april_npc_show_distance", "april_npc_show_weapon",
     "april_base_cabinet", "april_storage_cabinet", "april_small_box", "april_large_box",
     "april_sleeping_bag", "april_auto_turret", "april_auto_turret_ring", "april_shotgun_turret", "april_shotgun_turret_ring", "april_wooden_door",
     "april_wooden_double_door", "april_salvaged_door", "april_metal_door", "april_metal_double_door",
@@ -9667,174 +9675,266 @@ end)()
 
 -- ── game/player_state.lua ──
 April._mods["game.player_state"] = (function()
+-- Player ESP state from DataModel.Players.<Name> attributes.
+-- Vector: inst:get_attribute / get_attributes
+--   string  → string
+--   bool    → boolean
+--   Color3  → table { r, g, b }  (0-1, sometimes 0-255)
+-- ClanTag string can also appear on Character.NameTag — that is NOT enough for
+-- VIP/SafeZone/ClanColor; those only exist on the Player instance.
+
 local env = April.require("core.env")
 local team_state = April.require("game.team_state")
 
 local M = {}
 
-local function read_attribute(inst, key)
-    if not inst or not key then return nil end
-    local v = env.safe_call(function()
-        if inst.GetAttribute then return inst:GetAttribute(key) end
+local SNAP_TTL_MS = 200
+local snaps = {}
+local pl_cache = {}
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function cache_key(player)
+    local uid = tonumber(player and player.user_id)
+    if uid and uid ~= 0 then return "u:" .. tostring(uid) end
+    return "n:" .. tostring(player and (player.name or player.display_name) or "?")
+end
+
+local function players_service()
+    if game and game.players then
+        return game.players
+    end
+    return env.safe_call(function()
+        if game.get_service then return game.get_service("Players") end
+        if game.GetService then return game:GetService("Players") end
         return nil
     end)
-    if v ~= nil then return v end
-    return env.safe_call(function()
+end
+
+local function find_child(parent, name)
+    if not parent or not name or name == "" then return nil end
+    local ok, child = pcall(function()
+        if parent.find_first_child then return parent:find_first_child(name) end
+        if parent.FindFirstChild then return parent:FindFirstChild(name) end
+        return nil
+    end)
+    if ok and child then return child end
+    return nil
+end
+
+local function find_humanoid(char)
+    if not char then return nil end
+    local ok, hum = pcall(function()
+        if char.find_first_child_of_class then
+            return char:find_first_child_of_class("Humanoid")
+        end
+        if char.FindFirstChildOfClass then
+            return char:FindFirstChildOfClass("Humanoid")
+        end
+        return find_child(char, "Humanoid")
+    end)
+    if ok then return hum end
+    return nil
+end
+
+-- Do NOT gate on utility.is_valid — it can reject valid Players instances
+-- while find_first_child still returns a usable handle for get_attribute.
+local function read_attr(inst, key)
+    if not inst or not key then return nil end
+
+    local ok, v = pcall(function()
         if inst.get_attribute then return inst:get_attribute(key) end
         return nil
     end)
+    if ok and v ~= nil then return v end
+
+    ok, v = pcall(function()
+        if inst.GetAttribute then return inst:GetAttribute(key) end
+        return nil
+    end)
+    if ok and v ~= nil then return v end
+
+    return nil
 end
 
-local function inst_attr(inst, key)
-    return read_attribute(inst, key)
+local function read_all_attrs(inst)
+    if not inst then return nil end
+    local ok, bag = pcall(function()
+        if inst.get_attributes then return inst:get_attributes() end
+        if inst.GetAttributes then return inst:GetAttributes() end
+        return nil
+    end)
+    if ok and type(bag) == "table" then return bag end
+    return nil
 end
 
-local function players_children()
-    if not game or not game.players then return {} end
-    return env.safe_call(function()
-        if game.players.get_children then return game.players:get_children() end
-        return game.players:GetChildren()
-    end) or {}
-end
-
-function M.resolve_player_inst(player)
-    if not player then return nil end
-    if player.player and env.is_valid(player.player) then
-        return player.player
-    end
-
-    local uid = tonumber(player.user_id)
-    if uid and uid ~= 0 and game and game.players then
-        local pl = env.safe_call(function()
-            if game.players.GetPlayerByUserId then
-                return game.players:GetPlayerByUserId(uid)
-            end
-            if game.players.get_player_by_user_id then
-                return game.players:get_player_by_user_id(uid)
-            end
-            return nil
-        end)
-        if pl and env.is_valid(pl) then return pl end
-    end
-
-    local want_name = player.name
-    local kids = players_children()
-    for i = 1, #kids do
-        local pl = kids[i]
-        if env.is_valid(pl) then
-            local id = tonumber(pl.UserId or pl.user_id)
-            if uid and id and id == uid then
-                return pl
-            end
+local function bag_get(bag, key)
+    if type(bag) ~= "table" or not key then return nil end
+    local v = bag[key]
+    if v ~= nil then return v end
+    local want = key:lower()
+    for k, val in pairs(bag) do
+        if type(k) == "string" and k:lower() == want then
+            return val
         end
     end
-    if want_name then
-        for i = 1, #kids do
-            local pl = kids[i]
-            if env.is_valid(pl) then
-                local n = pl.Name or pl.name
-                local dn = pl.DisplayName or pl.display_name
-                if n == want_name or dn == want_name then
-                    return pl
+    return nil
+end
+
+local function as_bool(v)
+    if v == true then return true end
+    if v == false or v == nil then return false end
+    if type(v) == "boolean" then return v end
+    if v == 1 or v == 1.0 then return true end
+    if v == 0 or v == 0.0 then return false end
+    if type(v) == "string" then
+        local s = v:lower():match("^%s*(.-)%s*$") or ""
+        if s == "true" or s == "1" or s == "yes" then return true end
+        return false
+    end
+    if type(v) == "number" then return v ~= 0 end
+    return false
+end
+
+local function normalize_rgb(r, g, b)
+    r, g, b = tonumber(r), tonumber(g), tonumber(b)
+    if r == nil or g == nil or b == nil then return nil end
+    if r > 1 or g > 1 or b > 1 then
+        r, g, b = r / 255, g / 255, b / 255
+    end
+    if r < 0 then r = 0 elseif r > 1 then r = 1 end
+    if g < 0 then g = 0 elseif g > 1 then g = 1 end
+    if b < 0 then b = 0 elseif b > 1 then b = 1 end
+    return { r, g, b, 1 }
+end
+
+-- Vector docs: Color3 attrs → {r,g,b}; GuiObject TextColor3 → {R,G,B} (often 0-255).
+local function parse_color3(c)
+    if c == nil or c == false then return nil end
+
+    if type(c) == "table" then
+        local r = c.r or c.R or c.red or c.Red
+        local g = c.g or c.G or c.green or c.Green
+        local b = c.b or c.B or c.blue or c.Blue
+        if r == nil then r = c.x or c.X end
+        if g == nil then g = c.y or c.Y end
+        if b == nil then b = c.z or c.Z end
+        if r == nil then r = c[1] end
+        if g == nil then g = c[2] end
+        if b == nil then b = c[3] end
+        -- Some Vector builds use 0-based RGB arrays.
+        if r == nil and c[0] ~= nil and c[1] ~= nil and c[2] ~= nil then
+            r, g, b = c[0], c[1], c[2]
+        end
+
+        if r == nil and (c.value or c.Value or c.color or c.Color) then
+            return parse_color3(c.value or c.Value or c.color or c.Color)
+        end
+
+        if r == nil then
+            local nums = {}
+            for _, val in pairs(c) do
+                if type(val) == "number" then
+                    nums[#nums + 1] = val
                 end
             end
+            if #nums >= 3 then
+                r, g, b = nums[1], nums[2], nums[3]
+            end
         end
-        local by_name = env.safe_call(function()
-            if game.players.find_first_child then
-                return game.players:find_first_child(want_name)
-            end
-            if game.players.FindFirstChild then
-                return game.players:FindFirstChild(want_name)
-            end
-            return nil
-        end)
-        if by_name and env.is_valid(by_name) then return by_name end
+
+        return normalize_rgb(r, g, b)
     end
-    return nil
-end
 
-function M.player_attr(player, key)
-    local inst = M.resolve_player_inst(player)
-    if inst then
-        local v = read_attribute(inst, key)
-        if v ~= nil then return v end
+    if type(c) == "string" then
+        local r = c:match("<R>([%d%.]+)</R>")
+        local g = c:match("<G>([%d%.]+)</G>")
+        local b = c:match("<B>([%d%.]+)</B>")
+        if r then return normalize_rgb(r, g, b) end
+        r, g, b = c:match("([%d%.]+)%s*,%s*([%d%.]+)%s*,%s*([%d%.]+)")
+        return normalize_rgb(r, g, b)
     end
-    if player and type(player) == "table" then
-        return read_attribute(player, key)
+
+    if type(c) == "number" then
+        local n = math.floor(c)
+        return normalize_rgb(
+            math.floor(n / 65536) % 256,
+            math.floor(n / 256) % 256,
+            n % 256
+        )
     end
-    return nil
-end
 
-function M.char_attr(player, key)
-    if not player or not player.character or not env.is_valid(player.character) then
-        return nil
-    end
-    return inst_attr(player.character, key)
-end
-
-function M.humanoid_attr(player, key)
-    if not player then return nil end
-    local hum = player.humanoid
-    if not hum and player.character and env.is_valid(player.character) then
-        local char = player.character
-        hum = env.safe_call(function()
-            if char.find_first_child_of_class then
-                return char:find_first_child_of_class("Humanoid")
-            end
-            if char.FindFirstChildOfClass then
-                return char:FindFirstChildOfClass("Humanoid")
-            end
-            return char:FindFirstChild("Humanoid") or char:find_first_child("Humanoid")
-        end)
-    end
-    if not hum or not env.is_valid(hum) then return nil end
-    return inst_attr(hum, key)
-end
-
-local function truthy(v)
-    if v == true or v == 1 then return true end
-    if type(v) == "string" then
-        local s = v:lower()
-        return s == "true" or s == "1" or s == "yes"
-    end
-    return false
-end
-
-function M.is_safezone(player)
-    return truthy(M.player_attr(player, "SafeZone"))
-end
-
-function M.is_vip(player)
-    return truthy(M.player_attr(player, "VIP"))
-end
-
--- ChatController staff tags (Owner / Admin / Mod).
-function M.staff_tag(player)
-    if truthy(M.player_attr(player, "HideTag")) then return nil end
-    if truthy(M.player_attr(player, "Owner")) then return "OWNER" end
-    if truthy(M.player_attr(player, "Admin")) then return "ADMIN" end
-    if truthy(M.player_attr(player, "Mod")) then return "MOD" end
-    return nil
-end
-
-local function find_char_child(char, name)
-    if not char or not env.is_valid(char) then return nil end
-    return env.safe_call(function()
-        if char.find_first_child then return char:find_first_child(name) end
-        return char:FindFirstChild(name)
+    local ok, r, g, b = pcall(function()
+        return c.r or c.R or c.x or c.X, c.g or c.G or c.y or c.Y, c.b or c.B or c.z or c.Z
     end)
+    if ok then
+        local parsed = normalize_rgb(r, g, b)
+        if parsed then return parsed end
+    end
+
+    r, g, b = nil, nil, nil
+    ok = pcall(function()
+        if c.GetComponents then
+            r, g, b = c:GetComponents()
+        elseif c.get_components then
+            r, g, b = c:get_components()
+        end
+    end)
+    if ok then
+        local parsed = normalize_rgb(r, g, b)
+        if parsed then return parsed end
+    end
+
+    local s = env.safe_call(function() return tostring(c) end)
+    if type(s) == "string" and not s:lower():find("userdata", 1, true) then
+        return parse_color3(s)
+    end
+
+    return nil
 end
 
-function M.is_reviving(player)
-    if player and player.character and env.is_valid(player.character) then
-        local ic = find_char_child(player.character, "InteractController")
-        if ic and truthy(inst_attr(ic, "Reviving")) then
-            return true
-        end
+local function read_color3_attr(inst, key)
+    if not inst or not key then return nil end
+
+    local parsed = parse_color3(read_attr(inst, key))
+    if parsed then return parsed end
+
+    local bag = read_all_attrs(inst)
+    if bag then
+        parsed = parse_color3(bag_get(bag, key))
+        if parsed then return parsed end
     end
-    if truthy(M.humanoid_attr(player, "Reviving")) then return true end
-    if truthy(M.char_attr(player, "Reviving")) then return true end
-    return false
+
+    return nil
+end
+
+local function read_gui_color3(inst)
+    if not inst then return nil end
+    local v = env.safe_call(function()
+        return inst.TextColor3 or inst.text_color3
+            or inst.BackgroundColor3 or inst.background_color3
+            or inst.ImageColor3 or inst.image_color3
+    end)
+    return parse_color3(v)
+end
+
+local function parse_rgb_from_text(text)
+    if type(text) ~= "string" then return nil end
+    local r, g, b = text:match('rgb%(([%d%.]+)[,%s]+([%d%.]+)[,%s]+([%d%.]+)%)')
+    if not r then
+        r, g, b = text:match('color="rgb%(([%d%.]+)[,%s]+([%d%.]+)[,%s]+([%d%.]+)%)"')
+    end
+    return normalize_rgb(r, g, b)
+end
+
+local function is_near_white(col)
+    if not col then return true end
+    local r = col[1] or col.r or col.R or 1
+    local g = col[2] or col.g or col.G or 1
+    local b = col[3] or col.b or col.B or 1
+    return r > 0.95 and g > 0.95 and b > 0.95
 end
 
 local function normalize_clan_tag(tag)
@@ -9845,72 +9945,388 @@ local function normalize_clan_tag(tag)
         if tag == "" then return nil end
         return tag
     end
-    if type(tag) == "number" then
-        return tostring(tag)
-    end
+    if type(tag) == "number" then return tostring(tag) end
     local s = tostring(tag)
     if s == "" or s == "nil" or s == "false" or s == "true" then return nil end
     return s
 end
 
-function M.clan_tag(player)
-    local tag = normalize_clan_tag(M.player_attr(player, "ClanTag"))
-    if tag then return tag end
-    tag = normalize_clan_tag(M.char_attr(player, "ClanTag"))
-    if tag then return tag end
+function M.resolve_player_inst(player)
+    if not player then return nil end
+
+    local key = cache_key(player)
+    local now = tick_ms()
+    local cached = pl_cache[key]
+    if cached and cached.inst and (now - cached.t) < 1500 then
+        -- Soft re-check: try a cheap name read
+        local still = env.safe_call(function()
+            return cached.inst.Name or cached.inst.name
+        end)
+        if still then return cached.inst end
+    end
+
+    local players = players_service()
+    local found = nil
+
+    if players then
+        local names = { player.name, player.display_name }
+        for i = 1, #names do
+            local want = names[i]
+            if want and want ~= "" then
+                found = find_child(players, want)
+                if found then break end
+            end
+        end
+
+        if not found then
+            local uid = tonumber(player.user_id)
+            local kids = env.safe_call(function()
+                if players.get_children then return players:get_children() end
+                if players.GetChildren then return players:GetChildren() end
+                return nil
+            end) or {}
+            for i = 1, #kids do
+                local pl = kids[i]
+                local id = tonumber(env.safe_call(function()
+                    return pl.UserId or pl.user_id
+                end))
+                if uid and id and id == uid then
+                    found = pl
+                    break
+                end
+                local n = env.safe_call(function() return pl.Name or pl.name end)
+                local dn = env.safe_call(function() return pl.DisplayName or pl.display_name end)
+                if (player.name and (n == player.name or dn == player.name))
+                    or (player.display_name and (n == player.display_name or dn == player.display_name)) then
+                    found = pl
+                    break
+                end
+            end
+        end
+    end
+
+    -- Last resort: entity wrapper (strings may work; bools/Color3 often don't).
+    if not found and player.player then
+        found = player.player
+    end
+
+    if found then
+        pl_cache[key] = { t = now, inst = found }
+    end
+    return found
+end
+
+function M.resolve_character(player)
+    if not player then return nil end
+    if player.character then
+        local ok = env.safe_call(function()
+            return utility and utility.is_valid(player.character)
+        end)
+        if ok ~= false and player.character then
+            return player.character
+        end
+    end
+    local pl = M.resolve_player_inst(player)
+    if not pl then return nil end
+    return env.safe_call(function()
+        return pl.Character or pl.character
+    end)
+end
+
+function M.resolve_humanoid(player)
+    if not player then return nil end
+    if player.humanoid then return player.humanoid end
+    return find_humanoid(M.resolve_character(player))
+end
+
+local function read_player_attrs(pl)
+    local out = {
+        vip = false,
+        safezone = false,
+        hide = false,
+        owner = false,
+        admin = false,
+        mod = false,
+        clan_tag = nil,
+        clan_color = nil,
+        from_player = false,
+    }
+    if not pl then return out end
+
+    -- Primary: full attribute bag (most reliable for mixed types on Vector).
+    local bag = read_all_attrs(pl)
+    if bag then
+        out.from_player = true
+        out.vip = as_bool(bag_get(bag, "VIP"))
+        out.safezone = as_bool(bag_get(bag, "SafeZone"))
+        out.hide = as_bool(bag_get(bag, "HideTag"))
+        out.owner = as_bool(bag_get(bag, "Owner"))
+        out.admin = as_bool(bag_get(bag, "Admin"))
+        out.mod = as_bool(bag_get(bag, "Mod"))
+        out.clan_tag = normalize_clan_tag(bag_get(bag, "ClanTag"))
+        out.clan_color = read_color3_attr(pl, "ClanColor")
+    end
+
+    -- Per-key fill for anything still missing.
+    if not out.clan_tag then
+        local v = read_attr(pl, "ClanTag")
+        if v ~= nil then
+            out.from_player = true
+            out.clan_tag = normalize_clan_tag(v)
+        end
+    end
+    if not out.clan_color then
+        out.clan_color = read_color3_attr(pl, "ClanColor")
+    end
+    if not out.vip then
+        local v = read_attr(pl, "VIP")
+        if v ~= nil then
+            out.from_player = true
+            out.vip = as_bool(v)
+        end
+    end
+    if not out.safezone then
+        local v = read_attr(pl, "SafeZone")
+        if v ~= nil then
+            out.from_player = true
+            out.safezone = as_bool(v)
+        end
+    end
+    if not out.mod then
+        local v = read_attr(pl, "Mod")
+        if v ~= nil then
+            out.from_player = true
+            out.mod = as_bool(v)
+        end
+    end
+    if not out.owner then
+        local v = read_attr(pl, "Owner")
+        if v ~= nil then out.owner = as_bool(v) end
+    end
+    if not out.admin then
+        local v = read_attr(pl, "Admin")
+        if v ~= nil then out.admin = as_bool(v) end
+    end
+    if not out.hide then
+        local v = read_attr(pl, "HideTag")
+        if v ~= nil then out.hide = as_bool(v) end
+    end
+
+    return out
+end
+
+local function nametag_clan_tag_only(char)
+    if not char then return nil end
+    local nt = find_child(char, "NameTag")
+    if not nt then return nil end
+    local label = find_child(nt, "Label")
+    if not label then return nil end
+    local text = env.safe_call(function()
+        return label.Text or label.text
+    end)
+    if type(text) ~= "string" then return nil end
+    local tag = normalize_clan_tag(text:match("%[([^%]]+)%]"))
+    if not tag then return nil end
+    local upper = tag:upper()
+    if upper == "MOD" or upper == "ADMIN" or upper == "OWNER" or upper == "VIP" then
+        return nil
+    end
+    return tag
+end
+
+local function nametag_clan_color(char)
+    if not char then return nil end
+    local nt = find_child(char, "NameTag")
+    if not nt then return nil end
+    local label = find_child(nt, "Label")
+    if not label then return nil end
+
+    local text = env.safe_call(function()
+        return label.Text or label.text
+    end)
+    local from_text = parse_rgb_from_text(text)
+    if from_text then return from_text end
+
+    local tc = read_gui_color3(label)
+    if tc and not is_near_white(tc) then
+        return tc
+    end
+
+    local clan_lbl = find_child(nt, "ClanTag")
+    if clan_lbl then
+        from_text = parse_rgb_from_text(env.safe_call(function()
+            return clan_lbl.Text or clan_lbl.text
+        end))
+        if from_text then return from_text end
+        tc = read_gui_color3(clan_lbl)
+        if tc and not is_near_white(tc) then
+            return tc
+        end
+    end
+
     return nil
 end
 
-local function parse_color3(c)
-    if not c then return nil end
-    if type(c) == "table" and c[1] and c[2] and c[3] and not (c.R or c.r) then
-        local r, g, b = c[1], c[2], c[3]
-        if r > 1 or g > 1 or b > 1 then r, g, b = r / 255, g / 255, b / 255 end
-        return { r, g, b, c[4] or 1 }
+local function resolve_clan_color(pl, char, entity_player)
+    if pl then
+        local c = read_color3_attr(pl, "ClanColor")
+        if c then return c end
     end
 
-    local r = c.R or c.r
-    local g = c.G or c.g
-    local b = c.B or c.b
-    if r == nil or g == nil or b == nil then
-        r = env.safe_call(function() return c.R end) or env.safe_call(function() return c.r end)
-        g = env.safe_call(function() return c.G end) or env.safe_call(function() return c.g end)
-        b = env.safe_call(function() return c.B end) or env.safe_call(function() return c.b end)
+    if entity_player and entity_player.player and entity_player.player ~= pl then
+        local c = read_color3_attr(entity_player.player, "ClanColor")
+        if c then return c end
     end
-    if r == nil or g == nil or b == nil then return nil end
-    r, g, b = tonumber(r), tonumber(g), tonumber(b)
-    if not r or not g or not b then return nil end
-    if r > 1 or g > 1 or b > 1 then
-        r, g, b = r / 255, g / 255, b / 255
+
+    if entity_player then
+        local c = read_color3_attr(entity_player, "ClanColor")
+        if c then return c end
     end
-    return { r, g, b, 1 }
+
+    return nametag_clan_color(char)
+end
+
+local function build_snap(player)
+    local pl = M.resolve_player_inst(player)
+    local char = M.resolve_character(player)
+    local hum = M.resolve_humanoid(player)
+    if not hum and char then hum = find_humanoid(char) end
+    local ic = char and find_child(char, "InteractController") or nil
+
+    local pa = read_player_attrs(pl)
+
+    -- NameTag only fills missing ClanTag string — never invents VIP/color.
+    if not pa.clan_tag then
+        pa.clan_tag = nametag_clan_tag_only(char)
+    end
+
+    pa.clan_color = pa.clan_color or resolve_clan_color(pl, char, player)
+
+    local staff = nil
+    if not pa.hide then
+        if pa.owner then
+            staff = "OWNER"
+        elseif pa.admin then
+            staff = "ADMIN"
+        elseif pa.mod then
+            staff = "MOD"
+        end
+    end
+
+    return {
+        t = tick_ms(),
+        vip = pa.vip,
+        safezone = pa.safezone,
+        downed = as_bool(read_attr(hum, "Downed")),
+        reviving = as_bool(read_attr(ic, "Reviving")),
+        staff = staff,
+        clan_tag = pa.clan_tag,
+        clan_color = pa.clan_color,
+        resolved = pl ~= nil,
+        from_player = pa.from_player,
+    }
+end
+
+local function get_snap(player)
+    if not player then return nil end
+    local key = cache_key(player)
+    local now = tick_ms()
+    local s = snaps[key]
+    if s and (now - s.t) < SNAP_TTL_MS then
+        return s
+    end
+    s = build_snap(player)
+    snaps[key] = s
+    return s
+end
+
+function M.invalidate(player)
+    if not player then
+        snaps = {}
+        pl_cache = {}
+        return
+    end
+    local key = cache_key(player)
+    snaps[key] = nil
+    pl_cache[key] = nil
+end
+
+function M.esp_state(player)
+    return get_snap(player)
+end
+
+function M.player_attr(player, key)
+    return read_attr(M.resolve_player_inst(player), key)
+end
+
+function M.char_attr(player, key)
+    return read_attr(M.resolve_character(player), key)
+end
+
+function M.humanoid_attr(player, key)
+    return read_attr(M.resolve_humanoid(player), key)
+end
+
+function M.is_safezone(player)
+    local s = get_snap(player)
+    return s and s.safezone or false
+end
+
+function M.is_vip(player)
+    local s = get_snap(player)
+    return s and s.vip or false
+end
+
+function M.staff_tag(player)
+    local s = get_snap(player)
+    return s and s.staff or nil
+end
+
+function M.is_reviving(player)
+    local s = get_snap(player)
+    return s and s.reviving or false
+end
+
+function M.clan_tag(player)
+    local s = get_snap(player)
+    return s and s.clan_tag or nil
 end
 
 function M.clan_color(player)
-    local c = M.player_attr(player, "ClanColor")
-    if not c then c = M.char_attr(player, "ClanColor") end
-    return parse_color3(c)
+    local s = get_snap(player)
+    return s and s.clan_color or nil
 end
 
 function M.is_downed(player)
+    local s = get_snap(player)
+    return s and s.downed or false
+end
+
+function M.is_alive_body(player)
     if not player then return false end
-    return truthy(M.humanoid_attr(player, "Downed"))
+    if player.is_alive == false then return false end
+    local char = player.character
+    if not char then return false end
+    if utility and utility.is_valid and not utility.is_valid(char) then return false end
+    if player.health ~= nil and player.health <= 0 then return false end
+    return true
 end
 
 function M.is_combat_target(player)
     if not player or player.is_local then return false end
-    if player.is_alive == false then
-        if player.health and player.health > 0 then return true end
-        return false
-    end
-    return true
+    if player.is_alive ~= false then return true end
+    if M.is_downed(player) then return true end
+    if player.health and player.health > 0 then return true end
+    return false
 end
 
 function M.passes_health_check(player)
     if not player then return false end
-    if not player.is_alive then return false end
-    if player.health and player.health <= 0 then return false end
-    return true
+    if player.is_alive then
+        if player.health and player.health <= 0 then return false end
+        return true
+    end
+    return M.is_downed(player)
 end
 
 function M.passes_team_check(player)
@@ -9918,12 +10334,11 @@ function M.passes_team_check(player)
     return not team_state.is_teammate(player)
 end
 
--- mode: 0 = skip downed, 1 = allow, 2 = only downed
 function M.passes_downed_check(player, mode)
     if not player then return false end
     mode = tonumber(mode) or 0
-    local downed = M.is_downed(player)
     if mode == 1 then return true end
+    local downed = M.is_downed(player)
     if mode == 2 then return downed end
     return not downed
 end
@@ -10436,6 +10851,7 @@ local ATTACHMENT_SLOT_HINTS = {
 local EMPTY_HELD_NAMES = {
     ["hand"] = true, ["hands"] = true, ["fist"] = true, ["fists"] = true,
     ["unarmed"] = true, ["nothing"] = true, ["none"] = true, ["empty"] = true,
+    ["hair"] = true,
 }
 
 local function parse_variant_name(name)
@@ -13566,7 +13982,10 @@ function M.draw()
         if aim then
             local tx, ty, vis = w2s(aim.x, aim.y, aim.z)
             if vis then
-                draw_util.snapline(tx, ty, col, 1.5, sw, sh)
+                -- Same as camera aimbot: from screen center, not bottom.
+                local a = col[4] or 1
+                draw_util.line(cx, cy, tx, ty, { 0, 0, 0, a * 0.9 }, 3)
+                draw_util.line(cx, cy, tx, ty, col, 1.5)
             end
         end
     end
@@ -14657,6 +15076,18 @@ local function rebuild_panel_rows(now)
     panel_rows = rows
 end
 
+local function player_body_alive(p)
+    if not p or p.is_local then return false end
+    -- Hide badge when dead / no character (stale head_position can linger).
+    if p.is_alive == false then return false end
+    local char = p.character
+    if not char or not env.is_valid(char) then return false end
+    local hum = p.humanoid
+    if hum ~= nil and not env.is_valid(hum) then return false end
+    if p.health ~= nil and p.health <= 0 then return false end
+    return true
+end
+
 function M.reconcile_active(players)
     local present = {}
 
@@ -14669,8 +15100,17 @@ function M.reconcile_active(players)
         local uid = player_uid(p)
         if not uid or uid == "" then goto continue end
 
+        -- Keep lobby list entry, but only attach live body for world badge.
         present[uid] = true
-        M.track_player(p, role)
+        if player_body_alive(p) then
+            M.track_player(p, role)
+        elseif active[uid] then
+            active[uid].player = nil
+            active[uid].role = role
+        else
+            M.track_player(p, role)
+            if active[uid] then active[uid].player = nil end
+        end
 
         ::continue::
     end
@@ -14758,9 +15198,15 @@ end
 function M.draw_mod_markers()
     if not settings.enabled(P) then return end
 
-    for _, entry in pairs(active) do
+    for uid, entry in pairs(active) do
         local p = entry.player
-        if not p or p.is_local then goto continue end
+        if not player_body_alive(p) then
+            -- Drop dead / despawned bodies from marker set (panel clears on next scan).
+            if p and (p.is_alive == false or not p.character or not env.is_valid(p.character)) then
+                entry.player = nil
+            end
+            goto continue
+        end
 
         local wx, wy, wz = head_world_pos(p)
         if not wx then goto continue end
@@ -14880,7 +15326,6 @@ local player_gear = April.require("game.player_gear")
 local npcs = April.require("game.npcs")
 local mod_checker = April.require("features.utility.mod_checker")
 local mod_ids = April.require("game.mod_ids")
-local theme = April.require("core.ui_theme")
 
 local M = {}
 local P = "april_player_enabled"
@@ -14896,21 +15341,25 @@ local ID_NAME = "april_player_show_name"
 local ID_DIST = "april_player_show_distance"
 local ID_WEAPON = "april_player_show_weapon"
 local ID_CLAN = "april_player_clan_tag"
-local ID_CLAN_COLOR = "april_player_clan_color"
 local ID_BOX = "april_player_box_mode"
 local ID_RANGE = "april_player_range"
+local ID_FLAG_DOWN = "april_player_flag_downed"
+local ID_FLAG_SZ = "april_player_flag_safezone"
+local ID_FLAG_VIP = "april_player_flag_vip"
+local ID_FLAG_STAFF = "april_player_flag_staff"
+local ID_FLAG_REVIVE = "april_player_flag_reviving"
 
 local F_TEAM, F_SAFEZONE, F_SKIP_DOWNED = 1, 2, 3
 local FL_DOWNED, FL_SAFEZONE, FL_VIP, FL_STAFF, FL_REVIVING = 1, 2, 3, 4, 5
 
-local MUTED = { 0.82, 0.84, 0.88, 0.92 }
-local FLAG_COLS = {
-    VIP = { 1, 0.78, 0.15, 1 },
-    SZ = { 0.35, 0.85, 1, 1 },
+local DEFAULT_BOX = { 1, 0.35, 0.35, 1 }
+local DEFAULT_TEXT = { 1, 0.35, 0.35, 1 }
+local DEFAULT_CLAN = { 0.84, 0.31, 0.80, 1 }
+local DEFAULT_MUTED = { 0.82, 0.84, 0.88, 0.92 }
+local DEFAULT_FLAG = {
     DOWN = { 1, 0.35, 0.35, 1 },
-    OWNER = { 0, 0.62, 1, 1 },
-    ADMIN = { 1, 0.4, 0.05, 1 },
-    MOD = { 1, 0.33, 0.33, 1 },
+    SZ = { 0.35, 0.85, 1, 1 },
+    VIP = { 1, 0.78, 0.15, 1 },
     STAFF = { 1, 0.33, 0.33, 1 },
     REVIVE = { 0.45, 1, 0.55, 1 },
 }
@@ -14939,24 +15388,19 @@ local function held_weapon_name(p)
     pcall(function()
         name = player_gear.held_name(p)
     end)
+    if name and player_gear.is_empty_held_name and player_gear.is_empty_held_name(name) then
+        name = nil
+    end
     _wpn_cache[key] = { t = now, name = name }
     return name
 end
 
-local function default_color()
-    return settings.color(P, { 1, 0.35, 0.35, 1 })
+local function box_color()
+    return settings.color(P, DEFAULT_BOX)
 end
 
-local function resolve_color(p)
-    local role = mod_checker.staff_role(p)
-    if role then
-        return theme.role_accent(role)
-    end
-    if settings.bool(ID_CLAN_COLOR, false) then
-        local cc = player_state.clan_color(p)
-        if cc then return cc end
-    end
-    return default_color()
+local function resolve_color(_p)
+    return box_color()
 end
 
 local function players_chams_active()
@@ -14978,12 +15422,17 @@ local function filter_opts()
 end
 
 local function passes_player_filters(p, opts)
-    if not player_state.is_combat_target(p) then return false end
-    if npcs.kind(p.name) then return false end
+    if not p or p.is_local then return false end
     if p.is_workspace_entity or (p.user_id or 0) == 0 then return false end
+    if npcs.kind(p.name) then return false end
+    if not player_state.is_combat_target(p) then return false end
     if opts.team and not player_state.passes_team_check(p) then return false end
-    if not player_state.passes_downed_check(p, opts.downed) then return false end
-    if not player_state.passes_safezone_check(p, opts.skip_sz) then return false end
+    if opts.downed ~= 1 and not player_state.passes_downed_check(p, opts.downed) then
+        return false
+    end
+    if opts.skip_sz and not player_state.passes_safezone_check(p, true) then
+        return false
+    end
     return true
 end
 
@@ -15028,7 +15477,7 @@ function M.register_menu()
 
     menu_util.section(T, G.VISUALS, "Player ESP")
     menu_util.register_keybind(T, G.VISUALS, P, "Player ESP", false, {
-        colorpicker = { 1, 0.35, 0.35, 1 },
+        colorpicker = DEFAULT_BOX,
     })
 
     menu.add_combo(T, G.VISUALS, ID_BOX, "Player Box", { "None", "2D", "Corner" }, 1, { parent = P })
@@ -15036,16 +15485,18 @@ function M.register_menu()
     menu.add_checkbox(T, G.VISUALS, ID_HEALTH, "Player Health Bar", true, { parent = P })
     menu.add_checkbox(T, G.VISUALS, ID_SKELETON, "Player Skeleton", false,
         menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.92 } }))
-    menu.add_checkbox(T, G.VISUALS, ID_NAME, "Player Name", true, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, ID_CLAN, "Player Clan Tag", true, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, ID_CLAN_COLOR, "Player Color By Clan", false, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, ID_DIST, "Player Distance", true, { parent = P })
-    menu.add_checkbox(T, G.VISUALS, ID_WEAPON, "Player Weapon", false, { parent = P })
+    menu.add_checkbox(T, G.VISUALS, ID_NAME, "Player Name", true,
+        menu_util.parent(P, { colorpicker = DEFAULT_TEXT }))
+    menu.add_checkbox(T, G.VISUALS, ID_CLAN, "Player Clan Tag", true,
+        menu_util.parent(P, { colorpicker = DEFAULT_CLAN }))
+    menu.add_checkbox(T, G.VISUALS, ID_DIST, "Player Distance", true,
+        menu_util.parent(P, { colorpicker = DEFAULT_MUTED }))
+    menu.add_checkbox(T, G.VISUALS, ID_WEAPON, "Player Weapon", false,
+        menu_util.parent(P, { colorpicker = DEFAULT_MUTED }))
 
     menu.add_multicombo(T, G.VISUALS, FILTERS, "ESP Filters", {
         "Team Check", "Skip Safezone", "Skip Downed",
     }, { false, false, false }, { parent = P })
-    -- Default: team check only — Skip SZ/Downed hide the players those flags describe
     set_multi_defaults(FILTERS, { true, false, false })
 
     menu.add_multicombo(T, G.VISUALS, FLAGS, "ESP Flags", {
@@ -15053,50 +15504,77 @@ function M.register_menu()
     }, { false, false, false, false, false }, { parent = P })
     set_multi_defaults(FLAGS, { true, true, true, true, true })
 
+    menu.add_colorpicker(T, G.VISUALS, ID_FLAG_DOWN, "Flag Downed Color", DEFAULT_FLAG.DOWN, { parent = P })
+    menu.add_colorpicker(T, G.VISUALS, ID_FLAG_SZ, "Flag Safezone Color", DEFAULT_FLAG.SZ, { parent = P })
+    menu.add_colorpicker(T, G.VISUALS, ID_FLAG_VIP, "Flag VIP Color", DEFAULT_FLAG.VIP, { parent = P })
+    menu.add_colorpicker(T, G.VISUALS, ID_FLAG_STAFF, "Flag Staff Color", DEFAULT_FLAG.STAFF, { parent = P })
+    menu.add_colorpicker(T, G.VISUALS, ID_FLAG_REVIVE, "Flag Reviving Color", DEFAULT_FLAG.REVIVE, { parent = P })
+
     menu.add_slider_int(T, G.VISUALS, ID_RANGE, "Player Range", 50, 2000, 500, { parent = P })
     menu_util.gap(T, G.VISUALS)
 
     local children = {
         ID_BOX, ID_HEALTH, ID_SKELETON,
-        ID_NAME, ID_CLAN, ID_CLAN_COLOR, ID_DIST, ID_WEAPON,
-        FILTERS, FLAGS, ID_RANGE,
+        ID_NAME, ID_CLAN, ID_DIST, ID_WEAPON,
+        FILTERS, FLAGS,
+        ID_FLAG_DOWN, ID_FLAG_SZ, ID_FLAG_VIP, ID_FLAG_STAFF, ID_FLAG_REVIVE,
+        ID_RANGE,
     }
     menu_util.bind_children(P, children)
 
-    -- Clear any previous player chams owner from older builds
     if gpu_chams.available() then
         pcall(function() gpu_chams.clear_owner("players") end)
     end
 end
 
-local function collect_flags(p)
+local function clan_tag_color(snap, menu_col)
+    local cc = snap and snap.clan_color
+    if cc and cc[1] then return cc end
+    return menu_col
+end
+
+local function flag_on(index)
+    return settings.multi(FLAGS, index, true)
+end
+
+local function collect_side_tags(p, snap, show_clan, clan_menu_col, flag_cols)
     local out = {}
-    if settings.multi(FLAGS, FL_VIP, true) and player_state.is_vip(p) then
-        out[#out + 1] = { text = "VIP", col = FLAG_COLS.VIP }
+    snap = snap or player_state.esp_state(p)
+    if not snap then return out end
+
+    if show_clan and snap.clan_tag then
+        out[#out + 1] = {
+            text = "[" .. snap.clan_tag .. "]",
+            col = clan_tag_color(snap, clan_menu_col),
+        }
     end
-    if settings.multi(FLAGS, FL_SAFEZONE, true) and player_state.is_safezone(p) then
-        out[#out + 1] = { text = "SZ", col = FLAG_COLS.SZ }
+
+    if flag_on(FL_VIP) and snap.vip then
+        out[#out + 1] = { text = "[VIP]", col = flag_cols.vip }
     end
-    if settings.multi(FLAGS, FL_DOWNED, true) and player_state.is_downed(p) then
-        out[#out + 1] = { text = "DOWN", col = FLAG_COLS.DOWN }
+    if flag_on(FL_SAFEZONE) and snap.safezone then
+        out[#out + 1] = { text = "[SZ]", col = flag_cols.sz }
     end
-    if settings.multi(FLAGS, FL_STAFF, true) then
-        local tag = player_state.staff_tag(p)
-        if tag then
-            out[#out + 1] = { text = tag, col = FLAG_COLS[tag] or FLAG_COLS.STAFF }
+    if flag_on(FL_DOWNED) and snap.downed then
+        out[#out + 1] = { text = "[DOWN]", col = flag_cols.down }
+    end
+    if flag_on(FL_STAFF) then
+        if snap.staff then
+            out[#out + 1] = { text = "[" .. snap.staff .. "]", col = flag_cols.staff }
         else
             local role = mod_checker.staff_role(p)
             if role then
                 out[#out + 1] = {
-                    text = mod_ids.short_label(role),
-                    col = theme.role_accent(role),
+                    text = "[" .. mod_ids.short_label(role) .. "]",
+                    col = flag_cols.staff,
                 }
             end
         end
     end
-    if settings.multi(FLAGS, FL_REVIVING, true) and player_state.is_reviving(p) then
-        out[#out + 1] = { text = "REVIVE", col = FLAG_COLS.REVIVE }
+    if flag_on(FL_REVIVING) and snap.reviving then
+        out[#out + 1] = { text = "[REVIVE]", col = flag_cols.revive }
     end
+
     return out
 end
 
@@ -15180,6 +15658,17 @@ function M.draw()
     local show_wpn = settings.bool(ID_WEAPON, false)
 
     local skel_col = settings.color(ID_SKELETON, { 1, 1, 1, 0.92 })
+    local name_col = settings.color(ID_NAME, DEFAULT_TEXT)
+    local clan_menu_col = settings.color(ID_CLAN, DEFAULT_CLAN)
+    local dist_col = settings.color(ID_DIST, DEFAULT_MUTED)
+    local wpn_col = settings.color(ID_WEAPON, DEFAULT_MUTED)
+    local flag_cols = {
+        down = settings.color(ID_FLAG_DOWN, DEFAULT_FLAG.DOWN),
+        sz = settings.color(ID_FLAG_SZ, DEFAULT_FLAG.SZ),
+        vip = settings.color(ID_FLAG_VIP, DEFAULT_FLAG.VIP),
+        staff = settings.color(ID_FLAG_STAFF, DEFAULT_FLAG.STAFF),
+        revive = settings.color(ID_FLAG_REVIVE, DEFAULT_FLAG.REVIVE),
+    }
 
     for _, p in ipairs(entity.get_players()) do
         if not passes_player_filters(p, opts) then goto continue end
@@ -15197,6 +15686,7 @@ function M.draw()
             dist = math.sqrt(dist_sq)
         end
 
+        local snap = player_state.esp_state(p)
         local col = resolve_color(p)
         local bounds = resolve_bounds(p, pos, dist)
         if not bounds or not bounds.valid or not is_on_screen(bounds, pos) then
@@ -15211,31 +15701,15 @@ function M.draw()
         local cx = bounds.x + bounds.w * 0.5
         local box_ok = bounds.w >= 4 and bounds.h >= 8
 
+        -- Top: name + weapon only (never clan — clan is on the right with tags)
         local top = {}
-        if show_clan then
-            local tag = player_state.clan_tag(p)
-            if tag then
-                top[#top + 1] = { text = "[" .. tag .. "]", col = player_state.clan_color(p) or col }
-            end
-        end
         if show_name then
-            top[#top + 1] = { text = p.name or "?", col = col }
-        end
-        local flags = collect_flags(p)
-        if #flags > 0 then
-            local parts = {}
-            for i = 1, #flags do
-                parts[#parts + 1] = flags[i].text
-            end
-            top[#top + 1] = {
-                text = "[" .. table.concat(parts, "][") .. "]",
-                col = (#flags == 1) and flags[1].col or MUTED,
-            }
+            top[#top + 1] = { text = p.name or "?", col = name_col }
         end
         if show_wpn then
             local wpn = held_weapon_name(p)
             if wpn and wpn ~= "" then
-                top[#top + 1] = { text = tostring(wpn), col = MUTED }
+                top[#top + 1] = { text = tostring(wpn), col = wpn_col }
             end
         end
 
@@ -15243,6 +15717,22 @@ function M.draw()
             local ty = bounds.y - 4 - (#top * (ts + 1))
             for i = 1, #top do
                 draw_util.text_centered(cx, ty + (i - 1) * (ts + 1), top[i].text, top[i].col, ts)
+            end
+        end
+
+        -- Right: clan tag + attribute flags (VIP / SZ / DOWN / staff / revive)
+        local side = collect_side_tags(p, snap, show_clan, clan_menu_col, flag_cols)
+        if #side > 0 then
+            local rx = bounds.x + bounds.w + 4
+            local ry = bounds.y
+            for i = 1, #side do
+                draw_util.text(
+                    rx,
+                    ry + (i - 1) * (ts + 1),
+                    side[i].text,
+                    side[i].col,
+                    ts
+                )
             end
         end
 
@@ -15266,11 +15756,10 @@ function M.draw()
         end
 
         if show_skel then
-            local sc = settings.bool(ID_CLAN_COLOR, false) and (player_state.clan_color(p) or skel_col) or skel_col
             if p.get_bones_screen then
-                esp_util.draw_player_skeleton(p, sc, 1)
+                esp_util.draw_player_skeleton(p, skel_col, 1)
             elseif p.character then
-                esp_util.draw_model_skeleton(p.character, sc, 1)
+                esp_util.draw_model_skeleton(p.character, skel_col, 1)
             end
         end
 
@@ -15279,7 +15768,7 @@ function M.draw()
                 cx,
                 bounds.y + bounds.h + 3,
                 string.format("%dm", math.floor(dist + 0.5)),
-                MUTED,
+                dist_col,
                 ts
             )
         end
@@ -15375,8 +15864,9 @@ local function overlay_aim_config()
     local silent_fov = silent_on and settings.num("april_silent_fov", 150) or nil
     local aim_fov = aim_on and settings.num("april_aim_fov", 120) or nil
 
+    -- No aimbot FOVs on: still pick nearest in a quiet 100px radius (no FOV circle drawn).
     if not silent_fov and not aim_fov then
-        return nil, nil
+        return 100, "april_silent_"
     end
     if silent_fov and aim_fov then
         if silent_fov >= aim_fov then
@@ -17403,9 +17893,12 @@ function M.register_menu()
     menu.add_combo(T, G.WORLD, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 0, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_health", "NPC Health Bar", false, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "NPC Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
-    menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "NPC Show Name", true, root)
-    menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "NPC Show Distance", true, root)
-    menu.add_checkbox(T, G.WORLD, "april_npc_show_weapon", "NPC Weapon", false, root)
+    menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "NPC Show Name", true,
+        menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_show_distance", "NPC Show Distance", true,
+        menu_util.parent(P, { colorpicker = { 0.82, 0.84, 0.88, 0.92 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_show_weapon", "NPC Weapon", false,
+        menu_util.parent(P, { colorpicker = { 0.82, 0.84, 0.88, 0.92 } }))
 
     menu_util.gap(T, G.WORLD)
     menu.add_slider_int(T, G.WORLD, "april_npc_range", "NPC Range", 50, 2000, 500, root)
@@ -17681,7 +18174,10 @@ function M.draw()
 
         local lines = {}
         if show_name then
-            lines[#lines + 1] = label
+            lines[#lines + 1] = {
+                text = label,
+                col = settings.color("april_npc_show_name", col),
+            }
         end
         if show_wpn then
             local wpn = nil
@@ -17692,11 +18188,17 @@ function M.draw()
                 pcall(function() wpn = player_gear.held_name_from_character(entry.inst) end)
             end
             if wpn and wpn ~= "" then
-                lines[#lines + 1] = tostring(wpn)
+                lines[#lines + 1] = {
+                    text = tostring(wpn),
+                    col = settings.color("april_npc_show_weapon", { 0.82, 0.84, 0.88, 0.92 }),
+                }
             end
         end
         if show_dist and me_pos then
-            lines[#lines + 1] = string.format("%dm", math.floor(math.sqrt(dist_sq)))
+            lines[#lines + 1] = {
+                text = string.format("%dm", math.floor(math.sqrt(dist_sq))),
+                col = settings.color("april_npc_show_distance", { 0.82, 0.84, 0.88, 0.92 }),
+            }
         end
 
         if #lines > 0 then
@@ -17704,12 +18206,13 @@ function M.draw()
             local base_y = label_y - 4 - (#lines * (text_size + 1))
             for i = 1, #lines do
                 local ty = base_y + (i - 1) * (text_size + 1)
+                local line_col = lines[i].col or col
                 if bounds and bounds.valid and tx then
-                    draw_util.text_centered(tx, ty, lines[i], col, text_size)
+                    draw_util.text_centered(tx, ty, lines[i].text, line_col, text_size)
                 else
                     local sx, sy, vis = esp_util.w2s(lx, ly, lz)
                     if vis then
-                        draw_util.text_centered(sx, sy - 14 + (i - 1) * (text_size + 1), lines[i], col, text_size)
+                        draw_util.text_centered(sx, sy - 14 + (i - 1) * (text_size + 1), lines[i].text, line_col, text_size)
                     end
                 end
             end
@@ -21915,17 +22418,21 @@ local function build_visuals()
             combo("april_player_box_mode", "Player Box", { "None", "2D", "Corner" }, 1),
             cb("april_player_health", "Player Health Bar", true),
             cb("april_player_skeleton", "Player Skeleton", false, { 1, 1, 1, 0.92 }),
-            cb("april_player_show_name", "Player Name", true),
-            cb("april_player_clan_tag", "Player Clan Tag", true),
-            cb("april_player_clan_color", "Player Color By Clan", false),
-            cb("april_player_show_distance", "Player Distance", true),
-            cb("april_player_show_weapon", "Player Weapon", false),
+            cb("april_player_show_name", "Player Name", true, { 1, 0.35, 0.35, 1 }),
+            cb("april_player_clan_tag", "Player Clan Tag", true, { 0.84, 0.31, 0.80, 1 }),
+            cb("april_player_show_distance", "Player Distance", true, { 0.82, 0.84, 0.88, 0.92 }),
+            cb("april_player_show_weapon", "Player Weapon", false, { 0.82, 0.84, 0.88, 0.92 }),
             multi("april_player_esp_filters", "ESP Filters", {
                 "Team Check", "Skip Safezone", "Skip Downed",
             }, { true, false, false }),
             multi("april_player_esp_flags", "ESP Flags", {
                 "Downed", "Safezone", "VIP", "Staff", "Reviving",
             }, { true, true, true, true, true }),
+            color("april_player_flag_downed", "Flag Downed Color", { 1, 0.35, 0.35, 1 }, "april_player_enabled"),
+            color("april_player_flag_safezone", "Flag Safezone Color", { 0.35, 0.85, 1, 1 }, "april_player_enabled"),
+            color("april_player_flag_vip", "Flag VIP Color", { 1, 0.78, 0.15, 1 }, "april_player_enabled"),
+            color("april_player_flag_staff", "Flag Staff Color", { 1, 0.33, 0.33, 1 }, "april_player_enabled"),
+            color("april_player_flag_reviving", "Flag Reviving Color", { 0.45, 1, 0.55, 1 }, "april_player_enabled"),
             sl("april_player_range", "Player Range", 50, 2000, 500),
         },
     }
@@ -22029,9 +22536,9 @@ local function build_world()
             cb("april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, { 1, 0.5, 0.1, 1 }),
             cb("april_npc_health", "NPC Health Bar", false),
             cb("april_npc_skeleton", "NPC Skeleton", false, { 1, 1, 1, 0.85 }),
-            cb("april_npc_show_name", "NPC Show Name", true),
-            cb("april_npc_show_distance", "NPC Show Distance", true),
-            cb("april_npc_show_weapon", "NPC Weapon", false),
+            cb("april_npc_show_name", "NPC Show Name", true, { 1, 0.3, 0.3, 1 }),
+            cb("april_npc_show_distance", "NPC Show Distance", true, { 0.82, 0.84, 0.88, 0.92 }),
+            cb("april_npc_show_weapon", "NPC Weapon", false, { 0.82, 0.84, 0.88, 0.92 }),
             sl("april_npc_range", "NPC Range", 50, 2000, 500),
         },
     }

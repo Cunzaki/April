@@ -389,7 +389,10 @@ function M.draw()
         if aim then
             local tx, ty, vis = w2s(aim.x, aim.y, aim.z)
             if vis then
-                draw_util.snapline(tx, ty, col, 1.5, sw, sh)
+                -- Same as camera aimbot: from screen center, not bottom.
+                local a = col[4] or 1
+                draw_util.line(cx, cy, tx, ty, { 0, 0, 0, a * 0.9 }, 3)
+                draw_util.line(cx, cy, tx, ty, col, 1.5)
             end
         end
     end

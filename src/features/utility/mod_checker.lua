@@ -214,6 +214,18 @@ local function rebuild_panel_rows(now)
     panel_rows = rows
 end
 
+local function player_body_alive(p)
+    if not p or p.is_local then return false end
+    -- Hide badge when dead / no character (stale head_position can linger).
+    if p.is_alive == false then return false end
+    local char = p.character
+    if not char or not env.is_valid(char) then return false end
+    local hum = p.humanoid
+    if hum ~= nil and not env.is_valid(hum) then return false end
+    if p.health ~= nil and p.health <= 0 then return false end
+    return true
+end
+
 function M.reconcile_active(players)
     local present = {}
 
@@ -226,8 +238,17 @@ function M.reconcile_active(players)
         local uid = player_uid(p)
         if not uid or uid == "" then goto continue end
 
+        -- Keep lobby list entry, but only attach live body for world badge.
         present[uid] = true
-        M.track_player(p, role)
+        if player_body_alive(p) then
+            M.track_player(p, role)
+        elseif active[uid] then
+            active[uid].player = nil
+            active[uid].role = role
+        else
+            M.track_player(p, role)
+            if active[uid] then active[uid].player = nil end
+        end
 
         ::continue::
     end
@@ -315,9 +336,15 @@ end
 function M.draw_mod_markers()
     if not settings.enabled(P) then return end
 
-    for _, entry in pairs(active) do
+    for uid, entry in pairs(active) do
         local p = entry.player
-        if not p or p.is_local then goto continue end
+        if not player_body_alive(p) then
+            -- Drop dead / despawned bodies from marker set (panel clears on next scan).
+            if p and (p.is_alive == false or not p.character or not env.is_valid(p.character)) then
+                entry.player = nil
+            end
+            goto continue
+        end
 
         local wx, wy, wz = head_world_pos(p)
         if not wx then goto continue end

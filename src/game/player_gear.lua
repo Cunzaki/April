@@ -29,6 +29,7 @@ local ATTACHMENT_SLOT_HINTS = {
 local EMPTY_HELD_NAMES = {
     ["hand"] = true, ["hands"] = true, ["fist"] = true, ["fists"] = true,
     ["unarmed"] = true, ["nothing"] = true, ["none"] = true, ["empty"] = true,
+    ["hair"] = true,
 }
 
 local function parse_variant_name(name)

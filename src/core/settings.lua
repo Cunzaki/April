@@ -52,12 +52,14 @@ function M.multi(id, index, default)
     if type(t) ~= "table" then
         return default == true
     end
-    -- Prefer 1-based; some builds expose 0-based arrays.
-    local v = t[index]
-    if v == nil and index >= 1 then
-        v = t[index - 1]
+    -- Prefer 1-based. Only fall back to 0-based when the 1-based slot is absent.
+    if t[index] ~= nil then
+        return as_bool(t[index], default)
     end
-    return as_bool(v, default)
+    if index >= 1 and t[index - 1] ~= nil then
+        return as_bool(t[index - 1], default)
+    end
+    return default == true
 end
 
 function M.combo_index(id, labels, default)
