@@ -17,15 +17,17 @@ M.METHODS = {
     "Dense Shuffle",
 }
 
-local BONE_CENTER_Y = {
-    Head = -0.62,
+-- Kept for TP spawn sampling around the part. Aim always uses the raw hitpart
+-- from silent_resolve — do not apply Y offsets that pull Head → UpperTorso.
+local BONE_SPAWN_Y = {
+    Head = 0,
     UpperTorso = 0,
     LowerTorso = 0,
     HumanoidRootPart = 0,
     LeftUpperArm = 0,
     RightUpperArm = 0,
-    LeftUpperLeg = -0.15,
-    RightUpperLeg = -0.15,
+    LeftUpperLeg = 0,
+    RightUpperLeg = 0,
 }
 
 local GRID_OFFS = {}
@@ -64,8 +66,10 @@ end
 function M.target_center(hitpart, bone)
     if not hitpart then return nil end
     local c = copy_pos(hitpart)
-    local yoff = BONE_CENTER_Y[bone or "Head"] or -0.35
-    c.y = c.y + yoff
+    local yoff = BONE_SPAWN_Y[bone or "Head"] or 0
+    if yoff ~= 0 then
+        c.y = c.y + yoff
+    end
     return c
 end
 
@@ -213,23 +217,26 @@ function M.resolve(opts)
     if method_idx < 0 then method_idx = 0 end
     if method_idx >= #M.METHODS then method_idx = 0 end
 
-    local center = M.target_center(hitpart, opts.bone)
-    if not center then return nil end
+    -- Spawn TP origin near the selected hitpart; aim stays on that hitpart.
+    local spawn = M.target_center(hitpart, opts.bone) or copy_pos(hitpart)
+    if not spawn then return nil end
+    local aim = copy_pos(hitpart)
 
     local muzzle = opts.muzzle or combat_origin.get_muzzle_origin() or camera
     local pick = ORIGIN_FN[method_idx + 1] or origin_center
-    local origin = pick(center, camera, method_idx)
+    local origin = pick(spawn, camera, method_idx)
     if not origin then return nil end
 
-    local aim = aim_through(center, origin, camera)
+    -- Slight push through the hitpart so the ray doesn't stop short of the bone.
+    aim = aim_through(aim, origin, camera)
 
     return {
         origin = origin,
         aim = aim,
-        hitpart = center,
+        hitpart = copy_pos(hitpart),
         visual = false,
         method = M.METHODS[method_idx + 1],
-        tp_path = M.build_path(origin, center, muzzle),
+        tp_path = M.build_path(origin, hitpart, muzzle),
     }
 end
 

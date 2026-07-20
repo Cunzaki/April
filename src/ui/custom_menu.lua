@@ -1,6 +1,7 @@
 --[[
   Gamesense-style custom menu for April.
-  INSERT toggles by default (rebindable in Config → Menu). Scroll by hovering near the top or bottom of a column.
+  INSERT toggles by default (rebindable in Config → Menu).
+  Scroll: mouse wheel when Vector exposes a reader; else edge-hover (top/bottom of column).
 ]]
 
 local theme = April.require("ui.gs_theme")
@@ -29,6 +30,9 @@ local scroll = { left = 0, right = 0 }
 
 local SCROLL_EDGE = 36
 local SCROLL_SPEED = 5
+local WHEEL_STEP = 48
+local PAGE_STEP = 90
+local VK_PRIOR, VK_NEXT = 0x21, 0x22
 
 local function screen_size()
     if draw and draw.get_screen_size then
@@ -49,6 +53,15 @@ end
 local function master_on(id)
     if not id then return true end
     return state.get(id, false) == true
+end
+
+local function combo_value(id)
+    if not id then return nil end
+    local v = state.get(id)
+    if v == nil and menu and menu.get then
+        v = menu.get(id)
+    end
+    return tonumber(v)
 end
 
 local function color_override_on(idx)
@@ -76,6 +89,31 @@ local function item_visible(item, group)
     end
     if item.gate2 and not master_on(item.gate2) then
         return false
+    end
+    if item.gate_combo then
+        local cur = combo_value(item.gate_combo)
+        local want = tonumber(item.gate_combo_value) or 0
+        if cur ~= want then
+            return false
+        end
+    end
+    -- Show if ANY (combo_id, value) pair matches. pair = { id, value } or { id, {v1,v2} }
+    if item.gate_any_combo then
+        local ok = false
+        for _, pair in ipairs(item.gate_any_combo) do
+            local cid = pair[1] or pair.id
+            local want = pair[2] or pair.value
+            local cur = combo_value(cid)
+            if type(want) == "table" then
+                for _, w in ipairs(want) do
+                    if cur == w then ok = true; break end
+                end
+            elseif cur == want then
+                ok = true
+            end
+            if ok then break end
+        end
+        if not ok then return false end
     end
     if item.color_override_idx and not color_override_on(item.color_override_idx) then
         return false
@@ -183,6 +221,28 @@ local function handle_column_scroll(x, y, w, h, scroll_key, content_h)
     end
     if not hot then return end
 
+    -- Prefer real wheel when any probe delivers notches this frame.
+    -- Open dropdowns consume the wheel first (see gs_widgets).
+    if gin.wheel ~= 0 and not widgets.wheel_consumed then
+        scroll[scroll_key] = scroll[scroll_key] - gin.wheel * WHEEL_STEP
+        clamp_scroll(scroll_key, content_h, h)
+        widgets.wheel_consumed = true
+        return
+    end
+
+    -- Page Up / Page Down while hovering a column (documented IsKeyDown path).
+    if gin.key_pressed(VK_PRIOR) then
+        scroll[scroll_key] = scroll[scroll_key] - PAGE_STEP
+        clamp_scroll(scroll_key, content_h, h)
+        return
+    end
+    if gin.key_pressed(VK_NEXT) then
+        scroll[scroll_key] = scroll[scroll_key] + PAGE_STEP
+        clamp_scroll(scroll_key, content_h, h)
+        return
+    end
+
+    -- Fallback: edge hover (only when wheel isn't available / not moving).
     if gin.my < y + SCROLL_EDGE then
         scroll[scroll_key] = scroll[scroll_key] - SCROLL_SPEED
         clamp_scroll(scroll_key, content_h, h)

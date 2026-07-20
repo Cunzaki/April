@@ -17,8 +17,8 @@ local function kb(id, label, default, gate)
     return { type = "keybind", id = id, label = label, default = default == true, gate = gate }
 end
 
-local function sl(id, label, minv, maxv, default, float, gate)
-    return {
+local function sl(id, label, minv, maxv, default, float, gate, extra)
+    local item = {
         type = "slider",
         id = id,
         label = label,
@@ -29,6 +29,12 @@ local function sl(id, label, minv, maxv, default, float, gate)
         fmt = float and "%.2f" or "%d",
         gate = gate,
     }
+    if type(extra) == "table" then
+        for k, v in pairs(extra) do
+            item[k] = v
+        end
+    end
+    return item
 end
 
 local function combo(id, label, options, default, gate)
@@ -374,6 +380,29 @@ local function build_misc()
                 sep(),
                 kb("april_desync_enabled", "Desync", false),
                 cb("april_desync_visualizer", "Desync Visualize", false, { 0.2, 0.85, 1, 0.9 }, "april_desync_enabled"),
+                sep(),
+                kb("april_antiaim_enabled", "Anti-Aim", false),
+                combo("april_antiaim_yaw_mode", "Yaw Mode", { "None", "Backwards", "Spin", "Jitter", "Random Jitter", "Sideways Left", "Sideways Right", "Manual" }, 1, "april_antiaim_enabled"),
+                sl("april_antiaim_yaw_manual", "Manual Yaw", -180, 180, 90, false, "april_antiaim_enabled", {
+                    gate_combo = "april_antiaim_yaw_mode",
+                    gate_combo_value = 7,
+                }),
+                sl("april_antiaim_spin_speed", "Spin Speed", 30, 720, 180, false, "april_antiaim_enabled", {
+                    gate_combo = "april_antiaim_yaw_mode",
+                    gate_combo_value = 2,
+                }),
+                sl("april_antiaim_jitter_step", "Jitter Step", 15, 180, 90, false, "april_antiaim_enabled", {
+                    gate_any_combo = {
+                        { "april_antiaim_yaw_mode", { 3, 4 } },
+                    },
+                }),
+                sl("april_antiaim_jitter_ms", "Jitter Interval (ms)", 40, 500, 120, false, "april_antiaim_enabled", {
+                    gate_any_combo = {
+                        { "april_antiaim_yaw_mode", { 3, 4 } },
+                    },
+                }),
+                kb("april_fakeduck_enabled", "Fake Duck", false),
+                sl("april_fakeduck_height", "Duck Height", 0.01, 1.5, 1.1, true, "april_fakeduck_enabled"),
                 sep(),
                 kb("april_fling_enabled", "Fling", false),
                 sl("april_fling_fov", "Fling FOV", 20, 600, 150, false, "april_fling_enabled"),

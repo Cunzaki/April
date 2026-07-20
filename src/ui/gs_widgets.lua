@@ -21,6 +21,7 @@ M.interacted = false -- any widget captured LMB this frame
 M._hue_cache = {} -- id -> hue 0..1 for color picker
 M._list_scroll = {} -- id -> first visible option index (0-based)
 M.LIST_MAX_VISIBLE = 8
+M.wheel_consumed = false -- set when a dropdown/list eats the wheel this frame
 M.block_under = false -- true while pointer is over a floating popup (prior frame rect)
 -- Floating color picker (drawn after the menu so it doesn't expand sections)
 M._color_anchor = nil -- { id, x, y, w }
@@ -127,6 +128,7 @@ end
 function M.begin_popups()
     M.popup_used_click = false
     M.interacted = false
+    M.wheel_consumed = false
     M._color_anchor = nil
     M._bind_mode_anchor = nil
     M._active_input_rect = nil
@@ -209,7 +211,10 @@ local function apply_list_edge_scroll(id, count, max_vis, list_x, list_y, list_w
     if not input.hover(list_x, list_y, list_w, list_h) then return end
 
     local off = M._list_scroll[id] or 0
-    if input.my < list_y + LIST_SCROLL_EDGE then
+    if input.wheel ~= 0 and not M.wheel_consumed then
+        off = off - input.wheel
+        M.wheel_consumed = true
+    elseif input.my < list_y + LIST_SCROLL_EDGE then
         off = off - 1
     elseif input.my > list_y + list_h - LIST_SCROLL_EDGE then
         off = off + 1

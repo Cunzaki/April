@@ -393,7 +393,7 @@ if input.is_key_down(0x01) then ... end
 local cx, cy = input.get_screen_center()
 ```
 
-**Mouse wheel (custom UI):** Vector only documents `utility.mouse_scroll(amount)` to *simulate* scroll. There is **no documented wheel reader** for draw-only menus. Native `menu.add_*` panels scroll with the wheel automatically. April's custom draw UI uses **edge hover scroll** — move the cursor near the top or bottom of a column or open dropdown list to scroll.
+**Mouse wheel (custom UI):** Vector only documents `utility.mouse_scroll(amount)` to *simulate* scroll — there is **no documented wheel reader**. April probes undocumented paths (`UserInputService` InputChanged, PlayerMouse `WheelForward`/`WheelBackward`, and any `input`/`utility` getter whose name contains wheel/scroll). When a reader works, the custom menu uses the wheel; otherwise it falls back to **edge hover scroll** (and Page Up / Page Down while hovering a column).
 
 ### `part` global (direct memory writes)
 

@@ -285,8 +285,12 @@ function M.is_bow_weapon_name(name)
     if entry and entry.Weapon and entry.Weapon.IsBow then
         return true
     end
+    -- Fallen projectile bows that aim torso for ballistics (arrows still headshot).
     local n = name:lower()
-    return n:find("bow", 1, true) ~= nil
+    if n:find("crossbow", 1, true) then return true end
+    if n:find("wooden bow", 1, true) then return true end
+    if n == "bow" or n:sub(-4) == " bow" then return true end
+    return false
 end
 
 function M.invalidate()

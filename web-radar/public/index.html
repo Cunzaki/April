@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>April — Web Radar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css?v=3" />
+</head>
+<body>
+  <div class="ambient"></div>
+  <div class="app">
+    <header class="header panel">
+      <div class="header-left">
+        <div class="logo">A</div>
+        <div class="header-brand">
+          <span class="header-title">APRIL</span>
+          <span class="header-sub">Web Radar</span>
+        </div>
+      </div>
+      <div class="header-host">
+        <span class="header-host-label">Hosted at</span>
+        <code id="host-url">—</code>
+        <button type="button" class="btn-sm" id="copy-url">Copy</button>
+      </div>
+      <div class="header-stats">
+        <div class="stat"><span class="stat-label">Ping</span><span class="stat-val" id="update-ms">—</span></div>
+        <div class="stat"><span class="stat-label">Players</span><span class="stat-val" id="player-count">0</span></div>
+        <div class="stat"><span class="stat-label">Visible</span><span class="stat-val" id="marker-count">0</span></div>
+        <div class="stat"><span class="stat-label">Yaw</span><span class="stat-val" id="yaw-deg">—</span></div>
+      </div>
+      <div class="status-badge" id="status-pill">
+        <span class="status-dot"></span>
+        <span id="status-text">Connecting</span>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="radar-panel panel">
+        <div class="radar-toolbar">
+          <div class="radar-toolbar-left">
+            <h1 class="radar-title">Tactical Radar</h1>
+            <p class="radar-sub" id="you-line">Waiting for data…</p>
+          </div>
+          <div class="radar-toolbar-right">
+            <div class="control-group">
+              <label class="control-label">Zoom</label>
+              <input type="range" class="control-range" id="zoom" min="0.15" max="6" step="0.05" value="1.15" />
+            </div>
+            <label class="toggle-pill"><input type="checkbox" id="opt-labels" checked /><span>Labels</span></label>
+            <label class="toggle-pill"><input type="checkbox" id="opt-sweep" checked /><span>Sweep</span></label>
+            <label class="toggle-pill"><input type="checkbox" id="opt-trail" checked /><span>Smooth</span></label>
+          </div>
+        </div>
+
+        <div class="radar-viewport">
+          <canvas id="radar"></canvas>
+          <div class="radar-hud">
+            <span class="radar-fwd">FORWARD</span>
+          </div>
+          <div class="waiting-overlay" id="waiting-card">
+            <div class="waiting-box">
+              <div class="waiting-spinner"></div>
+              <h2>Waiting for April</h2>
+              <p>Run <code>start-webradar.bat</code>, load April, enable <strong>Web Radar</strong>.</p>
+            </div>
+          </div>
+          <div class="radar-tooltip" id="tooltip" hidden></div>
+        </div>
+
+        <div class="radar-legend" id="legend"></div>
+      </section>
+
+      <aside class="sidebar panel">
+        <nav class="sidebar-tabs" role="tablist">
+          <button type="button" class="sidebar-tab active" data-tab="filters">Filters</button>
+          <button type="button" class="sidebar-tab" data-tab="players">Players</button>
+          <button type="button" class="sidebar-tab" data-tab="entities">Entities</button>
+          <button type="button" class="sidebar-tab" data-tab="help">Help</button>
+        </nav>
+
+        <div class="sidebar-body">
+          <div class="sidebar-pane active" data-panel="filters">
+            <div class="sidebar-search">
+              <input type="search" id="filter-search" placeholder="Search filters…" autocomplete="off" />
+            </div>
+            <div class="sidebar-actions">
+              <button type="button" class="btn-sm" id="btn-all-on">Enable all</button>
+              <button type="button" class="btn-sm" id="btn-all-off">Disable all</button>
+            </div>
+            <div class="accordion" id="filter-groups"></div>
+          </div>
+
+          <div class="sidebar-pane" data-panel="players">
+            <div class="sidebar-search">
+              <input type="search" id="player-search" placeholder="Search players…" autocomplete="off" />
+            </div>
+            <ul class="list" id="player-list"></ul>
+          </div>
+
+          <div class="sidebar-pane" data-panel="entities">
+            <div class="sidebar-search">
+              <input type="search" id="entity-search" placeholder="Search markers…" autocomplete="off" />
+            </div>
+            <div class="chip-row" id="entity-type-filters"></div>
+            <ul class="list" id="entity-list"></ul>
+          </div>
+
+          <div class="sidebar-pane" data-panel="help">
+            <ul class="help-steps">
+              <li>Run <code>start-webradar.bat</code> and keep it open.</li>
+              <li>Load April in Vector and enable <strong>Web Radar</strong>.</li>
+              <li>Top of the map = your look direction.</li>
+              <li>Expand filter groups and toggle any ESP type.</li>
+              <li>Hover blips on the map for details.</li>
+            </ul>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <span id="place-line">Place —</span>
+      <span id="seq-line">Seq —</span>
+      <span id="counts-line">Counts —</span>
+    </footer>
+  </div>
+  <script src="/app.js?v=3" type="module"></script>
+</body>
+</html>

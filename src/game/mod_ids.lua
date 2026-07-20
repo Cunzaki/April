@@ -277,6 +277,14 @@ end
 
 M._player_roles = {}
 
+local function mod_group()
+    return April.require("game.mod_group")
+end
+
+local function player_state()
+    return April.require("game.player_state")
+end
+
 function M.reset_session()
     M._player_roles = {}
     local group = mod_group()
@@ -315,14 +323,6 @@ end
 local function write_cached_role(key, role)
     if key == nil then return end
     M._player_roles[key] = role or false
-end
-
-local function mod_group()
-    return April.require("game.mod_group")
-end
-
-local function player_state()
-    return April.require("game.player_state")
 end
 
 local function role_from_game_tag(player)

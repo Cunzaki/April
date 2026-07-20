@@ -1,12 +1,12 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-19T03:50:15.328Z
+    Built: 2026-07-20T04:19:39.460Z
     UI: custom Gamesense menu (INSERT) — Vector menu tabs disabled
 ]]
 
 April = {
-    version = "3.85.36",
+    version = "3.88.15",
     debug = false,
     _mods = {},
     bundled = true,
@@ -619,6 +619,14 @@ end
 
 M._player_roles = {}
 
+local function mod_group()
+    return April.require("game.mod_group")
+end
+
+local function player_state()
+    return April.require("game.player_state")
+end
+
 function M.reset_session()
     M._player_roles = {}
     local group = mod_group()
@@ -657,14 +665,6 @@ end
 local function write_cached_role(key, role)
     if key == nil then return end
     M._player_roles[key] = role or false
-end
-
-local function mod_group()
-    return April.require("game.mod_group")
-end
-
-local function player_state()
-    return April.require("game.player_state")
 end
 
 local function role_from_game_tag(player)
@@ -4815,7 +4815,7 @@ local active_count = 0
 function M.apply_movement_only()
     active_count = active_count + 1
     pcall(fflag_mem.refresh)
-    fflag_mem.set_int("S2PhysicsSenderRate", 0)
+    fflag_mem.set_int("S2PhysicsSenderRate", 0)W
     fflag_mem.set_int("PhysicsSenderMaxBandwidthBps", 0)
     fflag_mem.set_int("DataSenderRate", 60)
 end
@@ -4843,6 +4843,358 @@ end
 
 function M.is_active()
     return active_count > 0
+end
+
+return M
+
+end)()
+
+-- ── core/angle_util.lua ──
+April._mods["core.angle_util"] = (function()
+-- Shared yaw / flat-direction helpers for movement features.
+
+local env = April.require("core.env")
+
+local M = {}
+
+function M.normalize_yaw(y)
+    while y > math.pi do y = y - math.pi * 2 end
+    while y < -math.pi do y = y + math.pi * 2 end
+    return y
+end
+
+function M.yaw_delta(from_yaw, to_yaw)
+    return M.normalize_yaw((to_yaw or 0) - (from_yaw or 0))
+end
+
+function M.yaw_from_vector(lx, lz)
+    if not lx and not lz then return 0 end
+    lx, lz = lx or 0, lz or 0
+    if math.abs(lx) < 1e-5 and math.abs(lz) < 1e-5 then return 0 end
+    return math.atan2(lx, lz)
+end
+
+function M.flat_forward(yaw)
+    return math.sin(yaw or 0), math.cos(yaw or 0)
+end
+
+function M.camera_yaw()
+    if camera and camera.get_angles then
+        local ok, a = pcall(camera.get_angles)
+        if ok and a then
+            local deg = a.Y or a.y
+            if deg then return math.rad(deg) end
+        end
+    end
+    if utility and utility.get_camera_angles then
+        local ok, _, yaw = pcall(utility.get_camera_angles)
+        if ok and yaw then return math.rad(yaw) end
+    end
+    if camera and camera.get_look_vector then
+        local ok, lv = pcall(camera.get_look_vector)
+        if ok and lv then
+            return M.yaw_from_vector(lv.x or lv.X, lv.z or lv.Z)
+        end
+    end
+    return 0
+end
+
+function M.normalize_pitch(p)
+    local lim = math.rad(89)
+    if p > lim then return lim end
+    if p < -lim then return -lim end
+    return p or 0
+end
+
+function M.camera_pitch()
+    if camera and camera.get_angles then
+        local ok, a = pcall(camera.get_angles)
+        if ok and a then
+            local deg = a.X or a.x
+            if deg then return math.rad(deg) end
+        end
+    end
+    if utility and utility.get_camera_angles then
+        local ok, pitch = pcall(utility.get_camera_angles)
+        if ok and pitch then return math.rad(pitch) end
+    end
+    if camera and camera.get_look_vector then
+        local ok, lv = pcall(camera.get_look_vector)
+        if ok and lv then
+            local ly = lv.y or lv.Y or 0
+            return M.normalize_pitch(math.asin(math.max(-1, math.min(1, -ly))))
+        end
+    end
+    return 0
+end
+
+function M.body_pitch(lp, root)
+    if lp and lp.LookVector then
+        local lv = lp.LookVector
+        local ly = lv.y or lv.Y
+        if ly then
+            return M.normalize_pitch(math.asin(math.max(-1, math.min(1, -ly))))
+        end
+    end
+    if root then
+        local lv = env.safe_call(function()
+            local cf = root.CFrame or root.cframe
+            return cf and (cf.LookVector or cf.lookVector)
+        end)
+        if lv then
+            local ly = lv.Y or lv.y or 0
+            return M.normalize_pitch(math.asin(math.max(-1, math.min(1, -ly))))
+        end
+    end
+    return M.camera_pitch()
+end
+
+function M.body_yaw(lp, root)
+    if lp and lp.LookVector then
+        local lv = lp.LookVector
+        local yaw = M.yaw_from_vector(lv.x or lv.X, lv.z or lv.Z)
+        if yaw then return yaw end
+    end
+    if root then
+        local lv = env.safe_call(function()
+            local cf = root.CFrame or root.cframe
+            return cf and (cf.LookVector or cf.lookVector)
+        end)
+        if lv then
+            return M.yaw_from_vector(lv.X or lv.x, lv.Z or lv.z)
+        end
+    end
+    return M.camera_yaw()
+end
+
+function M.point_ahead(x, y, z, yaw, dist, lift)
+    dist = dist or 4
+    lift = lift or 0
+    local fx, fz = M.flat_forward(yaw)
+    return x + fx * dist, (y or 0) + lift, z + fz * dist
+end
+
+return M
+
+end)()
+
+-- ── core/camera_util.lua ──
+April._mods["core.camera_util"] = (function()
+-- Workspace camera helpers for third-person and other view overrides.
+
+local env = April.require("core.env")
+local angle_util = April.require("core.angle_util")
+
+local M = {}
+
+function M.get_workspace()
+    return env.get_workspace()
+end
+
+function M.get_current()
+    local ws = M.get_workspace()
+    if not ws then return nil end
+    return env.safe_call(function()
+        return ws.CurrentCamera or ws.currentCamera
+            or (ws.find_first_child and ws:find_first_child("CurrentCamera"))
+            or (ws.FindFirstChild and ws:FindFirstChild("CurrentCamera"))
+    end)
+end
+
+function M.vec3(x, y, z)
+    if Vector3 and Vector3.new then return Vector3.new(x, y, z) end
+    if Vector3 and Vector3.New then return Vector3.New(x, y, z) end
+    return { x = x, y = y, z = z, X = x, Y = y, Z = z }
+end
+
+function M.read_vector3(v)
+    if not v then return nil end
+    return v.x or v.X, v.y or v.Y, v.z or v.Z
+end
+
+function M.normalize3(x, y, z)
+    local m = math.sqrt(x * x + y * y + z * z)
+    if m < 1e-6 then return 0, 0, 1 end
+    return x / m, y / m, z / m
+end
+
+function M.cross(ax, ay, az, bx, by, bz)
+    return ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx
+end
+
+function M.read_cframe(cam)
+    if not cam then return nil end
+    local cf = env.safe_call(function() return cam.CFrame or cam.cframe end)
+    if not cf then return nil end
+
+    local px, py, pz = M.read_vector3(cf.Position or cf.position)
+    if not px then return nil end
+
+    local look = cf.LookVector or cf.lookVector
+    local right = cf.RightVector or cf.rightVector
+    local up = cf.UpVector or cf.upVector
+
+    if look then
+        local lx, ly, lz = M.read_vector3(look)
+        lx, ly, lz = M.normalize3(lx or 0, ly or 0, lz or 1)
+        local rx, ry, rz, ux, uy, uz
+        if right then
+            rx, ry, rz = M.read_vector3(right)
+        else
+            rx, ry, rz = M.cross(lx, ly, lz, 0, 1, 0)
+            rx, ry, rz = M.normalize3(rx, ry, rz)
+        end
+        if up then
+            ux, uy, uz = M.read_vector3(up)
+        else
+            ux, uy, uz = M.cross(rx, ry, rz, lx, ly, lz)
+        end
+        return {
+            px = px, py = py, pz = pz,
+            lx = lx, ly = ly, lz = lz,
+            rx = rx, ry = ry, rz = rz,
+            ux = ux, uy = uy, uz = uz,
+        }
+    end
+
+    return { px = px, py = py, pz = pz }
+end
+
+function M.read_from_api()
+    if not camera or not camera.get_position or not camera.get_look_vector then return nil end
+    local okp, pos = pcall(camera.get_position)
+    local okl, look = pcall(camera.get_look_vector)
+    if not okp or not pos or not okl or not look then return nil end
+    local px, py, pz = M.read_vector3(pos)
+    local lx, ly, lz = M.normalize3(M.read_vector3(look))
+    local rx, ry, rz = M.cross(lx, ly, lz, 0, 1, 0)
+    rx, ry, rz = M.normalize3(rx, ry, rz)
+    local ux, uy, uz = M.cross(rx, ry, rz, lx, ly, lz)
+    return {
+        px = px, py = py, pz = pz,
+        lx = lx, ly = ly, lz = lz,
+        rx = rx, ry = ry, rz = rz,
+        ux = ux, uy = uy, uz = uz,
+    }
+end
+
+function M.cframe_look_at(px, py, pz, lx, ly, lz)
+    lx, ly, lz = M.normalize3(lx, ly, lz)
+    if CFrame and CFrame.lookAt then
+        return CFrame.lookAt(M.vec3(px, py, pz), M.vec3(px + lx, py + ly, pz + lz))
+    end
+    if CFrame and CFrame.new and CFrame.Angles then
+        local yaw = math.atan2(lx, lz)
+        local pitch = math.asin(math.max(-1, math.min(1, -ly)))
+        return CFrame.new(px, py, pz) * CFrame.Angles(pitch, yaw, 0)
+    end
+    return nil
+end
+
+function M.write_cframe(cam, cf)
+    if not cam or not cf then return false end
+    return env.safe_call(function()
+        cam.CFrame = cf
+        return true
+    end) == true
+end
+
+function M.set_look(cam, px, py, pz, lx, ly, lz)
+    local cf = M.cframe_look_at(px, py, pz, lx, ly, lz)
+    if cf then return M.write_cframe(cam, cf) end
+    return false
+end
+
+function M.lerp(a, b, t)
+    return a + (b - a) * t
+end
+
+function M.lerp_pos(a, b, t)
+    return {
+        x = M.lerp(a.x, b.x, t),
+        y = M.lerp(a.y, b.y, t),
+        z = M.lerp(a.z, b.z, t),
+    }
+end
+
+function M.camera_type_value(name)
+    if not Enum or not Enum.CameraType then return nil end
+    local ct = Enum.CameraType
+    if name == "Scriptable" then return ct.Scriptable or ct.scriptable end
+    if name == "Custom" then return ct.Custom or ct.custom end
+    return ct.Custom or ct.custom
+end
+
+function M.read_camera_type(cam)
+    if not cam then return nil end
+    local t = env.safe_call(function() return cam.CameraType or cam.camera_type end)
+    return t
+end
+
+function M.look_from_angles(yaw, pitch)
+    pitch = pitch or 0
+    local cp = math.cos(pitch)
+    local lx = cp * math.sin(yaw)
+    local ly = -math.sin(pitch)
+    local lz = cp * math.cos(yaw)
+    local rx, ry, rz = M.cross(lx, ly, lz, 0, 1, 0)
+    rx, ry, rz = M.normalize3(rx, ry, rz)
+    local ux, uy, uz = M.cross(rx, ry, rz, lx, ly, lz)
+    return lx, ly, lz, rx, ry, rz, ux, uy, uz
+end
+
+function M.read_angles_from_api()
+    if utility and utility.get_camera_angles then
+        local ok, pitch, yaw = pcall(utility.get_camera_angles)
+        if ok and yaw then
+            return math.rad(yaw), math.rad(pitch or 0)
+        end
+    end
+    if camera and camera.get_angles then
+        local ok, a = pcall(camera.get_angles)
+        if ok and a then
+            local yaw = a.Y or a.y
+            local pitch = a.X or a.x
+            if yaw then
+                return math.rad(yaw), math.rad(pitch or 0)
+            end
+        end
+    end
+    if camera and camera.get_look_vector then
+        local ok, look = pcall(camera.get_look_vector)
+        if ok and look then
+            local lx, ly, lz = M.normalize3(M.read_vector3(look))
+            local yaw = math.atan2(lx, lz)
+            local pitch = math.asin(math.max(-1, math.min(1, -ly)))
+            return yaw, pitch
+        end
+    end
+    return nil, nil
+end
+
+function M.read_look_from_api()
+    local yaw, pitch = M.read_angles_from_api()
+    if yaw then
+        return M.look_from_angles(yaw, pitch)
+    end
+    if camera and camera.get_look_vector then
+        local ok, look = pcall(camera.get_look_vector)
+        if ok and look then
+            local lx, ly, lz = M.normalize3(M.read_vector3(look))
+            local rx, ry, rz = M.cross(lx, ly, lz, 0, 1, 0)
+            rx, ry, rz = M.normalize3(rx, ry, rz)
+            return lx, ly, lz, rx, ry, rz
+        end
+    end
+    return nil, nil, nil
+end
+
+function M.set_camera_type(cam, value)
+    if not cam or value == nil then return false end
+    return env.safe_call(function()
+        cam.CameraType = value
+        return true
+    end) == true
 end
 
 return M
@@ -5195,7 +5547,9 @@ local M = {}
 local _svc = nil
 local _svc_checked = false
 local _sim_hooks = {}
+local _render_hooks = {}
 local _heartbeat_conn = nil
+local _render_conn = nil
 local _uses_heartbeat = false
 local _last_hb_ms = 0
 local _dispatched_this_frame = false
@@ -5215,6 +5569,36 @@ local function run_sim_hooks(dt)
             env.safe_call(hook, dt)
         end
     end
+end
+
+local function run_render_hooks(dt)
+    for i = 1, #_render_hooks do
+        local hook = _render_hooks[i]
+        if hook then
+            env.safe_call(hook, dt)
+        end
+    end
+end
+
+local function try_connect_render_stepped(svc)
+    if not svc then return false end
+
+    local rs = svc.RenderStepped or svc.renderStepped
+    if not rs then return false end
+
+    local connect = rs.Connect or rs.connect
+    if type(connect) ~= "function" then return false end
+
+    local ok, conn = pcall(function()
+        return connect(rs, function(dt)
+            run_render_hooks(tonumber(dt) or delta_time())
+        end)
+    end)
+    if ok and conn then
+        _render_conn = conn
+        return true
+    end
+    return false
 end
 
 local function try_connect_heartbeat(svc)
@@ -5258,6 +5642,7 @@ function M.get()
     if ok and svc then
         _svc = svc
         try_connect_heartbeat(svc)
+        try_connect_render_stepped(svc)
     end
     return _svc
 end
@@ -5279,20 +5664,83 @@ end
 function M.on_sim(fn)
     if type(fn) ~= "function" then return false end
     _sim_hooks[#_sim_hooks + 1] = fn
-    -- Ensure Heartbeat probe runs even if install happens before first get()
     M.get()
     return true
 end
 
+function M.on_render(fn)
+    if type(fn) ~= "function" then return false end
+    _render_hooks[#_render_hooks + 1] = fn
+    M.get()
+    return true
+end
+
+local _bind_names = {}
+
+-- priority_offset: number added to Camera, or "Last" for RenderPriority.Last.
+local function render_priority(priority_offset)
+    if priority_offset == "Last" or priority_offset == "last" then
+        if Enum and Enum.RenderPriority and Enum.RenderPriority.Last then
+            local last = Enum.RenderPriority.Last.Value or Enum.RenderPriority.Last
+            if type(last) == "number" then return last end
+        end
+        return 2000
+    end
+
+    local offset = tonumber(priority_offset) or 3
+    if Enum and Enum.RenderPriority and Enum.RenderPriority.Camera then
+        local base = Enum.RenderPriority.Camera.Value or Enum.RenderPriority.Camera
+        if type(base) == "number" then return base + offset end
+    end
+    return 200 + offset
+end
+
+function M.on_bind_render(name, fn, priority_offset)
+    if type(fn) ~= "function" or not name then return false end
+    local svc = M.get()
+    if not svc then return false end
+
+    local bind = svc.BindToRenderStep or svc.bind_to_render_step
+    if type(bind) ~= "function" then return false end
+
+    local prio = render_priority(priority_offset)
+
+    local unbind = svc.UnbindFromRenderStep or svc.unbind_from_render_step
+    if type(unbind) == "function" then
+        pcall(unbind, svc, name)
+    end
+
+    local ok = pcall(function()
+        bind(svc, name, prio, function(dt)
+            env.safe_call(fn, tonumber(dt) or delta_time())
+        end)
+    end)
+
+    if ok then _bind_names[name] = true end
+    return ok
+end
+
+function M.unbind_render(name)
+    if not name then return end
+    local svc = M.get()
+    if not svc then return end
+    local unbind = svc.UnbindFromRenderStep or svc.unbind_from_render_step
+    if type(unbind) == "function" then
+        env.safe_call(unbind, svc, name)
+    end
+    _bind_names[name] = nil
+end
+
 function M.dispatch(dt)
-    -- Heartbeat is preferred, but keep on_frame dispatch as fallback if HB stalls.
     if _uses_heartbeat then
         local now = utility and utility.get_tick_count and utility.get_tick_count() or 0
         if _last_hb_ms > 0 and (now - _last_hb_ms) < 40 then
+            run_render_hooks(dt or delta_time())
             return
         end
     end
     run_sim_hooks(dt or delta_time())
+    run_render_hooks(dt or delta_time())
 end
 
 return M
@@ -5637,6 +6085,13 @@ local MENU_KEYS = {
     "april_fling_enabled", "april_fling_enabled_mode", "april_fling_fov", "april_fling_duration",
     "april_desync_enabled", "april_desync_enabled_mode",
     "april_desync_visualizer",
+    "april_antiaim_enabled", "april_antiaim_enabled_mode",
+    "april_antiaim_yaw_mode",
+    "april_antiaim_yaw_manual",
+    "april_antiaim_spin_speed",
+    "april_antiaim_jitter_step", "april_antiaim_jitter_ms",
+    "april_fakeduck_enabled", "april_fakeduck_enabled_mode",
+    "april_fakeduck_height",
     "april_bullet_manip_enabled", "april_bullet_manip_enabled_mode", "april_bullet_manip_range", "april_bullet_manip_speed",
     "april_bullet_manip_debug", "april_bullet_manip_console", "april_bullet_manip_vis",
     "april_bullet_manip_vis_style", "april_bullet_manip_vis_size",
@@ -5706,6 +6161,8 @@ local HOTKEY_KEYS = {
     "april_slowfall_enabled",
     "april_fling_enabled",
     "april_desync_enabled",
+    "april_antiaim_enabled",
+    "april_fakeduck_enabled",
     "april_bullet_manip_enabled",
     "april_silent_aim",
     "april_player_enabled",
@@ -8286,8 +8743,12 @@ function M.is_bow_weapon_name(name)
     if entry and entry.Weapon and entry.Weapon.IsBow then
         return true
     end
+    -- Fallen projectile bows that aim torso for ballistics (arrows still headshot).
     local n = name:lower()
-    return n:find("bow", 1, true) ~= nil
+    if n:find("crossbow", 1, true) then return true end
+    if n:find("wooden bow", 1, true) then return true end
+    if n == "bow" or n:sub(-4) == " bow" then return true end
+    return false
 end
 
 function M.invalidate()
@@ -11688,6 +12149,890 @@ return M
 
 end)()
 
+-- ── game/fallen_anims.lua ──
+April._mods["game.fallen_anims"] = (function()
+-- Auto-generated from dump/catalog/animations.tsv — all unique animation asset IDs.
+-- Playback must match Fallen: Humanoid:LoadAnimation(anim):Play() with default speed/weight.
+
+local M = {}
+
+M.LABELS = {
+    "None",
+    "Hit",
+    "Sleep",
+    "Body Stone Pickaxe Equip",
+    "Body Stone Pickaxe Idle",
+    "Body Stone Pickaxe Throw",
+    "Body Stone Pickaxe Swing1",
+    "Body Stone Pickaxe Swing2",
+    "Cam Stone Pickaxe Equip",
+    "VM Stone Pickaxe Hit",
+    "VM Stone Pickaxe Idle",
+    "VM Stone Pickaxe Inspect",
+    "VM Stone Pickaxe ThrowWindup",
+    "VM Stone Pickaxe Miss",
+    "VM Stone Pickaxe Equip",
+    "VM Stone Pickaxe Throw",
+    "VM Stone Pickaxe Windup",
+    "VM Stone Pickaxe ThrowHold",
+    "VM Wooden Spear Hit",
+    "VM Wooden Spear Idle",
+    "VM Wooden Spear Inspect",
+    "VM Wooden Spear ThrowWindup",
+    "VM Wooden Spear Equip",
+    "VM Wooden Spear Throw",
+    "VM Wooden Spear Windup",
+    "VM Wooden Spear ThrowHold",
+    "Body Wooden Spear Equip",
+    "Body Wooden Spear Idle",
+    "Body Wooden Spear Throw",
+    "Body Wooden Spear Aim",
+    "Body Wooden Spear Swing1",
+    "VM ez shovel Hit",
+    "VM ez shovel Idle",
+    "VM ez shovel Inspect",
+    "VM ez shovel Miss",
+    "VM ez shovel Equip",
+    "VM ez shovel ThrowWindup",
+    "VM ez shovel ThrowHold",
+    "VM ez shovel Windup",
+    "Body Pumpkin Launcher Equip",
+    "Body Pumpkin Launcher Idle",
+    "VM Pumpkin Launcher Equip",
+    "VM Pumpkin Launcher Idle",
+    "VM Pumpkin Launcher Inspect",
+    "VM Pumpkin Launcher Reload1",
+    "VM Pumpkin Launcher Reload2",
+    "VM Pumpkin Launcher Reload3",
+    "VM Pumpkin Launcher Shoot",
+    "Cam Pumpkin Launcher Reload",
+    "VM Boulder Hit",
+    "VM Boulder Idle",
+    "VM Boulder Inspect",
+    "VM Boulder ThrowWindup",
+    "VM Boulder Miss",
+    "VM Boulder Equip",
+    "VM Boulder Throw",
+    "VM Boulder Windup",
+    "Body Boulder Equip",
+    "Body Boulder Idle",
+    "Body Boulder Swing1",
+    "VM Small Medkit Equip",
+    "VM Small Medkit Idle",
+    "VM Small Medkit Use",
+    "Body Small Medkit Use",
+    "Body Small Medkit Idle",
+    "Body Small Medkit Equip",
+    "Body Military M4A1 Aim",
+    "VM Military M4A1 Equip",
+    "VM Military M4A1 Inspect",
+    "VM Military M4A1 Reload",
+    "VM Military M4A1 Shoot",
+    "VM Military M4A1 SightFix",
+    "VM Salvaged AK74u Idle",
+    "VM Salvaged AK74u Equip",
+    "VM Salvaged AK74u Reload",
+    "VM Salvaged AK74u Inspect",
+    "VM Salvaged AK74u Shoot",
+    "VM Salvaged AK74u Equip (8322)",
+    "VM Salvaged AK74u Idle (2757)",
+    "VM Salvaged AK74u Inspect (6548)",
+    "VM Salvaged AK74u Reload (3807)",
+    "VM Salvaged AK74u Shoot (8023)",
+    "VM Nail Gun Equip",
+    "VM Nail Gun Idle",
+    "VM Nail Gun Inspect",
+    "VM Nail Gun Reload",
+    "VM Timed Charge Idle",
+    "VM Timed Charge Equip",
+    "VM Timed Charge Throw",
+    "VM Steel Pickaxe Hit",
+    "VM Steel Pickaxe Idle",
+    "VM Steel Pickaxe Inspect",
+    "VM Steel Pickaxe ThrowWindup",
+    "VM Steel Pickaxe Miss",
+    "VM Steel Pickaxe Equip",
+    "VM Steel Pickaxe Throw",
+    "VM Steel Pickaxe Windup",
+    "VM Military Grenade Idle",
+    "VM Military Grenade Equip",
+    "VM Military Grenade UnderHandThrow",
+    "VM Military Grenade Light",
+    "VM Military Grenade OverHandThrow",
+    "VM Military Grenade ThrowStart",
+    "VM Salvaged RPG Idle",
+    "VM Salvaged RPG Equip",
+    "VM Salvaged RPG Reload",
+    "VM Salvaged RPG Inspect",
+    "VM Salvaged RPG Shoot",
+    "VM Salvaged Python Equip",
+    "VM Salvaged Python Idle",
+    "VM Salvaged Python Inspect",
+    "VM Salvaged Python Reload",
+    "VM Salvaged Python Shoot",
+    "VM Salvaged M14 Equip",
+    "VM Salvaged M14 Reload",
+    "VM Salvaged M14 Shoot",
+    "VM Salvaged SMG Equip",
+    "VM Salvaged SMG Reload",
+    "VM Salvaged P250 Idle",
+    "VM Salvaged P250 Equip",
+    "VM Salvaged P250 Reload",
+    "VM Salvaged P250 Inspect",
+    "VM Salvaged P250 Shoot",
+    "VM Salvaged Sniper Equip",
+    "VM Salvaged Sniper Reload",
+    "VM Salvaged Sniper Shoot",
+    "VM Salvaged Sniper Inspect",
+    "VM Salvaged Sniper Bolt",
+    "VM Wooden Bow Idle",
+    "VM Wooden Bow AimStart",
+    "VM Wooden Bow AimHold",
+    "VM Wooden Bow Equip",
+    "VM Wooden Bow Inspect",
+    "VM Wooden Bow JumpShotAimStart",
+    "VM Wooden Bow JumpShotAim",
+    "VM Wooden Bow AimStop",
+    "Body Wooden Bow Idle",
+    "Body Wooden Bow AimStart",
+    "Body Wooden Bow AimHold",
+    "VM Pink Keycard Use",
+    "VM Pink Keycard Idle",
+    "VM Pink Keycard Equip",
+    "VM Bandage Equip",
+    "VM Bandage Idle",
+    "VM Bandage Use",
+    "Body Bandage Use",
+    "VM Health Pen Equip",
+    "VM Health Pen Idle",
+    "VM Health Pen Use",
+    "VM Salvaged Pipe Rifle Idle",
+    "VM Salvaged Pipe Rifle Equip",
+    "VM Salvaged Pipe Rifle Inspect",
+    "VM Salvaged Pipe Rifle Shoot",
+    "VM Salvaged Pipe Rifle BoltNOTUSED",
+    "VM Salvaged Pipe Rifle Reload1",
+    "VM Salvaged Pipe Rifle Reload2",
+    "VM Salvaged Pipe Rifle Reload3",
+    "VM Salvaged AK47 Equip",
+    "VM Salvaged AK47 Reload",
+    "VM Salvaged AK47 Shoot",
+    "VM Salvaged AK47 Idle",
+    "VM Salvaged AK47 Inspect",
+    "VM Salvaged AK47 Equip (8743)",
+    "VM Salvaged AK47 Reload (6911)",
+    "VM Salvaged AK47 Idle (5515)",
+    "VM Salvaged AK47 Inspect (5998)",
+    "VM Salvaged AK47 ShootRENAMEWHENFIXED",
+    "VM Steel Shovel Dig",
+    "VM Crossbow Idle",
+    "VM Crossbow Equip",
+    "VM Crossbow Reload",
+    "VM Crossbow Inspect",
+    "VM Crossbow Shoot",
+    "VM Crossbow Unloaded",
+    "VM Crossbow Loaded",
+    "VM Lighter Idle",
+    "VM Lighter Inspect",
+    "VM Lighter Equip",
+    "VM Lighter Use",
+    "VM Lighter Idle (7599)",
+    "VM Lighter Inspect (6415)",
+    "VM Lighter Equip (7300)",
+    "VM Lighter Use (3870)",
+    "VM Salvaged Pump Action Idle",
+    "VM Salvaged Pump Action Equip",
+    "VM Salvaged Pump Action Inspect",
+    "VM Salvaged Pump Action Bolt",
+    "VM Salvaged Pump Action Reload1",
+    "VM Salvaged Pump Action Reload2",
+    "VM Salvaged Pump Action Reload3",
+    "VM Military AA12 Equip",
+    "VM Military AA12 Inspect",
+    "VM Military AA12 Reload1",
+    "VM Military AA12 Reload2",
+    "VM Military AA12 Reload3",
+    "VM Military AA12 Shoot",
+    "VM Military AA12 Idle",
+    "VM Salvaged Skorpion Equip",
+    "VM Salvaged Skorpion Reload",
+    "VM Salvaged Skorpion Shoot",
+    "VM Salvaged Skorpion Inspect",
+    "VM Military Barrett Equip",
+    "VM Military Barrett Reload",
+    "VM Military Barrett Shoot",
+    "VM Military Barrett Inspect",
+    "VM Military Barrett Bolt",
+    "VM Military Barrett SightFix",
+    "VM Military PKM Equip",
+    "VM Military PKM Reload",
+    "VM Military PKM Idle",
+    "VM Military PKM Inspect",
+    "VM Machete Hit",
+    "VM Machete Idle",
+    "VM Machete Inspect",
+    "VM Machete Miss",
+    "VM Machete Equip",
+    "VM Machete ThrowWindup",
+    "VM Machete ThrowHold",
+    "VM Machete Windup",
+    "VM Mining Drill Idle",
+    "VM Mining Drill WindupLoop",
+    "VM Mining Drill Equip",
+    "VM Chainsaw Idle",
+    "VM Chainsaw WindupLoop",
+    "VM Chainsaw Equip",
+    "VM Chainsaw Reload",
+    "VM Military MP7 Idle",
+    "VM Military MP7 Equip",
+    "VM Military MP7 Reload",
+    "VM Military MP7 Inspect",
+    "VM Military MP7 Shootold",
+    "VM Military USP Shoot",
+    "VM Salvaged Shotgun Equip",
+    "VM Salvaged Shotgun Light",
+    "VM Salvaged Shotgun Idle",
+    "VM Salvaged Shotgun Inspect",
+    "VM Salvaged Shotgun Reload",
+    "VM Salvaged Break Action Equip",
+    "VM Salvaged Break Action Reload",
+    "VM Salvaged Break Action Idle",
+    "VM Salvaged Break Action Inspect",
+    "Body Blueprint Idle",
+    "Body Blueprint Equip",
+    "VM Military Grenade Launcher Idle",
+    "VM Military Grenade Launcher Equip",
+    "VM Military Grenade Launcher Inspect",
+    "VM Military Grenade Launcher Shoot",
+    "VM Military Grenade Launcher Reload1",
+    "VM Military Grenade Launcher Reload2",
+    "VM Military Grenade Launcher Reload3",
+    "VM Salvaged Grenade Launcher Idle",
+    "VM Salvaged Grenade Launcher Equip",
+    "VM Salvaged Grenade Launcher Inspect",
+    "VM Salvaged Grenade Launcher Shoot",
+    "VM Salvaged Grenade Launcher Reload",
+    "VM Wire Cutters Equip",
+    "VM Wire Cutters Idle",
+    "VM Wire Cutters WireCutter",
+    "VM Wire Cutters Inspect",
+    "VM Salvaged Double Barrel Equip",
+    "VM Salvaged Double Barrel Reload",
+    "VM Salvaged Double Barrel Idle",
+    "VM Salvaged Double Barrel Inspect",
+    "VM Military M39 Equip",
+    "VM Military M39 Reload",
+    "VM Military M39 Shoot",
+    "VM Military M39 Idle",
+    "VM Military M39 Inspect",
+    "Idle",
+    "Backward",
+    "Forward",
+    "Left",
+    "Right",
+    "Sprint",
+    "SprintLeft",
+    "SprintRight",
+    "CrouchForward",
+    "Swim",
+    "SwimIdle",
+    "Down",
+    "DownFall",
+    "Sit",
+    "SitPilot",
+    "Run",
+    "Spook",
+    "Idle (8126)",
+    "Idle (5032)",
+    "AttackIdle",
+    "Run (7717)",
+    "Attack",
+    "Animation",
+    "SpinAnimation",
+    "SpinAnimation (4993)",
+    "Idle (6751)",
+}
+
+M.IDS = {
+    nil, -- None
+    "12295196614", -- Hit
+    "2889482101", -- Sleep
+    "12404717807", -- Body Stone Pickaxe Equip
+    "12404519685", -- Body Stone Pickaxe Idle
+    "12404755793", -- Body Stone Pickaxe Throw
+    "12404582634", -- Body Stone Pickaxe Swing1
+    "12404586561", -- Body Stone Pickaxe Swing2
+    "13824449779", -- Cam Stone Pickaxe Equip
+    "11254599050", -- VM Stone Pickaxe Hit
+    "11254603653", -- VM Stone Pickaxe Idle
+    "11254610632", -- VM Stone Pickaxe Inspect
+    "12087089666", -- VM Stone Pickaxe ThrowWindup
+    "12097635857", -- VM Stone Pickaxe Miss
+    "11254620945", -- VM Stone Pickaxe Equip
+    "12086968738", -- VM Stone Pickaxe Throw
+    "11254713577", -- VM Stone Pickaxe Windup
+    "12315210121", -- VM Stone Pickaxe ThrowHold
+    "12323621850", -- VM Wooden Spear Hit
+    "12323431574", -- VM Wooden Spear Idle
+    "12323465168", -- VM Wooden Spear Inspect
+    "12323588559", -- VM Wooden Spear ThrowWindup
+    "12323373070", -- VM Wooden Spear Equip
+    "12323523249", -- VM Wooden Spear Throw
+    "12323686914", -- VM Wooden Spear Windup
+    "12330525319", -- VM Wooden Spear ThrowHold
+    "12332656326", -- Body Wooden Spear Equip
+    "12332628544", -- Body Wooden Spear Idle
+    "12332606670", -- Body Wooden Spear Throw
+    "12332631981", -- Body Wooden Spear Aim
+    "12332622716", -- Body Wooden Spear Swing1
+    "14753903836", -- VM ez shovel Hit
+    "14753747589", -- VM ez shovel Idle
+    "14753755728", -- VM ez shovel Inspect
+    "14753829920", -- VM ez shovel Miss
+    "14753765263", -- VM ez shovel Equip
+    "14753924056", -- VM ez shovel ThrowWindup
+    "14753962771", -- VM ez shovel ThrowHold
+    "14753821942", -- VM ez shovel Windup
+    "10982184970", -- Body Pumpkin Launcher Equip
+    "10982102481", -- Body Pumpkin Launcher Idle
+    "107763869878004", -- VM Pumpkin Launcher Equip
+    "96964900616385", -- VM Pumpkin Launcher Idle
+    "113058224726735", -- VM Pumpkin Launcher Inspect
+    "122129787681927", -- VM Pumpkin Launcher Reload1
+    "131841243736090", -- VM Pumpkin Launcher Reload2
+    "134448134384946", -- VM Pumpkin Launcher Reload3
+    "84284689931857", -- VM Pumpkin Launcher Shoot
+    "13885646898", -- Cam Pumpkin Launcher Reload
+    "12576117123", -- VM Boulder Hit
+    "12576197130", -- VM Boulder Idle
+    "12576193813", -- VM Boulder Inspect
+    "12576260677", -- VM Boulder ThrowWindup
+    "12576268434", -- VM Boulder Miss
+    "12576113229", -- VM Boulder Equip
+    "12576313309", -- VM Boulder Throw
+    "12576221319", -- VM Boulder Windup
+    "2640084383", -- Body Boulder Equip
+    "2640084707", -- Body Boulder Idle
+    "2640085047", -- Body Boulder Swing1
+    "15126852724", -- VM Small Medkit Equip
+    "15126828005", -- VM Small Medkit Idle
+    "15126848291", -- VM Small Medkit Use
+    "2529243689", -- Body Small Medkit Use
+    "2529244101", -- Body Small Medkit Idle
+    "2529246854", -- Body Small Medkit Equip
+    "10982316984", -- Body Military M4A1 Aim
+    "15435529127", -- VM Military M4A1 Equip
+    "15435570035", -- VM Military M4A1 Inspect
+    "15435623751", -- VM Military M4A1 Reload
+    "15435532750", -- VM Military M4A1 Shoot
+    "15442290533", -- VM Military M4A1 SightFix
+    "10905196277", -- VM Salvaged AK74u Idle
+    "13642327129", -- VM Salvaged AK74u Equip
+    "13642332380", -- VM Salvaged AK74u Reload
+    "10905213921", -- VM Salvaged AK74u Inspect
+    "13642336532", -- VM Salvaged AK74u Shoot
+    "98129074368322", -- VM Salvaged AK74u Equip (8322)
+    "93372634082757", -- VM Salvaged AK74u Idle (2757)
+    "109508842676548", -- VM Salvaged AK74u Inspect (6548)
+    "128093247273807", -- VM Salvaged AK74u Reload (3807)
+    "130287124408023", -- VM Salvaged AK74u Shoot (8023)
+    "13327911632", -- VM Nail Gun Equip
+    "13327914671", -- VM Nail Gun Idle
+    "13327938850", -- VM Nail Gun Inspect
+    "13327926806", -- VM Nail Gun Reload
+    "13328349172", -- VM Timed Charge Idle
+    "13329537452", -- VM Timed Charge Equip
+    "13328390675", -- VM Timed Charge Throw
+    "13327409098", -- VM Steel Pickaxe Hit
+    "13327377006", -- VM Steel Pickaxe Idle
+    "13327416430", -- VM Steel Pickaxe Inspect
+    "13326920636", -- VM Steel Pickaxe ThrowWindup
+    "13326904374", -- VM Steel Pickaxe Miss
+    "13326900120", -- VM Steel Pickaxe Equip
+    "13326927760", -- VM Steel Pickaxe Throw
+    "13326914930", -- VM Steel Pickaxe Windup
+    "13328557028", -- VM Military Grenade Idle
+    "13328550574", -- VM Military Grenade Equip
+    "13328572108", -- VM Military Grenade UnderHandThrow
+    "13328632174", -- VM Military Grenade Light
+    "13328582483", -- VM Military Grenade OverHandThrow
+    "13328629789", -- VM Military Grenade ThrowStart
+    "13446590342", -- VM Salvaged RPG Idle
+    "13446858662", -- VM Salvaged RPG Equip
+    "13446581922", -- VM Salvaged RPG Reload
+    "13446577751", -- VM Salvaged RPG Inspect
+    "13446573652", -- VM Salvaged RPG Shoot
+    "11066772771", -- VM Salvaged Python Equip
+    "11066778914", -- VM Salvaged Python Idle
+    "11066786478", -- VM Salvaged Python Inspect
+    "11066790798", -- VM Salvaged Python Reload
+    "12581889409", -- VM Salvaged Python Shoot
+    "13670792109", -- VM Salvaged M14 Equip
+    "13670748435", -- VM Salvaged M14 Reload
+    "13670812891", -- VM Salvaged M14 Shoot
+    "14205062509", -- VM Salvaged SMG Equip
+    "14121442831", -- VM Salvaged SMG Reload
+    "12522326352", -- VM Salvaged P250 Idle
+    "12522337951", -- VM Salvaged P250 Equip
+    "12522315610", -- VM Salvaged P250 Reload
+    "12522200642", -- VM Salvaged P250 Inspect
+    "12523778090", -- VM Salvaged P250 Shoot
+    "102278056019292", -- VM Salvaged Sniper Equip
+    "76688960452168", -- VM Salvaged Sniper Reload
+    "76442867538012", -- VM Salvaged Sniper Shoot
+    "131088076477856", -- VM Salvaged Sniper Inspect
+    "134064393891680", -- VM Salvaged Sniper Bolt
+    "13676749170", -- VM Wooden Bow Idle
+    "13676752865", -- VM Wooden Bow AimStart
+    "13676756566", -- VM Wooden Bow AimHold
+    "13676758676", -- VM Wooden Bow Equip
+    "13676761493", -- VM Wooden Bow Inspect
+    "13676765827", -- VM Wooden Bow JumpShotAimStart
+    "13680356359", -- VM Wooden Bow JumpShotAim
+    "13681000136", -- VM Wooden Bow AimStop
+    "13960174047", -- Body Wooden Bow Idle
+    "13960202666", -- Body Wooden Bow AimStart
+    "13960210609", -- Body Wooden Bow AimHold
+    "13956423938", -- VM Pink Keycard Use
+    "13956427413", -- VM Pink Keycard Idle
+    "13956571659", -- VM Pink Keycard Equip
+    "13958285864", -- VM Bandage Equip
+    "13958303128", -- VM Bandage Idle
+    "13958298879", -- VM Bandage Use
+    "14860445359", -- Body Bandage Use
+    "13970663013", -- VM Health Pen Equip
+    "13970667527", -- VM Health Pen Idle
+    "14547962925", -- VM Health Pen Use
+    "13651086373", -- VM Salvaged Pipe Rifle Idle
+    "13651149446", -- VM Salvaged Pipe Rifle Equip
+    "13651157242", -- VM Salvaged Pipe Rifle Inspect
+    "13651300466", -- VM Salvaged Pipe Rifle Shoot
+    "13651231180", -- VM Salvaged Pipe Rifle BoltNOTUSED
+    "13651242520", -- VM Salvaged Pipe Rifle Reload1
+    "13651250402", -- VM Salvaged Pipe Rifle Reload2
+    "13651260689", -- VM Salvaged Pipe Rifle Reload3
+    "13537714744", -- VM Salvaged AK47 Equip
+    "13537638231", -- VM Salvaged AK47 Reload
+    "13537754482", -- VM Salvaged AK47 Shoot
+    "13537644331", -- VM Salvaged AK47 Idle
+    "13537721124", -- VM Salvaged AK47 Inspect
+    "17685378743", -- VM Salvaged AK47 Equip (8743)
+    "17685566911", -- VM Salvaged AK47 Reload (6911)
+    "17685385515", -- VM Salvaged AK47 Idle (5515)
+    "17685475998", -- VM Salvaged AK47 Inspect (5998)
+    "17685395097", -- VM Salvaged AK47 ShootRENAMEWHENFIXED
+    "14753791797", -- VM Steel Shovel Dig
+    "13661804506", -- VM Crossbow Idle
+    "13661753951", -- VM Crossbow Equip
+    "13661745837", -- VM Crossbow Reload
+    "13661800907", -- VM Crossbow Inspect
+    "13662357236", -- VM Crossbow Shoot
+    "13662019424", -- VM Crossbow Unloaded
+    "13662041428", -- VM Crossbow Loaded
+    "15099920803", -- VM Lighter Idle
+    "15099969777", -- VM Lighter Inspect
+    "15099967111", -- VM Lighter Equip
+    "15099971616", -- VM Lighter Use
+    "111476823327599", -- VM Lighter Idle (7599)
+    "79402821816415", -- VM Lighter Inspect (6415)
+    "99169514187300", -- VM Lighter Equip (7300)
+    "122545087673870", -- VM Lighter Use (3870)
+    "15374900583", -- VM Salvaged Pump Action Idle
+    "15375439667", -- VM Salvaged Pump Action Equip
+    "15374945610", -- VM Salvaged Pump Action Inspect
+    "15375019749", -- VM Salvaged Pump Action Bolt
+    "15374989233", -- VM Salvaged Pump Action Reload1
+    "15374950237", -- VM Salvaged Pump Action Reload2
+    "15374959462", -- VM Salvaged Pump Action Reload3
+    "15126455919", -- VM Military AA12 Equip
+    "15126678129", -- VM Military AA12 Inspect
+    "15126706765", -- VM Military AA12 Reload1
+    "15126674376", -- VM Military AA12 Reload2
+    "15126715408", -- VM Military AA12 Reload3
+    "15373354010", -- VM Military AA12 Shoot
+    "15126659544", -- VM Military AA12 Idle
+    "15610812844", -- VM Salvaged Skorpion Equip
+    "15610728466", -- VM Salvaged Skorpion Reload
+    "15610787069", -- VM Salvaged Skorpion Shoot
+    "15610777856", -- VM Salvaged Skorpion Inspect
+    "15882735108", -- VM Military Barrett Equip
+    "15882748975", -- VM Military Barrett Reload
+    "15882738576", -- VM Military Barrett Shoot
+    "15882744613", -- VM Military Barrett Inspect
+    "15882725391", -- VM Military Barrett Bolt
+    "15883684762", -- VM Military Barrett SightFix
+    "16487127739", -- VM Military PKM Equip
+    "16487134130", -- VM Military PKM Reload
+    "16487121752", -- VM Military PKM Idle
+    "16487140562", -- VM Military PKM Inspect
+    "16291366168", -- VM Machete Hit
+    "16291340052", -- VM Machete Idle
+    "16291343338", -- VM Machete Inspect
+    "16291351155", -- VM Machete Miss
+    "16291336720", -- VM Machete Equip
+    "16291353748", -- VM Machete ThrowWindup
+    "16291886891", -- VM Machete ThrowHold
+    "16291363603", -- VM Machete Windup
+    "17293759024", -- VM Mining Drill Idle
+    "17293721866", -- VM Mining Drill WindupLoop
+    "17293764948", -- VM Mining Drill Equip
+    "17293422918", -- VM Chainsaw Idle
+    "17293404371", -- VM Chainsaw WindupLoop
+    "17293430835", -- VM Chainsaw Equip
+    "17293426037", -- VM Chainsaw Reload
+    "17766851333", -- VM Military MP7 Idle
+    "17766847963", -- VM Military MP7 Equip
+    "17766833600", -- VM Military MP7 Reload
+    "17766840940", -- VM Military MP7 Inspect
+    "17767250057", -- VM Military MP7 Shootold
+    "96523967415718", -- VM Military USP Shoot
+    "131870776267221", -- VM Salvaged Shotgun Equip
+    "133968261920038", -- VM Salvaged Shotgun Light
+    "72995644901984", -- VM Salvaged Shotgun Idle
+    "84933068402315", -- VM Salvaged Shotgun Inspect
+    "102019461344676", -- VM Salvaged Shotgun Reload
+    "13975378175", -- VM Salvaged Break Action Equip
+    "13975340954", -- VM Salvaged Break Action Reload
+    "13975409679", -- VM Salvaged Break Action Idle
+    "13975434038", -- VM Salvaged Break Action Inspect
+    "13734772923", -- Body Blueprint Idle
+    "13734803430", -- Body Blueprint Equip
+    "140326279747478", -- VM Military Grenade Launcher Idle
+    "123224971801444", -- VM Military Grenade Launcher Equip
+    "114050633809537", -- VM Military Grenade Launcher Inspect
+    "74802718135370", -- VM Military Grenade Launcher Shoot
+    "91952685534246", -- VM Military Grenade Launcher Reload1
+    "94356108553295", -- VM Military Grenade Launcher Reload2
+    "133913608950018", -- VM Military Grenade Launcher Reload3
+    "112882818317211", -- VM Salvaged Grenade Launcher Idle
+    "70585446035249", -- VM Salvaged Grenade Launcher Equip
+    "88599504281373", -- VM Salvaged Grenade Launcher Inspect
+    "107924799713201", -- VM Salvaged Grenade Launcher Shoot
+    "86919401341255", -- VM Salvaged Grenade Launcher Reload
+    "117405006736055", -- VM Wire Cutters Equip
+    "133616833248387", -- VM Wire Cutters Idle
+    "106169010693313", -- VM Wire Cutters WireCutter
+    "134536396023659", -- VM Wire Cutters Inspect
+    "84783032215478", -- VM Salvaged Double Barrel Equip
+    "97601710279998", -- VM Salvaged Double Barrel Reload
+    "126786002630099", -- VM Salvaged Double Barrel Idle
+    "86800914023444", -- VM Salvaged Double Barrel Inspect
+    "76090728842149", -- VM Military M39 Equip
+    "117764005979607", -- VM Military M39 Reload
+    "102880815400501", -- VM Military M39 Shoot
+    "116186830802406", -- VM Military M39 Idle
+    "85821031583482", -- VM Military M39 Inspect
+    "10976840199", -- Idle
+    "10976855782", -- Backward
+    "10976858264", -- Forward
+    "10976863741", -- Left
+    "10976866578", -- Right
+    "10976869491", -- Sprint
+    "2128761345", -- SprintLeft
+    "2128762025", -- SprintRight
+    "2904653470", -- CrouchForward
+    "913384386", -- Swim
+    "913389285", -- SwimIdle
+    "13435049596", -- Down
+    "13435061543", -- DownFall
+    "2506281703", -- Sit
+    "134970817907270", -- SitPilot
+    "12611991969", -- Run
+    "12612385659", -- Spook
+    "12611998126", -- Idle (8126)
+    "12796825032", -- Idle (5032)
+    "12795190660", -- AttackIdle
+    "12795187717", -- Run (7717)
+    "12795184400", -- Attack
+    "89167396213866", -- Animation
+    "123000349120728", -- SpinAnimation
+    "109026981614993", -- SpinAnimation (4993)
+    "17513186751", -- Idle (6751)
+}
+
+function M.asset_url(id)
+    if not id or id == "" then return nil end
+    local s = tostring(id)
+    if s:find("rbxassetid", 1, true) or s:find("http", 1, true) then
+        return s
+    end
+    return "rbxassetid://" .. s
+end
+
+function M.id_for_index(idx)
+    idx = tonumber(idx) or 0
+    if idx < 0 or idx >= #M.IDS then return nil end
+    return M.IDS[idx + 1]
+end
+
+return M
+
+end)()
+
+-- ── core/anim_player.lua ──
+April._mods["core.anim_player"] = (function()
+-- Play Fallen animations like StateAssetController: LoadAnimation + bare :Play().
+-- Stops competing loco tracks so our selection can actually stick.
+
+local env = April.require("core.env")
+local fallen_anims = April.require("game.fallen_anims")
+
+local M = {}
+
+local _holder = nil
+local _anim_cache = {}
+local _track_cache = {}
+local _active = {
+    hum = nil,
+    id = nil,
+    track = nil,
+}
+
+local function find_child(parent, name)
+    if not parent then return nil end
+    return env.safe_call(function()
+        if parent.FindFirstChild then return parent:FindFirstChild(name) end
+        if parent.find_first_child then return parent:find_first_child(name) end
+        return nil
+    end)
+end
+
+local function find_child_of_class(parent, class_name)
+    if not parent then return nil end
+    return env.safe_call(function()
+        if parent.FindFirstChildOfClass then return parent:FindFirstChildOfClass(class_name) end
+        if parent.find_first_child_of_class then return parent:find_first_child_of_class(class_name) end
+        return nil
+    end)
+end
+
+local function get_children(parent)
+    if not parent then return nil end
+    return env.safe_call(function()
+        if parent.GetChildren then return parent:GetChildren() end
+        if parent.get_children then return parent:get_children() end
+        return nil
+    end)
+end
+
+local function get_holder()
+    if _holder then return _holder end
+    local rs = env.get_replicated_storage()
+    if not rs then return nil end
+    local existing = find_child(rs, "AprilAnimHolder")
+    if existing then
+        _holder = existing
+        return _holder
+    end
+    if instance and instance.New then
+        local ok, created = pcall(instance.New, "Folder", rs)
+        if ok and created then
+            pcall(function() created.Name = "AprilAnimHolder" end)
+            _holder = created
+            return _holder
+        end
+    end
+    return nil
+end
+
+local function anim_id_matches(anim, url)
+    local aid = env.safe_call(function() return anim.AnimationId or anim.animation_id end)
+    if not aid then return false end
+    local na = tostring(aid):match("(%d+)$")
+    local nb = tostring(url):match("(%d+)$")
+    return (tostring(aid) == tostring(url)) or (na and nb and na == nb)
+end
+
+local function find_existing_animation(asset_url)
+    local lp = game and (game.LocalPlayer or game.local_player)
+    if lp then
+        local ps = find_child(lp, "PlayerScripts")
+        local sac = ps and find_child(ps, "StateAssetController")
+        local folder = sac and find_child(sac, "Animations")
+        local kids = get_children(folder)
+        if kids then
+            for _, anim in ipairs(kids) do
+                if anim_id_matches(anim, asset_url) then return anim end
+            end
+        end
+    end
+
+    local rs = env.get_replicated_storage()
+    local vms = rs and find_child(rs, "VMs")
+    local tools = get_children(vms)
+    if not tools then return nil end
+    for _, tool in ipairs(tools) do
+        for _, folder_name in ipairs({ "GlobalAnims", "LocalAnims" }) do
+            local kids = get_children(find_child(tool, folder_name))
+            if kids then
+                for _, anim in ipairs(kids) do
+                    if anim_id_matches(anim, asset_url) then return anim end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function get_or_create_animation(id)
+    if not id then return nil end
+    local url = fallen_anims.asset_url(id)
+    if not url then return nil end
+    if _anim_cache[id] then return _anim_cache[id] end
+
+    local existing = find_existing_animation(url)
+    if existing then
+        _anim_cache[id] = existing
+        return existing
+    end
+
+    local holder = get_holder()
+    if not holder or not instance or not instance.New then return nil end
+    local ok, anim = pcall(instance.New, "Animation", holder)
+    if not ok or not anim then return nil end
+    pcall(function()
+        anim.Name = "April_" .. tostring(id)
+        anim.AnimationId = url
+    end)
+    _anim_cache[id] = anim
+    return anim
+end
+
+local function hum_key(hum)
+    return tostring(hum and (hum.Address or hum.address or hum) or "nil")
+end
+
+local function get_animator(hum)
+    if not hum then return nil end
+    local a = find_child_of_class(hum, "Animator")
+    if a then return a end
+    return env.safe_call(function()
+        if hum.FindFirstChildOfClass then return hum:FindFirstChildOfClass("Animator") end
+        return nil
+    end)
+end
+
+local function load_track(hum, id)
+    if not hum or not id then return nil end
+    local key = hum_key(hum) .. "|" .. tostring(id)
+    if _track_cache[key] then return _track_cache[key] end
+
+    local anim = get_or_create_animation(id)
+    if not anim then return nil end
+
+    local track = env.safe_call(function()
+        if hum.LoadAnimation then return hum:LoadAnimation(anim) end
+        if hum.load_animation then return hum:load_animation(anim) end
+        return nil
+    end)
+
+    if not track then
+        local animator = get_animator(hum)
+        if animator then
+            track = env.safe_call(function()
+                if animator.LoadAnimation then return animator:LoadAnimation(anim) end
+                return nil
+            end)
+        end
+    end
+
+    if track then
+        -- Match Roblox bare Play() defaults; loop so StateAsset can't leave us idle-gap.
+        pcall(function() track.Looped = true end)
+        pcall(function()
+            if Enum and Enum.AnimationPriority and Enum.AnimationPriority.Action then
+                track.Priority = Enum.AnimationPriority.Action
+            end
+        end)
+        _track_cache[key] = track
+    end
+    return track
+end
+
+-- Bare Play defaults = fade 0.1, weight 1, speed 1 (same as Fallen :Play()).
+local function play_default(track)
+    if not track then return false end
+    return env.safe_call(function()
+        if track.Play then
+            track:Play(0.1, 1, 1)
+            return true
+        end
+        if track.play then
+            track:play(0.1, 1, 1)
+            return true
+        end
+        return false
+    end) == true
+end
+
+local function stop_default(track)
+    if not track then return end
+    pcall(function()
+        if track.Stop then track:Stop(0.1)
+        elseif track.stop then track:stop(0.1)
+        end
+    end)
+end
+
+local function stop_other_tracks(hum, keep)
+    local animator = get_animator(hum)
+    if not animator then return end
+    local tracks = env.safe_call(function()
+        if animator.GetPlayingAnimationTracks then
+            return animator:GetPlayingAnimationTracks()
+        end
+        if animator.get_playing_animation_tracks then
+            return animator:get_playing_animation_tracks()
+        end
+        return nil
+    end)
+    if type(tracks) ~= "table" then return end
+    for _, t in ipairs(tracks) do
+        if t ~= keep then
+            stop_default(t)
+        end
+    end
+end
+
+function M.stop()
+    if _active.track then stop_default(_active.track) end
+    _active.hum = nil
+    _active.id = nil
+    _active.track = nil
+end
+
+function M.sync(hum, id)
+    if not hum or not id then
+        M.stop()
+        return false
+    end
+
+    if _active.hum == hum and _active.id == id and _active.track then
+        stop_other_tracks(hum, _active.track)
+        local playing = env.safe_call(function() return _active.track.IsPlaying end)
+        if playing ~= true then
+            play_default(_active.track)
+        end
+        return true
+    end
+
+    if _active.track then stop_default(_active.track) end
+
+    local track = load_track(hum, id)
+    if not track then return false end
+
+    stop_other_tracks(hum, track)
+    play_default(track)
+    _active.hum = hum
+    _active.id = id
+    _active.track = track
+    return true
+end
+
+return M
+
+end)()
+
 -- ── game/esp_scan.lua ──
 April._mods["game.esp_scan"] = (function()
 local env = April.require("core.env")
@@ -12322,15 +13667,17 @@ M.METHODS = {
     "Dense Shuffle",
 }
 
-local BONE_CENTER_Y = {
-    Head = -0.62,
+-- Kept for TP spawn sampling around the part. Aim always uses the raw hitpart
+-- from silent_resolve — do not apply Y offsets that pull Head → UpperTorso.
+local BONE_SPAWN_Y = {
+    Head = 0,
     UpperTorso = 0,
     LowerTorso = 0,
     HumanoidRootPart = 0,
     LeftUpperArm = 0,
     RightUpperArm = 0,
-    LeftUpperLeg = -0.15,
-    RightUpperLeg = -0.15,
+    LeftUpperLeg = 0,
+    RightUpperLeg = 0,
 }
 
 local GRID_OFFS = {}
@@ -12369,8 +13716,10 @@ end
 function M.target_center(hitpart, bone)
     if not hitpart then return nil end
     local c = copy_pos(hitpart)
-    local yoff = BONE_CENTER_Y[bone or "Head"] or -0.35
-    c.y = c.y + yoff
+    local yoff = BONE_SPAWN_Y[bone or "Head"] or 0
+    if yoff ~= 0 then
+        c.y = c.y + yoff
+    end
     return c
 end
 
@@ -12518,23 +13867,26 @@ function M.resolve(opts)
     if method_idx < 0 then method_idx = 0 end
     if method_idx >= #M.METHODS then method_idx = 0 end
 
-    local center = M.target_center(hitpart, opts.bone)
-    if not center then return nil end
+    -- Spawn TP origin near the selected hitpart; aim stays on that hitpart.
+    local spawn = M.target_center(hitpart, opts.bone) or copy_pos(hitpart)
+    if not spawn then return nil end
+    local aim = copy_pos(hitpart)
 
     local muzzle = opts.muzzle or combat_origin.get_muzzle_origin() or camera
     local pick = ORIGIN_FN[method_idx + 1] or origin_center
-    local origin = pick(center, camera, method_idx)
+    local origin = pick(spawn, camera, method_idx)
     if not origin then return nil end
 
-    local aim = aim_through(center, origin, camera)
+    -- Slight push through the hitpart so the ray doesn't stop short of the bone.
+    aim = aim_through(aim, origin, camera)
 
     return {
         origin = origin,
         aim = aim,
-        hitpart = center,
+        hitpart = copy_pos(hitpart),
         visual = false,
         method = M.METHODS[method_idx + 1],
-        tp_path = M.build_path(origin, center, muzzle),
+        tp_path = M.build_path(origin, hitpart, muzzle),
     }
 end
 
@@ -12865,6 +14217,36 @@ function M.bone_name(prefix)
     return combat_menu.bone_from_index(idx)
 end
 
+-- Fallen bow/crossbow aim uses torso for ballistics even when the desired
+-- hit result is head — aiming head with full drop prediction shoots too high.
+-- Extra drop only for Wooden Bow (not Crossbow).
+local WOODEN_BOW_AIM_Y_NUDGE = -0.22
+
+local function is_wooden_bow(weapon_name)
+    if not weapon_name then return false end
+    local n = weapon_name:lower()
+    return n:find("wooden bow", 1, true) ~= nil
+end
+
+function M.effective_aim_bone(bone, weapon_name)
+    bone = bone or "Head"
+    if bone == "Head" and weapons.is_bow_weapon_name(weapon_name) then
+        return "UpperTorso"
+    end
+    return bone
+end
+
+function M.bow_aim_nudge(point, weapon_name)
+    if not point or not is_wooden_bow(weapon_name) then
+        return point
+    end
+    return {
+        x = point.x,
+        y = point.y + WOODEN_BOW_AIM_Y_NUDGE,
+        z = point.z,
+    }
+end
+
 function M.target_priority_crosshair(prefix)
     local idx = settings.num(prefix .. "target_type", 0)
     return idx == 0
@@ -13067,8 +14449,11 @@ end
 
 function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
     bone = bone or M.bone_name(prefix)
+    local weapon = weapons.cached_held_ranged()
+    bone = M.effective_aim_bone(bone, weapon)
     local base = M.resolve_bone_world(target, bone, cx, cy)
     if not base then return nil end
+    base = M.bow_aim_nudge(base, weapon)
 
     if use_prediction == false then
         return base
@@ -13077,7 +14462,7 @@ function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
     origin = origin or combat_origin.get_fire_origin()
     if not origin then return base end
 
-    return M.predict_point(origin, base, target, weapons.cached_held_ranged())
+    return M.predict_point(origin, base, target, weapon)
 end
 
 function M.is_target_valid(target, prefix, cx, cy, fov_px, opts)
@@ -13087,7 +14472,9 @@ function M.is_target_valid(target, prefix, cx, cy, fov_px, opts)
     if not M.within_max_distance(target, origin, prefix) then return false end
 
     local bone = M.bone_name(prefix)
-    local base = M.resolve_bone_world(target, bone == "Closest" and "Head" or bone, cx, cy)
+    if bone == "Closest" then bone = "Head" end
+    bone = M.effective_aim_bone(bone, weapons.cached_held_ranged())
+    local base = M.resolve_bone_world(target, bone, cx, cy)
     if not base then return false end
 
     if not M.passes_filters(target, prefix, base, origin, opts) then return false end
@@ -13143,6 +14530,7 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
     opts = opts or {}
     local bone = M.bone_name(prefix)
     local screen_bone = bone == "Closest" and "Head" or bone
+    screen_bone = M.effective_aim_bone(screen_bone, weapons.cached_held_ranged())
     local use_fov = opts.force_crosshair_priority or M.target_priority_crosshair(prefix)
     local best, best_score = nil, use_fov and fov_px or math.huge
     local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
@@ -13294,12 +14682,13 @@ function M.resolve_track(target, prefix, cx, cy)
     local camera = silent_ray.get_camera_origin()
     if not camera then return nil, nil, OFF_INFO end
 
+    local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
     local bone = targeting.bone_name(prefix)
+    -- Bows/crossbows: Head selection aims UpperTorso (game ballistics rule).
+    bone = targeting.effective_aim_bone(bone, weapon)
     local hitpart = targeting.resolve_bone_world(target, bone, cx, cy)
     if not hitpart then return nil, nil, OFF_INFO end
-    local center = bullet_tp_ray.target_center(hitpart, bone) or hitpart
-
-    local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
+    hitpart = targeting.bow_aim_nudge(hitpart, weapon)
     local muzzle = fire_origin(camera)
     local body = combat_origin.get_server_origin()
 
@@ -13318,27 +14707,33 @@ function M.resolve_track(target, prefix, cx, cy)
             muzzle = muzzle,
         })
         if tp and tp.origin and tp.aim then
-            return apply_ray_aim(tp.origin, tp.aim, tp.hitpart or center, weapon, "tp", manip_extra, tp)
+            -- Force aim/hitpart to the selected bone (TP only moves spawn origin).
+            return apply_ray_aim(tp.origin, hitpart, hitpart, weapon, "tp", manip_extra, {
+                tp_path = bullet_tp_ray.build_path(tp.origin, hitpart, muzzle),
+                method = tp.method,
+                visual = tp.visual == true,
+            })
         end
     end
 
     if hitscan_on then
-        return apply_ray_aim(fire, center, center, weapon, "hitscan", manip_extra)
+        return apply_ray_aim(fire, hitpart, hitpart, weapon, "hitscan", manip_extra)
     end
 
     if manip_extra.state == "ready" and manip_fire then
-        return apply_ray_aim(manip_fire, center, center, weapon, "ready", manip_extra, {
-            tp_path = bullet_tp_ray.build_path(manip_fire, center, muzzle),
+        return apply_ray_aim(manip_fire, hitpart, hitpart, weapon, "ready", manip_extra, {
+            tp_path = bullet_tp_ray.build_path(manip_fire, hitpart, muzzle),
             method = "Manip",
             visual = false,
         })
     end
 
+    -- Curve/arch is visual + drop metadata; silent track still aims at hitpart.
     if manip_extra.state == "direct" then
-        return apply_drop_aim(muzzle, center, weapon, "direct", manip_extra)
+        return apply_drop_aim(muzzle, hitpart, weapon, "direct", manip_extra)
     end
 
-    return apply_drop_aim(muzzle, center, weapon, "curve", manip_extra)
+    return apply_drop_aim(muzzle, hitpart, weapon, "curve", manip_extra)
 end
 
 return M
@@ -19144,6 +20539,555 @@ return M
 
 end)()
 
+-- ── features/movement/anti_aim.lua ──
+April._mods["features.movement.anti_aim"] = (function()
+--[[
+  Anti-Aim — continuous body yaw (AutoRotate off + CFrame / angular velocity).
+
+  Same drive as the working yaw AA; pauses while firing (LMB) and snaps
+  back to camera yaw so flashpoint / shots stay valid.
+]]
+
+local settings = April.require("core.settings")
+local env = April.require("core.env")
+local menu_util = April.require("core.menu_util")
+local move = April.require("core.cframe_move")
+local misc_gate = April.require("core.misc_gate")
+local angle_util = April.require("core.angle_util")
+
+local M = {}
+
+local P = "april_antiaim_enabled"
+local P_YAW = "april_antiaim_yaw_mode"
+local P_YAW_MANUAL = "april_antiaim_yaw_manual"
+local P_SPIN = "april_antiaim_spin_speed"
+local P_JITTER = "april_antiaim_jitter_step"
+local P_JITTER_MS = "april_antiaim_jitter_ms"
+
+local YAW_LABELS = {
+    "None", "Backwards", "Spin", "Jitter", "Random Jitter",
+    "Sideways Left", "Sideways Right", "Manual",
+}
+local YAW_MANUAL_IDX = 7
+local YAW_SPIN, YAW_JITTER, YAW_RAND = 2, 3, 4
+
+local YAW_GAIN = 22
+local YAW_AV_MAX = 40
+local YAW_SNAP_EPS = 0.02
+local SHOOT_VK = 0x01
+
+local state = {
+    fake_yaw = 0,
+    yaw_jitter_idx = 0,
+    jitter_t = 0,
+    random_yaw = 0,
+    spin_yaw = 0,
+    was_active = false,
+    was_firing = false,
+}
+
+M.YAW_LABELS = YAW_LABELS
+
+local function active()
+    return settings.enabled(P)
+end
+
+local function find_child(parent, name)
+    if not parent then return nil end
+    return env.safe_call(function()
+        if parent.FindFirstChild then return parent:FindFirstChild(name) end
+        if parent.find_first_child then return parent:find_first_child(name) end
+        return nil
+    end)
+end
+
+local function get_character(lp)
+    if not lp then lp = env.get_local_player() end
+    if lp then
+        local char = lp.Character or lp.character
+        if char then return char end
+    end
+    local rp = game and (game.LocalPlayer or game.local_player)
+    if rp then return rp.Character or rp.character end
+    return nil
+end
+
+local function get_humanoid(lp)
+    if lp then
+        local hum = lp.Humanoid or lp.humanoid
+        if hum then return hum end
+    end
+    local char = get_character(lp)
+    return char and (move.find_part(char, "Humanoid") or find_child(char, "Humanoid"))
+end
+
+local function get_root(lp)
+    local char = get_character(lp)
+    if not char then return nil end
+    return move.find_part(char, "HumanoidRootPart")
+        or find_child(char, "HumanoidRootPart")
+        or env.safe_call(function() return char.PrimaryPart or char.primary_part end)
+end
+
+local function get_attr(inst, name)
+    if not inst then return nil end
+    return env.safe_call(function()
+        if inst.GetAttribute then return inst:GetAttribute(name) end
+        if inst.get_attribute then return inst:get_attribute(name) end
+        return nil
+    end)
+end
+
+-- LMB or Fallen ViewmodelController Using / Aiming fire path.
+local function is_firing(char)
+    if input and input.is_key_down and input.is_key_down(SHOOT_VK) then
+        return true
+    end
+    local vm = char and find_child(char, "ViewmodelController")
+    if vm then
+        if get_attr(vm, "Using") == true then return true end
+    end
+    return false
+end
+
+local function compute_fake_yaw(real_yaw, dt)
+    local mode = settings.combo_index(P_YAW, YAW_LABELS, 0)
+    if mode == 0 then return nil end
+    dt = dt or 0.016
+    if mode == 1 then return angle_util.normalize_yaw(real_yaw + math.pi) end
+    if mode == 2 then
+        state.spin_yaw = angle_util.normalize_yaw(state.spin_yaw + math.rad(settings.num(P_SPIN, 180)) * dt)
+        return angle_util.normalize_yaw(real_yaw + state.spin_yaw)
+    end
+    if mode == 3 then
+        local step = math.max(15, settings.num(P_JITTER, 90))
+        return angle_util.normalize_yaw(real_yaw + math.rad(state.yaw_jitter_idx * step))
+    end
+    if mode == 4 then return angle_util.normalize_yaw(real_yaw + state.random_yaw) end
+    if mode == 5 then return angle_util.normalize_yaw(real_yaw + math.pi * 0.5) end
+    if mode == 6 then return angle_util.normalize_yaw(real_yaw - math.pi * 0.5) end
+    return angle_util.normalize_yaw(real_yaw + math.rad(settings.num(P_YAW_MANUAL, 90)))
+end
+
+local function advance_jitter(dt)
+    local yaw_m = settings.combo_index(P_YAW, YAW_LABELS, 0)
+    if yaw_m ~= YAW_JITTER and yaw_m ~= YAW_RAND then return end
+
+    local interval = math.max(0.04, settings.num(P_JITTER_MS, 120) / 1000)
+    state.jitter_t = state.jitter_t + dt
+    if state.jitter_t < interval then return end
+    state.jitter_t = 0
+
+    local step = math.max(15, settings.num(P_JITTER, 90))
+    if yaw_m == YAW_JITTER then
+        state.yaw_jitter_idx = (state.yaw_jitter_idx + 1) % math.max(1, math.floor(360 / step))
+    end
+    if yaw_m == YAW_RAND then
+        state.random_yaw = math.random() * math.pi * 2
+    end
+end
+
+local function disable_auto_rotate(lp, hum)
+    if lp then pcall(function() lp.AutoRotate = false end) end
+    if hum then
+        pcall(function() hum.AutoRotate = false end)
+        pcall(function() hum.auto_rotate = false end)
+    end
+end
+
+local function restore_auto_rotate(lp, hum)
+    if lp then pcall(function() lp.AutoRotate = true end) end
+    if hum then
+        pcall(function() hum.AutoRotate = true end)
+        pcall(function() hum.auto_rotate = true end)
+    end
+end
+
+local function write_yaw(char, root, yaw)
+    if yaw == nil or not root or not CFrame then return end
+    local pos = move.read_pos(root)
+    if not pos then return end
+    local cf = CFrame.new(pos.x, pos.y, pos.z) * CFrame.Angles(0, yaw, 0)
+    pcall(function() root.CFrame = cf end)
+    if char then
+        pcall(function()
+            if char.PivotTo then char:PivotTo(cf) end
+        end)
+    end
+end
+
+local function steer_yaw(root, body_yaw, target_yaw)
+    if target_yaw == nil or not root then return end
+    local mode = settings.combo_index(P_YAW, YAW_LABELS, 0)
+    if mode == YAW_SPIN then
+        move.set_angular_velocity(root, 0, math.rad(settings.num(P_SPIN, 180)), 0)
+        return
+    end
+    local diff = angle_util.yaw_delta(body_yaw, target_yaw)
+    if math.abs(diff) < YAW_SNAP_EPS then
+        move.set_angular_velocity(root, 0, 0, 0)
+        return
+    end
+    local av = diff * YAW_GAIN
+    if av > YAW_AV_MAX then av = YAW_AV_MAX elseif av < -YAW_AV_MAX then av = -YAW_AV_MAX end
+    move.set_angular_velocity(root, 0, av, 0)
+end
+
+local function face_camera(lp, char, root, hum)
+    local yaw = angle_util.camera_yaw()
+    write_yaw(char, root, yaw)
+    if root then move.set_angular_velocity(root, 0, 0, 0) end
+    restore_auto_rotate(lp, hum)
+end
+
+local function tick_aa(dt)
+    local lp = env.get_local_player()
+    local char = get_character(lp)
+    local root = get_root(lp)
+    local hum = get_humanoid(lp)
+    if not root then return end
+
+    disable_auto_rotate(lp, hum)
+    advance_jitter(dt)
+
+    local real_yaw = angle_util.camera_yaw()
+    local fake_yaw = compute_fake_yaw(real_yaw, dt)
+    if fake_yaw == nil then
+        move.set_angular_velocity(root, 0, 0, 0)
+        return
+    end
+
+    state.fake_yaw = fake_yaw
+    local body_yaw = angle_util.body_yaw(lp, root)
+    write_yaw(char, root, fake_yaw)
+    steer_yaw(root, body_yaw, fake_yaw)
+end
+
+local function sync_option_visibility()
+    if not menu or not menu.set_visible then return end
+    local on = active()
+    local yaw_m = settings.combo_index(P_YAW, YAW_LABELS, 0)
+    pcall(menu.set_visible, P_YAW_MANUAL, on and yaw_m == YAW_MANUAL_IDX)
+    pcall(menu.set_visible, P_SPIN, on and yaw_m == YAW_SPIN)
+    pcall(menu.set_visible, P_JITTER, on and (yaw_m == YAW_JITTER or yaw_m == YAW_RAND))
+    pcall(menu.set_visible, P_JITTER_MS, on and (yaw_m == YAW_JITTER or yaw_m == YAW_RAND))
+end
+
+function M.register_menu()
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.MISC)
+    local root = menu_util.parent(P)
+
+    menu_util.section(T, G.MISC, "Movement")
+    menu_util.register_keybind(T, G.MISC, P, "Anti-Aim", false)
+    menu.add_combo(T, G.MISC, P_YAW, "Yaw Mode", YAW_LABELS, 1, root)
+    menu.add_slider_int(T, G.MISC, P_YAW_MANUAL, "Manual Yaw", -180, 180, 90,
+        menu_util.parent(P_YAW, { parent_value = YAW_MANUAL_IDX }))
+    menu.add_slider_int(T, G.MISC, P_SPIN, "Spin Speed", 30, 720, 180, root)
+    menu.add_slider_int(T, G.MISC, P_JITTER, "Jitter Step", 15, 180, 90, root)
+    menu.add_slider_int(T, G.MISC, P_JITTER_MS, "Jitter Interval (ms)", 40, 500, 120, root)
+
+    menu_util.bind_children(P, {
+        P_YAW, P_YAW_MANUAL, P_SPIN, P_JITTER, P_JITTER_MS,
+    })
+
+    if menu and menu.set_callback then
+        pcall(menu.set_callback, P, sync_option_visibility)
+        pcall(menu.set_callback, P_YAW, sync_option_visibility)
+    end
+    sync_option_visibility()
+end
+
+function M.install() end
+
+function M.update(dt)
+    sync_option_visibility()
+    dt = dt or 0.016
+
+    local lp = env.get_local_player()
+    local char = get_character(lp)
+    local root = get_root(lp)
+    local hum = get_humanoid(lp)
+    local on = active() and misc_gate.movement_allowed()
+    local firing = on and is_firing(char)
+
+    if state.was_active and (not on or firing) then
+        if root then move.set_angular_velocity(root, 0, 0, 0) end
+        if firing and on then
+            face_camera(lp, char, root, hum)
+        else
+            restore_auto_rotate(lp, hum)
+            state.spin_yaw = 0
+            state.jitter_t = 0
+        end
+    end
+
+    -- Leaving fire: re-engage AA next tick.
+    if state.was_firing and on and not firing then
+        disable_auto_rotate(lp, hum)
+    end
+
+    state.was_active = on and not firing
+    state.was_firing = firing
+
+    if not on or firing then return end
+    if settings.combo_index(P_YAW, YAW_LABELS, 0) == 0 then return end
+    tick_aa(dt)
+end
+
+function M.draw() end
+
+return M
+
+end)()
+
+-- ── features/movement/fake_duck.lua ──
+April._mods["features.movement.fake_duck"] = (function()
+--[[
+  Fake Duck — look crouched (IsCrouch / hip) while moving at stand/sprint speed.
+
+  Fallen StateController sets WalkSpeed=6.5 when crouched. Writing WalkSpeed
+  kicks — so we leave WalkSpeed alone and boost HRP velocity to walk(11)/sprint(18).
+]]
+
+local settings = April.require("core.settings")
+local env = April.require("core.env")
+local menu_util = April.require("core.menu_util")
+local move = April.require("core.cframe_move")
+local misc_gate = April.require("core.misc_gate")
+local runservice = April.require("core.runservice")
+
+local M = {}
+
+local P = "april_fakeduck_enabled"
+local P_HEIGHT = "april_fakeduck_height"
+
+-- Fallen stand hip = 1.6, normal crouch = 1.1. Lower values push further down.
+local DEFAULT_DUCK_HIP = 1.1
+local STAND_HIP = 1.6
+local SPEED_WALK = 11
+local SPEED_SPRINT = 18
+local SPEED_AIM_MUL = 0.8
+local SPEED_SLOW_MUL = 0.3
+local MOVE_EPS = 0.05
+
+local state = {
+    was_active = false,
+    hooks_installed = false,
+    state_ctrl = nil,
+    viewmodel = nil,
+    root = nil,
+    hum = nil,
+}
+
+local function active()
+    return settings.enabled(P)
+end
+
+local function find_child(parent, name)
+    if not parent then return nil end
+    return env.safe_call(function()
+        if parent.FindFirstChild then return parent:FindFirstChild(name) end
+        if parent.find_first_child then return parent:find_first_child(name) end
+        return nil
+    end)
+end
+
+local function get_character(lp)
+    if not lp then lp = env.get_local_player() end
+    if lp then
+        local char = lp.Character or lp.character
+        if char then return char end
+    end
+    local rp = game and (game.LocalPlayer or game.local_player)
+    if rp then return rp.Character or rp.character end
+    return nil
+end
+
+local function get_attr(inst, name)
+    if not inst then return nil end
+    return env.safe_call(function()
+        if inst.GetAttribute then return inst:GetAttribute(name) end
+        if inst.get_attribute then return inst:get_attribute(name) end
+        return nil
+    end)
+end
+
+local function set_attr(inst, name, value)
+    if not inst then return end
+    pcall(function()
+        if inst.SetAttribute then
+            inst:SetAttribute(name, value)
+        elseif inst.set_attribute then
+            inst:set_attribute(name, value)
+        end
+    end)
+end
+
+local function set_hip_height(hum, value)
+    if not hum then return end
+    pcall(function() hum.HipHeight = value end)
+    local lp = env.get_local_player()
+    if lp then
+        pcall(function() lp.HipHeight = value end)
+    end
+end
+
+local function duck_hip()
+    local h = settings.num(P_HEIGHT, DEFAULT_DUCK_HIP)
+    -- Sub-zero HipHeight is AC-flagged. Keep a tiny floor above 0.
+    if h > 1.5 then h = 1.5 end
+    if h < 0.01 then h = 0.01 end
+    return h
+end
+
+-- Slightly squash HRP as we go lower than normal crouch.
+local function set_root_size(root, crouch, hip)
+    if not root or not Vector3 then return end
+    local y = 2.5
+    if crouch then
+        hip = hip or DEFAULT_DUCK_HIP
+        -- 1.1 → 2.1, lower hips → smaller Y (floor ~1.4)
+        y = 2.1 - (DEFAULT_DUCK_HIP - hip) * 0.35
+        if y < 1.4 then y = 1.4 end
+        if y > 2.4 then y = 2.4 end
+    end
+    pcall(function()
+        root.Size = Vector3.new(2, y, 2)
+    end)
+end
+
+local function resolve_parts()
+    local lp = env.get_local_player()
+    local char = get_character(lp)
+    if not char then
+        state.state_ctrl, state.viewmodel, state.root, state.hum = nil, nil, nil, nil
+        return false
+    end
+
+    state.state_ctrl = find_child(char, "StateController")
+    state.viewmodel = find_child(char, "ViewmodelController")
+    state.root = move.find_part(char, "HumanoidRootPart") or find_child(char, "HumanoidRootPart")
+    state.hum = (lp and (lp.Humanoid or lp.humanoid))
+        or move.find_part(char, "Humanoid")
+        or find_child(char, "Humanoid")
+    return state.root ~= nil
+end
+
+local function desired_speed()
+    local sc = state.state_ctrl
+    local vm = state.viewmodel
+    local hum = state.hum
+
+    local sprint = get_attr(sc, "IsSprint") == true
+    local aiming = get_attr(vm, "Aiming") == true
+    local slowed = false
+    if hum then
+        local dc = get_attr(hum, "DamageConnections")
+        slowed = type(dc) == "number" and dc > 0
+    end
+    if get_attr(hum, "Downed") == true then return 0 end
+
+    local base = sprint and SPEED_SPRINT or SPEED_WALK
+    if aiming then base = base * SPEED_AIM_MUL end
+    if slowed then base = base * SPEED_SLOW_MUL end
+    return base
+end
+
+-- Scale / drive horizontal velocity to stand/sprint speed. Never touch WalkSpeed.
+local function boost_velocity(root, target)
+    if not root or not target or target <= 0 then return end
+
+    local mx, mz = move.read_flat_input()
+    local vx, vy, vz = move.read_velocity(root)
+    local input_mag = math.sqrt(mx * mx + mz * mz)
+
+    if input_mag >= MOVE_EPS then
+        move.set_velocity(root, mx * target, vy, mz * target)
+        return
+    end
+
+    -- No WASD: if humanoid still sliding, stretch existing horiz vel up to target.
+    local hmag = math.sqrt(vx * vx + vz * vz)
+    if hmag < 1.0 then return end
+    if hmag >= target * 0.95 then return end
+    local s = target / hmag
+    move.set_velocity(root, vx * s, vy, vz * s)
+end
+
+local function apply_duck()
+    if not resolve_parts() then return end
+
+    if state.state_ctrl then
+        set_attr(state.state_ctrl, "IsCrouch", true)
+    end
+
+    local hip = duck_hip()
+    set_hip_height(state.hum, hip)
+    set_root_size(state.root, true, hip)
+
+    boost_velocity(state.root, desired_speed())
+end
+
+local function restore_duck()
+    resolve_parts()
+    if state.state_ctrl then
+        set_attr(state.state_ctrl, "IsCrouch", false)
+    end
+    set_hip_height(state.hum, STAND_HIP)
+    set_root_size(state.root, false)
+end
+
+local function on_sim(_dt)
+    if not misc_gate.movement_allowed() then return end
+    local on = active()
+
+    if state.was_active and not on then
+        restore_duck()
+    end
+    state.was_active = on
+
+    if not on then return end
+    apply_duck()
+end
+
+local function ensure_hooks()
+    if state.hooks_installed then return end
+    state.hooks_installed = true
+    runservice.on_sim(on_sim)
+end
+
+function M.register_menu()
+    local G = menu_util.G
+    local T, _ = menu_util.group(G.MISC)
+    local root = menu_util.parent(P)
+
+    menu_util.section(T, G.MISC, "Movement")
+    menu_util.register_keybind(T, G.MISC, P, "Fake Duck", false)
+    menu.add_slider_float(T, G.MISC, P_HEIGHT, "Duck Height", 0.01, 1.5, DEFAULT_DUCK_HIP, "%.2f", root)
+    menu_util.bind_children(P, { P_HEIGHT })
+end
+
+function M.install()
+    ensure_hooks()
+end
+
+function M.update(_dt)
+    ensure_hooks()
+    if not runservice.uses_heartbeat() and misc_gate.movement_allowed() then
+        on_sim(_dt)
+    elseif state.was_active and not active() then
+        restore_duck()
+        state.was_active = false
+    end
+end
+
+function M.draw() end
+
+return M
+
+end)()
+
 -- ── features/radar/waypoints.lua ──
 April._mods["features.radar.waypoints"] = (function()
 local settings = April.require("core.settings")
@@ -19995,6 +21939,11 @@ end)()
 -- ── ui/gs_input.lua ──
 April._mods["ui.gs_input"] = (function()
 -- Mouse / key helpers. Raw cursor only — no windowed offset correction.
+--
+-- Wheel: Vector docs only expose utility.mouse_scroll() (inject). There is no
+-- documented reader. We probe every known path and accumulate into M.wheel;
+-- if none work, the menu keeps edge-hover scroll as fallback.
+
 local M = {}
 
 local prev_keys = {}
@@ -20013,6 +21962,12 @@ M.lmb_click = false
 M.rmb_click = false
 M.mmb_click = false
 M.lmb_release = false
+M.wheel = 0
+M.wheel_source = nil -- "api" | "uis" | "mouse" | nil
+M._wheel_accum = 0
+M._scroll_ready = false
+M._scroll_hook_tries = 0
+M._api_readers = nil
 M._game_cursor_hidden = false
 M._menu_open = false
 M.ui_x, M.ui_y, M.ui_w, M.ui_h = 0, 0, 0, 0
@@ -20038,6 +21993,167 @@ local function pcall_get_service(name)
         end)
     end
     return svc
+end
+
+local function on_wheel(dir, source)
+    dir = tonumber(dir) or 0
+    if dir == 0 then return end
+    -- Normalize to ±1 notches (UIS Position.Z is often ±1).
+    if dir > 0 then dir = 1 elseif dir < 0 then dir = -1 end
+    M._wheel_accum = (M._wheel_accum or 0) + dir
+    if source then M.wheel_source = source end
+end
+
+local function connect_signal(signal, fn)
+    if not signal then return false end
+    local connect = signal.Connect or signal.connect
+    if type(connect) ~= "function" then return false end
+    local ok = pcall(function()
+        connect(signal, fn)
+    end)
+    return ok == true
+end
+
+local function collect_api_readers()
+    if M._api_readers then return M._api_readers end
+    local readers = {}
+    local skip = {
+        mouse_scroll = true,
+        MouseScroll = true,
+        mouseScroll = true,
+    }
+    local function scan(tbl, label)
+        if type(tbl) ~= "table" then return end
+        for k, v in pairs(tbl) do
+            if type(v) == "function" and type(k) == "string" then
+                local name = k:lower()
+                if (name:find("wheel", 1, true) or name:find("scroll", 1, true))
+                    and not skip[k]
+                    and not name:find("set", 1, true)
+                    and not name:find("mouse_scroll", 1, true)
+                then
+                    readers[#readers + 1] = { fn = v, label = label .. "." .. k }
+                end
+            end
+        end
+    end
+    pcall(scan, input, "input")
+    pcall(scan, utility, "utility")
+    M._api_readers = readers
+    return readers
+end
+
+local function poll_api_readers()
+    local readers = collect_api_readers()
+    for i = 1, #readers do
+        local ok, a, b = pcall(readers[i].fn)
+        if ok then
+            local v = tonumber(a)
+            if (not v or v == 0) and b ~= nil then v = tonumber(b) end
+            if v and v ~= 0 then
+                on_wheel(v, "api")
+                return
+            end
+        end
+    end
+end
+
+local function try_hook_uis()
+    local uis = pcall_get_service("UserInputService")
+    if not uis then return false end
+
+    local function handle(input_obj, _game_processed)
+        if not input_obj then return end
+        local type_name = nil
+        pcall(function()
+            local t = input_obj.UserInputType or input_obj.user_input_type
+            if type(t) == "userdata" or type(t) == "table" then
+                type_name = tostring(t.Name or t.name or t)
+            else
+                type_name = tostring(t)
+            end
+        end)
+        if not type_name then return end
+        local lower = type_name:lower()
+        if not lower:find("mousewheel", 1, true) and lower ~= "mousewheel" then
+            return
+        end
+        local z = 0
+        pcall(function()
+            local pos = input_obj.Position or input_obj.position
+            if pos then z = pos.Z or pos.z or 0 end
+        end)
+        if z == 0 then
+            pcall(function()
+                z = input_obj.Delta and (input_obj.Delta.Z or input_obj.Delta.z) or 0
+            end)
+        end
+        if z == 0 then z = 1 end
+        on_wheel(z, "uis")
+    end
+
+    local hooked = false
+    if connect_signal(uis.InputChanged or uis.input_changed, handle) then
+        hooked = true
+    end
+    if connect_signal(uis.InputBegan or uis.input_began, handle) then
+        hooked = true
+    end
+    return hooked
+end
+
+local function try_hook_player_mouse()
+    local lp = nil
+    pcall(function()
+        if entity and entity.get_local_player then
+            lp = entity.get_local_player()
+        end
+    end)
+    if not lp then
+        pcall(function()
+            lp = game and (game.LocalPlayer or game.local_player)
+        end)
+    end
+    if not lp then return false end
+
+    local mouse = nil
+    pcall(function()
+        if lp.GetMouse then mouse = lp:GetMouse()
+        elseif lp.get_mouse then mouse = lp:get_mouse()
+        else mouse = lp.Mouse or lp.mouse
+        end
+    end)
+    if not mouse then return false end
+
+    local hooked = false
+    if connect_signal(mouse.WheelForward or mouse.wheel_forward, function()
+        on_wheel(1, "mouse")
+    end) then
+        hooked = true
+    end
+    if connect_signal(mouse.WheelBackward or mouse.wheel_backward, function()
+        on_wheel(-1, "mouse")
+    end) then
+        hooked = true
+    end
+    return hooked
+end
+
+local function ensure_scroll_hooks()
+    if M._scroll_ready then return end
+    -- Retry a few frames — LocalPlayer / services may not exist at load.
+    M._scroll_hook_tries = (M._scroll_hook_tries or 0) + 1
+    if M._scroll_hook_tries > 120 then
+        M._scroll_ready = true
+        return
+    end
+
+    local ok_uis = try_hook_uis()
+    local ok_mouse = try_hook_player_mouse()
+    collect_api_readers()
+    if ok_uis or ok_mouse or M._scroll_hook_tries >= 30 then
+        M._scroll_ready = true
+    end
 end
 
 function M.set_game_cursor_visible(visible)
@@ -20089,11 +22205,15 @@ function M.key_pressed(vk)
 end
 
 function M.begin_frame()
+    ensure_scroll_hooks()
+
     local amx, amy = 0, 0
     if utility and utility.get_mouse_pos then
         amx, amy = utility.get_mouse_pos()
     elseif input and input.get_mouse_pos then
         amx, amy = input.get_mouse_pos()
+    elseif input and input.get_mouse_position then
+        amx, amy = input.get_mouse_position()
     end
     amx = tonumber(amx) or 0
     amy = tonumber(amy) or 0
@@ -20110,6 +22230,11 @@ function M.begin_frame()
     prev_lmb = M.lmb
     prev_rmb = M.rmb
     prev_mmb = M.mmb
+
+    -- Poll any getter-style APIs each frame, then drain event accumulators.
+    poll_api_readers()
+    M.wheel = M._wheel_accum or 0
+    M._wheel_accum = 0
 end
 
 function M.hover(x, y, w, h)
@@ -21066,6 +23191,7 @@ M.interacted = false -- any widget captured LMB this frame
 M._hue_cache = {} -- id -> hue 0..1 for color picker
 M._list_scroll = {} -- id -> first visible option index (0-based)
 M.LIST_MAX_VISIBLE = 8
+M.wheel_consumed = false -- set when a dropdown/list eats the wheel this frame
 M.block_under = false -- true while pointer is over a floating popup (prior frame rect)
 -- Floating color picker (drawn after the menu so it doesn't expand sections)
 M._color_anchor = nil -- { id, x, y, w }
@@ -21172,6 +23298,7 @@ end
 function M.begin_popups()
     M.popup_used_click = false
     M.interacted = false
+    M.wheel_consumed = false
     M._color_anchor = nil
     M._bind_mode_anchor = nil
     M._active_input_rect = nil
@@ -21254,7 +23381,10 @@ local function apply_list_edge_scroll(id, count, max_vis, list_x, list_y, list_w
     if not input.hover(list_x, list_y, list_w, list_h) then return end
 
     local off = M._list_scroll[id] or 0
-    if input.my < list_y + LIST_SCROLL_EDGE then
+    if input.wheel ~= 0 and not M.wheel_consumed then
+        off = off - input.wheel
+        M.wheel_consumed = true
+    elseif input.my < list_y + LIST_SCROLL_EDGE then
         off = off - 1
     elseif input.my > list_y + list_h - LIST_SCROLL_EDGE then
         off = off + 1
@@ -22240,8 +24370,8 @@ local function kb(id, label, default, gate)
     return { type = "keybind", id = id, label = label, default = default == true, gate = gate }
 end
 
-local function sl(id, label, minv, maxv, default, float, gate)
-    return {
+local function sl(id, label, minv, maxv, default, float, gate, extra)
+    local item = {
         type = "slider",
         id = id,
         label = label,
@@ -22252,6 +24382,12 @@ local function sl(id, label, minv, maxv, default, float, gate)
         fmt = float and "%.2f" or "%d",
         gate = gate,
     }
+    if type(extra) == "table" then
+        for k, v in pairs(extra) do
+            item[k] = v
+        end
+    end
+    return item
 end
 
 local function combo(id, label, options, default, gate)
@@ -22598,6 +24734,29 @@ local function build_misc()
                 kb("april_desync_enabled", "Desync", false),
                 cb("april_desync_visualizer", "Desync Visualize", false, { 0.2, 0.85, 1, 0.9 }, "april_desync_enabled"),
                 sep(),
+                kb("april_antiaim_enabled", "Anti-Aim", false),
+                combo("april_antiaim_yaw_mode", "Yaw Mode", { "None", "Backwards", "Spin", "Jitter", "Random Jitter", "Sideways Left", "Sideways Right", "Manual" }, 1, "april_antiaim_enabled"),
+                sl("april_antiaim_yaw_manual", "Manual Yaw", -180, 180, 90, false, "april_antiaim_enabled", {
+                    gate_combo = "april_antiaim_yaw_mode",
+                    gate_combo_value = 7,
+                }),
+                sl("april_antiaim_spin_speed", "Spin Speed", 30, 720, 180, false, "april_antiaim_enabled", {
+                    gate_combo = "april_antiaim_yaw_mode",
+                    gate_combo_value = 2,
+                }),
+                sl("april_antiaim_jitter_step", "Jitter Step", 15, 180, 90, false, "april_antiaim_enabled", {
+                    gate_any_combo = {
+                        { "april_antiaim_yaw_mode", { 3, 4 } },
+                    },
+                }),
+                sl("april_antiaim_jitter_ms", "Jitter Interval (ms)", 40, 500, 120, false, "april_antiaim_enabled", {
+                    gate_any_combo = {
+                        { "april_antiaim_yaw_mode", { 3, 4 } },
+                    },
+                }),
+                kb("april_fakeduck_enabled", "Fake Duck", false),
+                sl("april_fakeduck_height", "Duck Height", 0.01, 1.5, 1.1, true, "april_fakeduck_enabled"),
+                sep(),
                 kb("april_fling_enabled", "Fling", false),
                 sl("april_fling_fov", "Fling FOV", 20, 600, 150, false, "april_fling_enabled"),
                 sl("april_fling_duration", "Fling Duration", 2, 10, 2, false, "april_fling_enabled"),
@@ -22762,7 +24921,8 @@ end)()
 April._mods["ui.custom_menu"] = (function()
 --[[
   Gamesense-style custom menu for April.
-  INSERT toggles by default (rebindable in Config → Menu). Scroll by hovering near the top or bottom of a column.
+  INSERT toggles by default (rebindable in Config → Menu).
+  Scroll: mouse wheel when Vector exposes a reader; else edge-hover (top/bottom of column).
 ]]
 
 local theme = April.require("ui.gs_theme")
@@ -22791,6 +24951,9 @@ local scroll = { left = 0, right = 0 }
 
 local SCROLL_EDGE = 36
 local SCROLL_SPEED = 5
+local WHEEL_STEP = 48
+local PAGE_STEP = 90
+local VK_PRIOR, VK_NEXT = 0x21, 0x22
 
 local function screen_size()
     if draw and draw.get_screen_size then
@@ -22811,6 +24974,15 @@ end
 local function master_on(id)
     if not id then return true end
     return state.get(id, false) == true
+end
+
+local function combo_value(id)
+    if not id then return nil end
+    local v = state.get(id)
+    if v == nil and menu and menu.get then
+        v = menu.get(id)
+    end
+    return tonumber(v)
 end
 
 local function color_override_on(idx)
@@ -22838,6 +25010,31 @@ local function item_visible(item, group)
     end
     if item.gate2 and not master_on(item.gate2) then
         return false
+    end
+    if item.gate_combo then
+        local cur = combo_value(item.gate_combo)
+        local want = tonumber(item.gate_combo_value) or 0
+        if cur ~= want then
+            return false
+        end
+    end
+    -- Show if ANY (combo_id, value) pair matches. pair = { id, value } or { id, {v1,v2} }
+    if item.gate_any_combo then
+        local ok = false
+        for _, pair in ipairs(item.gate_any_combo) do
+            local cid = pair[1] or pair.id
+            local want = pair[2] or pair.value
+            local cur = combo_value(cid)
+            if type(want) == "table" then
+                for _, w in ipairs(want) do
+                    if cur == w then ok = true; break end
+                end
+            elseif cur == want then
+                ok = true
+            end
+            if ok then break end
+        end
+        if not ok then return false end
     end
     if item.color_override_idx and not color_override_on(item.color_override_idx) then
         return false
@@ -22945,6 +25142,28 @@ local function handle_column_scroll(x, y, w, h, scroll_key, content_h)
     end
     if not hot then return end
 
+    -- Prefer real wheel when any probe delivers notches this frame.
+    -- Open dropdowns consume the wheel first (see gs_widgets).
+    if gin.wheel ~= 0 and not widgets.wheel_consumed then
+        scroll[scroll_key] = scroll[scroll_key] - gin.wheel * WHEEL_STEP
+        clamp_scroll(scroll_key, content_h, h)
+        widgets.wheel_consumed = true
+        return
+    end
+
+    -- Page Up / Page Down while hovering a column (documented IsKeyDown path).
+    if gin.key_pressed(VK_PRIOR) then
+        scroll[scroll_key] = scroll[scroll_key] - PAGE_STEP
+        clamp_scroll(scroll_key, content_h, h)
+        return
+    end
+    if gin.key_pressed(VK_NEXT) then
+        scroll[scroll_key] = scroll[scroll_key] + PAGE_STEP
+        clamp_scroll(scroll_key, content_h, h)
+        return
+    end
+
+    -- Fallback: edge hover (only when wheel isn't available / not moving).
     if gin.my < y + SCROLL_EDGE then
         scroll[scroll_key] = scroll[scroll_key] - SCROLL_SPEED
         clamp_scroll(scroll_key, content_h, h)
@@ -23201,6 +25420,8 @@ M.FEATURE_ORDER = {
     "features.radar.waypoints",
     "features.movement.exploits",
     "features.movement.desync",
+    "features.movement.anti_aim",
+    "features.movement.fake_duck",
     "features.movement.fling",
     "features.combat.perfect_farm",
     "features.utility.mod_checker",
@@ -23424,6 +25645,8 @@ local ok, err = pcall(function()
 
     April.require("core.movement_ctrl").install()
     April.require("features.movement.fling").install()
+    April.require("features.movement.anti_aim").install()
+    April.require("features.movement.fake_duck").install()
 
     April._init_ok = true
     print("[April] v" .. tostring(April.version) .. " — custom UI (INSERT to toggle)")

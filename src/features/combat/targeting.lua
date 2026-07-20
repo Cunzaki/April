@@ -118,6 +118,36 @@ function M.bone_name(prefix)
     return combat_menu.bone_from_index(idx)
 end
 
+-- Fallen bow/crossbow aim uses torso for ballistics even when the desired
+-- hit result is head — aiming head with full drop prediction shoots too high.
+-- Extra drop only for Wooden Bow (not Crossbow).
+local WOODEN_BOW_AIM_Y_NUDGE = -0.22
+
+local function is_wooden_bow(weapon_name)
+    if not weapon_name then return false end
+    local n = weapon_name:lower()
+    return n:find("wooden bow", 1, true) ~= nil
+end
+
+function M.effective_aim_bone(bone, weapon_name)
+    bone = bone or "Head"
+    if bone == "Head" and weapons.is_bow_weapon_name(weapon_name) then
+        return "UpperTorso"
+    end
+    return bone
+end
+
+function M.bow_aim_nudge(point, weapon_name)
+    if not point or not is_wooden_bow(weapon_name) then
+        return point
+    end
+    return {
+        x = point.x,
+        y = point.y + WOODEN_BOW_AIM_Y_NUDGE,
+        z = point.z,
+    }
+end
+
 function M.target_priority_crosshair(prefix)
     local idx = settings.num(prefix .. "target_type", 0)
     return idx == 0
@@ -320,8 +350,11 @@ end
 
 function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
     bone = bone or M.bone_name(prefix)
+    local weapon = weapons.cached_held_ranged()
+    bone = M.effective_aim_bone(bone, weapon)
     local base = M.resolve_bone_world(target, bone, cx, cy)
     if not base then return nil end
+    base = M.bow_aim_nudge(base, weapon)
 
     if use_prediction == false then
         return base
@@ -330,7 +363,7 @@ function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
     origin = origin or combat_origin.get_fire_origin()
     if not origin then return base end
 
-    return M.predict_point(origin, base, target, weapons.cached_held_ranged())
+    return M.predict_point(origin, base, target, weapon)
 end
 
 function M.is_target_valid(target, prefix, cx, cy, fov_px, opts)
@@ -340,7 +373,9 @@ function M.is_target_valid(target, prefix, cx, cy, fov_px, opts)
     if not M.within_max_distance(target, origin, prefix) then return false end
 
     local bone = M.bone_name(prefix)
-    local base = M.resolve_bone_world(target, bone == "Closest" and "Head" or bone, cx, cy)
+    if bone == "Closest" then bone = "Head" end
+    bone = M.effective_aim_bone(bone, weapons.cached_held_ranged())
+    local base = M.resolve_bone_world(target, bone, cx, cy)
     if not base then return false end
 
     if not M.passes_filters(target, prefix, base, origin, opts) then return false end
@@ -396,6 +431,7 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
     opts = opts or {}
     local bone = M.bone_name(prefix)
     local screen_bone = bone == "Closest" and "Head" or bone
+    screen_bone = M.effective_aim_bone(screen_bone, weapons.cached_held_ranged())
     local use_fov = opts.force_crosshair_priority or M.target_priority_crosshair(prefix)
     local best, best_score = nil, use_fov and fov_px or math.huge
     local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()

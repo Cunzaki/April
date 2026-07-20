@@ -98,12 +98,13 @@ function M.resolve_track(target, prefix, cx, cy)
     local camera = silent_ray.get_camera_origin()
     if not camera then return nil, nil, OFF_INFO end
 
+    local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
     local bone = targeting.bone_name(prefix)
+    -- Bows/crossbows: Head selection aims UpperTorso (game ballistics rule).
+    bone = targeting.effective_aim_bone(bone, weapon)
     local hitpart = targeting.resolve_bone_world(target, bone, cx, cy)
     if not hitpart then return nil, nil, OFF_INFO end
-    local center = bullet_tp_ray.target_center(hitpart, bone) or hitpart
-
-    local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
+    hitpart = targeting.bow_aim_nudge(hitpart, weapon)
     local muzzle = fire_origin(camera)
     local body = combat_origin.get_server_origin()
 
@@ -122,27 +123,33 @@ function M.resolve_track(target, prefix, cx, cy)
             muzzle = muzzle,
         })
         if tp and tp.origin and tp.aim then
-            return apply_ray_aim(tp.origin, tp.aim, tp.hitpart or center, weapon, "tp", manip_extra, tp)
+            -- Force aim/hitpart to the selected bone (TP only moves spawn origin).
+            return apply_ray_aim(tp.origin, hitpart, hitpart, weapon, "tp", manip_extra, {
+                tp_path = bullet_tp_ray.build_path(tp.origin, hitpart, muzzle),
+                method = tp.method,
+                visual = tp.visual == true,
+            })
         end
     end
 
     if hitscan_on then
-        return apply_ray_aim(fire, center, center, weapon, "hitscan", manip_extra)
+        return apply_ray_aim(fire, hitpart, hitpart, weapon, "hitscan", manip_extra)
     end
 
     if manip_extra.state == "ready" and manip_fire then
-        return apply_ray_aim(manip_fire, center, center, weapon, "ready", manip_extra, {
-            tp_path = bullet_tp_ray.build_path(manip_fire, center, muzzle),
+        return apply_ray_aim(manip_fire, hitpart, hitpart, weapon, "ready", manip_extra, {
+            tp_path = bullet_tp_ray.build_path(manip_fire, hitpart, muzzle),
             method = "Manip",
             visual = false,
         })
     end
 
+    -- Curve/arch is visual + drop metadata; silent track still aims at hitpart.
     if manip_extra.state == "direct" then
-        return apply_drop_aim(muzzle, center, weapon, "direct", manip_extra)
+        return apply_drop_aim(muzzle, hitpart, weapon, "direct", manip_extra)
     end
 
-    return apply_drop_aim(muzzle, center, weapon, "curve", manip_extra)
+    return apply_drop_aim(muzzle, hitpart, weapon, "curve", manip_extra)
 end
 
 return M

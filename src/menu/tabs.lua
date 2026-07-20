@@ -23,6 +23,8 @@ M.FEATURE_ORDER = {
     "features.radar.waypoints",
     "features.movement.exploits",
     "features.movement.desync",
+    "features.movement.anti_aim",
+    "features.movement.fake_duck",
     "features.movement.fling",
     "features.combat.perfect_farm",
     "features.utility.mod_checker",

@@ -44,6 +44,8 @@ const ORDER = [
   "core/manip_math.lua",
   "core/desync_vis.lua",
   "core/packet_desync.lua",
+  "core/angle_util.lua",
+  "core/camera_util.lua",
   "core/cframe_move.lua",
   "core/runservice.lua",
   "core/misc_gate.lua",
@@ -73,6 +75,8 @@ const ORDER = [
   "game/npcs.lua",
   "game/turret_stats.lua",
   "game/esp_maps.lua",
+  "game/fallen_anims.lua",
+  "core/anim_player.lua",
   "game/esp_scan.lua",
   "game/toolinfo_weapon_mods.lua",
   "features/combat/silent_whitelist.lua",
@@ -98,6 +102,8 @@ const ORDER = [
   "features/movement/exploits.lua",
   "features/movement/fling.lua",
   "features/movement/desync.lua",
+  "features/movement/anti_aim.lua",
+  "features/movement/fake_duck.lua",
   "features/radar/waypoints.lua",
   "features/radar/tactical_map.lua",
   "features/utility/keybind_viewer.lua",
@@ -125,7 +131,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.85.36",
+    version = "3.88.15",
     debug = false,
     _mods = {},
     bundled = true,
@@ -165,6 +171,8 @@ local ok, err = pcall(function()
 
     April.require("core.movement_ctrl").install()
     April.require("features.movement.fling").install()
+    April.require("features.movement.anti_aim").install()
+    April.require("features.movement.fake_duck").install()
 
     April._init_ok = true
     print("[April] v" .. tostring(April.version) .. " — custom UI (INSERT to toggle)")

@@ -13,6 +13,7 @@
     "sync-assets:slow": "node scripts/sync-assets.mjs --slow",
     "assets": "node scripts/sync-assets.mjs",
     "dump": "node scripts/dump-rbxlx.mjs",
-    "merge-dump": "node scripts/merge-dump.mjs"
+    "merge-dump": "node scripts/merge-dump.mjs",
+    "webradar": "node web-radar/server.mjs"
   }
 }
