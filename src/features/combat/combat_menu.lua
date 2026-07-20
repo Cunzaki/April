@@ -103,6 +103,12 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     }, { false }, { parent = parent_id })
     menu.add_slider_int(T, G, p .. "hit_chance", "Hit Chance %", 1, 100, 100, { parent = parent_id })
     menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 150, { parent = parent_id })
+
+    menu_util.section(T, G, "Bullet")
+    if menu and menu.add_label then
+        pcall(menu.add_label, T, G, "These options can cause invalids.")
+        pcall(menu.add_label, T, G, "Server may reject shots - use carefully.")
+    end
     menu.add_checkbox(T, G, p .. "hitscan", "Hitscan", false, { parent = parent_id })
 
     menu_util.section(T, G, "Bullet TP")

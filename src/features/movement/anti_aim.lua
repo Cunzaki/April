@@ -1,5 +1,5 @@
 --[[
-  Anti-Aim — continuous body yaw (AutoRotate off + CFrame / angular velocity).
+  Anti-Aim - continuous body yaw (AutoRotate off + CFrame / angular velocity).
 
   Same drive as the working yaw AA; pauses while firing (LMB) and snaps
   back to camera yaw so flashpoint / shots stay valid.

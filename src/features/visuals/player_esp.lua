@@ -384,7 +384,7 @@ function M.draw()
         local cx = bounds.x + bounds.w * 0.5
         local box_ok = bounds.w >= 4 and bounds.h >= 8
 
-        -- Top: name + weapon only (never clan — clan is on the right with tags)
+        -- Top: name + weapon only (never clan - clan is on the right with tags)
         local top = {}
         if show_name then
             top[#top + 1] = { text = p.name or "?", col = name_col }

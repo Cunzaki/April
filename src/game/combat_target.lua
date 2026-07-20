@@ -1,5 +1,5 @@
 -- Shared combat target for overlay / tracers / hitmarkers.
--- Does not require a weapon out — uses aimbot scoped target or crosshair FOV.
+-- Does not require a weapon out - uses aimbot scoped target or crosshair FOV.
 
 local settings = April.require("core.settings")
 local player_state = April.require("game.player_state")

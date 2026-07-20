@@ -16,7 +16,7 @@ local function pct_to_neg_mult(pct)
 end
 
 -- Items dump: Muzzle Boost FireRateMult = 0.12. Game delay *= 1 - FireRateMult.
--- Menu slider 1.0–3.0 maps to 0.12–0.99 (works without muzzle attachment).
+-- Menu slider 1.0-3.0 maps to 0.12-0.99 (works without muzzle attachment).
 function M.fire_rate_mult(slider)
     slider = math.max(1, math.min(3, tonumber(slider) or 1.5))
     local t = (slider - 1) / 2
@@ -60,7 +60,7 @@ end
 
 -- Neutral attachment-style mults (game uses 1 + Mult for speed/range/sway/spread/recoil,
 -- and delay *= 1 - FireRateMult). Only used when disabling gun mods / clearing apply.
--- Do NOT merge these into active apply payloads — that stomps attachment FireRateMult etc.
+-- Do NOT merge these into active apply payloads - that stomps attachment FireRateMult etc.
 function M.build_reset_mods()
     return {
         RecoilMult = 0,
@@ -106,7 +106,7 @@ function M.build_mods_for_weapon(name)
     return M.build_mods_from_profile(profile)
 end
 
--- Live menu toggles/sliders — no saved profile required.
+-- Live menu toggles/sliders - no saved profile required.
 function M.editor_profile()
     return store.read_editor()
 end

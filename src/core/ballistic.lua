@@ -70,7 +70,7 @@ local function solve_flight_time(dx, dy, dz, speed, g)
     local horiz2 = dx * dx + dz * dz
 
     -- |offset/t + (0, 0.5*g*t, 0)|^2 = s^2
-    -- → (g^2/4)*t^4 + (g*dy - s^2)*t^2 + (horiz2+dy^2) = 0
+    -- -> (g^2/4)*t^4 + (g*dy - s^2)*t^2 + (horiz2+dy^2) = 0
     local a = (g * g) * 0.25
     local b = g * dy - s2
     local c = horiz2 + dy * dy
@@ -113,7 +113,7 @@ local function solve_flight_time(dx, dy, dz, speed, g)
 end
 
 -- Ballistic arc that lands exactly on hitpart (visual / debug path).
--- launch_dir / aim_far describe the physical launch under gravity — do NOT feed
+-- launch_dir / aim_far describe the physical launch under gravity - do NOT feed
 -- aim_far into silent track_silent_target (hook projectiles are near-hitscan).
 function M.curve_to_hit(origin, hit, bullet_speed, bullet_gravity, steps)
     if not origin or not hit then return nil end
@@ -142,7 +142,7 @@ function M.curve_to_hit(origin, hit, bullet_speed, bullet_gravity, steps)
     local vy = (dy + 0.5 * g * flight * flight) / flight
     local vz = dz / flight
 
-    -- Game clamps to Direction.Unit * Speed — normalize then scale.
+    -- Game clamps to Direction.Unit * Speed - normalize then scale.
     local lm = math.sqrt(vx * vx + vy * vy + vz * vz)
     local launch_dir
     if lm > 0.001 then

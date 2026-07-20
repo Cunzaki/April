@@ -9,10 +9,10 @@ function M.init()
         return false
     end
     if not (utility and utility.get_mouse_pos) and not (input and input.is_key_down) then
-        print("[April UI] input/utility mouse APIs missing — UI may not be interactive")
+        print("[April UI] input/utility mouse APIs missing - UI may not be interactive")
     end
     custom_menu.init()
-    print("[April UI] Gamesense placeholder ready — INSERT to toggle")
+    print("[April UI] Gamesense placeholder ready - INSERT to toggle")
     return true
 end
 

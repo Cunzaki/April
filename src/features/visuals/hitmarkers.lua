@@ -66,7 +66,7 @@ local function watch_game_hitmarker()
     local vis = env.safe_call(function() return hm.Visible end)
     if vis and not hitmarker_was then
         local rot = env.safe_call(function() return hm.Rotation end)
-        -- Game uses red children for headshots; Rotation alone isn't enough — treat as body.
+        -- Game uses red children for headshots; Rotation alone isn't enough - treat as body.
         spawn(false)
         local ok, tracers = pcall(function()
             return April.require("features.visuals.bullet_tracers")

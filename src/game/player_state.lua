@@ -1,9 +1,9 @@
 -- Player ESP state from DataModel.Players.<Name> attributes.
 -- Vector: inst:get_attribute / get_attributes
---   string  → string
---   bool    → boolean
---   Color3  → table { r, g, b }  (0-1, sometimes 0-255)
--- ClanTag string can also appear on Character.NameTag — that is NOT enough for
+--   string  -> string
+--   bool    -> boolean
+--   Color3  -> table { r, g, b }  (0-1, sometimes 0-255)
+-- ClanTag string can also appear on Character.NameTag - that is NOT enough for
 -- VIP/SafeZone/ClanColor; those only exist on the Player instance.
 
 local env = April.require("core.env")
@@ -62,7 +62,7 @@ local function find_humanoid(char)
     return nil
 end
 
--- Do NOT gate on utility.is_valid — it can reject valid Players instances
+-- Do NOT gate on utility.is_valid - it can reject valid Players instances
 -- while find_first_child still returns a usable handle for get_attribute.
 local function read_attr(inst, key)
     if not inst or not key then return nil end
@@ -133,7 +133,7 @@ local function normalize_rgb(r, g, b)
     return { r, g, b, 1 }
 end
 
--- Vector docs: Color3 attrs → {r,g,b}; GuiObject TextColor3 → {R,G,B} (often 0-255).
+-- Vector docs: Color3 attrs -> {r,g,b}; GuiObject TextColor3 -> {R,G,B} (often 0-255).
 local function parse_color3(c)
     if c == nil or c == false then return nil end
 
@@ -518,7 +518,7 @@ local function build_snap(player)
 
     local pa = read_player_attrs(pl)
 
-    -- NameTag only fills missing ClanTag string — never invents VIP/color.
+    -- NameTag only fills missing ClanTag string - never invents VIP/color.
     if not pa.clan_tag then
         pa.clan_tag = nametag_clan_tag_only(char)
     end

@@ -103,6 +103,8 @@ local MENU_KEYS = {
     "april_antiaim_jitter_step", "april_antiaim_jitter_ms",
     "april_fakeduck_enabled", "april_fakeduck_enabled_mode",
     "april_fakeduck_height",
+    "april_fakeduck_spam", "april_fakeduck_spam_mode",
+    "april_fakeduck_spam_min", "april_fakeduck_spam_max", "april_fakeduck_spam_ms",
     "april_bullet_manip_enabled", "april_bullet_manip_enabled_mode", "april_bullet_manip_range", "april_bullet_manip_speed",
     "april_bullet_manip_debug", "april_bullet_manip_console", "april_bullet_manip_vis",
     "april_bullet_manip_vis_style", "april_bullet_manip_vis_size",

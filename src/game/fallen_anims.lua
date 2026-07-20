@@ -1,4 +1,4 @@
--- Auto-generated from dump/catalog/animations.tsv — all unique animation asset IDs.
+-- Auto-generated from dump/catalog/animations.tsv - all unique animation asset IDs.
 -- Playback must match Fallen: Humanoid:LoadAnimation(anim):Play() with default speed/weight.
 
 local M = {}

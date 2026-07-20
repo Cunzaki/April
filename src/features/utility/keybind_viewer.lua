@@ -124,7 +124,7 @@ function M.draw()
 
         local right = row.key
         if row.show_mode then
-            right = right .. " · " .. row.mode
+            right = right .. " - " .. row.mode
         end
         local tw = theme.text_w(right, 11)
         draw_util.text(x + PANEL_W - pad - tw, ry, right, key_col, 11)

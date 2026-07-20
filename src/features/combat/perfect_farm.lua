@@ -1,5 +1,5 @@
 --[[
-  Farm helper — silent or camera aim at gather hit parts.
+  Farm helper - silent or camera aim at gather hit parts.
   Melee uses camera / mouse unit-ray origin (RaycastUtil.MouseRaycast).
 ]]
 
@@ -252,7 +252,7 @@ function M.update(_dt)
         if silent_ray.track(origin, aim, SHOOT_VK, aim) then
             M._tracking = true
         else
-            debug.error_once("farm:silent", "Silent farm hook unavailable — toggle Silent Farm off for camera aim")
+            debug.error_once("farm:silent", "Silent farm hook unavailable - toggle Silent Farm off for camera aim")
             stop_silent()
         end
         return

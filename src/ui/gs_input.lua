@@ -1,4 +1,4 @@
--- Mouse / key helpers. Raw cursor only — no windowed offset correction.
+-- Mouse / key helpers. Raw cursor only - no windowed offset correction.
 --
 -- Wheel: Vector docs only expose utility.mouse_scroll() (inject). There is no
 -- documented reader. We probe every known path and accumulate into M.wheel;
@@ -201,7 +201,7 @@ end
 
 local function ensure_scroll_hooks()
     if M._scroll_ready then return end
-    -- Retry a few frames — LocalPlayer / services may not exist at load.
+    -- Retry a few frames - LocalPlayer / services may not exist at load.
     M._scroll_hook_tries = (M._scroll_hook_tries or 0) + 1
     if M._scroll_hook_tries > 120 then
         M._scroll_ready = true

@@ -1,4 +1,4 @@
--- Soft movement helpers. Prefer velocity writes on HRP only — avoid position
+-- Soft movement helpers. Prefer velocity writes on HRP only - avoid position
 -- teleports, limb velocity spam, and insane pulse values (those ban).
 
 local env = April.require("core.env")

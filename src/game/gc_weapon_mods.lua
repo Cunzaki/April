@@ -154,8 +154,8 @@ function M.apply_weapon(mods, opts)
 
     if warm <= 0 then
         M._fail_streak = M._fail_streak + 1
-        debug.warn_once("gun_mods:nodes", "GC still warming — equip a gun, enable a mod option, keep master on")
-        return false, 0, "GC warming — equip gun and wait a moment"
+        debug.warn_once("gun_mods:nodes", "GC still warming - equip a gun, enable a mod option, keep master on")
+        return false, 0, "GC warming - equip gun and wait a moment"
     end
 
     local patched = 0
@@ -185,7 +185,7 @@ function M.apply_weapon(mods, opts)
     if M._fail_streak == 1 then
         M._last_node_count = 0
     end
-    return false, 0, "GC warming — equip gun and wait a moment"
+    return false, 0, "GC warming - equip gun and wait a moment"
 end
 
 function M.apply(mods)

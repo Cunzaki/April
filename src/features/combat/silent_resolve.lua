@@ -54,7 +54,7 @@ end
 
 local function apply_drop_aim(origin, hitpart, weapon, state, extra)
     local muzzle = origin or combat_origin.get_muzzle_origin()
-    -- Visual drop arc only (path ends on hitpart). Silent API aims at hitpart —
+    -- Visual drop arc only (path ends on hitpart). Silent API aims at hitpart -
     -- hook projectiles are effectively hitscan-speed, so aim-up misses.
     local curve = ballistic.curve_for_weapon(muzzle, hitpart, weapon, 24)
     local info = {
@@ -99,12 +99,10 @@ function M.resolve_track(target, prefix, cx, cy)
     if not camera then return nil, nil, OFF_INFO end
 
     local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
+    -- Silent aim always uses the selected hitpart (no bow torso remap - that's aimbot-only).
     local bone = targeting.bone_name(prefix)
-    -- Bows/crossbows: Head selection aims UpperTorso (game ballistics rule).
-    bone = targeting.effective_aim_bone(bone, weapon)
     local hitpart = targeting.resolve_bone_world(target, bone, cx, cy)
     if not hitpart then return nil, nil, OFF_INFO end
-    hitpart = targeting.bow_aim_nudge(hitpart, weapon)
     local muzzle = fire_origin(camera)
     local body = combat_origin.get_server_origin()
 

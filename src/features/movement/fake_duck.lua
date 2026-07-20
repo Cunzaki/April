@@ -1,8 +1,10 @@
 --[[
-  Fake Duck — look crouched (IsCrouch / hip) while moving at stand/sprint speed.
+  Fake Duck - look crouched (IsCrouch / hip) while moving at stand/sprint speed.
 
   Fallen StateController sets WalkSpeed=6.5 when crouched. Writing WalkSpeed
-  kicks — so we leave WalkSpeed alone and boost HRP velocity to walk(11)/sprint(18).
+  kicks - so we leave WalkSpeed alone and boost HRP velocity to walk(11)/sprint(18).
+
+  Optional height spam: flip HipHeight between min/max on an interval.
 ]]
 
 local settings = April.require("core.settings")
@@ -16,10 +18,19 @@ local M = {}
 
 local P = "april_fakeduck_enabled"
 local P_HEIGHT = "april_fakeduck_height"
+local P_SPAM = "april_fakeduck_spam"
+local P_SPAM_MIN = "april_fakeduck_spam_min"
+local P_SPAM_MAX = "april_fakeduck_spam_max"
+local P_SPAM_MS = "april_fakeduck_spam_ms"
+local P_SPAM_MODE = "april_fakeduck_spam_mode"
+
+local SPAM_MODES = { "Alternating", "Random" }
 
 -- Fallen stand hip = 1.6, normal crouch = 1.1. Lower values push further down.
 local DEFAULT_DUCK_HIP = 1.1
 local STAND_HIP = 1.6
+local HIP_MIN = 0.01
+local HIP_MAX = 1.5
 local SPEED_WALK = 11
 local SPEED_SPRINT = 18
 local SPEED_AIM_MUL = 0.8
@@ -33,10 +44,20 @@ local state = {
     viewmodel = nil,
     root = nil,
     hum = nil,
+    spam_t = 0,
+    spam_hi = false,
+    spam_val = DEFAULT_DUCK_HIP,
 }
 
 local function active()
     return settings.enabled(P)
+end
+
+local function clamp_hip(h)
+    h = tonumber(h) or DEFAULT_DUCK_HIP
+    if h > HIP_MAX then h = HIP_MAX end
+    if h < HIP_MIN then h = HIP_MIN end
+    return h
 end
 
 local function find_child(parent, name)
@@ -88,12 +109,43 @@ local function set_hip_height(hum, value)
     end
 end
 
-local function duck_hip()
-    local h = settings.num(P_HEIGHT, DEFAULT_DUCK_HIP)
-    -- Sub-zero HipHeight is AC-flagged. Keep a tiny floor above 0.
-    if h > 1.5 then h = 1.5 end
-    if h < 0.01 then h = 0.01 end
-    return h
+local function static_duck_hip()
+    return clamp_hip(settings.num(P_HEIGHT, DEFAULT_DUCK_HIP))
+end
+
+local function spam_range()
+    local lo = clamp_hip(settings.num(P_SPAM_MIN, HIP_MIN))
+    local hi = clamp_hip(settings.num(P_SPAM_MAX, HIP_MAX))
+    if lo > hi then
+        lo, hi = hi, lo
+    end
+    return lo, hi
+end
+
+local function duck_hip(dt)
+    if not settings.bool(P_SPAM, false) then
+        state.spam_t = 0
+        return static_duck_hip()
+    end
+
+    local lo, hi = spam_range()
+    local interval = math.max(0.02, settings.num(P_SPAM_MS, 80) / 1000)
+    local mode = settings.combo_index(P_SPAM_MODE, SPAM_MODES, 0)
+
+    state.spam_t = (state.spam_t or 0) + (dt or 0.016)
+    if state.spam_t >= interval then
+        state.spam_t = 0
+        if mode == 1 then
+            -- Random value in [lo, hi]
+            state.spam_val = lo + math.random() * (hi - lo)
+        else
+            -- Alternating endpoints
+            state.spam_hi = not state.spam_hi
+            state.spam_val = state.spam_hi and hi or lo
+        end
+    end
+
+    return clamp_hip(state.spam_val or lo)
 end
 
 -- Slightly squash HRP as we go lower than normal crouch.
@@ -102,7 +154,6 @@ local function set_root_size(root, crouch, hip)
     local y = 2.5
     if crouch then
         hip = hip or DEFAULT_DUCK_HIP
-        -- 1.1 → 2.1, lower hips → smaller Y (floor ~1.4)
         y = 2.1 - (DEFAULT_DUCK_HIP - hip) * 0.35
         if y < 1.4 then y = 1.4 end
         if y > 2.4 then y = 2.4 end
@@ -149,7 +200,6 @@ local function desired_speed()
     return base
 end
 
--- Scale / drive horizontal velocity to stand/sprint speed. Never touch WalkSpeed.
 local function boost_velocity(root, target)
     if not root or not target or target <= 0 then return end
 
@@ -162,7 +212,6 @@ local function boost_velocity(root, target)
         return
     end
 
-    -- No WASD: if humanoid still sliding, stretch existing horiz vel up to target.
     local hmag = math.sqrt(vx * vx + vz * vz)
     if hmag < 1.0 then return end
     if hmag >= target * 0.95 then return end
@@ -170,14 +219,14 @@ local function boost_velocity(root, target)
     move.set_velocity(root, vx * s, vy, vz * s)
 end
 
-local function apply_duck()
+local function apply_duck(dt)
     if not resolve_parts() then return end
 
     if state.state_ctrl then
         set_attr(state.state_ctrl, "IsCrouch", true)
     end
 
-    local hip = duck_hip()
+    local hip = duck_hip(dt)
     set_hip_height(state.hum, hip)
     set_root_size(state.root, true, hip)
 
@@ -191,9 +240,11 @@ local function restore_duck()
     end
     set_hip_height(state.hum, STAND_HIP)
     set_root_size(state.root, false)
+    state.spam_t = 0
+    state.spam_hi = false
 end
 
-local function on_sim(_dt)
+local function on_sim(dt)
     if not misc_gate.movement_allowed() then return end
     local on = active()
 
@@ -203,7 +254,7 @@ local function on_sim(_dt)
     state.was_active = on
 
     if not on then return end
-    apply_duck()
+    apply_duck(dt or 0.016)
 end
 
 local function ensure_hooks()
@@ -216,21 +267,33 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
+    local spam_root = menu_util.parent(P_SPAM)
 
     menu_util.section(T, G.MISC, "Movement")
     menu_util.register_keybind(T, G.MISC, P, "Fake Duck", false)
-    menu.add_slider_float(T, G.MISC, P_HEIGHT, "Duck Height", 0.01, 1.5, DEFAULT_DUCK_HIP, "%.2f", root)
-    menu_util.bind_children(P, { P_HEIGHT })
+    menu.add_slider_float(T, G.MISC, P_HEIGHT, "Duck Height", HIP_MIN, HIP_MAX, DEFAULT_DUCK_HIP, "%.2f", root)
+    menu.add_checkbox(T, G.MISC, P_SPAM, "Spam Height", false, root)
+    menu.add_combo(T, G.MISC, P_SPAM_MODE, "Spam Mode", SPAM_MODES, 0, spam_root)
+    menu.add_slider_float(T, G.MISC, P_SPAM_MIN, "Spam Min", HIP_MIN, HIP_MAX, HIP_MIN, "%.2f", spam_root)
+    menu.add_slider_float(T, G.MISC, P_SPAM_MAX, "Spam Max", HIP_MIN, HIP_MAX, HIP_MAX, "%.2f", spam_root)
+    menu.add_slider_int(T, G.MISC, P_SPAM_MS, "Spam Interval (ms)", 20, 400, 80, spam_root)
+
+    menu_util.bind_children(P, {
+        P_HEIGHT, P_SPAM, P_SPAM_MODE, P_SPAM_MIN, P_SPAM_MAX, P_SPAM_MS,
+    })
+    menu_util.bind_children(P_SPAM, {
+        P_SPAM_MODE, P_SPAM_MIN, P_SPAM_MAX, P_SPAM_MS,
+    })
 end
 
 function M.install()
     ensure_hooks()
 end
 
-function M.update(_dt)
+function M.update(dt)
     ensure_hooks()
     if not runservice.uses_heartbeat() and misc_gate.movement_allowed() then
-        on_sim(_dt)
+        on_sim(dt)
     elseif state.was_active and not active() then
         restore_duck()
         state.was_active = false

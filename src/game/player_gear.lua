@@ -334,7 +334,7 @@ local function find_attachments_folder(parent)
     end)
 end
 
--- Fallen Ultimate pattern: Attachments:GetChildren() → attachment item names only.
+-- Fallen Ultimate pattern: Attachments:GetChildren() -> attachment item names only.
 -- Do not recurse into attachment model internals (Vignette, Sight mesh parts, etc.).
 local function scan_weapon_attachments_folder(folder, out, seen, depth)
     depth = depth or 0

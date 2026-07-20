@@ -18,7 +18,7 @@ M.METHODS = {
 }
 
 -- Kept for TP spawn sampling around the part. Aim always uses the raw hitpart
--- from silent_resolve — do not apply Y offsets that pull Head → UpperTorso.
+-- from silent_resolve - do not apply Y offsets that pull Head -> UpperTorso.
 local BONE_SPAWN_Y = {
     Head = 0,
     UpperTorso = 0,

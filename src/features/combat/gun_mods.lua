@@ -24,7 +24,7 @@ M._was_in_match = false
 M._gc_redo_at = 0
 M._notify_next = false
 M._last_held_apply = nil
-M._held_display = "—"
+M._held_display = "-"
 M._combo_registered = false
 M._combo_ctx = nil
 M._had_applied_mods = false
@@ -114,7 +114,7 @@ end
 
 local function sync_held_display(held)
     held = held or profiles.held_weapon_name()
-    local text = held or "—"
+    local text = held or "-"
     if held then
         if store.editor_has_active_mods() then
             text = held .. (profiles.is_global_mode() and " (global live)" or " (live)")
@@ -178,7 +178,7 @@ function M.register_menu()
     menu_util.register_keybind(T, G.GUN_MODS, P, "Enable Gun Mods", false)
 
     menu_util.section(T, G.GUN_MODS, "Apply")
-    menu_util.input(T, G.GUN_MODS, HELD_ID, "Held Weapon", "—")
+    menu_util.input(T, G.GUN_MODS, HELD_ID, "Held Weapon", "-")
     menu.add_combo(T, G.GUN_MODS, profiles.MODE_ID, "Apply Mode", profiles.MODES, 0, root)
 
     M._combo_ctx = { T = T, G = G.GUN_MODS, root = root }
@@ -296,7 +296,7 @@ function M.register_menu()
     for _, id in ipairs(editor_ids) do
         settings.on_change(id, function()
             if settings.enabled(P) then
-                -- Debounce slider spam — live editor applies without a saved profile
+                -- Debounce slider spam - live editor applies without a saved profile
                 schedule_apply(280)
             end
         end)
@@ -464,7 +464,7 @@ function M.update(_dt)
             M._force_apply = true
             M._defer_until = now
             M._retry_until = now + RETRY_MAX_MS
-            notify.info("Re-applying gun mods after session change…", 2500)
+            notify.info("Re-applying gun mods after session change...", 2500)
         end
     end
 
@@ -473,7 +473,7 @@ function M.update(_dt)
     if M._retry_until > 0 and now > M._retry_until then
         M._apply_dirty = false
         M._force_apply = false
-        notify.warning("Gun mods: could not patch — equip gun in match and switch weapons", 5000)
+        notify.warning("Gun mods: could not patch - equip gun in match and switch weapons", 5000)
         return
     end
 

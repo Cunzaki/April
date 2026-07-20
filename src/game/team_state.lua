@@ -1,5 +1,5 @@
 -- Official Fallen party teams (TeamNavigationController) + Roblox Team fallback.
--- Dump: CharacterScripts.TeamNavigationController — InTeam / CanInvite attrs,
+-- Dump: CharacterScripts.TeamNavigationController - InTeam / CanInvite attrs,
 -- FetchTeam returns userId list, teammates get TeamHighlight on character.
 
 local env = April.require("core.env")
@@ -90,7 +90,7 @@ local function members_from_teamlist()
     local list_frame = team and find_child(team, "TeamList")
     if not list_frame then return nil end
 
-    -- Resolve Member* TextLabels → userIds via entity name match.
+    -- Resolve Member* TextLabels -> userIds via entity name match.
     local labels = {}
     for _, child in ipairs(env.safe_call(function()
         if list_frame.get_children then return list_frame:get_children() end

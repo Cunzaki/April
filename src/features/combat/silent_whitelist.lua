@@ -109,7 +109,7 @@ function M.toggle_player(player, prefix)
     if set[uid] then
         set[uid] = nil
         added = false
-        notify.warning("WL − " .. name, 2500)
+        notify.warning("WL - " .. name, 2500)
     else
         set[uid] = true
         added = true

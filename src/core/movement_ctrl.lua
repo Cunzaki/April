@@ -1,4 +1,4 @@
--- Fly / Slowfall — HRP velocity on RunService Heartbeat (falls back to on_frame).
+-- Fly / Slowfall - HRP velocity on RunService Heartbeat (falls back to on_frame).
 
 local settings = April.require("core.settings")
 local env = April.require("core.env")
@@ -16,7 +16,7 @@ local fly_noclip = false
 local tracked_char_id = nil
 local last_fly_zero_ms = 0
 
--- Slider 1–20 studs/s
+-- Slider 1-20 studs/s
 local MIN_FLY_SPEED = 1
 local MAX_FLY_SPEED = 20
 local GROUND_DIST = 4.5

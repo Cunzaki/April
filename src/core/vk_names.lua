@@ -1,4 +1,4 @@
--- Shared VK → label map (matches custom UI keybind chips).
+-- Shared VK -> label map (matches custom UI keybind chips).
 local M = {}
 
 M.NAMES = {

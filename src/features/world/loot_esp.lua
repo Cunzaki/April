@@ -74,7 +74,7 @@ local function collect_loot_chams(applied)
             if (dx * dx + dy * dy + dz * dz) > range_sq then goto continue end
         end
 
-        -- One visual part per entry (instance Address) — not every MeshPart in the world.
+        -- One visual part per entry (instance Address) - not every MeshPart in the world.
         gpu_chams.cham_entry_part(entry, applied)
         ::continue::
     end

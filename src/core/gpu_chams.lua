@@ -3,8 +3,8 @@
 -- front (owner.applied) = addresses currently stamped by the engine
 -- back  (fresh collect) = addresses that SHOULD be chammed this tick (in-range only)
 --
--- If back == front → no work (or only apply brand-new addrs).
--- If any addr left back → RevertChams + re-apply ONLY back (all active owners).
+-- If back == front -> no work (or only apply brand-new addrs).
+-- If any addr left back -> RevertChams + re-apply ONLY back (all active owners).
 -- That is the "double buffer": never leave stale out-of-range instances chammed.
 --
 -- Range is fail-closed: without a local player position, collect applies nothing.
@@ -390,7 +390,7 @@ function M.sync_owner(id, force)
     end
 
     if has_removed(front, back) or next(front) == nil then
-        -- Something left range / first populate after clear → swap buffers via rebuild.
+        -- Something left range / first populate after clear -> swap buffers via rebuild.
         -- Rebuild reapplies ALL active owners from scratch (correct multi-owner state).
         owner.applied = {}
         if not M.rebuild_all() then

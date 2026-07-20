@@ -1,6 +1,6 @@
 --[[
   Gamesense-style custom menu for April.
-  INSERT toggles by default (rebindable in Config → Menu).
+  INSERT toggles by default (rebindable in Config -> Menu).
   Scroll: mouse wheel when Vector exposes a reader; else edge-hover (top/bottom of column).
 ]]
 

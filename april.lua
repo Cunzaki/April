@@ -1,12 +1,12 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-20T04:19:39.460Z
+    Built: 2026-07-20T04:41:03.943Z
     UI: custom Gamesense menu (INSERT) — Vector menu tabs disabled
 ]]
 
 April = {
-    version = "3.88.15",
+    version = "3.88.19",
     debug = false,
     _mods = {},
     bundled = true,
@@ -1521,7 +1521,7 @@ function M.health_bar_nice(x, y, h, hp, max_hp, bar_w)
 
     if draw.rect_filled then
         draw.rect_filled(x, y, bar_w, h, { 0, 0, 0, 0.55 }, 1)
-        -- green → yellow → red
+        -- green -> yellow -> red
         local r, g, b
         if pct > 0.5 then
             local t = (pct - 0.5) * 2
@@ -1613,7 +1613,7 @@ end)()
 
 -- ── core/vk_names.lua ──
 April._mods["core.vk_names"] = (function()
--- Shared VK → label map (matches custom UI keybind chips).
+-- Shared VK -> label map (matches custom UI keybind chips).
 local M = {}
 
 M.NAMES = {
@@ -2272,9 +2272,9 @@ end)()
 -- ── core/image_cache.lua ──
 April._mods["core.image_cache"] = (function()
 --[[
-    Vector on_frame pattern (stable v3.65–3.69):
+    Vector on_frame pattern (stable v3.65-3.69):
       handle = draw.load_image(url) once
-      draw.image(handle, x, y, w, h, 255, 255, 255, 255) every frame — no-ops until ready
+      draw.image(handle, x, y, w, h, 255, 255, 255, 255) every frame - no-ops until ready
     Do NOT gate on draw.image_loaded; that breaks gear icons on Vector.
 ]]
 
@@ -3135,8 +3135,8 @@ April._mods["core.gpu_chams"] = (function()
 -- front (owner.applied) = addresses currently stamped by the engine
 -- back  (fresh collect) = addresses that SHOULD be chammed this tick (in-range only)
 --
--- If back == front → no work (or only apply brand-new addrs).
--- If any addr left back → RevertChams + re-apply ONLY back (all active owners).
+-- If back == front -> no work (or only apply brand-new addrs).
+-- If any addr left back -> RevertChams + re-apply ONLY back (all active owners).
 -- That is the "double buffer": never leave stale out-of-range instances chammed.
 --
 -- Range is fail-closed: without a local player position, collect applies nothing.
@@ -3522,7 +3522,7 @@ function M.sync_owner(id, force)
     end
 
     if has_removed(front, back) or next(front) == nil then
-        -- Something left range / first populate after clear → swap buffers via rebuild.
+        -- Something left range / first populate after clear -> swap buffers via rebuild.
         -- Rebuild reapplies ALL active owners from scratch (correct multi-owner state).
         owner.applied = {}
         if not M.rebuild_all() then
@@ -4109,7 +4109,7 @@ local function solve_flight_time(dx, dy, dz, speed, g)
     local horiz2 = dx * dx + dz * dz
 
     -- |offset/t + (0, 0.5*g*t, 0)|^2 = s^2
-    -- → (g^2/4)*t^4 + (g*dy - s^2)*t^2 + (horiz2+dy^2) = 0
+    -- -> (g^2/4)*t^4 + (g*dy - s^2)*t^2 + (horiz2+dy^2) = 0
     local a = (g * g) * 0.25
     local b = g * dy - s2
     local c = horiz2 + dy * dy
@@ -4152,7 +4152,7 @@ local function solve_flight_time(dx, dy, dz, speed, g)
 end
 
 -- Ballistic arc that lands exactly on hitpart (visual / debug path).
--- launch_dir / aim_far describe the physical launch under gravity — do NOT feed
+-- launch_dir / aim_far describe the physical launch under gravity - do NOT feed
 -- aim_far into silent track_silent_target (hook projectiles are near-hitscan).
 function M.curve_to_hit(origin, hit, bullet_speed, bullet_gravity, steps)
     if not origin or not hit then return nil end
@@ -4181,7 +4181,7 @@ function M.curve_to_hit(origin, hit, bullet_speed, bullet_gravity, steps)
     local vy = (dy + 0.5 * g * flight * flight) / flight
     local vz = dz / flight
 
-    -- Game clamps to Direction.Unit * Speed — normalize then scale.
+    -- Game clamps to Direction.Unit * Speed - normalize then scale.
     local lm = math.sqrt(vx * vx + vy * vy + vz * vz)
     local launch_dir
     if lm > 0.001 then
@@ -4405,7 +4405,7 @@ function M.track(origin, aim_point, shoot_vk, hitpart)
 end
 
 -- Silent track straight to hitpart (API projectiles are near-hitscan speed).
--- Still builds a muzzle→hitpart drop curve for visuals / target line.
+-- Still builds a muzzle->hitpart drop curve for visuals / target line.
 function M.track_curve(origin, aim_point, weapon_name, shoot_vk, hitpart)
     origin = origin or M.get_camera_origin()
     if not origin or not aim_point then
@@ -4417,7 +4417,7 @@ function M.track_curve(origin, aim_point, weapon_name, shoot_vk, hitpart)
     local hit = hitpart or aim_point
     local curve = ballistic.curve_for_weapon(origin, hit, weapon_name, 24)
 
-    -- Never aim above the hitpart — direction is always origin → selected hitpart.
+    -- Never aim above the hitpart - direction is always origin -> selected hitpart.
     local ok = M.track(origin, hit, shoot_vk, hit)
     M._last_curve = curve
     M._last_target = { x = hit.x, y = hit.y, z = hit.z }
@@ -4815,7 +4815,7 @@ local active_count = 0
 function M.apply_movement_only()
     active_count = active_count + 1
     pcall(fflag_mem.refresh)
-    fflag_mem.set_int("S2PhysicsSenderRate", 0)W
+    fflag_mem.set_int("S2PhysicsSenderRate", 0)
     fflag_mem.set_int("PhysicsSenderMaxBandwidthBps", 0)
     fflag_mem.set_int("DataSenderRate", 60)
 end
@@ -5203,7 +5203,7 @@ end)()
 
 -- ── core/cframe_move.lua ──
 April._mods["core.cframe_move"] = (function()
--- Soft movement helpers. Prefer velocity writes on HRP only — avoid position
+-- Soft movement helpers. Prefer velocity writes on HRP only - avoid position
 -- teleports, limb velocity spam, and insane pulse values (those ban).
 
 local env = April.require("core.env")
@@ -5692,6 +5692,7 @@ local function render_priority(priority_offset)
         local base = Enum.RenderPriority.Camera.Value or Enum.RenderPriority.Camera
         if type(base) == "number" then return base + offset end
     end
+    -- Roblox Camera priority is 200.
     return 200 + offset
 end
 
@@ -5763,7 +5764,7 @@ end)()
 
 -- ── core/movement_ctrl.lua ──
 April._mods["core.movement_ctrl"] = (function()
--- Fly / Slowfall — HRP velocity on RunService Heartbeat (falls back to on_frame).
+-- Fly / Slowfall - HRP velocity on RunService Heartbeat (falls back to on_frame).
 
 local settings = April.require("core.settings")
 local env = April.require("core.env")
@@ -5781,7 +5782,7 @@ local fly_noclip = false
 local tracked_char_id = nil
 local last_fly_zero_ms = 0
 
--- Slider 1–20 studs/s
+-- Slider 1-20 studs/s
 local MIN_FLY_SPEED = 1
 local MAX_FLY_SPEED = 20
 local GROUND_DIST = 4.5
@@ -6092,6 +6093,8 @@ local MENU_KEYS = {
     "april_antiaim_jitter_step", "april_antiaim_jitter_ms",
     "april_fakeduck_enabled", "april_fakeduck_enabled_mode",
     "april_fakeduck_height",
+    "april_fakeduck_spam", "april_fakeduck_spam_mode",
+    "april_fakeduck_spam_min", "april_fakeduck_spam_max", "april_fakeduck_spam_ms",
     "april_bullet_manip_enabled", "april_bullet_manip_enabled_mode", "april_bullet_manip_range", "april_bullet_manip_speed",
     "april_bullet_manip_debug", "april_bullet_manip_console", "april_bullet_manip_vis",
     "april_bullet_manip_vis_style", "april_bullet_manip_vis_size",
@@ -7205,7 +7208,7 @@ end)()
 
 -- ── game/item_images.lua ──
 April._mods["game.item_images"] = (function()
--- AUTO-GENERATED by scripts/sync-assets.mjs — do not edit by hand
+-- AUTO-GENERATED by scripts/sync-assets.mjs - do not edit by hand
 -- Sources: Items module Image + SkinsModule (inventory icons only)
 
 local M = {}
@@ -9127,8 +9130,8 @@ function M.apply_weapon(mods, opts)
 
     if warm <= 0 then
         M._fail_streak = M._fail_streak + 1
-        debug.warn_once("gun_mods:nodes", "GC still warming — equip a gun, enable a mod option, keep master on")
-        return false, 0, "GC warming — equip gun and wait a moment"
+        debug.warn_once("gun_mods:nodes", "GC still warming - equip a gun, enable a mod option, keep master on")
+        return false, 0, "GC warming - equip gun and wait a moment"
     end
 
     local patched = 0
@@ -9158,7 +9161,7 @@ function M.apply_weapon(mods, opts)
     if M._fail_streak == 1 then
         M._last_node_count = 0
     end
-    return false, 0, "GC warming — equip gun and wait a moment"
+    return false, 0, "GC warming - equip gun and wait a moment"
 end
 
 function M.apply(mods)
@@ -9454,7 +9457,7 @@ local function pct_to_neg_mult(pct)
 end
 
 -- Items dump: Muzzle Boost FireRateMult = 0.12. Game delay *= 1 - FireRateMult.
--- Menu slider 1.0–3.0 maps to 0.12–0.99 (works without muzzle attachment).
+-- Menu slider 1.0-3.0 maps to 0.12-0.99 (works without muzzle attachment).
 function M.fire_rate_mult(slider)
     slider = math.max(1, math.min(3, tonumber(slider) or 1.5))
     local t = (slider - 1) / 2
@@ -9498,7 +9501,7 @@ end
 
 -- Neutral attachment-style mults (game uses 1 + Mult for speed/range/sway/spread/recoil,
 -- and delay *= 1 - FireRateMult). Only used when disabling gun mods / clearing apply.
--- Do NOT merge these into active apply payloads — that stomps attachment FireRateMult etc.
+-- Do NOT merge these into active apply payloads - that stomps attachment FireRateMult etc.
 function M.build_reset_mods()
     return {
         RecoilMult = 0,
@@ -9544,7 +9547,7 @@ function M.build_mods_for_weapon(name)
     return M.build_mods_from_profile(profile)
 end
 
--- Live menu toggles/sliders — no saved profile required.
+-- Live menu toggles/sliders - no saved profile required.
 function M.editor_profile()
     return store.read_editor()
 end
@@ -9918,7 +9921,7 @@ end)()
 -- ── game/team_state.lua ──
 April._mods["game.team_state"] = (function()
 -- Official Fallen party teams (TeamNavigationController) + Roblox Team fallback.
--- Dump: CharacterScripts.TeamNavigationController — InTeam / CanInvite attrs,
+-- Dump: CharacterScripts.TeamNavigationController - InTeam / CanInvite attrs,
 -- FetchTeam returns userId list, teammates get TeamHighlight on character.
 
 local env = April.require("core.env")
@@ -10009,7 +10012,7 @@ local function members_from_teamlist()
     local list_frame = team and find_child(team, "TeamList")
     if not list_frame then return nil end
 
-    -- Resolve Member* TextLabels → userIds via entity name match.
+    -- Resolve Member* TextLabels -> userIds via entity name match.
     local labels = {}
     for _, child in ipairs(env.safe_call(function()
         if list_frame.get_children then return list_frame:get_children() end
@@ -10138,10 +10141,10 @@ end)()
 April._mods["game.player_state"] = (function()
 -- Player ESP state from DataModel.Players.<Name> attributes.
 -- Vector: inst:get_attribute / get_attributes
---   string  → string
---   bool    → boolean
---   Color3  → table { r, g, b }  (0-1, sometimes 0-255)
--- ClanTag string can also appear on Character.NameTag — that is NOT enough for
+--   string  -> string
+--   bool    -> boolean
+--   Color3  -> table { r, g, b }  (0-1, sometimes 0-255)
+-- ClanTag string can also appear on Character.NameTag - that is NOT enough for
 -- VIP/SafeZone/ClanColor; those only exist on the Player instance.
 
 local env = April.require("core.env")
@@ -10200,7 +10203,7 @@ local function find_humanoid(char)
     return nil
 end
 
--- Do NOT gate on utility.is_valid — it can reject valid Players instances
+-- Do NOT gate on utility.is_valid - it can reject valid Players instances
 -- while find_first_child still returns a usable handle for get_attribute.
 local function read_attr(inst, key)
     if not inst or not key then return nil end
@@ -10271,7 +10274,7 @@ local function normalize_rgb(r, g, b)
     return { r, g, b, 1 }
 end
 
--- Vector docs: Color3 attrs → {r,g,b}; GuiObject TextColor3 → {R,G,B} (often 0-255).
+-- Vector docs: Color3 attrs -> {r,g,b}; GuiObject TextColor3 -> {R,G,B} (often 0-255).
 local function parse_color3(c)
     if c == nil or c == false then return nil end
 
@@ -10656,7 +10659,7 @@ local function build_snap(player)
 
     local pa = read_player_attrs(pl)
 
-    -- NameTag only fills missing ClanTag string — never invents VIP/color.
+    -- NameTag only fills missing ClanTag string - never invents VIP/color.
     if not pa.clan_tag then
         pa.clan_tag = nametag_clan_tag_only(char)
     end
@@ -11027,7 +11030,7 @@ end)()
 -- ── game/farm_targets.lua ──
 April._mods["game.farm_targets"] = (function()
 --[[
-  Gather hit parts near the player — dump hierarchy:
+  Gather hit parts near the player - dump hierarchy:
   Nodes: NodeSpark.Main | Trees: TreeX.Main | Plants: Main+Item | Cactus: CactusPart
 ]]
 
@@ -11617,7 +11620,7 @@ local function find_attachments_folder(parent)
     end)
 end
 
--- Fallen Ultimate pattern: Attachments:GetChildren() → attachment item names only.
+-- Fallen Ultimate pattern: Attachments:GetChildren() -> attachment item names only.
 -- Do not recurse into attachment model internals (Vignette, Sight mesh parts, etc.).
 local function scan_weapon_attachments_folder(folder, out, seen, depth)
     depth = depth or 0
@@ -12151,7 +12154,7 @@ end)()
 
 -- ── game/fallen_anims.lua ──
 April._mods["game.fallen_anims"] = (function()
--- Auto-generated from dump/catalog/animations.tsv — all unique animation asset IDs.
+-- Auto-generated from dump/catalog/animations.tsv - all unique animation asset IDs.
 -- Playback must match Fallen: Humanoid:LoadAnimation(anim):Play() with default speed/weight.
 
 local M = {}
@@ -13600,7 +13603,7 @@ function M.toggle_player(player, prefix)
     if set[uid] then
         set[uid] = nil
         added = false
-        notify.warning("WL − " .. name, 2500)
+        notify.warning("WL - " .. name, 2500)
     else
         set[uid] = true
         added = true
@@ -13668,7 +13671,7 @@ M.METHODS = {
 }
 
 -- Kept for TP spawn sampling around the part. Aim always uses the raw hitpart
--- from silent_resolve — do not apply Y offsets that pull Head → UpperTorso.
+-- from silent_resolve - do not apply Y offsets that pull Head -> UpperTorso.
 local BONE_SPAWN_Y = {
     Head = 0,
     UpperTorso = 0,
@@ -14010,6 +14013,12 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     }, { false }, { parent = parent_id })
     menu.add_slider_int(T, G, p .. "hit_chance", "Hit Chance %", 1, 100, 100, { parent = parent_id })
     menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 150, { parent = parent_id })
+
+    menu_util.section(T, G, "Bullet")
+    if menu and menu.add_label then
+        pcall(menu.add_label, T, G, "These options can cause invalids.")
+        pcall(menu.add_label, T, G, "Server may reject shots - use carefully.")
+    end
     menu.add_checkbox(T, G, p .. "hitscan", "Hitscan", false, { parent = parent_id })
 
     menu_util.section(T, G, "Bullet TP")
@@ -14217,15 +14226,20 @@ function M.bone_name(prefix)
     return combat_menu.bone_from_index(idx)
 end
 
--- Fallen bow/crossbow aim uses torso for ballistics even when the desired
--- hit result is head — aiming head with full drop prediction shoots too high.
--- Extra drop only for Wooden Bow (not Crossbow).
+-- Camera aimbot only: bows use torso for prediction (head aim shoots too high).
+-- Silent aim must NOT use this - it tracks the real selected hitpart.
+-- Extra Y nudge only for Wooden Bow (not Crossbow).
 local WOODEN_BOW_AIM_Y_NUDGE = -0.22
 
 local function is_wooden_bow(weapon_name)
     if not weapon_name then return false end
     local n = weapon_name:lower()
     return n:find("wooden bow", 1, true) ~= nil
+end
+
+-- Bow torso remap applies only to camera aimbot (april_aim_*), not silent (april_silent_*).
+function M.uses_bow_torso_aim(prefix)
+    return type(prefix) == "string" and prefix:sub(1, 10) == "april_aim_"
 end
 
 function M.effective_aim_bone(bone, weapon_name)
@@ -14450,10 +14464,14 @@ end
 function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
     bone = bone or M.bone_name(prefix)
     local weapon = weapons.cached_held_ranged()
-    bone = M.effective_aim_bone(bone, weapon)
+    if M.uses_bow_torso_aim(prefix) then
+        bone = M.effective_aim_bone(bone, weapon)
+    end
     local base = M.resolve_bone_world(target, bone, cx, cy)
     if not base then return nil end
-    base = M.bow_aim_nudge(base, weapon)
+    if M.uses_bow_torso_aim(prefix) then
+        base = M.bow_aim_nudge(base, weapon)
+    end
 
     if use_prediction == false then
         return base
@@ -14473,7 +14491,9 @@ function M.is_target_valid(target, prefix, cx, cy, fov_px, opts)
 
     local bone = M.bone_name(prefix)
     if bone == "Closest" then bone = "Head" end
-    bone = M.effective_aim_bone(bone, weapons.cached_held_ranged())
+    if M.uses_bow_torso_aim(prefix) then
+        bone = M.effective_aim_bone(bone, weapons.cached_held_ranged())
+    end
     local base = M.resolve_bone_world(target, bone, cx, cy)
     if not base then return false end
 
@@ -14530,7 +14550,9 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
     opts = opts or {}
     local bone = M.bone_name(prefix)
     local screen_bone = bone == "Closest" and "Head" or bone
-    screen_bone = M.effective_aim_bone(screen_bone, weapons.cached_held_ranged())
+    if M.uses_bow_torso_aim(prefix) then
+        screen_bone = M.effective_aim_bone(screen_bone, weapons.cached_held_ranged())
+    end
     local use_fov = opts.force_crosshair_priority or M.target_priority_crosshair(prefix)
     local best, best_score = nil, use_fov and fov_px or math.huge
     local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
@@ -14638,7 +14660,7 @@ end
 
 local function apply_drop_aim(origin, hitpart, weapon, state, extra)
     local muzzle = origin or combat_origin.get_muzzle_origin()
-    -- Visual drop arc only (path ends on hitpart). Silent API aims at hitpart —
+    -- Visual drop arc only (path ends on hitpart). Silent API aims at hitpart -
     -- hook projectiles are effectively hitscan-speed, so aim-up misses.
     local curve = ballistic.curve_for_weapon(muzzle, hitpart, weapon, 24)
     local info = {
@@ -14683,12 +14705,10 @@ function M.resolve_track(target, prefix, cx, cy)
     if not camera then return nil, nil, OFF_INFO end
 
     local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
+    -- Silent aim always uses the selected hitpart (no bow torso remap - that's aimbot-only).
     local bone = targeting.bone_name(prefix)
-    -- Bows/crossbows: Head selection aims UpperTorso (game ballistics rule).
-    bone = targeting.effective_aim_bone(bone, weapon)
     local hitpart = targeting.resolve_bone_world(target, bone, cx, cy)
     if not hitpart then return nil, nil, OFF_INFO end
-    hitpart = targeting.bow_aim_nudge(hitpart, weapon)
     local muzzle = fire_origin(camera)
     local body = combat_origin.get_server_origin()
 
@@ -15393,7 +15413,7 @@ end)()
 -- ── game/combat_target.lua ──
 April._mods["game.combat_target"] = (function()
 -- Shared combat target for overlay / tracers / hitmarkers.
--- Does not require a weapon out — uses aimbot scoped target or crosshair FOV.
+-- Does not require a weapon out - uses aimbot scoped target or crosshair FOV.
 
 local settings = April.require("core.settings")
 local player_state = April.require("game.player_state")
@@ -15479,7 +15499,7 @@ end)()
 -- ── features/combat/perfect_farm.lua ──
 April._mods["features.combat.perfect_farm"] = (function()
 --[[
-  Farm helper — silent or camera aim at gather hit parts.
+  Farm helper - silent or camera aim at gather hit parts.
   Melee uses camera / mouse unit-ray origin (RaycastUtil.MouseRaycast).
 ]]
 
@@ -15732,7 +15752,7 @@ function M.update(_dt)
         if silent_ray.track(origin, aim, SHOOT_VK, aim) then
             M._tracking = true
         else
-            debug.error_once("farm:silent", "Silent farm hook unavailable — toggle Silent Farm off for camera aim")
+            debug.error_once("farm:silent", "Silent farm hook unavailable - toggle Silent Farm off for camera aim")
             stop_silent()
         end
         return
@@ -15776,7 +15796,7 @@ M._was_in_match = false
 M._gc_redo_at = 0
 M._notify_next = false
 M._last_held_apply = nil
-M._held_display = "—"
+M._held_display = "-"
 M._combo_registered = false
 M._combo_ctx = nil
 M._had_applied_mods = false
@@ -15866,7 +15886,7 @@ end
 
 local function sync_held_display(held)
     held = held or profiles.held_weapon_name()
-    local text = held or "—"
+    local text = held or "-"
     if held then
         if store.editor_has_active_mods() then
             text = held .. (profiles.is_global_mode() and " (global live)" or " (live)")
@@ -15930,7 +15950,7 @@ function M.register_menu()
     menu_util.register_keybind(T, G.GUN_MODS, P, "Enable Gun Mods", false)
 
     menu_util.section(T, G.GUN_MODS, "Apply")
-    menu_util.input(T, G.GUN_MODS, HELD_ID, "Held Weapon", "—")
+    menu_util.input(T, G.GUN_MODS, HELD_ID, "Held Weapon", "-")
     menu.add_combo(T, G.GUN_MODS, profiles.MODE_ID, "Apply Mode", profiles.MODES, 0, root)
 
     M._combo_ctx = { T = T, G = G.GUN_MODS, root = root }
@@ -16048,7 +16068,7 @@ function M.register_menu()
     for _, id in ipairs(editor_ids) do
         settings.on_change(id, function()
             if settings.enabled(P) then
-                -- Debounce slider spam — live editor applies without a saved profile
+                -- Debounce slider spam - live editor applies without a saved profile
                 schedule_apply(280)
             end
         end)
@@ -16216,7 +16236,7 @@ function M.update(_dt)
             M._force_apply = true
             M._defer_until = now
             M._retry_until = now + RETRY_MAX_MS
-            notify.info("Re-applying gun mods after session change…", 2500)
+            notify.info("Re-applying gun mods after session change...", 2500)
         end
     end
 
@@ -16225,7 +16245,7 @@ function M.update(_dt)
     if M._retry_until > 0 and now > M._retry_until then
         M._apply_dirty = false
         M._force_apply = false
-        notify.warning("Gun mods: could not patch — equip gun in match and switch weapons", 5000)
+        notify.warning("Gun mods: could not patch - equip gun in match and switch weapons", 5000)
         return
     end
 
@@ -17096,7 +17116,7 @@ function M.draw()
         local cx = bounds.x + bounds.w * 0.5
         local box_ok = bounds.w >= 4 and bounds.h >= 8
 
-        -- Top: name + weapon only (never clan — clan is on the right with tags)
+        -- Top: name + weapon only (never clan - clan is on the right with tags)
         local top = {}
         if show_name then
             top[#top + 1] = { text = p.name or "?", col = name_col }
@@ -18006,7 +18026,7 @@ local function watch_game_hitmarker()
     local vis = env.safe_call(function() return hm.Visible end)
     if vis and not hitmarker_was then
         local rot = env.safe_call(function() return hm.Rotation end)
-        -- Game uses red children for headshots; Rotation alone isn't enough — treat as body.
+        -- Game uses red children for headshots; Rotation alone isn't enough - treat as body.
         spawn(false)
         local ok, tracers = pcall(function()
             return April.require("features.visuals.bullet_tracers")
@@ -18510,7 +18530,7 @@ local function collect_loot_chams(applied)
             if (dx * dx + dy * dy + dz * dz) > range_sq then goto continue end
         end
 
-        -- One visual part per entry (instance Address) — not every MeshPart in the world.
+        -- One visual part per entry (instance Address) - not every MeshPart in the world.
         gpu_chams.cham_entry_part(entry, applied)
         ::continue::
     end
@@ -20542,7 +20562,7 @@ end)()
 -- ── features/movement/anti_aim.lua ──
 April._mods["features.movement.anti_aim"] = (function()
 --[[
-  Anti-Aim — continuous body yaw (AutoRotate off + CFrame / angular velocity).
+  Anti-Aim - continuous body yaw (AutoRotate off + CFrame / angular velocity).
 
   Same drive as the working yaw AA; pauses while firing (LMB) and snaps
   back to camera yaw so flashpoint / shots stay valid.
@@ -20844,10 +20864,12 @@ end)()
 -- ── features/movement/fake_duck.lua ──
 April._mods["features.movement.fake_duck"] = (function()
 --[[
-  Fake Duck — look crouched (IsCrouch / hip) while moving at stand/sprint speed.
+  Fake Duck - look crouched (IsCrouch / hip) while moving at stand/sprint speed.
 
   Fallen StateController sets WalkSpeed=6.5 when crouched. Writing WalkSpeed
-  kicks — so we leave WalkSpeed alone and boost HRP velocity to walk(11)/sprint(18).
+  kicks - so we leave WalkSpeed alone and boost HRP velocity to walk(11)/sprint(18).
+
+  Optional height spam: flip HipHeight between min/max on an interval.
 ]]
 
 local settings = April.require("core.settings")
@@ -20861,10 +20883,19 @@ local M = {}
 
 local P = "april_fakeduck_enabled"
 local P_HEIGHT = "april_fakeduck_height"
+local P_SPAM = "april_fakeduck_spam"
+local P_SPAM_MIN = "april_fakeduck_spam_min"
+local P_SPAM_MAX = "april_fakeduck_spam_max"
+local P_SPAM_MS = "april_fakeduck_spam_ms"
+local P_SPAM_MODE = "april_fakeduck_spam_mode"
+
+local SPAM_MODES = { "Alternating", "Random" }
 
 -- Fallen stand hip = 1.6, normal crouch = 1.1. Lower values push further down.
 local DEFAULT_DUCK_HIP = 1.1
 local STAND_HIP = 1.6
+local HIP_MIN = 0.01
+local HIP_MAX = 1.5
 local SPEED_WALK = 11
 local SPEED_SPRINT = 18
 local SPEED_AIM_MUL = 0.8
@@ -20878,10 +20909,20 @@ local state = {
     viewmodel = nil,
     root = nil,
     hum = nil,
+    spam_t = 0,
+    spam_hi = false,
+    spam_val = DEFAULT_DUCK_HIP,
 }
 
 local function active()
     return settings.enabled(P)
+end
+
+local function clamp_hip(h)
+    h = tonumber(h) or DEFAULT_DUCK_HIP
+    if h > HIP_MAX then h = HIP_MAX end
+    if h < HIP_MIN then h = HIP_MIN end
+    return h
 end
 
 local function find_child(parent, name)
@@ -20933,12 +20974,43 @@ local function set_hip_height(hum, value)
     end
 end
 
-local function duck_hip()
-    local h = settings.num(P_HEIGHT, DEFAULT_DUCK_HIP)
-    -- Sub-zero HipHeight is AC-flagged. Keep a tiny floor above 0.
-    if h > 1.5 then h = 1.5 end
-    if h < 0.01 then h = 0.01 end
-    return h
+local function static_duck_hip()
+    return clamp_hip(settings.num(P_HEIGHT, DEFAULT_DUCK_HIP))
+end
+
+local function spam_range()
+    local lo = clamp_hip(settings.num(P_SPAM_MIN, HIP_MIN))
+    local hi = clamp_hip(settings.num(P_SPAM_MAX, HIP_MAX))
+    if lo > hi then
+        lo, hi = hi, lo
+    end
+    return lo, hi
+end
+
+local function duck_hip(dt)
+    if not settings.bool(P_SPAM, false) then
+        state.spam_t = 0
+        return static_duck_hip()
+    end
+
+    local lo, hi = spam_range()
+    local interval = math.max(0.02, settings.num(P_SPAM_MS, 80) / 1000)
+    local mode = settings.combo_index(P_SPAM_MODE, SPAM_MODES, 0)
+
+    state.spam_t = (state.spam_t or 0) + (dt or 0.016)
+    if state.spam_t >= interval then
+        state.spam_t = 0
+        if mode == 1 then
+            -- Random value in [lo, hi]
+            state.spam_val = lo + math.random() * (hi - lo)
+        else
+            -- Alternating endpoints
+            state.spam_hi = not state.spam_hi
+            state.spam_val = state.spam_hi and hi or lo
+        end
+    end
+
+    return clamp_hip(state.spam_val or lo)
 end
 
 -- Slightly squash HRP as we go lower than normal crouch.
@@ -20947,7 +21019,6 @@ local function set_root_size(root, crouch, hip)
     local y = 2.5
     if crouch then
         hip = hip or DEFAULT_DUCK_HIP
-        -- 1.1 → 2.1, lower hips → smaller Y (floor ~1.4)
         y = 2.1 - (DEFAULT_DUCK_HIP - hip) * 0.35
         if y < 1.4 then y = 1.4 end
         if y > 2.4 then y = 2.4 end
@@ -20994,7 +21065,6 @@ local function desired_speed()
     return base
 end
 
--- Scale / drive horizontal velocity to stand/sprint speed. Never touch WalkSpeed.
 local function boost_velocity(root, target)
     if not root or not target or target <= 0 then return end
 
@@ -21007,7 +21077,6 @@ local function boost_velocity(root, target)
         return
     end
 
-    -- No WASD: if humanoid still sliding, stretch existing horiz vel up to target.
     local hmag = math.sqrt(vx * vx + vz * vz)
     if hmag < 1.0 then return end
     if hmag >= target * 0.95 then return end
@@ -21015,14 +21084,14 @@ local function boost_velocity(root, target)
     move.set_velocity(root, vx * s, vy, vz * s)
 end
 
-local function apply_duck()
+local function apply_duck(dt)
     if not resolve_parts() then return end
 
     if state.state_ctrl then
         set_attr(state.state_ctrl, "IsCrouch", true)
     end
 
-    local hip = duck_hip()
+    local hip = duck_hip(dt)
     set_hip_height(state.hum, hip)
     set_root_size(state.root, true, hip)
 
@@ -21036,9 +21105,11 @@ local function restore_duck()
     end
     set_hip_height(state.hum, STAND_HIP)
     set_root_size(state.root, false)
+    state.spam_t = 0
+    state.spam_hi = false
 end
 
-local function on_sim(_dt)
+local function on_sim(dt)
     if not misc_gate.movement_allowed() then return end
     local on = active()
 
@@ -21048,7 +21119,7 @@ local function on_sim(_dt)
     state.was_active = on
 
     if not on then return end
-    apply_duck()
+    apply_duck(dt or 0.016)
 end
 
 local function ensure_hooks()
@@ -21061,21 +21132,33 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
+    local spam_root = menu_util.parent(P_SPAM)
 
     menu_util.section(T, G.MISC, "Movement")
     menu_util.register_keybind(T, G.MISC, P, "Fake Duck", false)
-    menu.add_slider_float(T, G.MISC, P_HEIGHT, "Duck Height", 0.01, 1.5, DEFAULT_DUCK_HIP, "%.2f", root)
-    menu_util.bind_children(P, { P_HEIGHT })
+    menu.add_slider_float(T, G.MISC, P_HEIGHT, "Duck Height", HIP_MIN, HIP_MAX, DEFAULT_DUCK_HIP, "%.2f", root)
+    menu.add_checkbox(T, G.MISC, P_SPAM, "Spam Height", false, root)
+    menu.add_combo(T, G.MISC, P_SPAM_MODE, "Spam Mode", SPAM_MODES, 0, spam_root)
+    menu.add_slider_float(T, G.MISC, P_SPAM_MIN, "Spam Min", HIP_MIN, HIP_MAX, HIP_MIN, "%.2f", spam_root)
+    menu.add_slider_float(T, G.MISC, P_SPAM_MAX, "Spam Max", HIP_MIN, HIP_MAX, HIP_MAX, "%.2f", spam_root)
+    menu.add_slider_int(T, G.MISC, P_SPAM_MS, "Spam Interval (ms)", 20, 400, 80, spam_root)
+
+    menu_util.bind_children(P, {
+        P_HEIGHT, P_SPAM, P_SPAM_MODE, P_SPAM_MIN, P_SPAM_MAX, P_SPAM_MS,
+    })
+    menu_util.bind_children(P_SPAM, {
+        P_SPAM_MODE, P_SPAM_MIN, P_SPAM_MAX, P_SPAM_MS,
+    })
 end
 
 function M.install()
     ensure_hooks()
 end
 
-function M.update(_dt)
+function M.update(dt)
     ensure_hooks()
     if not runservice.uses_heartbeat() and misc_gate.movement_allowed() then
-        on_sim(_dt)
+        on_sim(dt)
     elseif state.was_active and not active() then
         restore_duck()
         state.was_active = false
@@ -21647,7 +21730,7 @@ function M.draw()
 
         local right = row.key
         if row.show_mode then
-            right = right .. " · " .. row.mode
+            right = right .. " - " .. row.mode
         end
         local tw = theme.text_w(right, 11)
         draw_util.text(x + PANEL_W - pad - tw, ry, right, key_col, 11)
@@ -21938,7 +22021,7 @@ end)()
 
 -- ── ui/gs_input.lua ──
 April._mods["ui.gs_input"] = (function()
--- Mouse / key helpers. Raw cursor only — no windowed offset correction.
+-- Mouse / key helpers. Raw cursor only - no windowed offset correction.
 --
 -- Wheel: Vector docs only expose utility.mouse_scroll() (inject). There is no
 -- documented reader. We probe every known path and accumulate into M.wheel;
@@ -22141,7 +22224,7 @@ end
 
 local function ensure_scroll_hooks()
     if M._scroll_ready then return end
-    -- Retry a few frames — LocalPlayer / services may not exist at load.
+    -- Retry a few frames - LocalPlayer / services may not exist at load.
     M._scroll_hook_tries = (M._scroll_hook_tries or 0) + 1
     if M._scroll_hook_tries > 120 then
         M._scroll_ready = true
@@ -23843,7 +23926,7 @@ function M.combo(x, y, w, id, label, options, default_idx)
     M.text(bx + 6, by + math.floor((bh - 12) * 0.5), tostring(cur), theme.TEXT_ACTIVE, theme.FONT_SMALL)
     M.text(bx + bw - 13, by + math.floor((bh - 12) * 0.5), open and "^" or "v", open and theme.TEXT_ACTIVE or theme.TEXT_DIM, theme.FONT_SMALL)
 
-    -- Header toggles open/closed (do not require clip hover — fixes "can't close")
+    -- Header toggles open/closed (do not require clip hover - fixes "can't close")
     if ui_clicked(bx, by, bw, bh) then
         mark_interacted()
         if open then
@@ -24291,7 +24374,7 @@ end
 function M.estimate_height(item)
     local t = item.type
     local extra = 0
-    -- Color pickers overlay — they do not expand layout height
+    -- Color pickers overlay - they do not expand layout height
     if item.id and M.open_combo == item.id and item.options then
         extra = math.min(#item.options, M.LIST_MAX_VISIBLE) * 18
     elseif item.id and M.open_multi == item.id and item.options then
@@ -24514,7 +24597,6 @@ local function build_aim()
             multi("april_silent_options", "Options", { "Sticky Target" }, { false }),
             sl("april_silent_hit_chance", "Hit Chance %", 1, 100, 100),
             sl("april_silent_fov", "FOV Radius (px)", 20, 600, 150),
-            cb("april_silent_hitscan", "Hitscan", false),
             sep(),
             label("Visuals", false),
             cb("april_silent_draw_fov", "FOV Circle", false, { 0.55, 0.2, 1, 1 }),
@@ -24527,6 +24609,12 @@ local function build_aim()
         title = "Bullet",
         master = "april_silent_aim",
         items = {
+            label("These options can cause invalids.", true),
+            label("Server may reject shots - use carefully.", true),
+            sep(),
+            label("Hitscan", false),
+            cb("april_silent_hitscan", "Hitscan", false),
+            sep(),
             label("Bullet TP", false),
             cb("april_silent_bullet_tp", "Bullet TP", false),
             combo("april_silent_tp_method", "TP Method", combat_menu.TP_METHODS, 0, "april_silent_bullet_tp"),
@@ -24691,9 +24779,9 @@ local function build_guns()
                 kb("april_gunmods_enabled", "Enable Gun Mods", false),
                 sep(),
                 label("Apply", false),
-                input("april_gm_held_weapon", "Held Weapon", "—"),
+                input("april_gm_held_weapon", "Held Weapon", "-"),
                 combo("april_gm_mode", "Apply Mode", { "Live (save optional)", "Global" }, 0),
-                combo("april_gm_weapon_select", "Edit Weapon", { "—", "AK", "M4", "MP5" }, 0),
+                combo("april_gm_weapon_select", "Edit Weapon", { "-", "AK", "M4", "MP5" }, 0),
                 sep(),
                 label("Modifiers", false),
                 cb("april_gm_recoil", "No Recoil", false),
@@ -24756,6 +24844,11 @@ local function build_misc()
                 }),
                 kb("april_fakeduck_enabled", "Fake Duck", false),
                 sl("april_fakeduck_height", "Duck Height", 0.01, 1.5, 1.1, true, "april_fakeduck_enabled"),
+                cb("april_fakeduck_spam", "Spam Height", false, nil, "april_fakeduck_enabled"),
+                combo("april_fakeduck_spam_mode", "Spam Mode", { "Alternating", "Random" }, 0, "april_fakeduck_spam"),
+                sl("april_fakeduck_spam_min", "Spam Min", 0.01, 1.5, 0.01, true, "april_fakeduck_spam"),
+                sl("april_fakeduck_spam_max", "Spam Max", 0.01, 1.5, 1.5, true, "april_fakeduck_spam"),
+                sl("april_fakeduck_spam_ms", "Spam Interval (ms)", 20, 400, 80, false, "april_fakeduck_spam"),
                 sep(),
                 kb("april_fling_enabled", "Fling", false),
                 sl("april_fling_fov", "Fling FOV", 20, 600, 150, false, "april_fling_enabled"),
@@ -24921,7 +25014,7 @@ end)()
 April._mods["ui.custom_menu"] = (function()
 --[[
   Gamesense-style custom menu for April.
-  INSERT toggles by default (rebindable in Config → Menu).
+  INSERT toggles by default (rebindable in Config -> Menu).
   Scroll: mouse wheel when Vector exposes a reader; else edge-hover (top/bottom of column).
 ]]
 

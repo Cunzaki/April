@@ -1,5 +1,5 @@
 --[[
-  Gather hit parts near the player — dump hierarchy:
+  Gather hit parts near the player - dump hierarchy:
   Nodes: NodeSpark.Main | Trees: TreeX.Main | Plants: Main+Item | Cactus: CactusPart
 ]]
 

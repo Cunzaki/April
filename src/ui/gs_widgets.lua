@@ -673,7 +673,7 @@ function M.combo(x, y, w, id, label, options, default_idx)
     M.text(bx + 6, by + math.floor((bh - 12) * 0.5), tostring(cur), theme.TEXT_ACTIVE, theme.FONT_SMALL)
     M.text(bx + bw - 13, by + math.floor((bh - 12) * 0.5), open and "^" or "v", open and theme.TEXT_ACTIVE or theme.TEXT_DIM, theme.FONT_SMALL)
 
-    -- Header toggles open/closed (do not require clip hover — fixes "can't close")
+    -- Header toggles open/closed (do not require clip hover - fixes "can't close")
     if ui_clicked(bx, by, bw, bh) then
         mark_interacted()
         if open then
@@ -1121,7 +1121,7 @@ end
 function M.estimate_height(item)
     local t = item.type
     local extra = 0
-    -- Color pickers overlay — they do not expand layout height
+    -- Color pickers overlay - they do not expand layout height
     if item.id and M.open_combo == item.id and item.options then
         extra = math.min(#item.options, M.LIST_MAX_VISIBLE) * 18
     elseif item.id and M.open_multi == item.id and item.options then

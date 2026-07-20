@@ -78,7 +78,7 @@ function M.health_bar_nice(x, y, h, hp, max_hp, bar_w)
 
     if draw.rect_filled then
         draw.rect_filled(x, y, bar_w, h, { 0, 0, 0, 0.55 }, 1)
-        -- green → yellow → red
+        -- green -> yellow -> red
         local r, g, b
         if pct > 0.5 then
             local t = (pct - 0.5) * 2

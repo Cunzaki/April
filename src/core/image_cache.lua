@@ -1,7 +1,7 @@
 --[[
-    Vector on_frame pattern (stable v3.65–3.69):
+    Vector on_frame pattern (stable v3.65-3.69):
       handle = draw.load_image(url) once
-      draw.image(handle, x, y, w, h, 255, 255, 255, 255) every frame — no-ops until ready
+      draw.image(handle, x, y, w, h, 255, 255, 255, 255) every frame - no-ops until ready
     Do NOT gate on draw.image_loaded; that breaks gear icons on Vector.
 ]]
 
