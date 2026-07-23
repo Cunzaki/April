@@ -9,13 +9,19 @@ node_modules/
 # Backups
 *.bak
 
-# Vector load copy (bundled output is april.lua)
+# Vector load copies (shipped file is april.lua via LoadUrl)
 Script 1.lua
 Script 2.lua
+april UI.lua
+load_ui.lua
+
+# Standalone UI demo bundle (not the LoadUrl ship)
+april_ui.lua
 
 # Local-only RE / reference material
 references/
 RE/
+dump/
 
 # Cursor IDE
 .cursor/
@@ -32,9 +38,15 @@ April_meta.txt
 .env
 .env.*
 
-# Local Fallen game dump (restored from history; do not commit)
-dump/
-
-# Local Vector injector config (workspace-only)
+# Local Vector injector / machine scripts (not part of April ship)
 injector/
+web-radar/
+start-webradar.bat
+tools/fix_disks.ps1
+scripts/optimize-vector.ps1
+scripts/register-priority-task.ps1
+scripts/set-vector-ifeo.ps1
+scripts/setup-vector-perf.ps1
+scripts/vector-priority-keeper.ps1
+scripts/fix-mod-warning-alpha.ps1
 

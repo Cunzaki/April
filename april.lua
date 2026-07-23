@@ -1,12 +1,12 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-23T20:05:07.235Z
+    Built: 2026-07-23T22:47:17.680Z
     UI: custom Gamesense menu (INSERT) — Vector menu tabs disabled
 ]]
 
 April = {
-    version = "3.96.9",
+    version = "3.97.0",
     debug = false,
     _mods = {},
     bundled = true,
@@ -3290,19 +3290,13 @@ function M.draw_entry_boxes(entry, col, thick)
     local env = April.require("core.env")
     if not env.is_valid(entry.inst) then return end
 
-    -- Prefer stable hydrated box (static resources don't move). Avoid re-reading
-    -- part vectors every frame — that was laggy and produced broken boxes.
     if entry.box then
         M.draw_oriented_box(entry.box, col, thick)
         return
     end
-
     local scan = April.require("game.esp_scan")
-    local main = entry.main_part
-    if not main or not env.is_valid(main) then
-        main = scan.find_main_part(entry.inst)
-        entry.main_part = main
-    end
+    local main = entry.main_part or scan.find_main_part(entry.inst)
+    if main then entry.main_part = main end
     local box = main and scan.read_part_box(main)
     if box then
         entry.box = box
@@ -3425,7 +3419,7 @@ local owners = {}
 local owner_order = {}
 local rebuild_busy = false
 local last_global_rebuild = 0
-local MIN_REBUILD_GAP_MS = 750
+local MIN_REBUILD_GAP_MS = 250
 
 function M.available()
     return exploits ~= nil
@@ -3788,30 +3782,13 @@ function M.sync_owner(id, force)
         return
     end
 
-    if next(front) == nil then
-        -- First populate after clear -> full rebuild.
+    if has_removed(front, back) or next(front) == nil then
+        -- Something left range / first populate after clear -> swap buffers via rebuild.
+        -- Rebuild reapplies ALL active owners from scratch (correct multi-owner state).
         owner.applied = {}
         if not M.rebuild_all() then
+            -- Rate-limited: still track desired set; next tick will rebuild.
             owner.applied = back
-        end
-        return
-    end
-
-    if has_removed(front, back) then
-        -- Defer Revert hitch while walking: keep stamping additions only.
-        -- A full rebuild runs when the global gap allows (not every leave-range).
-        for addr, _ in pairs(back) do
-            if not front[addr] then
-                pcall(exploits.ApplyChamsToInstance, addr)
-                front[addr] = true
-            end
-        end
-        owner.applied = front
-        if (now - last_global_rebuild) >= MIN_REBUILD_GAP_MS then
-            owner.applied = {}
-            if not M.rebuild_all() then
-                owner.applied = back
-            end
         end
         return
     end
@@ -6269,7 +6246,7 @@ local MENU_KEYS = {
     "april_farm_silent",
     "april_world_enabled", "april_world_enabled_mode", "april_stone_node", "april_metal_node", "april_phosphate_node",
     "april_corn_plant", "april_tomato_plant", "april_pumpkin_plant", "april_lemon_plant",
-    "april_raspberry_plant", "april_blueberry_plant", "april_wool_plant",
+    "april_raspberry_plant", "april_blueberry_plant", "april_wool_plant", "april_hemp_plant",
     "april_deer", "april_boar", "april_wolf",
     "april_world_boxes", "april_world_show_name", "april_world_show_distance", "april_world_range",
     "april_world_chams", "april_world_chams_mode", "april_world_chams_color",
@@ -6332,7 +6309,7 @@ local COLOR_KEYS = {
     "april_player_flag_staff", "april_player_flag_reviving",
     "april_stone_node", "april_metal_node", "april_phosphate_node", "april_corn_plant", "april_tomato_plant",
     "april_pumpkin_plant", "april_lemon_plant", "april_raspberry_plant", "april_blueberry_plant",
-    "april_wool_plant", "april_deer", "april_boar", "april_wolf",
+    "april_wool_plant", "april_hemp_plant", "april_deer", "april_boar", "april_wolf",
     "april_dropped_item", "april_wooden_crate", "april_metal_crate", "april_steel_crate", "april_food_crate",
     "april_timed_crate", "april_care_package", "april_btr_crate", "april_body_bag", "april_sleeper",
     "april_trash_can", "april_oil_barrel", "april_small_egg", "april_medium_egg", "april_large_egg",
@@ -10446,48 +10423,34 @@ local M = {}
 
 local loaded = false
 local farm_tools = {}
-local tool_kinds = {}
+local tool_caps = {} -- name -> { Trees=, Nodes=, Logs=, Cactus=, Dig= }
 
+-- Dump ToolInfo ObjectDamages gather tools (fallback if ToolInfo missing).
 local FALLBACK_GATHER_TOOLS = {
-    ["Stone Hatchet"] = true,
-    ["Iron Shard Hatchet"] = true,
-    ["Steel Axe"] = true,
-    Chainsaw = true,
-    ["Stone Pickaxe"] = true,
-    ["Iron Shard Pickaxe"] = true,
-    ["Steel Pickaxe"] = true,
-    ["Mining Drill"] = true,
-    ["Bone Tool"] = true,
-    ["Candy Cane"] = true,
-    ["Carrot Blade"] = true,
-    Boulder = true,
-    Machete = true,
-    ["Saw Bat"] = true,
-}
-
--- Dump ToolInfo ObjectDamages defaults when module table is incomplete.
-local FALLBACK_KINDS = {
-    ["Stone Hatchet"] = { trees = true, logs = true, cactus = true },
-    ["Iron Shard Hatchet"] = { trees = true, logs = true, cactus = true },
-    ["Steel Axe"] = { trees = true, logs = true, cactus = true },
-    Chainsaw = { trees = true, logs = true, cactus = true },
-    ["Stone Pickaxe"] = { nodes = true },
-    ["Iron Shard Pickaxe"] = { nodes = true },
-    ["Steel Pickaxe"] = { nodes = true },
-    ["Mining Drill"] = { nodes = true },
-    ["Bone Tool"] = { trees = true, nodes = true, logs = true, cactus = true },
-    ["Candy Cane"] = { trees = true, nodes = true, logs = true, cactus = true },
-    ["Carrot Blade"] = { trees = true, nodes = true, logs = true, cactus = true },
-    Boulder = { trees = true, nodes = true, logs = true, cactus = true },
-    Machete = { trees = true, logs = true, cactus = true },
-    ["Saw Bat"] = { cactus = true },
+    ["Stone Hatchet"] = { Trees = true, Logs = true, Cactus = true },
+    ["Iron Shard Hatchet"] = { Trees = true, Logs = true, Cactus = true },
+    ["Steel Axe"] = { Trees = true, Logs = true, Cactus = true },
+    Chainsaw = { Trees = true, Logs = true, Cactus = true },
+    Machete = { Trees = true, Logs = true, Cactus = true },
+    ["Saw Bat"] = { Cactus = true },
+    ["Stone Pickaxe"] = { Nodes = true },
+    ["Iron Shard Pickaxe"] = { Nodes = true },
+    ["Steel Pickaxe"] = { Nodes = true },
+    ["Mining Drill"] = { Nodes = true },
+    ["Bone Tool"] = { Trees = true, Nodes = true, Logs = true, Cactus = true },
+    ["Candy Cane"] = { Trees = true, Nodes = true, Logs = true, Cactus = true },
+    ["Carrot Blade"] = { Trees = true, Nodes = true, Logs = true, Cactus = true },
+    Boulder = { Trees = true, Nodes = true, Logs = true, Cactus = true },
+    ["Steel Shovel"] = { Dig = true, Shovel = true },
+    ["Salvaged Shovel"] = { Dig = true, Shovel = true },
+    ["ez shovel"] = { Dig = true, Shovel = true },
 }
 
 local NAME_HINTS = {
     "hatchet", "pickaxe", "pick axe", " axe", "axe ",
     "chainsaw", "mining drill", "bone tool",
-    "candy cane", "carrot blade", "boulder",
-    "machete", "saw bat",
+    "candy cane", "carrot blade", "boulder", "machete",
+    "saw bat", "shovel",
 }
 
 -- MeleeChecks reach from ToolInfo dump (RaycastUtil MouseRaycast / HitMelee).
@@ -10496,6 +10459,8 @@ local MELEE_RANGE = {
     ["Iron Shard Hatchet"] = 5,
     ["Steel Axe"] = 5.5,
     Chainsaw = 6.5,
+    Machete = 5.5,
+    ["Saw Bat"] = 5,
     ["Stone Pickaxe"] = 5,
     ["Iron Shard Pickaxe"] = 5,
     ["Steel Pickaxe"] = 5.5,
@@ -10504,8 +10469,9 @@ local MELEE_RANGE = {
     ["Candy Cane"] = 5,
     ["Carrot Blade"] = 5,
     Boulder = 4.5,
-    Machete = 5.5,
-    ["Saw Bat"] = 6.5,
+    ["Steel Shovel"] = 5,
+    ["Salvaged Shovel"] = 5,
+    ["ez shovel"] = 5,
 }
 
 local function inst_name(inst)
@@ -10518,20 +10484,20 @@ local function normalize(name)
     return name
 end
 
-local function kinds_from_od(od)
+local function caps_from_object_damages(od)
     if type(od) ~= "table" then return nil end
-    local kinds = {}
-    if od.Trees ~= nil then kinds.trees = true end
-    if od.Nodes ~= nil then kinds.nodes = true end
-    if od.Logs ~= nil then kinds.logs = true end
-    if od.Cactus ~= nil then kinds.cactus = true end
-    if next(kinds) == nil then return nil end
-    return kinds
+    local caps = {}
+    if od.Trees ~= nil then caps.Trees = true end
+    if od.Nodes ~= nil then caps.Nodes = true end
+    if od.Logs ~= nil then caps.Logs = true end
+    if od.Cactus ~= nil then caps.Cactus = true end
+    if next(caps) == nil then return nil end
+    return caps
 end
 
 local function entry_can_gather(entry)
     if not entry or not entry.Melee then return false end
-    return kinds_from_od(entry.ObjectDamages) ~= nil
+    return caps_from_object_damages(entry.ObjectDamages) ~= nil
 end
 
 local function name_hint_match(name)
@@ -10542,30 +10508,34 @@ local function name_hint_match(name)
     return false
 end
 
-local function hint_kinds(name)
+local function hint_caps(name)
     local n = (name or ""):lower()
-    if n:find("pickaxe", 1, true) or n:find("mining drill", 1, true) then
-        return { nodes = true }
+    if n:find("shovel", 1, true) then
+        return { Dig = true, Shovel = true }
+    end
+    if n:find("pickaxe", 1, true) or n:find("pick axe", 1, true) or n:find("mining drill", 1, true) then
+        return { Nodes = true }
     end
     if n:find("saw bat", 1, true) then
-        return { cactus = true }
+        return { Cactus = true }
     end
     if n:find("hatchet", 1, true) or n:find("axe", 1, true) or n:find("chainsaw", 1, true)
         or n:find("machete", 1, true) then
-        return { trees = true, logs = true, cactus = true }
+        return { Trees = true, Logs = true, Cactus = true }
     end
-    -- Bone / candy / boulder style hybrids
-    return { trees = true, nodes = true, logs = true, cactus = true }
+    -- hybrid / unknown gather melee
+    return { Trees = true, Nodes = true, Logs = true, Cactus = true }
 end
 
 function M.load()
     if loaded then return true end
 
     farm_tools = {}
-    tool_kinds = {}
-    for name in pairs(FALLBACK_GATHER_TOOLS) do
+    tool_caps = {}
+
+    for name, caps in pairs(FALLBACK_GATHER_TOOLS) do
         farm_tools[name] = true
-        tool_kinds[name] = FALLBACK_KINDS[name] or hint_kinds(name)
+        tool_caps[name] = caps
     end
 
     local data = bootstrap.get_module("ToolInfo")
@@ -10573,7 +10543,10 @@ function M.load()
         for name, entry in pairs(data) do
             if type(name) == "string" and entry_can_gather(entry) then
                 farm_tools[name] = true
-                tool_kinds[name] = kinds_from_od(entry.ObjectDamages) or FALLBACK_KINDS[name] or hint_kinds(name)
+                local caps = caps_from_object_damages(entry.ObjectDamages)
+                if caps then
+                    tool_caps[name] = caps
+                end
             end
         end
     end
@@ -10585,7 +10558,7 @@ end
 function M.invalidate()
     loaded = false
     farm_tools = {}
-    tool_kinds = {}
+    tool_caps = {}
 end
 
 function M.is_farm_tool_name(name)
@@ -10596,28 +10569,14 @@ function M.is_farm_tool_name(name)
     return name_hint_match(name)
 end
 
--- Which gather kinds this tool can damage (dump ObjectDamages).
-function M.gather_kinds(tool_name)
+function M.tool_caps(tool_name)
     tool_name = normalize(tool_name)
     if not tool_name then return nil end
     if not loaded then M.load() end
-
-    local kinds = tool_kinds[tool_name]
-    if kinds then return kinds end
-
-    local data = bootstrap.get_module("ToolInfo")
-    local entry = data and data[tool_name]
-    kinds = entry and kinds_from_od(entry.ObjectDamages)
-    if kinds then
-        tool_kinds[tool_name] = kinds
-        return kinds
-    end
-
-    if FALLBACK_KINDS[tool_name] then
-        return FALLBACK_KINDS[tool_name]
-    end
+    local caps = tool_caps[tool_name]
+    if caps then return caps end
     if name_hint_match(tool_name) then
-        return hint_kinds(tool_name)
+        return hint_caps(tool_name)
     end
     return nil
 end
@@ -10642,12 +10601,17 @@ function M.get_held_farm_tool_name()
     local lp = env.get_local_player()
     if not lp then return nil end
 
+    -- Cheap path first (entity tool_name).
+    local from_lp = pick_farm_name(lp.tool_name)
+    if from_lp then return from_lp end
+
     local char = lp.character
     if char and env.is_valid(char) then
         local hit = scan_children(env.safe_call(function() return char:get_children() end))
         if hit then return hit end
     end
 
+    -- Viewmodel fallback (some tools only show here).
     local ws = env.get_workspace()
     if ws then
         local vms = env.safe_call(function() return ws:find_first_child("Viewmodels") end)
@@ -10662,7 +10626,7 @@ function M.get_held_farm_tool_name()
         end
     end
 
-    return pick_farm_name(lp.tool_name)
+    return nil
 end
 
 function M.holding_farm_tool()
@@ -10727,13 +10691,10 @@ end)()
 -- ── game/farm_targets.lua ──
 April._mods["game.farm_targets"] = (function()
 --[[
-  Gather hit parts near the player (dump hierarchy):
-  Trees: TreeX.Main (preferred) -> Main
-  Nodes: NodeSpark.Main (preferred) -> Main
-  Vegetation: CactusPart / Forest_Log Main|Branch
+  Gather targeting — TreeX / NodeSpark preferred, Main fallback.
 
-  Performance: maintains a lightweight spatial index, updated in small
-  budgeted batches — never walks every tree/node on the ESP frame.
+  Perf: distance-gate on cheap Main/CactusPart first. Never resolve TreeX /
+  NodeSpark for models outside tool range.
 ]]
 
 local env = April.require("core.env")
@@ -10741,305 +10702,200 @@ local folders = April.require("game.folders")
 
 local M = {}
 
--- Index entries: { model, kind, x, y, z, hit }
-local index = {}
-local index_n = 0
-
-local folder_cache = {} -- key -> { folder, children, t }
-local FOLDER_CACHE_MS = 2500
-local INDEX_BUDGET = 48 -- models touched per index tick
-local index_cursor = 1
-local index_folder_i = 1
-local last_index_ms = 0
-local INDEX_TICK_MS = 50
-
-local FOLDER_SPECS = {
-    { key = "nodes", kind = "nodes" },
-    { trees = true, kind = "trees" },
-    { key = "vegetation", kind = "vegetation" },
-}
-
-local function tick_ms()
-    return utility and utility.get_tick_count and utility.get_tick_count() or 0
-end
-
-local function find_child(parent, name)
+local function child(parent, name)
     if not parent then return nil end
     return env.safe_call(function()
         return parent:find_first_child(name) or parent:FindFirstChild(name)
     end)
 end
 
-local function inst_name(inst)
-    if not inst then return nil end
-    return inst.Name or inst.name
+local function name_of(inst)
+    return inst and (inst.Name or inst.name) or nil
 end
 
-local function part_pos(part)
+local function read_pos(part)
     if not part or not env.is_valid(part) then return nil end
     local p = part.Position or part.position
     if not p or p.x == nil then return nil end
     return p
 end
 
-local function dist2(a, b)
-    local dx = a.x - b.x
-    local dy = a.y - b.y
-    local dz = a.z - b.z
+local function d2(a, b)
+    local dx, dy, dz = a.x - b.x, a.y - b.y, a.z - b.z
     return dx * dx + dy * dy + dz * dz
 end
 
-local function main_from(container)
-    if not container or not env.is_valid(container) then return nil end
-    local main = env.safe_call(function() return container.PrimaryPart end)
-    if main and env.is_valid(main) then return main end
-    return find_child(container, "Main")
-end
-
-local function folder_for(spec)
-    if spec.trees then
-        return folders.get_folder("Trees")
-    end
-    return folders.from_key(spec.key)
-end
-
-local function folder_children(spec)
-    local key = spec.trees and "trees" or spec.key
-    local now = tick_ms()
-    local cached = folder_cache[key]
-    if cached and cached.children and (now - cached.t) < FOLDER_CACHE_MS and env.is_valid(cached.folder) then
-        return cached.children, cached.folder
-    end
-    local folder = folder_for(spec)
-    if not env.is_valid(folder) then
-        folder_cache[key] = { folder = nil, children = {}, t = now }
-        return {}, nil
-    end
-    local children = env.safe_call(function() return folder:get_children() end) or {}
-    folder_cache[key] = { folder = folder, children = children, t = now }
-    return children, folder
-end
-
-local function vegetation_kind_name(name)
-    if not name then return nil end
-    if name:find("cactus", 1, true) then return "cactus" end
-    if name:find("log", 1, true) then return "logs" end
+function M.kind_from_name(name)
+    if not name or name == "" then return nil end
+    if name:find("_Node", 1, true) then return "Nodes" end
+    if name:find("Desert_Tree", 1, true) or name:find("Tree_", 1, true) then return "Trees" end
+    if name:find("Forest_Log", 1, true) then return "Logs" end
+    if name:find("Desert_Cactus", 1, true) then return "Cactus" end
+    if name == "DigPile" then return "Dig" end
     return nil
 end
 
-local function resolve_kind(model, spec_kind)
-    if spec_kind ~= "vegetation" then return spec_kind end
-    local name = (inst_name(model) or ""):lower()
-    return vegetation_kind_name(name)
+local function marker_main(model, marker_name)
+    local marker = child(model, marker_name)
+    if not marker or not env.is_valid(marker) then return nil end
+    return child(marker, "Main")
 end
 
--- Preferred melee hit part for a model (TreeX / NodeSpark when present).
-function M.hit_part_from_model(model, kind_hint)
-    if not env.is_valid(model) then return nil, nil end
-
-    local spark = find_child(model, "NodeSpark")
-    if spark and env.is_valid(spark) then
-        local part = main_from(spark)
-        if part then return part, "nodes" end
-    end
-
-    local tree_x = find_child(model, "TreeX")
-    if tree_x and env.is_valid(tree_x) then
-        local part = main_from(tree_x)
-        if part then return part, "trees" end
-    end
-
-    local cactus = find_child(model, "CactusPart")
-    if cactus and env.is_valid(cactus) then
-        return cactus, "cactus"
-    end
-
-    local name = (inst_name(model) or ""):lower()
-    if name:find("log", 1, true) then
-        local part = main_from(model) or find_child(model, "Branch")
-        if part then return part, "logs" end
-    end
-
-    if kind_hint == "nodes" or name:find("node", 1, true) then
-        local part = main_from(model)
-        if part then return part, "nodes" end
-    end
-
-    if kind_hint == "cactus" then
-        return cactus or main_from(model), "cactus"
-    end
-
-    if kind_hint == "logs" then
-        local part = main_from(model) or find_child(model, "Branch")
-        if part then return part, "logs" end
-    end
-
-    local part = main_from(model)
-    if part then
-        return part, kind_hint or "trees"
-    end
-    return nil, nil
+-- Cheap proxy part used only for distance gate (no TreeX/NodeSpark walk).
+local function proxy_part(model, kind)
+    if kind == "Cactus" then return child(model, "CactusPart") end
+    if kind == "Dig" then return child(model, "Dirt") end
+    if kind == "Logs" then return child(model, "Main") or child(model, "Branch") end
+    return child(model, "Main")
 end
 
-local function upsert_index(model, kind)
-    local hit, resolved = M.hit_part_from_model(model, kind)
-    kind = resolved or kind
-    if not hit then return end
-    local pos = part_pos(hit)
-    if not pos then return end
-
-    for i = 1, index_n do
-        local e = index[i]
-        if e and e.model == model then
-            e.kind = kind
-            e.x, e.y, e.z = pos.x, pos.y, pos.z
-            e.hit = hit
-            return
-        end
+-- Aim part once model is known in-range.
+local function aim_part(model, kind)
+    if kind == "Trees" then
+        return marker_main(model, "TreeX") or child(model, "Main"), true
     end
-
-    index_n = index_n + 1
-    index[index_n] = {
-        model = model,
-        kind = kind,
-        x = pos.x,
-        y = pos.y,
-        z = pos.z,
-        hit = hit,
-    }
+    if kind == "Nodes" then
+        local spark = marker_main(model, "NodeSpark")
+        if spark then return spark, true end
+        return child(model, "Main"), false
+    end
+    if kind == "Cactus" then
+        local p = child(model, "CactusPart")
+        return p, p ~= nil
+    end
+    if kind == "Dig" then
+        local p = child(model, "Dirt")
+        return p, p ~= nil
+    end
+    if kind == "Logs" then
+        local p = child(model, "Main") or child(model, "Branch")
+        return p, p ~= nil
+    end
+    return child(model, "Main"), false
 end
 
-local function compact_index()
-    local write = 1
-    for i = 1, index_n do
-        local e = index[i]
-        if e and e.model and env.is_valid(e.model) and e.hit and env.is_valid(e.hit) then
-            if write ~= i then
-                index[write] = e
-            end
-            write = write + 1
-        end
+function M.hit_part(model, kind)
+    if not env.is_valid(model) then return nil, false end
+    kind = kind or M.kind_from_name(name_of(model))
+    local part, is_mark = aim_part(model, kind)
+    if kind == "Trees" then
+        is_mark = part ~= nil and child(model, "TreeX") ~= nil
+    elseif kind == "Nodes" then
+        is_mark = part ~= nil and child(model, "NodeSpark") ~= nil
     end
-    for i = write, index_n do
-        index[i] = nil
-    end
-    index_n = write - 1
-    if index_cursor > index_n then index_cursor = 1 end
+    return part, is_mark
 end
 
--- Advance the spatial index a little each call (budgeted).
--- force=true skips the tick gate (used when near-list is empty / just enabled).
-function M.tick_index(force)
-    local now = tick_ms()
-    if not force and (now - last_index_ms) < INDEX_TICK_MS then return end
-    last_index_ms = now
-
-    local budget = force and (INDEX_BUDGET * 3) or INDEX_BUDGET
-    local started_folder = index_folder_i
-    local started_cursor = index_cursor
-
-    while budget > 0 do
-        local spec = FOLDER_SPECS[index_folder_i]
-        if not spec then
-            index_folder_i = 1
-            index_cursor = 1
-            compact_index()
-            break
-        end
-
-        local children = folder_children(spec)
-        local n = #children
-        if n == 0 or index_cursor > n then
-            index_folder_i = index_folder_i + 1
-            if index_folder_i > #FOLDER_SPECS then
-                index_folder_i = 1
-                compact_index()
-            end
-            index_cursor = 1
-            if index_folder_i == started_folder and index_cursor == started_cursor then
-                break
-            end
-        else
-            local model = children[index_cursor]
-            index_cursor = index_cursor + 1
-            budget = budget - 1
-            if env.is_valid(model) then
-                local is_model = model.ClassName == "Model"
-                    or env.safe_call(function() return model:is_a("Model") end)
-                if is_model then
-                    local kind = resolve_kind(model, spec.kind)
-                    if kind then
-                        upsert_index(model, kind)
-                    end
-                end
-            end
-        end
-    end
+local function folder_children(folder)
+    if not env.is_valid(folder) then return nil end
+    return env.safe_call(function() return folder:get_children() end)
 end
 
-local function kind_allowed(kind, allow)
-    if not allow then return true end
+local function folders_for_caps(caps)
+    local list = {}
+    local want_nodes = not caps or caps.Nodes
+    local want_trees = not caps or caps.Trees
+    local want_veg = caps and (caps.Logs or caps.Cactus or caps.Dig)
+
+    if want_nodes then list[#list + 1] = folders.from_key("nodes") end
+    if want_trees then list[#list + 1] = folders.get_folder("Trees") end
+    if want_veg then list[#list + 1] = folders.from_key("vegetation") end
+    return list
+end
+
+local function kind_allowed(caps, kind)
     if not kind then return false end
-    return allow[kind] == true
+    if not caps then
+        return kind == "Trees" or kind == "Nodes"
+    end
+    if kind == "Dig" then
+        return caps.Dig == true or caps.Shovel == true
+    end
+    return caps[kind] == true
 end
 
-local function refresh_entry_hit(e)
-    if not e or not e.model or not env.is_valid(e.model) then return false end
-    local hit, kind = M.hit_part_from_model(e.model, e.kind)
-    if not hit then return false end
-    local pos = part_pos(hit)
-    if not pos then return false end
-    e.hit = hit
-    e.kind = kind or e.kind
-    e.x, e.y, e.z = pos.x, pos.y, pos.z
-    return true
-end
+--[[
+  Nearest in-range aim point.
+  1) Gate on proxy Main distance (cheap)
+  2) Only then resolve TreeX / NodeSpark
+  3) Early-out if a close marker is found
+]]
+function M.find_nearest(origin, radius, tool_caps)
+    if not origin or not radius or radius <= 0 then return nil end
 
--- Query near list from spatial index (cheap). Refreshes hit parts for near hits only.
-function M.collect_near(origin, radius, out, max_out, allow)
-    out = out or {}
-    max_out = max_out or 16
-    if not origin or radius <= 0 then return out end
+    local limit2 = radius * radius
+    local early2 = (radius * 0.45) * (radius * 0.45)
+    local best_mark, best_mark_d2 = nil, limit2
+    local best_plain, best_plain_d2 = nil, limit2
+    local seen = {}
 
-    M.tick_index()
+    local folder_list = folders_for_caps(tool_caps)
+    for fi = 1, #folder_list do
+        local folder = folder_list[fi]
+        if folder and not seen[folder] then
+            seen[folder] = true
+            local children = folder_children(folder)
+            if children then
+                for i = 1, #children do
+                    local model = children[i]
+                    if env.is_valid(model) then
+                        local kind = M.kind_from_name(name_of(model))
+                        if kind_allowed(tool_caps, kind) then
+                            local proxy = proxy_part(model, kind)
+                            local ppos = read_pos(proxy)
+                            if ppos and d2(ppos, origin) <= limit2 then
+                                local part, is_mark = aim_part(model, kind)
+                                -- Trees: aim_part returns mark|main; detect marker properly
+                                if kind == "Trees" then
+                                    local mark = marker_main(model, "TreeX")
+                                    if mark then
+                                        part, is_mark = mark, true
+                                    else
+                                        part, is_mark = child(model, "Main"), false
+                                    end
+                                elseif kind == "Nodes" then
+                                    local mark = marker_main(model, "NodeSpark")
+                                    if mark then
+                                        part, is_mark = mark, true
+                                    else
+                                        part, is_mark = child(model, "Main"), false
+                                    end
+                                end
 
-    local limit2 = (radius + 6) * (radius + 6)
-    local write = 1
-
-    for i = 1, index_n do
-        if write > max_out then break end
-        local e = index[i]
-        if e and kind_allowed(e.kind, allow) then
-            local dx = e.x - origin.x
-            local dy = e.y - origin.y
-            local dz = e.z - origin.z
-            if (dx * dx + dy * dy + dz * dz) <= limit2 then
-                if refresh_entry_hit(e) then
-                    dx = e.x - origin.x
-                    dy = e.y - origin.y
-                    dz = e.z - origin.z
-                    if (dx * dx + dy * dy + dz * dz) <= limit2 and env.is_valid(e.hit) then
-                        out[write] = e.hit
-                        write = write + 1
+                                local pos = read_pos(part)
+                                if pos then
+                                    local dist = d2(pos, origin)
+                                    if dist <= limit2 then
+                                        if is_mark then
+                                            if dist < best_mark_d2 then
+                                                best_mark_d2 = dist
+                                                best_mark = part
+                                                if dist <= early2 then
+                                                    return best_mark
+                                                end
+                                            end
+                                        elseif dist < best_plain_d2 then
+                                            best_plain_d2 = dist
+                                            best_plain = part
+                                        end
+                                    end
+                                end
+                            end
+                        end
                     end
                 end
             end
         end
     end
 
-    for i = write, #out do
-        out[i] = nil
-    end
-    return out
+    return best_mark or best_plain
 end
 
-function M.reset()
-    index = {}
-    index_n = 0
-    folder_cache = {}
-    index_cursor = 1
-    index_folder_i = 1
-    last_index_ms = 0
+function M.collect_near(origin, radius, out, _max_out, tool_caps)
+    out = out or {}
+    local part = M.find_nearest(origin, radius, tool_caps)
+    if part then out[1] = part end
+    return out
 end
 
 return M
@@ -11865,10 +11721,8 @@ M.NODE_LABELS = {
     ["Phosphate_Node"] = "Phosphate Node",
 }
 
--- Dump: Workspace.Nodes only (Stone/Metal/Phosphate). Not Vegetation.
-M.NODE_FOLDERS = { "nodes" }
+M.NODE_FOLDERS = { "vegetation", "nodes" }
 
--- Dump Workspace.Plants only — no Hemp in this game.
 M.PLANT_MAP = {
     ["Corn Plant"] = "april_corn_plant",
     ["Tomato Plant"] = "april_tomato_plant",
@@ -11877,6 +11731,8 @@ M.PLANT_MAP = {
     ["Raspberry Plant"] = "april_raspberry_plant",
     ["Blueberry Plant"] = "april_blueberry_plant",
     ["Wool Plant"] = "april_wool_plant",
+    ["Hemp Plant"] = "april_hemp_plant",
+    ["Hemp"] = "april_hemp_plant",
 }
 
 M.PLANT_LABELS = {
@@ -11887,9 +11743,11 @@ M.PLANT_LABELS = {
     ["Raspberry Plant"] = "Raspberry Plant",
     ["Blueberry Plant"] = "Blueberry Plant",
     ["Wool Plant"] = "Wool Plant",
+    ["Hemp Plant"] = "Hemp Plant",
+    ["Hemp"] = "Hemp",
 }
 
-M.PLANT_FOLDERS = { "plants" }
+M.PLANT_FOLDERS = { "plants", "vegetation" }
 
 M.ANIMAL_MAP = {
     ["PREFAB_ANIMAL_DEER"] = "april_deer",
@@ -11926,6 +11784,7 @@ M.WORLD_TOGGLES = {
     { id = "april_raspberry_plant", label = "Raspberry Plant", color = { 0.9, 0.2, 0.4, 1 } },
     { id = "april_blueberry_plant", label = "Blueberry Plant", color = { 0.3, 0.4, 0.9, 1 } },
     { id = "april_wool_plant", label = "Wool Plant", color = { 0.85, 0.85, 0.9, 1 } },
+    { id = "april_hemp_plant", label = "Hemp Plant", color = { 0.3, 0.7, 0.25, 1 } },
     { id = "april_deer", label = "Deer", color = { 0.6, 0.4, 0.2, 1 } },
     { id = "april_boar", label = "Wild Boar", color = { 0.4, 0.3, 0.2, 1 } },
     { id = "april_wolf", label = "Wolf", color = { 0.5, 0.5, 0.5, 1 } },
@@ -15674,22 +15533,18 @@ end)()
 -- ── features/combat/perfect_farm.lua ──
 April._mods["features.combat.perfect_farm"] = (function()
 --[[
-  Farm helper - silent or camera aim at gather hit parts.
-  Melee uses camera / mouse unit-ray origin (RaycastUtil.MouseRaycast).
+  Farm helper — only scans / aims when a gather target is inside tool range.
 
-  Perf: spatial index in farm_targets (budgeted); no full Trees/Nodes walks
-  on the ESP frame. Tool name + near list are rate-limited.
+  Idle  (always-on OK): rare cheap discovery scan, silent OFF
+  Active (in range):    aim at TreeX / NodeSpark; no world scan each frame
 ]]
 
 local settings = April.require("core.settings")
 local env = April.require("core.env")
-local debug = April.require("core.debug")
 local farm_tools = April.require("game.farm_tools")
 local farm_targets = April.require("game.farm_targets")
-local math_util = April.require("core.math_util")
 local menu_util = April.require("core.menu_util")
 local silent_ray = April.require("core.silent_ray")
-local esp_util = April.require("core.esp_util")
 
 local M = {}
 
@@ -15697,256 +15552,140 @@ local P = "april_farm_helper"
 local P_RADIUS = "april_farm_radius"
 local P_SMOOTH = "april_farm_smooth"
 local P_SILENT = "april_farm_silent"
+local SHOOT_VK = 0x01
 
-local gather_parts = {}
+-- Idle = far from anything (slow scan). Active = locked in range (validate only).
+local IDLE_SCAN_MS = 900
+local ACTIVE_RESERVE_MS = 700 -- occasional upgrade TreeX/spark while farming
+local TOOL_CACHE_MS = 250
+local LOCK_PAD = 1.15
+
 local locked_part = nil
-local lock_grace_until = 0
+local active = false
 local next_scan_ms = 0
-local next_pick_ms = 0
-local last_tool = nil
 local cached_tool = nil
-local cached_tool_ms = 0
-local TOOL_CACHE_MS = 120
-
--- Unlocked: scan often enough to acquire. Locked: rarely (index still ticks).
-local SCAN_MS_UNLOCKED = 350
-local SCAN_MS_LOCKED = 900
-local PICK_MS = 50
-local LOCK_GRACE_MS = 500
-local PICK_FOV = 240
-local MAX_NEAR = 14
+local cached_tool_until = 0
+local silent_on = false
 
 M._tracking = false
 
-local cx, cy = 960, 540
-local cx_init = false
-
-local function tick_ms()
+local function now_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
-local function ensure_screen_center()
-    if cx_init then return end
-    if draw and draw.get_screen_size then
-        cx, cy = draw.get_screen_size()
-        cx, cy = cx * 0.5, cy * 0.5
-    elseif utility and utility.get_screen_size then
-        cx, cy = utility.get_screen_size()
-        cx, cy = cx * 0.5, cy * 0.5
-    end
-    cx_init = true
-end
-
-local function part_position(part)
+local function part_pos(part)
     if not part or not env.is_valid(part) then return nil end
-    local pos = part.Position or part.position
-    if not pos or pos.x == nil then return nil end
-    return pos
-end
-
-local function unpack_pos(v)
-    if not v then return nil end
-    if v.x ~= nil then return v.x, v.y, v.z end
-    if v.X ~= nil then return v.X, v.Y, v.Z end
-    return nil
+    local p = part.Position or part.position
+    if not p or p.x == nil then return nil end
+    return p
 end
 
 local function dist2(a, b)
-    local dx = a.x - b.x
-    local dy = a.y - b.y
-    local dz = a.z - b.z
+    local dx, dy, dz = a.x - b.x, a.y - b.y, a.z - b.z
     return dx * dx + dy * dy + dz * dz
 end
 
-local function character_origin()
+local function body_origin()
     local lp = env.get_local_player()
-    if not lp then return nil end
-    local char = lp.character
-    if char and env.is_valid(char) then
-        local hrp = env.safe_call(function()
-            return char:find_first_child("HumanoidRootPart") or char:FindFirstChild("HumanoidRootPart")
-        end)
-        local pos = part_position(hrp)
-        if pos then return pos end
+    if lp then
+        local pos = lp.position or lp.Position
+        if pos and pos.x ~= nil then return pos end
+        local char = lp.character
+        if char and env.is_valid(char) then
+            local hrp = env.safe_call(function()
+                return char:find_first_child("HumanoidRootPart") or char:FindFirstChild("HumanoidRootPart")
+            end)
+            local p = part_pos(hrp)
+            if p then return p end
+        end
     end
-    local px, py, pz = unpack_pos(lp.position or lp.Position)
-    if px then return { x = px, y = py, z = pz } end
-    return nil
+    return silent_ray.get_camera_origin()
 end
 
-local function held_tool_cached()
-    local now = tick_ms()
-    if cached_tool and (now - cached_tool_ms) < TOOL_CACHE_MS then
+local function held_tool()
+    local t = now_ms()
+    if cached_tool and t < cached_tool_until then
         return cached_tool
     end
     farm_tools.load()
     cached_tool = farm_tools.get_held_farm_tool_name()
-    cached_tool_ms = now
+    cached_tool_until = t + TOOL_CACHE_MS
     return cached_tool
 end
 
-local function refresh_near(scan_origin, radius, allow, locked)
-    local now = tick_ms()
-    local interval = locked and SCAN_MS_LOCKED or SCAN_MS_UNLOCKED
-    if now < next_scan_ms then
-        -- Still advance spatial index cheaply so new trees appear.
-        farm_targets.tick_index(#gather_parts == 0)
-        return
-    end
-    next_scan_ms = now + interval
-    if #gather_parts == 0 then
-        farm_targets.tick_index(true)
-    end
-    farm_targets.collect_near(scan_origin, radius, gather_parts, MAX_NEAR, allow)
-end
-
-local function ray_origin()
-    return silent_ray.get_camera_origin()
-end
-
-local function effective_radius(tool_name)
+-- Strict: only tool melee reach, capped by slider (never search the whole forest).
+local function radius_for(tool_name)
     local tool_range = farm_tools.melee_range(tool_name)
     local slider = settings.num(P_RADIUS, 7)
     if slider <= 0 then return 0 end
-    return math.min(slider, tool_range + 0.5)
+    return math.min(slider, tool_range + 0.35)
 end
 
-local function target_valid(part, origin, radius, loose)
-    if not env.is_valid(part) then return false end
-    local pos = part_position(part)
+local function tool_caps(tool_name)
+    local caps = farm_tools.tool_caps(tool_name)
+    if caps then return caps end
+    return { Trees = true, Nodes = true, Logs = true, Cactus = true }
+end
+
+local function in_range(part, origin, radius)
+    local pos = part_pos(part)
     if not pos or not origin then return false end
-    local limit = loose and (radius * 1.4) or radius
-    return dist2(pos, origin) <= limit * limit
-end
-
-local function pick_target(origin, radius)
-    ensure_screen_center()
-
-    local best_part = nil
-    local best_score = math.huge
-    local best_fov = math.huge
-    local nearest_part = nil
-    local nearest_d2 = math.huge
-    local r2 = radius * radius
-
-    for i = 1, #gather_parts do
-        local part = gather_parts[i]
-        if env.is_valid(part) then
-            local pos = part_position(part)
-            if pos then
-                local d2 = dist2(pos, origin)
-                if d2 <= r2 then
-                    if d2 < nearest_d2 then
-                        nearest_d2 = d2
-                        nearest_part = part
-                    end
-
-                    local sx, sy, on_screen = esp_util.w2s(pos.x, pos.y, pos.z)
-                    if on_screen then
-                        local fov = math_util.screen_fov_dist(sx, sy, cx, cy)
-                        local score = fov * 0.85 + d2 * 2.0e-4
-                        if score < best_score then
-                            best_score = score
-                            best_fov = fov
-                            best_part = part
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    if best_part and best_fov <= PICK_FOV then
-        return best_part
-    end
-    return nearest_part
-end
-
-local function resolve_target(origin, radius, force_pick)
-    local now = tick_ms()
-
-    if locked_part and target_valid(locked_part, origin, radius, true) then
-        lock_grace_until = now + LOCK_GRACE_MS
-        return locked_part
-    end
-
-    if locked_part and now < lock_grace_until and env.is_valid(locked_part) and part_position(locked_part) then
-        return locked_part
-    end
-
-    if not force_pick and now < next_pick_ms then
-        return locked_part
-    end
-    next_pick_ms = now + PICK_MS
-
-    local picked = pick_target(origin, radius)
-    if picked then
-        locked_part = picked
-        lock_grace_until = now + LOCK_GRACE_MS
-        return picked
-    end
-
-    locked_part = nil
-    lock_grace_until = 0
-    return nil
-end
-
-local function silent_mode()
-    return settings.bool(P_SILENT, true) and silent_ray.available()
+    local lim = radius * LOCK_PAD
+    return dist2(pos, origin) <= lim * lim
 end
 
 local function stop_silent()
-    if not M._tracking then return end
+    if not silent_on and not M._tracking then return end
     silent_ray.stop()
+    silent_on = false
     M._tracking = false
 end
 
-local function clear_lock()
+local function deactivate()
     locked_part = nil
-    lock_grace_until = 0
-    gather_parts = {}
-    next_scan_ms = 0
-    next_pick_ms = 0
-    last_tool = nil
-    cached_tool = nil
-    cached_tool_ms = 0
+    active = false
+    stop_silent()
 end
 
-local function apply_silent(origin, aim)
-    if not silent_ray.ensure_hook() then
-        debug.error_once("farm:silent", "Silent farm hook unavailable - toggle Silent Farm off for camera aim")
-        return false
-    end
+local function clear_all()
+    deactivate()
+    next_scan_ms = 0
+    cached_tool = nil
+    cached_tool_until = 0
+end
 
-    -- Continuous set_target only — track(key) fails between LMB presses and used to tear down aim.
-    local ok = false
-    if silent_ray.set_target then
-        ok = silent_ray.set_target(origin, aim, aim) == true
-    elseif silent_ray.track then
-        ok = silent_ray.track(origin, aim, 0x01, aim) == true
-    end
+local function try_discover(origin, radius, tool_name)
+    local t = now_ms()
+    if t < next_scan_ms then return nil end
+    next_scan_ms = t + (active and ACTIVE_RESERVE_MS or IDLE_SCAN_MS)
 
-    if ok then
+    return farm_targets.find_nearest(origin, radius, tool_caps(tool_name))
+end
+
+local function aim_at(cam, aim)
+    local use_silent = settings.bool(P_SILENT, false) and silent_ray.available()
+    if use_silent then
+        silent_ray.ensure_hook()
+        silent_ray.track(cam, aim, SHOOT_VK, aim)
+        silent_on = true
         M._tracking = true
-        return true
+        return
     end
-
-    if M._tracking then
-        return true
+    stop_silent()
+    if camera and camera.look_at then
+        local smooth = math.max(1, settings.num(P_SMOOTH, 8))
+        pcall(camera.look_at, aim.x, aim.y, aim.z, smooth)
     end
-
-    debug.error_once("farm:silent", "Silent farm hook unavailable - toggle Silent Farm off for camera aim")
-    return false
 end
 
 function M.register_menu()
     local G = menu_util.G
-    local T, _ = menu_util.group(G.MISC)
+    local T = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
     menu_util.section(T, G.MISC, "Farm")
     menu_util.register_keybind(T, G.MISC, P, "Farm Helper", false)
-    menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", true, root)
+    menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", false, root)
     menu_util.gap(T, G.MISC)
     menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 10, 7, root)
     menu.add_slider_int(T, G.MISC, P_SMOOTH, "Camera Smoothness", 1, 30, 8, root)
@@ -15955,69 +15694,62 @@ end
 
 function M.update(_dt)
     if not settings.enabled(P) then
-        stop_silent()
-        clear_lock()
+        clear_all()
         return
     end
 
-    local tool_name = held_tool_cached()
+    local tool_name = held_tool()
     if not tool_name then
-        stop_silent()
-        clear_lock()
+        clear_all()
         return
     end
 
-    if tool_name ~= last_tool then
-        last_tool = tool_name
-        next_scan_ms = 0
-        locked_part = nil
-    end
-
-    local cam_origin = ray_origin()
-    if not cam_origin then
-        stop_silent()
+    local body = body_origin()
+    local cam = silent_ray.get_camera_origin()
+    if not body or not cam then
+        deactivate()
         return
     end
 
-    local radius = effective_radius(tool_name)
+    local radius = radius_for(tool_name)
     if radius <= 0 then
-        stop_silent()
+        clear_all()
         return
     end
 
-    local allow = farm_tools.gather_kinds(tool_name)
-    local scan_origin = character_origin() or cam_origin
-    local locked_ok = locked_part and target_valid(locked_part, scan_origin, radius, true)
-
-    refresh_near(scan_origin, radius, allow, locked_ok == true)
-
-    local target = resolve_target(scan_origin, radius, locked_ok ~= true)
-    if not target then
-        stop_silent()
-        return
+    -- Active: stay on current spark/X while it remains in tool range.
+    if active and locked_part and in_range(locked_part, body, radius) then
+        -- Rare refresh for better marker; otherwise zero world scanning.
+        local refreshed = try_discover(body, radius, tool_name)
+        if refreshed then
+            locked_part = refreshed
+        end
+        local aim = part_pos(locked_part)
+        if aim then
+            aim_at(cam, aim)
+            return
+        end
+        deactivate()
+    elseif active then
+        -- Walked out of range — shut off aim/silent immediately.
+        deactivate()
+        next_scan_ms = 0 -- allow quick rediscover if still near something else
     end
 
-    local aim = part_position(target)
-    if not aim then
-        stop_silent()
-        return
-    end
-
-    if silent_mode() then
-        if not apply_silent(cam_origin, aim) then
-            -- Fall back to camera so farming still works without silent hook.
-            if camera and camera.look_at then
-                local smooth = math.max(1, settings.num(P_SMOOTH, 8))
-                pcall(camera.look_at, aim.x, aim.y, aim.z, smooth)
-            end
+    -- Idle: only occasional discovery. No silent / camera until something is in range.
+    local found = try_discover(body, radius, tool_name)
+    if found and in_range(found, body, radius) then
+        locked_part = found
+        active = true
+        local aim = part_pos(found)
+        if aim then
+            aim_at(cam, aim)
         end
         return
     end
 
+    -- Nothing in tool range — stay cold.
     stop_silent()
-    if not camera or not camera.look_at then return end
-    local smooth = math.max(1, settings.num(P_SMOOTH, 8))
-    pcall(camera.look_at, aim.x, aim.y, aim.z, smooth)
 end
 
 return M
@@ -18148,8 +17880,7 @@ local function collect_world_chams(applied)
     local me_pos = me and me.position
     if not me_pos then return end
 
-    -- Hysteresis: keep chams a bit past ESP range to avoid Revert thrash while walking.
-    local range = settings.num("april_world_range", 500) * 1.35
+    local range = settings.num("april_world_range", 500)
     local range_sq = range * range
 
     for _, entry in ipairs(cache.world) do
@@ -18228,7 +17959,7 @@ function M.register_menu()
             master_id = P,
             is_active = world_chams_active,
             collect = collect_world_chams,
-            rescan_ms = 1800,
+            rescan_ms = 900,
             toggle_ids = toggle_ids,
         })
     end
@@ -18449,7 +18180,7 @@ local function collect_loot_chams(applied)
     -- Fail closed: without local pos we must NOT cham the whole cache.
     if not me_pos then return end
 
-    local range = settings.num("april_loot_range", 300) * 1.35
+    local range = settings.num("april_loot_range", 300)
     local range_sq = range * range
 
     for _, entry in ipairs(cache.loot) do
@@ -18722,7 +18453,7 @@ function M.register_menu()
             master_id = P,
             is_active = loot_chams_active,
             collect = collect_loot_chams,
-            rescan_ms = 2000,
+            rescan_ms = 1200,
             toggle_ids = toggle_ids,
         })
     end
@@ -18887,7 +18618,7 @@ local function collect_base_chams(applied)
     local me_pos = me and me.position
     if not me_pos then return end
 
-    local range = settings.num("april_base_range", 150) * 1.35
+    local range = settings.num("april_base_range", 150)
     local range_sq = range * range
 
     for _, entry in ipairs(cache.base) do
@@ -19001,7 +18732,7 @@ function M.register_menu()
             master_id = P,
             is_active = base_chams_active,
             collect = collect_base_chams,
-            rescan_ms = 1800,
+            rescan_ms = 900,
             toggle_ids = toggle_ids,
         })
     end
@@ -23096,10 +22827,8 @@ M.NODE_LABELS = {
     ["Phosphate_Node"] = "Phosphate Node",
 }
 
--- Dump: Workspace.Nodes only (Stone/Metal/Phosphate). Not Vegetation.
-M.NODE_FOLDERS = { "nodes" }
+M.NODE_FOLDERS = { "vegetation", "nodes" }
 
--- Dump Workspace.Plants only — no Hemp in this game.
 M.PLANT_MAP = {
     ["Corn Plant"] = "april_corn_plant",
     ["Tomato Plant"] = "april_tomato_plant",
@@ -23108,6 +22837,8 @@ M.PLANT_MAP = {
     ["Raspberry Plant"] = "april_raspberry_plant",
     ["Blueberry Plant"] = "april_blueberry_plant",
     ["Wool Plant"] = "april_wool_plant",
+    ["Hemp Plant"] = "april_hemp_plant",
+    ["Hemp"] = "april_hemp_plant",
 }
 
 M.PLANT_LABELS = {
@@ -23118,9 +22849,11 @@ M.PLANT_LABELS = {
     ["Raspberry Plant"] = "Raspberry Plant",
     ["Blueberry Plant"] = "Blueberry Plant",
     ["Wool Plant"] = "Wool Plant",
+    ["Hemp Plant"] = "Hemp Plant",
+    ["Hemp"] = "Hemp",
 }
 
-M.PLANT_FOLDERS = { "plants" }
+M.PLANT_FOLDERS = { "plants", "vegetation" }
 
 M.ANIMAL_MAP = {
     ["PREFAB_ANIMAL_DEER"] = "april_deer",
@@ -23157,6 +22890,7 @@ M.WORLD_TOGGLES = {
     { id = "april_raspberry_plant", label = "Raspberry Plant", color = { 0.9, 0.2, 0.4, 1 } },
     { id = "april_blueberry_plant", label = "Blueberry Plant", color = { 0.3, 0.4, 0.9, 1 } },
     { id = "april_wool_plant", label = "Wool Plant", color = { 0.85, 0.85, 0.9, 1 } },
+    { id = "april_hemp_plant", label = "Hemp Plant", color = { 0.3, 0.7, 0.25, 1 } },
     { id = "april_deer", label = "Deer", color = { 0.6, 0.4, 0.2, 1 } },
     { id = "april_boar", label = "Wild Boar", color = { 0.4, 0.3, 0.2, 1 } },
     { id = "april_wolf", label = "Wolf", color = { 0.5, 0.5, 0.5, 1 } },
@@ -23420,7 +23154,7 @@ M.BY_ID = {
     april_fling_enabled = "Launches nearby entities upward.",
 
     -- Utility
-    april_farm_helper = "Automatically farms nearby trees, nodes, logs, and cactus.",
+    april_farm_helper = "Automatically farms nearby nodes and plants.",
     april_farm_silent = "Uses silent aim while farm helper is active.",
     april_anti_afk = "Prevents idle kick by simulating activity.",
     april_mod_checker_enabled = "Alerts you when staff or mods join the server.",
@@ -25936,7 +25670,7 @@ local function build_misc()
             title = "Utility",
             items = {
                 kb("april_farm_helper", "Farm Helper", false),
-                cb("april_farm_silent", "Silent Farm", true, nil, "april_farm_helper"),
+                cb("april_farm_silent", "Silent Farm", false, nil, "april_farm_helper"),
                 sl("april_farm_radius", "Farm Range (studs)", 1, 10, 7, false, "april_farm_helper"),
                 sl("april_farm_smooth", "Camera Smoothness", 1, 30, 8, false, "april_farm_helper"),
                 sep(),

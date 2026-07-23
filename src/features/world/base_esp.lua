@@ -48,7 +48,7 @@ local function collect_base_chams(applied)
     local me_pos = me and me.position
     if not me_pos then return end
 
-    local range = settings.num("april_base_range", 150) * 1.35
+    local range = settings.num("april_base_range", 150)
     local range_sq = range * range
 
     for _, entry in ipairs(cache.base) do
@@ -162,7 +162,7 @@ function M.register_menu()
             master_id = P,
             is_active = base_chams_active,
             collect = collect_base_chams,
-            rescan_ms = 1800,
+            rescan_ms = 900,
             toggle_ids = toggle_ids,
         })
     end

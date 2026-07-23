@@ -45,8 +45,7 @@ local function collect_world_chams(applied)
     local me_pos = me and me.position
     if not me_pos then return end
 
-    -- Hysteresis: keep chams a bit past ESP range to avoid Revert thrash while walking.
-    local range = settings.num("april_world_range", 500) * 1.35
+    local range = settings.num("april_world_range", 500)
     local range_sq = range * range
 
     for _, entry in ipairs(cache.world) do
@@ -125,7 +124,7 @@ function M.register_menu()
             master_id = P,
             is_active = world_chams_active,
             collect = collect_world_chams,
-            rescan_ms = 1800,
+            rescan_ms = 900,
             toggle_ids = toggle_ids,
         })
     end

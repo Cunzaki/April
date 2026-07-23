@@ -31,7 +31,7 @@ local owners = {}
 local owner_order = {}
 local rebuild_busy = false
 local last_global_rebuild = 0
-local MIN_REBUILD_GAP_MS = 750
+local MIN_REBUILD_GAP_MS = 250
 
 function M.available()
     return exploits ~= nil
@@ -394,30 +394,13 @@ function M.sync_owner(id, force)
         return
     end
 
-    if next(front) == nil then
-        -- First populate after clear -> full rebuild.
+    if has_removed(front, back) or next(front) == nil then
+        -- Something left range / first populate after clear -> swap buffers via rebuild.
+        -- Rebuild reapplies ALL active owners from scratch (correct multi-owner state).
         owner.applied = {}
         if not M.rebuild_all() then
+            -- Rate-limited: still track desired set; next tick will rebuild.
             owner.applied = back
-        end
-        return
-    end
-
-    if has_removed(front, back) then
-        -- Defer Revert hitch while walking: keep stamping additions only.
-        -- A full rebuild runs when the global gap allows (not every leave-range).
-        for addr, _ in pairs(back) do
-            if not front[addr] then
-                pcall(exploits.ApplyChamsToInstance, addr)
-                front[addr] = true
-            end
-        end
-        owner.applied = front
-        if (now - last_global_rebuild) >= MIN_REBUILD_GAP_MS then
-            owner.applied = {}
-            if not M.rebuild_all() then
-                owner.applied = back
-            end
         end
         return
     end

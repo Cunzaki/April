@@ -56,7 +56,7 @@ local function collect_loot_chams(applied)
     -- Fail closed: without local pos we must NOT cham the whole cache.
     if not me_pos then return end
 
-    local range = settings.num("april_loot_range", 300) * 1.35
+    local range = settings.num("april_loot_range", 300)
     local range_sq = range * range
 
     for _, entry in ipairs(cache.loot) do
@@ -329,7 +329,7 @@ function M.register_menu()
             master_id = P,
             is_active = loot_chams_active,
             collect = collect_loot_chams,
-            rescan_ms = 2000,
+            rescan_ms = 1200,
             toggle_ids = toggle_ids,
         })
     end

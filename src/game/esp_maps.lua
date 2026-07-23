@@ -12,10 +12,8 @@ M.NODE_LABELS = {
     ["Phosphate_Node"] = "Phosphate Node",
 }
 
--- Dump: Workspace.Nodes only (Stone/Metal/Phosphate). Not Vegetation.
-M.NODE_FOLDERS = { "nodes" }
+M.NODE_FOLDERS = { "vegetation", "nodes" }
 
--- Dump Workspace.Plants only — no Hemp in this game.
 M.PLANT_MAP = {
     ["Corn Plant"] = "april_corn_plant",
     ["Tomato Plant"] = "april_tomato_plant",
@@ -24,6 +22,8 @@ M.PLANT_MAP = {
     ["Raspberry Plant"] = "april_raspberry_plant",
     ["Blueberry Plant"] = "april_blueberry_plant",
     ["Wool Plant"] = "april_wool_plant",
+    ["Hemp Plant"] = "april_hemp_plant",
+    ["Hemp"] = "april_hemp_plant",
 }
 
 M.PLANT_LABELS = {
@@ -34,9 +34,11 @@ M.PLANT_LABELS = {
     ["Raspberry Plant"] = "Raspberry Plant",
     ["Blueberry Plant"] = "Blueberry Plant",
     ["Wool Plant"] = "Wool Plant",
+    ["Hemp Plant"] = "Hemp Plant",
+    ["Hemp"] = "Hemp",
 }
 
-M.PLANT_FOLDERS = { "plants" }
+M.PLANT_FOLDERS = { "plants", "vegetation" }
 
 M.ANIMAL_MAP = {
     ["PREFAB_ANIMAL_DEER"] = "april_deer",
@@ -73,6 +75,7 @@ M.WORLD_TOGGLES = {
     { id = "april_raspberry_plant", label = "Raspberry Plant", color = { 0.9, 0.2, 0.4, 1 } },
     { id = "april_blueberry_plant", label = "Blueberry Plant", color = { 0.3, 0.4, 0.9, 1 } },
     { id = "april_wool_plant", label = "Wool Plant", color = { 0.85, 0.85, 0.9, 1 } },
+    { id = "april_hemp_plant", label = "Hemp Plant", color = { 0.3, 0.7, 0.25, 1 } },
     { id = "april_deer", label = "Deer", color = { 0.6, 0.4, 0.2, 1 } },
     { id = "april_boar", label = "Wild Boar", color = { 0.4, 0.3, 0.2, 1 } },
     { id = "april_wolf", label = "Wolf", color = { 0.5, 0.5, 0.5, 1 } },

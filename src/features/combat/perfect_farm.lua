@@ -1,20 +1,16 @@
 --[[
-  Farm helper - silent or camera aim at gather hit parts.
-  Melee uses camera / mouse unit-ray origin (RaycastUtil.MouseRaycast).
+  Farm helper — only scans / aims when a gather target is inside tool range.
 
-  Perf: spatial index in farm_targets (budgeted); no full Trees/Nodes walks
-  on the ESP frame. Tool name + near list are rate-limited.
+  Idle  (always-on OK): rare cheap discovery scan, silent OFF
+  Active (in range):    aim at TreeX / NodeSpark; no world scan each frame
 ]]
 
 local settings = April.require("core.settings")
 local env = April.require("core.env")
-local debug = April.require("core.debug")
 local farm_tools = April.require("game.farm_tools")
 local farm_targets = April.require("game.farm_targets")
-local math_util = April.require("core.math_util")
 local menu_util = April.require("core.menu_util")
 local silent_ray = April.require("core.silent_ray")
-local esp_util = April.require("core.esp_util")
 
 local M = {}
 
@@ -22,256 +18,140 @@ local P = "april_farm_helper"
 local P_RADIUS = "april_farm_radius"
 local P_SMOOTH = "april_farm_smooth"
 local P_SILENT = "april_farm_silent"
+local SHOOT_VK = 0x01
 
-local gather_parts = {}
+-- Idle = far from anything (slow scan). Active = locked in range (validate only).
+local IDLE_SCAN_MS = 900
+local ACTIVE_RESERVE_MS = 700 -- occasional upgrade TreeX/spark while farming
+local TOOL_CACHE_MS = 250
+local LOCK_PAD = 1.15
+
 local locked_part = nil
-local lock_grace_until = 0
+local active = false
 local next_scan_ms = 0
-local next_pick_ms = 0
-local last_tool = nil
 local cached_tool = nil
-local cached_tool_ms = 0
-local TOOL_CACHE_MS = 120
-
--- Unlocked: scan often enough to acquire. Locked: rarely (index still ticks).
-local SCAN_MS_UNLOCKED = 350
-local SCAN_MS_LOCKED = 900
-local PICK_MS = 50
-local LOCK_GRACE_MS = 500
-local PICK_FOV = 240
-local MAX_NEAR = 14
+local cached_tool_until = 0
+local silent_on = false
 
 M._tracking = false
 
-local cx, cy = 960, 540
-local cx_init = false
-
-local function tick_ms()
+local function now_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
-local function ensure_screen_center()
-    if cx_init then return end
-    if draw and draw.get_screen_size then
-        cx, cy = draw.get_screen_size()
-        cx, cy = cx * 0.5, cy * 0.5
-    elseif utility and utility.get_screen_size then
-        cx, cy = utility.get_screen_size()
-        cx, cy = cx * 0.5, cy * 0.5
-    end
-    cx_init = true
-end
-
-local function part_position(part)
+local function part_pos(part)
     if not part or not env.is_valid(part) then return nil end
-    local pos = part.Position or part.position
-    if not pos or pos.x == nil then return nil end
-    return pos
-end
-
-local function unpack_pos(v)
-    if not v then return nil end
-    if v.x ~= nil then return v.x, v.y, v.z end
-    if v.X ~= nil then return v.X, v.Y, v.Z end
-    return nil
+    local p = part.Position or part.position
+    if not p or p.x == nil then return nil end
+    return p
 end
 
 local function dist2(a, b)
-    local dx = a.x - b.x
-    local dy = a.y - b.y
-    local dz = a.z - b.z
+    local dx, dy, dz = a.x - b.x, a.y - b.y, a.z - b.z
     return dx * dx + dy * dy + dz * dz
 end
 
-local function character_origin()
+local function body_origin()
     local lp = env.get_local_player()
-    if not lp then return nil end
-    local char = lp.character
-    if char and env.is_valid(char) then
-        local hrp = env.safe_call(function()
-            return char:find_first_child("HumanoidRootPart") or char:FindFirstChild("HumanoidRootPart")
-        end)
-        local pos = part_position(hrp)
-        if pos then return pos end
+    if lp then
+        local pos = lp.position or lp.Position
+        if pos and pos.x ~= nil then return pos end
+        local char = lp.character
+        if char and env.is_valid(char) then
+            local hrp = env.safe_call(function()
+                return char:find_first_child("HumanoidRootPart") or char:FindFirstChild("HumanoidRootPart")
+            end)
+            local p = part_pos(hrp)
+            if p then return p end
+        end
     end
-    local px, py, pz = unpack_pos(lp.position or lp.Position)
-    if px then return { x = px, y = py, z = pz } end
-    return nil
+    return silent_ray.get_camera_origin()
 end
 
-local function held_tool_cached()
-    local now = tick_ms()
-    if cached_tool and (now - cached_tool_ms) < TOOL_CACHE_MS then
+local function held_tool()
+    local t = now_ms()
+    if cached_tool and t < cached_tool_until then
         return cached_tool
     end
     farm_tools.load()
     cached_tool = farm_tools.get_held_farm_tool_name()
-    cached_tool_ms = now
+    cached_tool_until = t + TOOL_CACHE_MS
     return cached_tool
 end
 
-local function refresh_near(scan_origin, radius, allow, locked)
-    local now = tick_ms()
-    local interval = locked and SCAN_MS_LOCKED or SCAN_MS_UNLOCKED
-    if now < next_scan_ms then
-        -- Still advance spatial index cheaply so new trees appear.
-        farm_targets.tick_index(#gather_parts == 0)
-        return
-    end
-    next_scan_ms = now + interval
-    if #gather_parts == 0 then
-        farm_targets.tick_index(true)
-    end
-    farm_targets.collect_near(scan_origin, radius, gather_parts, MAX_NEAR, allow)
-end
-
-local function ray_origin()
-    return silent_ray.get_camera_origin()
-end
-
-local function effective_radius(tool_name)
+-- Strict: only tool melee reach, capped by slider (never search the whole forest).
+local function radius_for(tool_name)
     local tool_range = farm_tools.melee_range(tool_name)
     local slider = settings.num(P_RADIUS, 7)
     if slider <= 0 then return 0 end
-    return math.min(slider, tool_range + 0.5)
+    return math.min(slider, tool_range + 0.35)
 end
 
-local function target_valid(part, origin, radius, loose)
-    if not env.is_valid(part) then return false end
-    local pos = part_position(part)
+local function tool_caps(tool_name)
+    local caps = farm_tools.tool_caps(tool_name)
+    if caps then return caps end
+    return { Trees = true, Nodes = true, Logs = true, Cactus = true }
+end
+
+local function in_range(part, origin, radius)
+    local pos = part_pos(part)
     if not pos or not origin then return false end
-    local limit = loose and (radius * 1.4) or radius
-    return dist2(pos, origin) <= limit * limit
-end
-
-local function pick_target(origin, radius)
-    ensure_screen_center()
-
-    local best_part = nil
-    local best_score = math.huge
-    local best_fov = math.huge
-    local nearest_part = nil
-    local nearest_d2 = math.huge
-    local r2 = radius * radius
-
-    for i = 1, #gather_parts do
-        local part = gather_parts[i]
-        if env.is_valid(part) then
-            local pos = part_position(part)
-            if pos then
-                local d2 = dist2(pos, origin)
-                if d2 <= r2 then
-                    if d2 < nearest_d2 then
-                        nearest_d2 = d2
-                        nearest_part = part
-                    end
-
-                    local sx, sy, on_screen = esp_util.w2s(pos.x, pos.y, pos.z)
-                    if on_screen then
-                        local fov = math_util.screen_fov_dist(sx, sy, cx, cy)
-                        local score = fov * 0.85 + d2 * 2.0e-4
-                        if score < best_score then
-                            best_score = score
-                            best_fov = fov
-                            best_part = part
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    if best_part and best_fov <= PICK_FOV then
-        return best_part
-    end
-    return nearest_part
-end
-
-local function resolve_target(origin, radius, force_pick)
-    local now = tick_ms()
-
-    if locked_part and target_valid(locked_part, origin, radius, true) then
-        lock_grace_until = now + LOCK_GRACE_MS
-        return locked_part
-    end
-
-    if locked_part and now < lock_grace_until and env.is_valid(locked_part) and part_position(locked_part) then
-        return locked_part
-    end
-
-    if not force_pick and now < next_pick_ms then
-        return locked_part
-    end
-    next_pick_ms = now + PICK_MS
-
-    local picked = pick_target(origin, radius)
-    if picked then
-        locked_part = picked
-        lock_grace_until = now + LOCK_GRACE_MS
-        return picked
-    end
-
-    locked_part = nil
-    lock_grace_until = 0
-    return nil
-end
-
-local function silent_mode()
-    return settings.bool(P_SILENT, true) and silent_ray.available()
+    local lim = radius * LOCK_PAD
+    return dist2(pos, origin) <= lim * lim
 end
 
 local function stop_silent()
-    if not M._tracking then return end
+    if not silent_on and not M._tracking then return end
     silent_ray.stop()
+    silent_on = false
     M._tracking = false
 end
 
-local function clear_lock()
+local function deactivate()
     locked_part = nil
-    lock_grace_until = 0
-    gather_parts = {}
-    next_scan_ms = 0
-    next_pick_ms = 0
-    last_tool = nil
-    cached_tool = nil
-    cached_tool_ms = 0
+    active = false
+    stop_silent()
 end
 
-local function apply_silent(origin, aim)
-    if not silent_ray.ensure_hook() then
-        debug.error_once("farm:silent", "Silent farm hook unavailable - toggle Silent Farm off for camera aim")
-        return false
-    end
+local function clear_all()
+    deactivate()
+    next_scan_ms = 0
+    cached_tool = nil
+    cached_tool_until = 0
+end
 
-    -- Continuous set_target only — track(key) fails between LMB presses and used to tear down aim.
-    local ok = false
-    if silent_ray.set_target then
-        ok = silent_ray.set_target(origin, aim, aim) == true
-    elseif silent_ray.track then
-        ok = silent_ray.track(origin, aim, 0x01, aim) == true
-    end
+local function try_discover(origin, radius, tool_name)
+    local t = now_ms()
+    if t < next_scan_ms then return nil end
+    next_scan_ms = t + (active and ACTIVE_RESERVE_MS or IDLE_SCAN_MS)
 
-    if ok then
+    return farm_targets.find_nearest(origin, radius, tool_caps(tool_name))
+end
+
+local function aim_at(cam, aim)
+    local use_silent = settings.bool(P_SILENT, false) and silent_ray.available()
+    if use_silent then
+        silent_ray.ensure_hook()
+        silent_ray.track(cam, aim, SHOOT_VK, aim)
+        silent_on = true
         M._tracking = true
-        return true
+        return
     end
-
-    if M._tracking then
-        return true
+    stop_silent()
+    if camera and camera.look_at then
+        local smooth = math.max(1, settings.num(P_SMOOTH, 8))
+        pcall(camera.look_at, aim.x, aim.y, aim.z, smooth)
     end
-
-    debug.error_once("farm:silent", "Silent farm hook unavailable - toggle Silent Farm off for camera aim")
-    return false
 end
 
 function M.register_menu()
     local G = menu_util.G
-    local T, _ = menu_util.group(G.MISC)
+    local T = menu_util.group(G.MISC)
     local root = menu_util.parent(P)
 
     menu_util.section(T, G.MISC, "Farm")
     menu_util.register_keybind(T, G.MISC, P, "Farm Helper", false)
-    menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", true, root)
+    menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", false, root)
     menu_util.gap(T, G.MISC)
     menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 10, 7, root)
     menu.add_slider_int(T, G.MISC, P_SMOOTH, "Camera Smoothness", 1, 30, 8, root)
@@ -280,69 +160,62 @@ end
 
 function M.update(_dt)
     if not settings.enabled(P) then
-        stop_silent()
-        clear_lock()
+        clear_all()
         return
     end
 
-    local tool_name = held_tool_cached()
+    local tool_name = held_tool()
     if not tool_name then
-        stop_silent()
-        clear_lock()
+        clear_all()
         return
     end
 
-    if tool_name ~= last_tool then
-        last_tool = tool_name
-        next_scan_ms = 0
-        locked_part = nil
-    end
-
-    local cam_origin = ray_origin()
-    if not cam_origin then
-        stop_silent()
+    local body = body_origin()
+    local cam = silent_ray.get_camera_origin()
+    if not body or not cam then
+        deactivate()
         return
     end
 
-    local radius = effective_radius(tool_name)
+    local radius = radius_for(tool_name)
     if radius <= 0 then
-        stop_silent()
+        clear_all()
         return
     end
 
-    local allow = farm_tools.gather_kinds(tool_name)
-    local scan_origin = character_origin() or cam_origin
-    local locked_ok = locked_part and target_valid(locked_part, scan_origin, radius, true)
-
-    refresh_near(scan_origin, radius, allow, locked_ok == true)
-
-    local target = resolve_target(scan_origin, radius, locked_ok ~= true)
-    if not target then
-        stop_silent()
-        return
+    -- Active: stay on current spark/X while it remains in tool range.
+    if active and locked_part and in_range(locked_part, body, radius) then
+        -- Rare refresh for better marker; otherwise zero world scanning.
+        local refreshed = try_discover(body, radius, tool_name)
+        if refreshed then
+            locked_part = refreshed
+        end
+        local aim = part_pos(locked_part)
+        if aim then
+            aim_at(cam, aim)
+            return
+        end
+        deactivate()
+    elseif active then
+        -- Walked out of range — shut off aim/silent immediately.
+        deactivate()
+        next_scan_ms = 0 -- allow quick rediscover if still near something else
     end
 
-    local aim = part_position(target)
-    if not aim then
-        stop_silent()
-        return
-    end
-
-    if silent_mode() then
-        if not apply_silent(cam_origin, aim) then
-            -- Fall back to camera so farming still works without silent hook.
-            if camera and camera.look_at then
-                local smooth = math.max(1, settings.num(P_SMOOTH, 8))
-                pcall(camera.look_at, aim.x, aim.y, aim.z, smooth)
-            end
+    -- Idle: only occasional discovery. No silent / camera until something is in range.
+    local found = try_discover(body, radius, tool_name)
+    if found and in_range(found, body, radius) then
+        locked_part = found
+        active = true
+        local aim = part_pos(found)
+        if aim then
+            aim_at(cam, aim)
         end
         return
     end
 
+    -- Nothing in tool range — stay cold.
     stop_silent()
-    if not camera or not camera.look_at then return end
-    local smooth = math.max(1, settings.num(P_SMOOTH, 8))
-    pcall(camera.look_at, aim.x, aim.y, aim.z, smooth)
 end
 
 return M
