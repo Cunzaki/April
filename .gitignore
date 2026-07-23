@@ -11,6 +11,7 @@ node_modules/
 
 # Vector load copy (bundled output is april.lua)
 Script 1.lua
+Script 2.lua
 
 # Local-only RE / reference material
 references/

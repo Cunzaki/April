@@ -4,43 +4,40 @@ Fallen Survival script for [Project Vector](https://project-vector-1.gitbook.io/
 
 ## Load in Vector
 
-**Option A — loadstring (recommended):**
+Paste this into a Vector script slot and execute:
 
 ```lua
-utility.load_url("https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/april.lua")
+utility.LoadUrl("https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/april.lua")
 ```
 
-Or run `load.lua` from this repo.
+That always pulls the latest `april.lua` from GitHub `main`.
 
-**Option B — local file:**
-
-1. Build: `npm run build`
-2. Load `april.lua` in Vector → **Execute Script**.
-
-Menu: **Scripts → April**
+Menu: **INSERT** (custom UI)
 
 ---
 
-## Rebuild from source
+## Rebuild & ship
 
 ```bash
 npm run build
+git add april.lua
+git commit -m "Ship April vX.Y.Z"
+git push origin main
 ```
 
-Edit `src/`, rebuild, push `april.lua` to GitHub.
+After push, `utility.LoadUrl(...)` serves the new build.
 
 ---
 
-## What's on GitHub (minimal)
+## Repo layout
 
 | Path | Purpose |
 |------|---------|
-| `load.lua` | One-line loadstring |
-| `april.lua` | Bundled runtime script |
+| `april.lua` | Bundled runtime (what LoadUrl downloads) |
+| `load.lua` | Same one-liner as above |
 | `src/` | Modular source |
-| `scripts/` | Bundle + asset tools |
-| `assets/` | CDN images (`raw.githubusercontent.com/.../assets/`) |
-| `package.json` | `npm run build` |
+| `scripts/` | Bundle tools |
+| `docs/` | API notes |
 
 **Local only (gitignored):** `dump/`, `RE/`, `node_modules/`
 

@@ -119,7 +119,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "3.96.4";
+const VERSION = "3.96.5";
 
 const header = `--[[
     April Fallen — Fallen Survival for Project Vector
@@ -210,39 +210,18 @@ for (const rel of ORDER) {
 fs.writeFileSync(OUT, header + body + footer);
 console.log("Built", path.relative(ROOT, OUT), `(${(fs.statSync(OUT).size / 1024).toFixed(1)} KB)`);
 
-// Full bundle copies for Vector script slots (do NOT use CDN loader until GitHub is updated).
-const SCRIPT2_OUT = path.join(ROOT, "Script 2.lua");
-fs.writeFileSync(SCRIPT2_OUT, header + body + footer);
-console.log("Built", path.relative(ROOT, SCRIPT2_OUT), "(full bundle — paste into Vector Script 2)");
-
-const loader = `-- April LOCAL loader — paste into Vector Script 1/2.
--- Loads the built april.lua from disk (not GitHub CDN).
-
-local path = [[${path.join(ROOT, "april.lua").replace(/\\/g, "\\\\")}]]
-local f = io.open(path, "r")
-if not f then
-    print("[April] missing local file: " .. path)
-    print("[April] Run npm run build, or paste april.lua into this script slot")
-    return
-end
-local src = f:read("*a")
-f:close()
-if not src or #src < 1000 then
-    print("[April] local april.lua empty/corrupt")
-    return
-end
-local fn, err = loadstring(src)
-if not fn then
-    print("[April] compile failed: " .. tostring(err))
-    return
-end
-local ok, run_err = pcall(fn)
-if not ok then
-    print("[April] run failed: " .. tostring(run_err))
-end
+// Ship loader — only LoadUrl to GitHub main (no local/CDN variants).
+const loader = `utility.LoadUrl("https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/april.lua")
 `;
 
 fs.writeFileSync(LOAD_OUT, loader);
 fs.writeFileSync(SCRIPT1_OUT, loader);
 console.log("Built", path.relative(ROOT, LOAD_OUT));
-console.log("Built", path.relative(ROOT, SCRIPT1_OUT), "(local-disk loader)");
+console.log("Built", path.relative(ROOT, SCRIPT1_OUT), "(same as load.lua)");
+
+// Do not keep a duplicate full-bundle Script 2.lua around.
+const SCRIPT2_OUT = path.join(ROOT, "Script 2.lua");
+if (fs.existsSync(SCRIPT2_OUT)) {
+  fs.unlinkSync(SCRIPT2_OUT);
+  console.log("Removed Script 2.lua (use LoadUrl / load.lua only)");
+}
