@@ -1,6 +1,7 @@
 --[[
   Farm helper - silent or camera aim at gather hit parts.
   Melee uses camera / mouse unit-ray origin (RaycastUtil.MouseRaycast).
+  Covers Trees / Nodes / Logs / Cactus for every gather tool in ToolInfo.
 ]]
 
 local settings = April.require("core.settings")
@@ -26,12 +27,14 @@ local locked_part = nil
 local lock_grace_until = 0
 local next_scan_ms = 0
 local next_pick_ms = 0
+local last_tool = nil
 
-local SCAN_MS = 1800
-local PICK_MS = 66
-local LOCK_GRACE_MS = 350
-local PICK_FOV = 160
-local MAX_NEAR = 28
+-- Fast rescan so newly spawned TreeX / nearby nodes lock quickly.
+local SCAN_MS = 200
+local PICK_MS = 33
+local LOCK_GRACE_MS = 450
+local PICK_FOV = 220
+local MAX_NEAR = 48
 
 M._tracking = false
 
@@ -61,6 +64,13 @@ local function part_position(part)
     return pos
 end
 
+local function unpack_pos(v)
+    if not v then return nil end
+    if v.x ~= nil then return v.x, v.y, v.z end
+    if v.X ~= nil then return v.X, v.Y, v.Z end
+    return nil
+end
+
 local function dist2(a, b)
     local dx = a.x - b.x
     local dy = a.y - b.y
@@ -68,13 +78,29 @@ local function dist2(a, b)
     return dx * dx + dy * dy + dz * dz
 end
 
-local function refresh_near(origin, radius)
+local function character_origin()
+    local lp = env.get_local_player()
+    if not lp then return nil end
+    local char = lp.character
+    if char and env.is_valid(char) then
+        local hrp = env.safe_call(function()
+            return char:find_first_child("HumanoidRootPart") or char:FindFirstChild("HumanoidRootPart")
+        end)
+        local pos = part_position(hrp)
+        if pos then return pos end
+    end
+    local px, py, pz = unpack_pos(lp.position or lp.Position)
+    if px then return { x = px, y = py, z = pz } end
+    return nil
+end
+
+local function refresh_near(scan_origin, radius, allow)
     local now = tick_ms()
     if now < next_scan_ms then return end
     next_scan_ms = now + SCAN_MS
 
-    local out = {}
-    farm_targets.collect_near(origin, radius, out, MAX_NEAR)
+    local out = gather_parts
+    farm_targets.collect_near(scan_origin, radius, out, MAX_NEAR, allow)
     gather_parts = out
 end
 
@@ -86,14 +112,14 @@ local function effective_radius(tool_name)
     local tool_range = farm_tools.melee_range(tool_name)
     local slider = settings.num(P_RADIUS, 7)
     if slider <= 0 then return 0 end
-    return math.min(slider, tool_range + 0.15)
+    return math.min(slider, tool_range + 0.35)
 end
 
 local function target_valid(part, origin, radius, loose)
     if not env.is_valid(part) then return false end
     local pos = part_position(part)
     if not pos or not origin then return false end
-    local limit = loose and (radius * 1.25) or radius
+    local limit = loose and (radius * 1.35) or radius
     return dist2(pos, origin) <= limit * limit
 end
 
@@ -122,7 +148,8 @@ local function pick_target(origin, radius)
                     local sx, sy, on_screen = esp_util.w2s(pos.x, pos.y, pos.z)
                     if on_screen then
                         local fov = math_util.screen_fov_dist(sx, sy, cx, cy)
-                        local score = fov + d2 * 1.5e-4
+                        -- Prefer close + on-screen; small FOV bias so looking at a tree wins.
+                        local score = fov * 0.85 + d2 * 2.0e-4
                         if score < best_score then
                             best_score = score
                             best_fov = fov
@@ -185,6 +212,35 @@ local function clear_lock()
     gather_parts = {}
     next_scan_ms = 0
     next_pick_ms = 0
+    last_tool = nil
+end
+
+local function apply_silent(origin, aim)
+    silent_ray.ensure_hook()
+
+    -- Continuous set_target keeps melee rays on the node even between clicks.
+    local ok = false
+    if silent_ray.set_target then
+        ok = silent_ray.set_target(origin, aim, aim) == true
+    end
+    if silent_ray.track then
+        -- Also bind while LMB held (matches HitMelee swing path).
+        local tracked = silent_ray.track(origin, aim, SHOOT_VK, aim) == true
+        ok = ok or tracked
+    end
+
+    if ok then
+        M._tracking = true
+        return true
+    end
+
+    -- Do not tear down on a single failed frame (key-up / transient API miss).
+    if M._tracking then
+        return true
+    end
+
+    debug.error_once("farm:silent", "Silent farm hook unavailable - toggle Silent Farm off for camera aim")
+    return false
 end
 
 function M.register_menu()
@@ -216,8 +272,14 @@ function M.update(_dt)
         return
     end
 
-    local origin = ray_origin()
-    if not origin then
+    if tool_name ~= last_tool then
+        last_tool = tool_name
+        next_scan_ms = 0
+        locked_part = nil
+    end
+
+    local cam_origin = ray_origin()
+    if not cam_origin then
         stop_silent()
         clear_lock()
         return
@@ -230,12 +292,14 @@ function M.update(_dt)
         return
     end
 
-    local locked_ok = locked_part and target_valid(locked_part, origin, radius, true)
-    if not locked_ok then
-        refresh_near(origin, radius)
-    end
+    local allow = farm_tools.gather_kinds(tool_name)
+    -- Scan from character so looking away still finds nearby trees/nodes.
+    local scan_origin = character_origin() or cam_origin
+    local locked_ok = locked_part and target_valid(locked_part, scan_origin, radius, true)
+    -- Always rate-limited rescan so TreeX / NodeSpark / new nodes appear quickly.
+    refresh_near(scan_origin, radius, allow)
 
-    local target = resolve_target(origin, radius, locked_ok ~= true)
+    local target = resolve_target(scan_origin, radius, locked_ok ~= true)
     if not target then
         stop_silent()
         return
@@ -248,11 +312,7 @@ function M.update(_dt)
     end
 
     if silent_mode() then
-        silent_ray.ensure_hook()
-        if silent_ray.track(origin, aim, SHOOT_VK, aim) then
-            M._tracking = true
-        else
-            debug.error_once("farm:silent", "Silent farm hook unavailable - toggle Silent Farm off for camera aim")
+        if not apply_silent(cam_origin, aim) then
             stop_silent()
         end
         return

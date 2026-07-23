@@ -5,6 +5,7 @@ local M = {}
 
 local loaded = false
 local farm_tools = {}
+local tool_kinds = {}
 
 local FALLBACK_GATHER_TOOLS = {
     ["Stone Hatchet"] = true,
@@ -18,14 +19,34 @@ local FALLBACK_GATHER_TOOLS = {
     ["Bone Tool"] = true,
     ["Candy Cane"] = true,
     ["Carrot Blade"] = true,
-    ["Halloween Scythe"] = true,
     Boulder = true,
+    Machete = true,
+    ["Saw Bat"] = true,
+}
+
+-- Dump ToolInfo ObjectDamages defaults when module table is incomplete.
+local FALLBACK_KINDS = {
+    ["Stone Hatchet"] = { trees = true, logs = true, cactus = true },
+    ["Iron Shard Hatchet"] = { trees = true, logs = true, cactus = true },
+    ["Steel Axe"] = { trees = true, logs = true, cactus = true },
+    Chainsaw = { trees = true, logs = true, cactus = true },
+    ["Stone Pickaxe"] = { nodes = true },
+    ["Iron Shard Pickaxe"] = { nodes = true },
+    ["Steel Pickaxe"] = { nodes = true },
+    ["Mining Drill"] = { nodes = true },
+    ["Bone Tool"] = { trees = true, nodes = true, logs = true, cactus = true },
+    ["Candy Cane"] = { trees = true, nodes = true, logs = true, cactus = true },
+    ["Carrot Blade"] = { trees = true, nodes = true, logs = true, cactus = true },
+    Boulder = { trees = true, nodes = true, logs = true, cactus = true },
+    Machete = { trees = true, logs = true, cactus = true },
+    ["Saw Bat"] = { cactus = true },
 }
 
 local NAME_HINTS = {
     "hatchet", "pickaxe", "pick axe", " axe", "axe ",
     "chainsaw", "mining drill", "bone tool",
-    "candy cane", "carrot blade", "halloween scythe", "boulder",
+    "candy cane", "carrot blade", "boulder",
+    "machete", "saw bat",
 }
 
 -- MeleeChecks reach from ToolInfo dump (RaycastUtil MouseRaycast / HitMelee).
@@ -41,8 +62,9 @@ local MELEE_RANGE = {
     ["Bone Tool"] = 5,
     ["Candy Cane"] = 5,
     ["Carrot Blade"] = 5,
-    ["Halloween Scythe"] = 5.5,
     Boulder = 4.5,
+    Machete = 5.5,
+    ["Saw Bat"] = 6.5,
 }
 
 local function inst_name(inst)
@@ -50,16 +72,25 @@ local function inst_name(inst)
     return inst.name or inst.Name
 end
 
-local function entry_can_gather(entry)
-    if not entry or not entry.Melee then return false end
-    local od = entry.ObjectDamages
-    if not od then return false end
-    return od.Trees ~= nil or od.Nodes ~= nil
-end
-
 local function normalize(name)
     if not name or name == "" then return nil end
     return name
+end
+
+local function kinds_from_od(od)
+    if type(od) ~= "table" then return nil end
+    local kinds = {}
+    if od.Trees ~= nil then kinds.trees = true end
+    if od.Nodes ~= nil then kinds.nodes = true end
+    if od.Logs ~= nil then kinds.logs = true end
+    if od.Cactus ~= nil then kinds.cactus = true end
+    if next(kinds) == nil then return nil end
+    return kinds
+end
+
+local function entry_can_gather(entry)
+    if not entry or not entry.Melee then return false end
+    return kinds_from_od(entry.ObjectDamages) ~= nil
 end
 
 local function name_hint_match(name)
@@ -70,12 +101,30 @@ local function name_hint_match(name)
     return false
 end
 
+local function hint_kinds(name)
+    local n = (name or ""):lower()
+    if n:find("pickaxe", 1, true) or n:find("mining drill", 1, true) then
+        return { nodes = true }
+    end
+    if n:find("saw bat", 1, true) then
+        return { cactus = true }
+    end
+    if n:find("hatchet", 1, true) or n:find("axe", 1, true) or n:find("chainsaw", 1, true)
+        or n:find("machete", 1, true) then
+        return { trees = true, logs = true, cactus = true }
+    end
+    -- Bone / candy / boulder style hybrids
+    return { trees = true, nodes = true, logs = true, cactus = true }
+end
+
 function M.load()
     if loaded then return true end
 
     farm_tools = {}
+    tool_kinds = {}
     for name in pairs(FALLBACK_GATHER_TOOLS) do
         farm_tools[name] = true
+        tool_kinds[name] = FALLBACK_KINDS[name] or hint_kinds(name)
     end
 
     local data = bootstrap.get_module("ToolInfo")
@@ -83,6 +132,7 @@ function M.load()
         for name, entry in pairs(data) do
             if type(name) == "string" and entry_can_gather(entry) then
                 farm_tools[name] = true
+                tool_kinds[name] = kinds_from_od(entry.ObjectDamages) or FALLBACK_KINDS[name] or hint_kinds(name)
             end
         end
     end
@@ -94,6 +144,7 @@ end
 function M.invalidate()
     loaded = false
     farm_tools = {}
+    tool_kinds = {}
 end
 
 function M.is_farm_tool_name(name)
@@ -102,6 +153,32 @@ function M.is_farm_tool_name(name)
     if not loaded then M.load() end
     if farm_tools[name] then return true end
     return name_hint_match(name)
+end
+
+-- Which gather kinds this tool can damage (dump ObjectDamages).
+function M.gather_kinds(tool_name)
+    tool_name = normalize(tool_name)
+    if not tool_name then return nil end
+    if not loaded then M.load() end
+
+    local kinds = tool_kinds[tool_name]
+    if kinds then return kinds end
+
+    local data = bootstrap.get_module("ToolInfo")
+    local entry = data and data[tool_name]
+    kinds = entry and kinds_from_od(entry.ObjectDamages)
+    if kinds then
+        tool_kinds[tool_name] = kinds
+        return kinds
+    end
+
+    if FALLBACK_KINDS[tool_name] then
+        return FALLBACK_KINDS[tool_name]
+    end
+    if name_hint_match(tool_name) then
+        return hint_kinds(tool_name)
+    end
+    return nil
 end
 
 local function pick_farm_name(name)
