@@ -251,7 +251,7 @@ function M.step_static_scan(state, batch)
 end
 
 function M.complete_static_scan(state)
-    M._static = state.out or {}
+    M._static = esp_scan.merge_entries(M._static, state.out)
     rebuild_cache()
     cache.stats.last_loot_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
@@ -289,7 +289,7 @@ function M.step_drops_scan(state, batch)
 end
 
 function M.complete_drops_scan(state)
-    M._drops = state.out or {}
+    M._drops = esp_scan.merge_entries(M._drops, state.out)
     rebuild_cache()
 end
 
@@ -308,44 +308,33 @@ function M.register_menu()
     menu.add_slider_int(T, G.WORLD, "april_loot_range", "Loot Range", 50, 2000, 300, { parent = P })
 
     local child_ids = { "april_loot_boxes", "april_loot_show_name", "april_loot_show_distance", "april_loot_range" }
+    local toggle_ids = {}
     for _, t in ipairs(maps.LOOT_TOGGLES) do
         child_ids[#child_ids + 1] = t.id
+        toggle_ids[#toggle_ids + 1] = t.id
     end
 
+    local chams_ids = {}
     if gpu_chams.available() then
-        local labels = loot_chams_labels()
-        menu.add_multicombo(T, G.WORLD, CHAMS_ID, "Loot Chams", labels,
-            gpu_chams.multicombo_defaults(#labels), { parent = P })
-        gpu_chams.add_mode_color_menu(T, G.WORLD, P, CHAMS_MODE, CHAMS_COLOR,
-            "Loot Chams Mode", "Loot Chams Color")
-        child_ids[#child_ids + 1] = CHAMS_ID
-        child_ids[#child_ids + 1] = CHAMS_MODE
-        child_ids[#child_ids + 1] = CHAMS_COLOR
-
-        gpu_chams.register_owner("loot", {
-            rescan_ms = 500,
+        menu_util.section(T, G.WORLD, "Loot Mesh Chams")
+        chams_ids = gpu_chams.wire_esp_chams({
+            tab = T,
+            group = G.WORLD,
+            parent = P,
+            chams_id = CHAMS_ID,
+            mode_id = CHAMS_MODE,
+            color_id = CHAMS_COLOR,
+            labels = loot_chams_labels(),
+            owner_id = "loot",
+            master_id = P,
             is_active = loot_chams_active,
-            style = function()
-                return gpu_chams.mode_index(CHAMS_MODE, 0), gpu_chams.color_index(CHAMS_COLOR, 0)
-            end,
             collect = collect_loot_chams,
+            rescan_ms = 1200,
+            toggle_ids = toggle_ids,
         })
-        gpu_chams.wire_style_controls("loot", CHAMS_MODE, CHAMS_COLOR)
-        settings.on_change(CHAMS_ID, function()
-            gpu_chams.sync_owner("loot", true)
-        end)
-        settings.on_change(P, function(v)
-            if v == true or v == 1 then
-                gpu_chams.sync_owner("loot", true)
-            else
-                gpu_chams.clear_owner("loot")
-            end
-        end)
-        for _, t in ipairs(maps.LOOT_TOGGLES) do
-            settings.on_change(t.id, function()
-                gpu_chams.sync_owner("loot", true)
-            end)
-        end
+    end
+    for _, id in ipairs(chams_ids) do
+        child_ids[#child_ids + 1] = id
     end
 
     menu_util.bind_children(P, child_ids)
@@ -373,19 +362,24 @@ function M.update(_dt)
     local loot_on = settings.enabled(P)
 
     if loot_on or map_loot then
-        if cache.should_refresh_positions() then
+        if cache.should_prune() then
             cache.prune_invalid(M._static)
             cache.prune_invalid(M._drops)
             rebuild_cache()
+        end
+        if cache.should_refresh_positions() then
             if #M._drops > 0 then
                 refresh_dynamic_positions(M._drops)
             end
         end
     end
 
-    -- Always sync so disable / empty multicombo actually RevertChams.
+    -- Always sync when active so disable / empty multicombo actually RevertChams.
     if gpu_chams.available() then
-        gpu_chams.sync_owner("loot")
+        local owner = gpu_chams.get_owner("loot")
+        if loot_chams_active() or (owner and (owner.was_active or next(owner.applied))) then
+            gpu_chams.sync_owner("loot")
+        end
     end
 end
 

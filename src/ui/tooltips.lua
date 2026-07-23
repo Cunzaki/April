@@ -132,6 +132,17 @@ M.BY_ID = {
     april_ui_radar_layers = "Choose what appears on the tactical map.",
     april_waypoints_enabled = "Place and navigate to saved world waypoints.",
 
+    -- GPU mesh chams (exploits preset indices — see docs/API.md §15)
+    april_world_chams = "GPU mesh chams on selected resource types (in-range only).",
+    april_world_chams_mode = "Fill, Wireframe, Fill Glow, or Wireframe Glow.",
+    april_world_chams_color = "Glow preset color (Fill Glow / Wireframe Glow only).",
+    april_loot_chams = "GPU mesh chams on selected loot types (in-range only).",
+    april_loot_chams_mode = "Fill, Wireframe, Fill Glow, or Wireframe Glow.",
+    april_loot_chams_color = "Glow preset color (Fill Glow / Wireframe Glow only).",
+    april_base_chams = "GPU mesh chams on selected base structures (in-range only).",
+    april_base_chams_mode = "Fill, Wireframe, Fill Glow, or Wireframe Glow.",
+    april_base_chams_color = "Glow preset color (Fill Glow / Wireframe Glow only).",
+
     -- Config / actions
     april_ui_menu_key = "Key used to open and close this menu.",
     april_cfg_autoload = "Loads your saved profile automatically on inject.",

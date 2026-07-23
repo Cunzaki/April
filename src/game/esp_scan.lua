@@ -189,6 +189,40 @@ function M.entry_coords(entry)
     return M.label_position(entry)
 end
 
+local function entry_key(entry)
+    if not entry or not entry.inst then return nil end
+    return tostring(entry.inst.Address or entry.inst) .. ":" .. tostring(entry.toggle_id or "")
+end
+
+-- Reuse stable entry tables across rescans to avoid GC churn and unbounded growth.
+function M.merge_entries(prev, fresh)
+    local env = April.require("core.env")
+    local prev_by_key = {}
+    for _, entry in ipairs(prev or {}) do
+        local key = entry_key(entry)
+        if key and entry.inst and env.is_valid(entry.inst) then
+            prev_by_key[key] = entry
+        end
+    end
+
+    local out = {}
+    local seen = {}
+    for _, entry in ipairs(fresh or {}) do
+        if not entry or not entry.inst or not env.is_valid(entry.inst) then goto continue end
+        local key = entry_key(entry)
+        if not key or seen[key] then goto continue end
+        seen[key] = true
+        local existing = prev_by_key[key]
+        if existing and env.is_valid(existing.inst) then
+            out[#out + 1] = existing
+        else
+            out[#out + 1] = entry
+        end
+        ::continue::
+    end
+    return out
+end
+
 function M.create_folder_scan(folder_keys, name_map, label_map, dynamic)
     return {
         folder_keys = folder_keys,

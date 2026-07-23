@@ -220,6 +220,14 @@ local function prune_bounds_cache(now)
     end
 end
 
+local function prune_wpn_cache(now)
+    for key, ent in pairs(_wpn_cache) do
+        if not ent or (now - (ent.t or 0)) > WPN_TTL_MS * 8 then
+            _wpn_cache[key] = nil
+        end
+    end
+end
+
 local function resolve_bounds(p, pos, dist)
     local key = cache_key(p)
     local now = tick_ms()
@@ -264,6 +272,7 @@ function M.draw()
 
     local now = tick_ms()
     prune_bounds_cache(now)
+    prune_wpn_cache(now)
 
     local range = settings.num(ID_RANGE, 500)
     local range_sq = range * range

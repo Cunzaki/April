@@ -1,25 +1,25 @@
--- April loader — paste this into Vector as "Script 1.lua" (small file, always pulls latest build).
-local tick = 0
-pcall(function()
-    if utility and utility.get_tick_count then
-        tick = utility.get_tick_count()
-    end
-end)
-if tick == 0 then tick = os.time() end
+-- April LOCAL loader — paste into Vector Script 1/2.
+-- Loads the built april.lua from disk (not GitHub CDN).
 
-local urls = {
-    "https://cdn.jsdelivr.net/gh/Cunzaki/April@main/april.lua?v=3.95.8&cb=" .. tostring(tick),
-    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/april.lua?v=3.95.8&cb=" .. tostring(tick),
-}
-
-local load_fn = utility and (utility.load_url or utility.LoadUrl or utility.loadurl)
-if not load_fn then
-    print("[April] utility.load_url unavailable")
+local path = [[C:\\Users\\Cunza\\Desktop\\Vector Fallen V2\\April Fallen\\april.lua]]
+local f = io.open(path, "r")
+if not f then
+    print("[April] missing local file: " .. path)
+    print("[April] Run npm run build, or paste april.lua into this script slot")
     return
 end
-
-for i = 1, #urls do
-    local ok, err = pcall(load_fn, urls[i])
-    if ok then return end
-    print("[April] load failed (" .. i .. "): " .. tostring(err))
+local src = f:read("*a")
+f:close()
+if not src or #src < 1000 then
+    print("[April] local april.lua empty/corrupt")
+    return
+end
+local fn, err = loadstring(src)
+if not fn then
+    print("[April] compile failed: " .. tostring(err))
+    return
+end
+local ok, run_err = pcall(fn)
+if not ok then
+    print("[April] run failed: " .. tostring(run_err))
 end

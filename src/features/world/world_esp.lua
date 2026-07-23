@@ -103,44 +103,33 @@ function M.register_menu()
     menu.add_slider_int(T, G.WORLD, "april_world_range", "Resource Range", 50, 2000, 500, { parent = P })
 
     local child_ids = { "april_world_boxes", "april_world_show_name", "april_world_show_distance", "april_world_range" }
+    local toggle_ids = {}
     for _, t in ipairs(maps.WORLD_TOGGLES) do
         child_ids[#child_ids + 1] = t.id
+        toggle_ids[#toggle_ids + 1] = t.id
     end
 
+    local chams_ids = {}
     if gpu_chams.available() then
-        local labels = world_chams_labels()
-        menu.add_multicombo(T, G.WORLD, CHAMS_ID, "Resource Chams", labels,
-            gpu_chams.multicombo_defaults(#labels), { parent = P })
-        gpu_chams.add_mode_color_menu(T, G.WORLD, P, CHAMS_MODE, CHAMS_COLOR,
-            "Resource Chams Mode", "Resource Chams Color")
-        child_ids[#child_ids + 1] = CHAMS_ID
-        child_ids[#child_ids + 1] = CHAMS_MODE
-        child_ids[#child_ids + 1] = CHAMS_COLOR
-
-        gpu_chams.register_owner("world", {
-            rescan_ms = 500,
+        menu_util.section(T, G.WORLD, "Resource Mesh Chams")
+        chams_ids = gpu_chams.wire_esp_chams({
+            tab = T,
+            group = G.WORLD,
+            parent = P,
+            chams_id = CHAMS_ID,
+            mode_id = CHAMS_MODE,
+            color_id = CHAMS_COLOR,
+            labels = world_chams_labels(),
+            owner_id = "world",
+            master_id = P,
             is_active = world_chams_active,
-            style = function()
-                return gpu_chams.mode_index(CHAMS_MODE, 0), gpu_chams.color_index(CHAMS_COLOR, 0)
-            end,
             collect = collect_world_chams,
+            rescan_ms = 900,
+            toggle_ids = toggle_ids,
         })
-        gpu_chams.wire_style_controls("world", CHAMS_MODE, CHAMS_COLOR)
-        settings.on_change(CHAMS_ID, function()
-            gpu_chams.sync_owner("world", true)
-        end)
-        settings.on_change(P, function(v)
-            if v == true or v == 1 then
-                gpu_chams.sync_owner("world", true)
-            else
-                gpu_chams.clear_owner("world")
-            end
-        end)
-        for _, t in ipairs(maps.WORLD_TOGGLES) do
-            settings.on_change(t.id, function()
-                gpu_chams.sync_owner("world", true)
-            end)
-        end
+    end
+    for _, id in ipairs(chams_ids) do
+        child_ids[#child_ids + 1] = id
     end
 
     menu_util.bind_children(P, child_ids)
@@ -178,7 +167,7 @@ function M.step_static_scan(state, batch)
 end
 
 function M.complete_static_scan(state)
-    M._static = state.out or {}
+    M._static = esp_scan.merge_entries(M._static, state.out)
     rebuild_cache()
     cache.stats.last_world_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
@@ -192,7 +181,7 @@ function M.step_dynamic_scan(state, batch)
 end
 
 function M.complete_dynamic_scan(state)
-    M._dynamic = state.out or {}
+    M._dynamic = esp_scan.merge_entries(M._dynamic, state.out)
     rebuild_cache()
 end
 
@@ -217,10 +206,12 @@ function M.update(_dt)
     local world_on = settings.enabled(P)
 
     if world_on then
-        if cache.should_refresh_positions() then
+        if cache.should_prune() then
             cache.prune_invalid(M._static)
             cache.prune_invalid(M._dynamic)
             rebuild_cache()
+        end
+        if cache.should_refresh_positions() then
             if #M._dynamic > 0 then
                 refresh_dynamic_positions(M._dynamic)
             end
@@ -228,7 +219,10 @@ function M.update(_dt)
     end
 
     if gpu_chams.available() then
-        gpu_chams.sync_owner("world")
+        local owner = gpu_chams.get_owner("world")
+        if world_chams_active() or (owner and (owner.was_active or next(owner.applied))) then
+            gpu_chams.sync_owner("world")
+        end
     end
 end
 

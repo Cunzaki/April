@@ -119,6 +119,8 @@ const ORDER = [
   "app.lua",
 ];
 
+const VERSION = "3.96.4";
+
 const header = `--[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
@@ -127,7 +129,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.95.4",
+    version = "${VERSION}",
     debug = false,
     _mods = {},
     bundled = true,
@@ -208,35 +210,39 @@ for (const rel of ORDER) {
 fs.writeFileSync(OUT, header + body + footer);
 console.log("Built", path.relative(ROOT, OUT), `(${(fs.statSync(OUT).size / 1024).toFixed(1)} KB)`);
 
-const VERSION = "3.95.8";
-const loader = `-- April loader — paste this into Vector as "Script 1.lua" (small file, always pulls latest build).
-local tick = 0
-pcall(function()
-    if utility and utility.get_tick_count then
-        tick = utility.get_tick_count()
-    end
-end)
-if tick == 0 then tick = os.time() end
+// Full bundle copies for Vector script slots (do NOT use CDN loader until GitHub is updated).
+const SCRIPT2_OUT = path.join(ROOT, "Script 2.lua");
+fs.writeFileSync(SCRIPT2_OUT, header + body + footer);
+console.log("Built", path.relative(ROOT, SCRIPT2_OUT), "(full bundle — paste into Vector Script 2)");
 
-local urls = {
-    "https://cdn.jsdelivr.net/gh/Cunzaki/April@main/april.lua?v=${VERSION}&cb=" .. tostring(tick),
-    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/april.lua?v=${VERSION}&cb=" .. tostring(tick),
-}
+const loader = `-- April LOCAL loader — paste into Vector Script 1/2.
+-- Loads the built april.lua from disk (not GitHub CDN).
 
-local load_fn = utility and (utility.load_url or utility.LoadUrl or utility.loadurl)
-if not load_fn then
-    print("[April] utility.load_url unavailable")
+local path = [[${path.join(ROOT, "april.lua").replace(/\\/g, "\\\\")}]]
+local f = io.open(path, "r")
+if not f then
+    print("[April] missing local file: " .. path)
+    print("[April] Run npm run build, or paste april.lua into this script slot")
     return
 end
-
-for i = 1, #urls do
-    local ok, err = pcall(load_fn, urls[i])
-    if ok then return end
-    print("[April] load failed (" .. i .. "): " .. tostring(err))
+local src = f:read("*a")
+f:close()
+if not src or #src < 1000 then
+    print("[April] local april.lua empty/corrupt")
+    return
+end
+local fn, err = loadstring(src)
+if not fn then
+    print("[April] compile failed: " .. tostring(err))
+    return
+end
+local ok, run_err = pcall(fn)
+if not ok then
+    print("[April] run failed: " .. tostring(run_err))
 end
 `;
 
 fs.writeFileSync(LOAD_OUT, loader);
 fs.writeFileSync(SCRIPT1_OUT, loader);
 console.log("Built", path.relative(ROOT, LOAD_OUT));
-console.log("Built", path.relative(ROOT, SCRIPT1_OUT), "(copy into Vector Scripts slot)");
+console.log("Built", path.relative(ROOT, SCRIPT1_OUT), "(local-disk loader)");

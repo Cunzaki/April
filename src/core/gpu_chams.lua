@@ -196,10 +196,13 @@ end
 -- Cham'ing every descendant was heavy and made shared-mesh bleed worse.
 function M.cham_entry_part(entry, applied)
     if not entry then return false end
+    if entry._no_part then return false end
+
     local part = entry.main_part
     if part and env.is_valid(part) and M.is_part(part) then
         return apply_one(part, applied)
     end
+
     if entry.inst and env.is_valid(entry.inst) then
         local esp_scan = April.require("game.esp_scan")
         local main = esp_scan.find_main_part(entry.inst)
@@ -207,17 +210,19 @@ function M.cham_entry_part(entry, applied)
             entry.main_part = main
             return apply_one(main, applied)
         end
-        -- Animals / odd models: first MeshPart descendant
-        local desc = env.safe_call(function()
-            if entry.inst.get_descendants then return entry.inst:get_descendants() end
-            return entry.inst:GetDescendants()
+
+        -- One cheap child scan only — never walk full descendants every resync.
+        local kids = env.safe_call(function()
+            if entry.inst.get_children then return entry.inst:get_children() end
+            return entry.inst:GetChildren()
         end) or {}
-        for _, d in ipairs(desc) do
+        for _, d in ipairs(kids) do
             if M.is_part(d) then
                 entry.main_part = d
                 return apply_one(d, applied)
             end
         end
+        entry._no_part = true
     end
     return false
 end
@@ -431,8 +436,61 @@ end
 function M.add_mode_color_menu(T, G, parent_id, mode_id, color_id, mode_label, color_label)
     local root = { parent = parent_id }
     menu.add_combo(T, G, mode_id, mode_label or "Chams Mode", M.MODE_LABELS, 0, root)
-    menu.add_combo(T, G, color_id, color_label or "Chams Color", M.COLOR_LABELS, 0, root)
+    menu.add_combo(T, G, color_id, color_label or "Glow Preset", M.COLOR_LABELS, 0, root)
     return mode_id, color_id
+end
+
+function M.wire_esp_chams(opts)
+    opts = opts or {}
+    if not M.available() then return {} end
+
+    local T = opts.tab
+    local G = opts.group
+    local parent = opts.parent
+    local chams_id = opts.chams_id
+    local mode_id = opts.mode_id
+    local color_id = opts.color_id
+    local labels = opts.labels or {}
+    local owner_id = opts.owner_id
+    local master_id = opts.master_id
+    local multicombo_label = opts.multicombo_label or "Cham Types"
+    local is_active = opts.is_active
+    local collect = opts.collect
+    local rescan_ms = opts.rescan_ms or 900
+    local toggle_ids = opts.toggle_ids or {}
+
+    menu.add_multicombo(T, G, chams_id, multicombo_label, labels,
+        M.multicombo_defaults(#labels), { parent = parent })
+    M.add_mode_color_menu(T, G, parent, mode_id, color_id,
+        opts.mode_label or "Chams Mode", opts.color_label or "Glow Preset")
+
+    M.register_owner(owner_id, {
+        rescan_ms = rescan_ms,
+        is_active = is_active,
+        style = function()
+            return M.mode_index(mode_id, 0), M.color_index(color_id, 0)
+        end,
+        collect = collect,
+    })
+    M.wire_style_controls(owner_id, mode_id, color_id)
+
+    settings.on_change(chams_id, function()
+        M.sync_owner(owner_id, true)
+    end)
+    settings.on_change(master_id, function(v)
+        if v == true or v == 1 then
+            M.sync_owner(owner_id, true)
+        else
+            M.clear_owner(owner_id)
+        end
+    end)
+    for _, tid in ipairs(toggle_ids) do
+        settings.on_change(tid, function()
+            M.sync_owner(owner_id, true)
+        end)
+    end
+
+    return { chams_id, mode_id, color_id }
 end
 
 return M

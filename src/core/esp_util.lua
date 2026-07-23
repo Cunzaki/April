@@ -40,11 +40,29 @@ M.SKELETON_PAIRS = {
     { "RightLowerLeg", "RightFoot" },
 }
 
+-- Must be declared before any M.* that closes over it (Lua local scoping).
+local function vec3_pos(v)
+    if not v then return nil end
+    if type(v) == "number" then return nil end
+    local x = tonumber(v.x or v.X or v[1])
+    local y = tonumber(v.y or v.Y or v[2])
+    local z = tonumber(v.z or v.Z or v[3])
+    if not x or not y or not z then return nil end
+    return x, y, z
+end
+M.vec3_pos = vec3_pos
+
 function M.text_size()
     return settings.num("april_esp_text_size", 13)
 end
 
 function M.w2s(x, y, z)
+    x = tonumber(x)
+    y = tonumber(y)
+    z = tonumber(z)
+    if not x or not y or not z then
+        return 0, 0, false
+    end
     if draw and draw.world_to_screen then
         return draw.world_to_screen(x, y, z)
     end
@@ -102,14 +120,17 @@ function M.model_screen_bounds(model)
         end)
         if part and env.is_valid(part) then
             local pos = part.Position or part.position
-            if pos and pos.x then
-                local sx, sy, vis = M.w2s(pos.x, pos.y, pos.z)
-                if vis then
-                    any = true
-                    min_x = min_x and math.min(min_x, sx) or sx
-                    min_y = min_y and math.min(min_y, sy) or sy
-                    max_x = max_x and math.max(max_x, sx) or sx
-                    max_y = max_y and math.max(max_y, sy) or sy
+            if pos then
+                local px, py, pz = M.vec3_pos(pos)
+                if px then
+                    local sx, sy, vis = M.w2s(px, py, pz)
+                    if vis then
+                        any = true
+                        min_x = min_x and math.min(min_x, sx) or sx
+                        min_y = min_y and math.min(min_y, sy) or sy
+                        max_x = max_x and math.max(max_x, sx) or sx
+                        max_y = max_y and math.max(max_y, sy) or sy
+                    end
                 end
             end
         end
@@ -231,12 +252,6 @@ function M.hold_bounds(store, key, fresh, now, ttl_ms)
     return nil
 end
 
-local function vec3_pos(v)
-    if not v then return nil end
-    if v.x ~= nil then return v.x, v.y, v.z end
-    return v[1], v[2], v[3]
-end
-
 local function head_feet_from_model(model, opts)
     if not model then return nil end
     opts = opts or {}
@@ -246,7 +261,7 @@ local function head_feet_from_model(model, opts)
     local head = env.safe_call(function()
         return model:find_first_child("Head") or model:FindFirstChild("Head")
     end)
-    local hx, hy, hz = head and env.is_valid(head) and vec3_pos(head.Position or head.position) or nil
+    local hx, hy, hz = head and env.is_valid(head) and M.vec3_pos(head.Position or head.position) or nil
     if not hx then return nil end
 
     local sx, sy, vis = M.w2s(hx, hy, hz)
@@ -258,7 +273,7 @@ local function head_feet_from_model(model, opts)
             return model:find_first_child(name) or model:FindFirstChild(name)
         end)
         if foot and env.is_valid(foot) then
-            fx, fy, fz = vec3_pos(foot.Position or foot.position)
+            fx, fy, fz = M.vec3_pos(foot.Position or foot.position)
             if fx then
                 if name == "HumanoidRootPart" then
                     fy = fy - 2.5
@@ -289,7 +304,7 @@ function M.head_feet_screen_bounds(player, opts)
     opts = opts or {}
     local env = April.require("core.env")
 
-    local hx, hy, hz = vec3_pos(player.head_position)
+    local hx, hy, hz = M.vec3_pos(player.head_position)
     if not hx then
         local char = player.character
         if char and env.is_valid(char) then
@@ -297,7 +312,7 @@ function M.head_feet_screen_bounds(player, opts)
                 return char:find_first_child("Head") or char:FindFirstChild("Head")
             end)
             if head and env.is_valid(head) then
-                hx, hy, hz = vec3_pos(head.Position or head.position)
+                hx, hy, hz = M.vec3_pos(head.Position or head.position)
             end
         end
     end
@@ -319,13 +334,13 @@ function M.head_feet_screen_bounds(player, opts)
                 return char:find_first_child(name) or char:FindFirstChild(name)
             end)
             if foot and env.is_valid(foot) then
-                fx, fy, fz = vec3_pos(foot.Position or foot.position)
+                fx, fy, fz = M.vec3_pos(foot.Position or foot.position)
                 if fx then break end
             end
         end
     end
     if not fx then
-        fx, fy, fz = vec3_pos(player.position)
+        fx, fy, fz = M.vec3_pos(player.position)
         if fx then fy = fy - 2.8 end
     end
     if not fx then
@@ -700,13 +715,17 @@ end
 
 function M.draw_entry_boxes(entry, col, thick)
     if not entry or not entry.inst then return end
+    local env = April.require("core.env")
+    if not env.is_valid(entry.inst) then return end
+
     if entry.box then
         M.draw_oriented_box(entry.box, col, thick)
         return
     end
     local scan = April.require("game.esp_scan")
     local main = entry.main_part or scan.find_main_part(entry.inst)
-    local box = scan.read_part_box(main)
+    if main then entry.main_part = main end
+    local box = main and scan.read_part_box(main)
     if box then
         entry.box = box
         M.draw_oriented_box(box, col, thick)

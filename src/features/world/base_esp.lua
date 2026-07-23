@@ -138,47 +138,36 @@ function M.register_menu()
     menu.add_slider_int(T, G.WORLD, "april_base_range", "Base Range", 50, 500, 150, { parent = P })
 
     local child_ids = { "april_base_boxes", "april_base_show_name", "april_base_show_distance", "april_base_range" }
+    local toggle_ids = {}
     for _, t in ipairs(maps.BASE_TOGGLES) do
         child_ids[#child_ids + 1] = t.id
+        toggle_ids[#toggle_ids + 1] = t.id
         if t.ring_id then
             child_ids[#child_ids + 1] = t.ring_id
         end
     end
 
+    local chams_ids = {}
     if gpu_chams.available() then
-        local labels = base_chams_labels()
-        menu.add_multicombo(T, G.WORLD, CHAMS_ID, "Base Chams", labels,
-            gpu_chams.multicombo_defaults(#labels), { parent = P })
-        gpu_chams.add_mode_color_menu(T, G.WORLD, P, CHAMS_MODE, CHAMS_COLOR,
-            "Base Chams Mode", "Base Chams Color")
-        child_ids[#child_ids + 1] = CHAMS_ID
-        child_ids[#child_ids + 1] = CHAMS_MODE
-        child_ids[#child_ids + 1] = CHAMS_COLOR
-
-        gpu_chams.register_owner("base", {
-            rescan_ms = 500,
+        menu_util.section(T, G.WORLD, "Base Mesh Chams")
+        chams_ids = gpu_chams.wire_esp_chams({
+            tab = T,
+            group = G.WORLD,
+            parent = P,
+            chams_id = CHAMS_ID,
+            mode_id = CHAMS_MODE,
+            color_id = CHAMS_COLOR,
+            labels = base_chams_labels(),
+            owner_id = "base",
+            master_id = P,
             is_active = base_chams_active,
-            style = function()
-                return gpu_chams.mode_index(CHAMS_MODE, 0), gpu_chams.color_index(CHAMS_COLOR, 0)
-            end,
             collect = collect_base_chams,
+            rescan_ms = 900,
+            toggle_ids = toggle_ids,
         })
-        gpu_chams.wire_style_controls("base", CHAMS_MODE, CHAMS_COLOR)
-        settings.on_change(CHAMS_ID, function()
-            gpu_chams.sync_owner("base", true)
-        end)
-        settings.on_change(P, function(v)
-            if v == true or v == 1 then
-                gpu_chams.sync_owner("base", true)
-            else
-                gpu_chams.clear_owner("base")
-            end
-        end)
-        for _, t in ipairs(maps.BASE_TOGGLES) do
-            settings.on_change(t.id, function()
-                gpu_chams.sync_owner("base", true)
-            end)
-        end
+    end
+    for _, id in ipairs(chams_ids) do
+        child_ids[#child_ids + 1] = id
     end
 
     menu_util.bind_children(P, child_ids)
@@ -266,7 +255,7 @@ function M.step_scan(state, batch)
 end
 
 function M.complete_scan(state)
-    cache.base = state.out or {}
+    cache.base = esp_scan.merge_entries(cache.base, state.out)
     cache.stats.last_base_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
@@ -277,12 +266,17 @@ function M.scan()
 end
 
 function M.update(_dt)
-    if settings.enabled(P) and cache.should_refresh_positions() then
-        cache.prune_invalid(cache.base)
+    if settings.enabled(P) then
+        if cache.should_prune() then
+            cache.prune_invalid(cache.base)
+        end
     end
 
     if gpu_chams.available() then
-        gpu_chams.sync_owner("base")
+        local owner = gpu_chams.get_owner("base")
+        if base_chams_active() or (owner and (owner.was_active or next(owner.applied))) then
+            gpu_chams.sync_owner("base")
+        end
     end
 end
 

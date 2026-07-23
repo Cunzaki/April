@@ -6,6 +6,7 @@
 
 local maps = April.require("game.esp_maps")
 local combat_menu = April.require("ui.combat_labels")
+local gpu_chams = April.require("core.gpu_chams")
 
 local M = {}
 
@@ -37,8 +38,14 @@ local function sl(id, label, minv, maxv, default, float, gate, extra)
     return item
 end
 
-local function combo(id, label, options, default, gate)
-    return { type = "combo", id = id, label = label, options = options, default = default or 0, gate = gate }
+local function combo(id, label, options, default, gate, extra)
+    local item = { type = "combo", id = id, label = label, options = options, default = default or 0, gate = gate }
+    if type(extra) == "table" then
+        for k, v in pairs(extra) do
+            item[k] = v
+        end
+    end
+    return item
 end
 
 local function multi(id, label, options, defaults, gate, extra)
@@ -99,6 +106,32 @@ local function append(dst, src)
     for _, v in ipairs(src) do
         dst[#dst + 1] = v
     end
+end
+
+local function toggle_labels(list)
+    local labels = {}
+    for i, t in ipairs(list) do
+        labels[i] = t.label
+    end
+    return labels
+end
+
+-- GPU mesh chams block (see docs/API.md §15 — preset mode + glow color indices).
+local function mesh_chams_block(prefix, toggle_list, master)
+    local chams_id = prefix .. "_chams"
+    local mode_id = prefix .. "_chams_mode"
+    local color_id = prefix .. "_chams_color"
+    return {
+        sep(master),
+        label("Mesh Chams (GPU)", false, master),
+        multi(chams_id, "Cham Types", toggle_labels(toggle_list), {}, master),
+        combo(mode_id, "Chams Mode", gpu_chams.MODE_LABELS, 0, master),
+        combo(color_id, "Glow Preset", gpu_chams.COLOR_LABELS, 0, master, {
+            gate_any_combo = {
+                { mode_id, { 2, 3 } },
+            },
+        }),
+    }
 end
 
 M.TABS = {
@@ -314,14 +347,8 @@ local function build_world()
         cb("april_world_show_name", "Resource Show Name", true),
         cb("april_world_show_distance", "Resource Show Distance", true),
         sl("april_world_range", "Resource Range", 50, 2000, 500),
-        multi("april_world_chams", "Resource Chams", (function()
-            local labels = {}
-            for i, t in ipairs(maps.WORLD_TOGGLES) do labels[i] = t.label end
-            return labels
-        end)(), {}),
-        combo("april_world_chams_mode", "Resource Chams Mode", { "Flat", "Fresnel", "Glow" }, 0),
-        color("april_world_chams_color", "Resource Chams Color", { 0.4, 1, 0.4, 1 }),
     })
+    append(resources.items, mesh_chams_block("april_world", maps.WORLD_TOGGLES, "april_world_enabled"))
 
     local loot = {
         title = "Loot",
@@ -336,14 +363,8 @@ local function build_world()
         cb("april_loot_show_name", "Loot Show Name", true),
         cb("april_loot_show_distance", "Loot Show Distance", true),
         sl("april_loot_range", "Loot Range", 50, 2000, 300),
-        multi("april_loot_chams", "Loot Chams", (function()
-            local labels = {}
-            for i, t in ipairs(maps.LOOT_TOGGLES) do labels[i] = t.label end
-            return labels
-        end)(), {}),
-        combo("april_loot_chams_mode", "Loot Chams Mode", { "Flat", "Fresnel", "Glow" }, 0),
-        color("april_loot_chams_color", "Loot Chams Color", { 1, 0.85, 0.35, 1 }),
     })
+    append(loot.items, mesh_chams_block("april_loot", maps.LOOT_TOGGLES, "april_loot_enabled"))
 
     local bases = {
         title = "Bases",
@@ -358,14 +379,8 @@ local function build_world()
         cb("april_base_show_name", "Base Show Name", true),
         cb("april_base_show_distance", "Base Show Distance", false),
         sl("april_base_range", "Base Range", 50, 500, 150),
-        multi("april_base_chams", "Base Chams", (function()
-            local labels = {}
-            for i, t in ipairs(maps.BASE_TOGGLES) do labels[i] = t.label end
-            return labels
-        end)(), {}),
-        combo("april_base_chams_mode", "Base Chams Mode", { "Flat", "Fresnel", "Glow" }, 0),
-        color("april_base_chams_color", "Base Chams Color", { 0.55, 0.55, 1, 1 }),
     })
+    append(bases.items, mesh_chams_block("april_base", maps.BASE_TOGGLES, "april_base_enabled"))
 
     local npcs = {
         title = "NPCs",

@@ -25,6 +25,7 @@ M._notify_next = false
 M._last_held_apply = nil
 M._had_applied_mods = false
 M._last_applied_keys = nil
+M._toolinfo_dirty = false
 M._boot_ms = nil
 
 local MODIFIER_TOGGLES = {
@@ -96,6 +97,7 @@ local function clear_apply_state()
     M._last_held_apply = nil
     M._had_applied_mods = false
     M._last_applied_keys = nil
+    M._toolinfo_dirty = false
 end
 
 local function build_clear_payload()
@@ -259,29 +261,45 @@ function M.try_apply(silent)
         return false
     end
 
-    if not can_apply_now() then
+    local held = profiles.held_weapon_name()
+    local needs_gc = M._apply_dirty or M._force_apply
+    local needs_ti = M._toolinfo_dirty
+
+    if not needs_gc and not needs_ti then
+        if M._had_applied_mods and not in_match() then
+            clear_all_mods()
+        end
+        return M._had_applied_mods
+    end
+
+    if needs_gc and not can_apply_now() then
         if M._had_applied_mods and not in_match() then
             clear_all_mods()
         end
         return false
     end
 
-    local held = profiles.held_weapon_name()
     if not held then
-        if M._had_applied_mods then
+        if M._had_applied_mods and needs_gc then
             clear_all_mods()
         end
-        M._apply_dirty = false
-        M._force_apply = false
+        if needs_gc then
+            M._apply_dirty = false
+            M._force_apply = false
+        end
+        M._toolinfo_dirty = false
         return false
     end
 
     if not profiles.should_apply_for_held(held) then
-        if M._had_applied_mods then
+        if M._had_applied_mods and needs_gc then
             clear_all_mods()
         end
-        M._apply_dirty = false
-        M._force_apply = false
+        if needs_gc then
+            M._apply_dirty = false
+            M._force_apply = false
+        end
+        M._toolinfo_dirty = false
         return false
     end
 
@@ -296,53 +314,62 @@ function M.try_apply(silent)
         end
         M._apply_dirty = false
         M._force_apply = false
+        M._toolinfo_dirty = false
         return false
     end
 
-    if not M._force_apply and not M._apply_dirty then
-        return true
-    end
-
     local ok_gc, count, msg = true, 0, nil
-    if has_gc then
+    if has_gc and needs_gc then
         ok_gc, count, msg = gc.apply_weapon(mods)
         if ok_gc then
             remember_applied(mods)
+            M._apply_dirty = false
+            M._force_apply = false
+            M._retry_until = 0
         end
-    else
+    elseif has_gc and M._had_applied_mods then
+        ok_gc = true
+    elseif needs_gc and not has_gc then
         local clear = build_clear_payload()
         if clear then
             pcall(gc.apply_weapon, clear)
         end
         M._last_applied_keys = nil
+        M._apply_dirty = false
+        M._force_apply = false
     end
 
     local ok_ti = true
     local ti_count, ti_msg
-    if has_ti then
+    if has_ti and (needs_ti or needs_gc) then
         ok_ti, ti_count, ti_msg = toolinfo_mods.apply(ti_opts, ti_weapon or held)
-    else
+        M._toolinfo_dirty = false
+    elseif needs_ti and not has_ti then
+        pcall(toolinfo_mods.reset)
+        M._toolinfo_dirty = false
+    elseif needs_gc and not has_ti then
         pcall(toolinfo_mods.reset)
     end
 
-    local ok = (not has_gc or ok_gc) and ok_ti
-    if ok then
-        M._had_applied_mods = true
-        M._apply_dirty = false
-        M._force_apply = false
-        M._retry_until = 0
-        if M._notify_next or not silent then
+    local ok = (not has_gc or not needs_gc or ok_gc) and (not needs_ti or not has_ti or ok_ti)
+    if ok and (needs_gc or needs_ti) then
+        if has_gc and (needs_gc or M._had_applied_mods) then
+            M._had_applied_mods = true
+        end
+        if needs_gc and (M._notify_next or not silent) then
             M._notify_next = false
             local parts = {}
-            if has_gc then
+            if has_gc and needs_gc then
                 parts[#parts + 1] = tostring(msg or (tostring(count) .. " nodes"))
             end
             if has_ti and ti_count and ti_count > 0 then
                 parts[#parts + 1] = tostring(ti_msg or (tostring(ti_count) .. " burst"))
             end
-            notify.success("Gun mods applied: " .. table.concat(parts, ", "), 3500)
+            if #parts > 0 then
+                notify.success("Gun mods applied: " .. table.concat(parts, ", "), 3500)
+            end
         end
-    else
+    elseif needs_gc then
         M._apply_dirty = true
         M._force_apply = true
         M._defer_until = tick_ms() + RETRY_MS
@@ -379,7 +406,7 @@ function M.on_weapon_equip_changed(held)
     if held == M._last_held_apply then return end
     M._last_held_apply = held
     if settings.enabled(P) then
-        schedule_apply(600)
+        M._toolinfo_dirty = true
     end
 end
 
@@ -408,10 +435,10 @@ function M.update(_dt)
         end
     end
 
-    if not M._apply_dirty then return end
-    if now < M._defer_until then return end
-    if not can_apply_now() then return end
-    if M._retry_until > 0 and now > M._retry_until then
+    if not M._apply_dirty and not M._toolinfo_dirty then return end
+    if M._apply_dirty and now < M._defer_until then return end
+    if M._apply_dirty and not can_apply_now() then return end
+    if M._retry_until > 0 and now > M._retry_until and M._apply_dirty then
         M._apply_dirty = false
         M._force_apply = false
         notify.warning("Gun mods: equip a gun in match, then toggle a mod option", 5000)
@@ -428,7 +455,10 @@ end
 function M.on_modules_ready()
     toolinfo_mods.invalidate()
     if settings.enabled(P) then
-        schedule_apply(1200)
+        M._toolinfo_dirty = true
+        if not M._had_applied_mods then
+            schedule_apply(1200)
+        end
     end
 end
 

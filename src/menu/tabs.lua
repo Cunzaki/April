@@ -78,6 +78,7 @@ function M.setup_scans()
     iscan.configure({ budget_ms = 6, items_per_step = 18 })
 
     local SCAN_MS = cache.WORKSPACE_SCAN_MS or 1000
+    local DROPS_SCAN_MS = cache.DROPS_SCAN_MS or 2500
 
     local function map_on(layer)
         return function()
@@ -101,7 +102,7 @@ function M.setup_scans()
         return settings.enabled("april_loot_enabled") or map_on("loot")()
     end, loot_esp.begin_static_scan, loot_esp.step_static_scan, loot_esp.complete_static_scan, 240)
 
-    iscan.register("loot_drops", SCAN_MS, function()
+    iscan.register("loot_drops", DROPS_SCAN_MS, function()
         if settings.enabled("april_loot_enabled") then
             return settings.enabled("april_dropped_item")
         end
