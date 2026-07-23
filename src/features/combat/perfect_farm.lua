@@ -1,7 +1,9 @@
 --[[
   Farm helper - silent or camera aim at gather hit parts.
   Melee uses camera / mouse unit-ray origin (RaycastUtil.MouseRaycast).
-  Covers Trees / Nodes / Logs / Cactus for every gather tool in ToolInfo.
+
+  Perf: spatial index in farm_targets (budgeted); no full Trees/Nodes walks
+  on the ESP frame. Tool name + near list are rate-limited.
 ]]
 
 local settings = April.require("core.settings")
@@ -20,7 +22,6 @@ local P = "april_farm_helper"
 local P_RADIUS = "april_farm_radius"
 local P_SMOOTH = "april_farm_smooth"
 local P_SILENT = "april_farm_silent"
-local SHOOT_VK = 0x01
 
 local gather_parts = {}
 local locked_part = nil
@@ -28,13 +29,17 @@ local lock_grace_until = 0
 local next_scan_ms = 0
 local next_pick_ms = 0
 local last_tool = nil
+local cached_tool = nil
+local cached_tool_ms = 0
+local TOOL_CACHE_MS = 120
 
--- Fast rescan so newly spawned TreeX / nearby nodes lock quickly.
-local SCAN_MS = 200
-local PICK_MS = 33
-local LOCK_GRACE_MS = 450
-local PICK_FOV = 220
-local MAX_NEAR = 48
+-- Unlocked: scan often enough to acquire. Locked: rarely (index still ticks).
+local SCAN_MS_UNLOCKED = 350
+local SCAN_MS_LOCKED = 900
+local PICK_MS = 50
+local LOCK_GRACE_MS = 500
+local PICK_FOV = 240
+local MAX_NEAR = 14
 
 M._tracking = false
 
@@ -94,14 +99,30 @@ local function character_origin()
     return nil
 end
 
-local function refresh_near(scan_origin, radius, allow)
+local function held_tool_cached()
     local now = tick_ms()
-    if now < next_scan_ms then return end
-    next_scan_ms = now + SCAN_MS
+    if cached_tool and (now - cached_tool_ms) < TOOL_CACHE_MS then
+        return cached_tool
+    end
+    farm_tools.load()
+    cached_tool = farm_tools.get_held_farm_tool_name()
+    cached_tool_ms = now
+    return cached_tool
+end
 
-    local out = gather_parts
-    farm_targets.collect_near(scan_origin, radius, out, MAX_NEAR, allow)
-    gather_parts = out
+local function refresh_near(scan_origin, radius, allow, locked)
+    local now = tick_ms()
+    local interval = locked and SCAN_MS_LOCKED or SCAN_MS_UNLOCKED
+    if now < next_scan_ms then
+        -- Still advance spatial index cheaply so new trees appear.
+        farm_targets.tick_index(#gather_parts == 0)
+        return
+    end
+    next_scan_ms = now + interval
+    if #gather_parts == 0 then
+        farm_targets.tick_index(true)
+    end
+    farm_targets.collect_near(scan_origin, radius, gather_parts, MAX_NEAR, allow)
 end
 
 local function ray_origin()
@@ -112,14 +133,14 @@ local function effective_radius(tool_name)
     local tool_range = farm_tools.melee_range(tool_name)
     local slider = settings.num(P_RADIUS, 7)
     if slider <= 0 then return 0 end
-    return math.min(slider, tool_range + 0.35)
+    return math.min(slider, tool_range + 0.5)
 end
 
 local function target_valid(part, origin, radius, loose)
     if not env.is_valid(part) then return false end
     local pos = part_position(part)
     if not pos or not origin then return false end
-    local limit = loose and (radius * 1.35) or radius
+    local limit = loose and (radius * 1.4) or radius
     return dist2(pos, origin) <= limit * limit
 end
 
@@ -148,7 +169,6 @@ local function pick_target(origin, radius)
                     local sx, sy, on_screen = esp_util.w2s(pos.x, pos.y, pos.z)
                     if on_screen then
                         local fov = math_util.screen_fov_dist(sx, sy, cx, cy)
-                        -- Prefer close + on-screen; small FOV bias so looking at a tree wins.
                         local score = fov * 0.85 + d2 * 2.0e-4
                         if score < best_score then
                             best_score = score
@@ -213,20 +233,22 @@ local function clear_lock()
     next_scan_ms = 0
     next_pick_ms = 0
     last_tool = nil
+    cached_tool = nil
+    cached_tool_ms = 0
 end
 
 local function apply_silent(origin, aim)
-    silent_ray.ensure_hook()
+    if not silent_ray.ensure_hook() then
+        debug.error_once("farm:silent", "Silent farm hook unavailable - toggle Silent Farm off for camera aim")
+        return false
+    end
 
-    -- Continuous set_target keeps melee rays on the node even between clicks.
+    -- Continuous set_target only — track(key) fails between LMB presses and used to tear down aim.
     local ok = false
     if silent_ray.set_target then
         ok = silent_ray.set_target(origin, aim, aim) == true
-    end
-    if silent_ray.track then
-        -- Also bind while LMB held (matches HitMelee swing path).
-        local tracked = silent_ray.track(origin, aim, SHOOT_VK, aim) == true
-        ok = ok or tracked
+    elseif silent_ray.track then
+        ok = silent_ray.track(origin, aim, 0x01, aim) == true
     end
 
     if ok then
@@ -234,7 +256,6 @@ local function apply_silent(origin, aim)
         return true
     end
 
-    -- Do not tear down on a single failed frame (key-up / transient API miss).
     if M._tracking then
         return true
     end
@@ -250,7 +271,7 @@ function M.register_menu()
 
     menu_util.section(T, G.MISC, "Farm")
     menu_util.register_keybind(T, G.MISC, P, "Farm Helper", false)
-    menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", false, root)
+    menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", true, root)
     menu_util.gap(T, G.MISC)
     menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 10, 7, root)
     menu.add_slider_int(T, G.MISC, P_SMOOTH, "Camera Smoothness", 1, 30, 8, root)
@@ -264,8 +285,7 @@ function M.update(_dt)
         return
     end
 
-    farm_tools.load()
-    local tool_name = farm_tools.get_held_farm_tool_name()
+    local tool_name = held_tool_cached()
     if not tool_name then
         stop_silent()
         clear_lock()
@@ -281,23 +301,20 @@ function M.update(_dt)
     local cam_origin = ray_origin()
     if not cam_origin then
         stop_silent()
-        clear_lock()
         return
     end
 
     local radius = effective_radius(tool_name)
     if radius <= 0 then
         stop_silent()
-        clear_lock()
         return
     end
 
     local allow = farm_tools.gather_kinds(tool_name)
-    -- Scan from character so looking away still finds nearby trees/nodes.
     local scan_origin = character_origin() or cam_origin
     local locked_ok = locked_part and target_valid(locked_part, scan_origin, radius, true)
-    -- Always rate-limited rescan so TreeX / NodeSpark / new nodes appear quickly.
-    refresh_near(scan_origin, radius, allow)
+
+    refresh_near(scan_origin, radius, allow, locked_ok == true)
 
     local target = resolve_target(scan_origin, radius, locked_ok ~= true)
     if not target then
@@ -313,7 +330,11 @@ function M.update(_dt)
 
     if silent_mode() then
         if not apply_silent(cam_origin, aim) then
-            stop_silent()
+            -- Fall back to camera so farming still works without silent hook.
+            if camera and camera.look_at then
+                local smooth = math.max(1, settings.num(P_SMOOTH, 8))
+                pcall(camera.look_at, aim.x, aim.y, aim.z, smooth)
+            end
         end
         return
     end

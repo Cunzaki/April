@@ -1,12 +1,12 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-23T19:52:50.510Z
+    Built: 2026-07-23T20:01:17.229Z
     UI: custom Gamesense menu (INSERT) — Vector menu tabs disabled
 ]]
 
 April = {
-    version = "3.96.7",
+    version = "3.96.8",
     debug = false,
     _mods = {},
     bundled = true,
@@ -3290,17 +3290,22 @@ function M.draw_entry_boxes(entry, col, thick)
     local env = April.require("core.env")
     if not env.is_valid(entry.inst) then return end
 
-    if entry.box then
-        M.draw_oriented_box(entry.box, col, thick)
-        return
-    end
     local scan = April.require("game.esp_scan")
-    local main = entry.main_part or scan.find_main_part(entry.inst)
-    if main then entry.main_part = main end
+    -- Always refresh box from cached main_part so draw stays on-frame without folder scans.
+    local main = entry.main_part
+    if not main or not env.is_valid(main) then
+        main = scan.find_main_part(entry.inst)
+        entry.main_part = main
+    end
     local box = main and scan.read_part_box(main)
     if box then
         entry.box = box
+        entry.lx = box.x
+        entry.ly = box.y + box.hy + 0.25
+        entry.lz = box.z
         M.draw_oriented_box(box, col, thick)
+    elseif entry.box then
+        M.draw_oriented_box(entry.box, col, thick)
     end
 end
 
@@ -3419,7 +3424,7 @@ local owners = {}
 local owner_order = {}
 local rebuild_busy = false
 local last_global_rebuild = 0
-local MIN_REBUILD_GAP_MS = 250
+local MIN_REBUILD_GAP_MS = 750
 
 function M.available()
     return exploits ~= nil
@@ -3782,13 +3787,30 @@ function M.sync_owner(id, force)
         return
     end
 
-    if has_removed(front, back) or next(front) == nil then
-        -- Something left range / first populate after clear -> swap buffers via rebuild.
-        -- Rebuild reapplies ALL active owners from scratch (correct multi-owner state).
+    if next(front) == nil then
+        -- First populate after clear -> full rebuild.
         owner.applied = {}
         if not M.rebuild_all() then
-            -- Rate-limited: still track desired set; next tick will rebuild.
             owner.applied = back
+        end
+        return
+    end
+
+    if has_removed(front, back) then
+        -- Defer Revert hitch while walking: keep stamping additions only.
+        -- A full rebuild runs when the global gap allows (not every leave-range).
+        for addr, _ in pairs(back) do
+            if not front[addr] then
+                pcall(exploits.ApplyChamsToInstance, addr)
+                front[addr] = true
+            end
+        end
+        owner.applied = front
+        if (now - last_global_rebuild) >= MIN_REBUILD_GAP_MS then
+            owner.applied = {}
+            if not M.rebuild_all() then
+                owner.applied = back
+            end
         end
         return
     end
@@ -10708,13 +10730,37 @@ April._mods["game.farm_targets"] = (function()
   Trees: TreeX.Main (preferred) -> Main
   Nodes: NodeSpark.Main (preferred) -> Main
   Vegetation: CactusPart / Forest_Log Main|Branch
-  (Plants are interact-pick, not melee gather — not scanned here.)
+
+  Performance: maintains a lightweight spatial index, updated in small
+  budgeted batches — never walks every tree/node on the ESP frame.
 ]]
 
 local env = April.require("core.env")
 local folders = April.require("game.folders")
 
 local M = {}
+
+-- Index entries: { model, kind, x, y, z, hit }
+local index = {}
+local index_n = 0
+
+local folder_cache = {} -- key -> { folder, children, t }
+local FOLDER_CACHE_MS = 2500
+local INDEX_BUDGET = 48 -- models touched per index tick
+local index_cursor = 1
+local index_folder_i = 1
+local last_index_ms = 0
+local INDEX_TICK_MS = 50
+
+local FOLDER_SPECS = {
+    { key = "nodes", kind = "nodes" },
+    { trees = true, kind = "trees" },
+    { key = "vegetation", kind = "vegetation" },
+}
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
 
 local function find_child(parent, name)
     if not parent then return nil end
@@ -10749,17 +10795,41 @@ local function main_from(container)
     return find_child(container, "Main")
 end
 
-local function rough_pos(model)
-    local main = main_from(model) or find_child(model, "Main")
-    local pos = part_pos(main)
-    if pos then return pos, main end
+local function folder_for(spec)
+    if spec.trees then
+        return folders.get_folder("Trees")
+    end
+    return folders.from_key(spec.key)
+end
 
-    local cactus = find_child(model, "CactusPart")
-    pos = part_pos(cactus)
-    if pos then return pos, cactus end
+local function folder_children(spec)
+    local key = spec.trees and "trees" or spec.key
+    local now = tick_ms()
+    local cached = folder_cache[key]
+    if cached and cached.children and (now - cached.t) < FOLDER_CACHE_MS and env.is_valid(cached.folder) then
+        return cached.children, cached.folder
+    end
+    local folder = folder_for(spec)
+    if not env.is_valid(folder) then
+        folder_cache[key] = { folder = nil, children = {}, t = now }
+        return {}, nil
+    end
+    local children = env.safe_call(function() return folder:get_children() end) or {}
+    folder_cache[key] = { folder = folder, children = children, t = now }
+    return children, folder
+end
 
-    local branch = find_child(model, "Branch")
-    return part_pos(branch), branch
+local function vegetation_kind_name(name)
+    if not name then return nil end
+    if name:find("cactus", 1, true) then return "cactus" end
+    if name:find("log", 1, true) then return "logs" end
+    return nil
+end
+
+local function resolve_kind(model, spec_kind)
+    if spec_kind ~= "vegetation" then return spec_kind end
+    local name = (inst_name(model) or ""):lower()
+    return vegetation_kind_name(name)
 end
 
 -- Preferred melee hit part for a model (TreeX / NodeSpark when present).
@@ -10784,19 +10854,14 @@ function M.hit_part_from_model(model, kind_hint)
     end
 
     local name = (inst_name(model) or ""):lower()
-    if name:find("log", 1, true) or name:find("forest_log", 1, true) then
+    if name:find("log", 1, true) then
         local part = main_from(model) or find_child(model, "Branch")
         if part then return part, "logs" end
     end
 
-    if name:find("node", 1, true) or kind_hint == "nodes" then
+    if kind_hint == "nodes" or name:find("node", 1, true) then
         local part = main_from(model)
         if part then return part, "nodes" end
-    end
-
-    if name:find("tree", 1, true) or name:find("desert_tree", 1, true) or kind_hint == "trees" then
-        local part = main_from(model)
-        if part then return part, "trees" end
     end
 
     if kind_hint == "cactus" then
@@ -10808,7 +10873,6 @@ function M.hit_part_from_model(model, kind_hint)
         if part then return part, "logs" end
     end
 
-    -- Last resort: model Main (covers odd Desert/Tree variants).
     local part = main_from(model)
     if part then
         return part, kind_hint or "trees"
@@ -10816,30 +10880,100 @@ function M.hit_part_from_model(model, kind_hint)
     return nil, nil
 end
 
--- Only dump folders that hold melee gatherables.
-local FOLDER_SPECS = {
-    { key = "nodes", kind = "nodes" },
-    { trees = true, kind = "trees" },
-    { key = "vegetation", kind = "vegetation" },
-}
+local function upsert_index(model, kind)
+    local hit, resolved = M.hit_part_from_model(model, kind)
+    kind = resolved or kind
+    if not hit then return end
+    local pos = part_pos(hit)
+    if not pos then return end
 
-local function folder_for(spec)
-    if spec.trees then
-        return folders.get_folder("Trees")
+    for i = 1, index_n do
+        local e = index[i]
+        if e and e.model == model then
+            e.kind = kind
+            e.x, e.y, e.z = pos.x, pos.y, pos.z
+            e.hit = hit
+            return
+        end
     end
-    return folders.from_key(spec.key)
+
+    index_n = index_n + 1
+    index[index_n] = {
+        model = model,
+        kind = kind,
+        x = pos.x,
+        y = pos.y,
+        z = pos.z,
+        hit = hit,
+    }
 end
 
-local function vegetation_kind(model)
-    local name = (inst_name(model) or ""):lower()
-    if name:find("cactus", 1, true) or find_child(model, "CactusPart") then
-        return "cactus"
+local function compact_index()
+    local write = 1
+    for i = 1, index_n do
+        local e = index[i]
+        if e and e.model and env.is_valid(e.model) and e.hit and env.is_valid(e.hit) then
+            if write ~= i then
+                index[write] = e
+            end
+            write = write + 1
+        end
     end
-    if name:find("log", 1, true) then
-        return "logs"
+    for i = write, index_n do
+        index[i] = nil
     end
-    -- Bushes / ferns / DigPile / boulders are not standard gather melee targets.
-    return nil
+    index_n = write - 1
+    if index_cursor > index_n then index_cursor = 1 end
+end
+
+-- Advance the spatial index a little each call (budgeted).
+-- force=true skips the tick gate (used when near-list is empty / just enabled).
+function M.tick_index(force)
+    local now = tick_ms()
+    if not force and (now - last_index_ms) < INDEX_TICK_MS then return end
+    last_index_ms = now
+
+    local budget = force and (INDEX_BUDGET * 3) or INDEX_BUDGET
+    local started_folder = index_folder_i
+    local started_cursor = index_cursor
+
+    while budget > 0 do
+        local spec = FOLDER_SPECS[index_folder_i]
+        if not spec then
+            index_folder_i = 1
+            index_cursor = 1
+            compact_index()
+            break
+        end
+
+        local children = folder_children(spec)
+        local n = #children
+        if n == 0 or index_cursor > n then
+            index_folder_i = index_folder_i + 1
+            if index_folder_i > #FOLDER_SPECS then
+                index_folder_i = 1
+                compact_index()
+            end
+            index_cursor = 1
+            if index_folder_i == started_folder and index_cursor == started_cursor then
+                break
+            end
+        else
+            local model = children[index_cursor]
+            index_cursor = index_cursor + 1
+            budget = budget - 1
+            if env.is_valid(model) then
+                local is_model = model.ClassName == "Model"
+                    or env.safe_call(function() return model:is_a("Model") end)
+                if is_model then
+                    local kind = resolve_kind(model, spec.kind)
+                    if kind then
+                        upsert_index(model, kind)
+                    end
+                end
+            end
+        end
+    end
 end
 
 local function kind_allowed(kind, allow)
@@ -10848,48 +10982,44 @@ local function kind_allowed(kind, allow)
     return allow[kind] == true
 end
 
--- Scan every child in gather folders; keep only parts within range.
--- `allow` optional: { trees=true, nodes=true, logs=true, cactus=true }
--- Returns list of BaseParts (hit parts).
+local function refresh_entry_hit(e)
+    if not e or not e.model or not env.is_valid(e.model) then return false end
+    local hit, kind = M.hit_part_from_model(e.model, e.kind)
+    if not hit then return false end
+    local pos = part_pos(hit)
+    if not pos then return false end
+    e.hit = hit
+    e.kind = kind or e.kind
+    e.x, e.y, e.z = pos.x, pos.y, pos.z
+    return true
+end
+
+-- Query near list from spatial index (cheap). Refreshes hit parts for near hits only.
 function M.collect_near(origin, radius, out, max_out, allow)
     out = out or {}
-    max_out = max_out or 48
+    max_out = max_out or 16
     if not origin or radius <= 0 then return out end
 
-    -- Pad so we don't drop borderline targets while locked / moving.
-    local limit2 = (radius + 10) * (radius + 10)
+    M.tick_index()
+
+    local limit2 = (radius + 6) * (radius + 6)
     local write = 1
 
-    for s = 1, #FOLDER_SPECS do
+    for i = 1, index_n do
         if write > max_out then break end
-        local spec = FOLDER_SPECS[s]
-        local folder = folder_for(spec)
-        if env.is_valid(folder) then
-            local children = env.safe_call(function() return folder:get_children() end) or {}
-            for i = 1, #children do
-                if write > max_out then break end
-                local model = children[i]
-                if env.is_valid(model) then
-                    local is_model = model.ClassName == "Model"
-                        or env.safe_call(function() return model:is_a("Model") end)
-                    if is_model then
-                        local kind = spec.kind
-                        if kind == "vegetation" then
-                            kind = vegetation_kind(model)
-                        end
-
-                        if kind and kind_allowed(kind, allow) then
-                            local rough, rough_part = rough_pos(model)
-                            if rough and dist2(rough, origin) <= limit2 then
-                                local part = select(1, M.hit_part_from_model(model, kind))
-                                if not part then part = rough_part end
-                                local pos = part_pos(part)
-                                if pos and dist2(pos, origin) <= limit2 then
-                                    out[write] = part
-                                    write = write + 1
-                                end
-                            end
-                        end
+        local e = index[i]
+        if e and kind_allowed(e.kind, allow) then
+            local dx = e.x - origin.x
+            local dy = e.y - origin.y
+            local dz = e.z - origin.z
+            if (dx * dx + dy * dy + dz * dz) <= limit2 then
+                if refresh_entry_hit(e) then
+                    dx = e.x - origin.x
+                    dy = e.y - origin.y
+                    dz = e.z - origin.z
+                    if (dx * dx + dy * dy + dz * dz) <= limit2 and env.is_valid(e.hit) then
+                        out[write] = e.hit
+                        write = write + 1
                     end
                 end
             end
@@ -10900,6 +11030,15 @@ function M.collect_near(origin, radius, out, max_out, allow)
         out[i] = nil
     end
     return out
+end
+
+function M.reset()
+    index = {}
+    index_n = 0
+    folder_cache = {}
+    index_cursor = 1
+    index_folder_i = 1
+    last_index_ms = 0
 end
 
 return M
@@ -15536,7 +15675,9 @@ April._mods["features.combat.perfect_farm"] = (function()
 --[[
   Farm helper - silent or camera aim at gather hit parts.
   Melee uses camera / mouse unit-ray origin (RaycastUtil.MouseRaycast).
-  Covers Trees / Nodes / Logs / Cactus for every gather tool in ToolInfo.
+
+  Perf: spatial index in farm_targets (budgeted); no full Trees/Nodes walks
+  on the ESP frame. Tool name + near list are rate-limited.
 ]]
 
 local settings = April.require("core.settings")
@@ -15555,7 +15696,6 @@ local P = "april_farm_helper"
 local P_RADIUS = "april_farm_radius"
 local P_SMOOTH = "april_farm_smooth"
 local P_SILENT = "april_farm_silent"
-local SHOOT_VK = 0x01
 
 local gather_parts = {}
 local locked_part = nil
@@ -15563,13 +15703,17 @@ local lock_grace_until = 0
 local next_scan_ms = 0
 local next_pick_ms = 0
 local last_tool = nil
+local cached_tool = nil
+local cached_tool_ms = 0
+local TOOL_CACHE_MS = 120
 
--- Fast rescan so newly spawned TreeX / nearby nodes lock quickly.
-local SCAN_MS = 200
-local PICK_MS = 33
-local LOCK_GRACE_MS = 450
-local PICK_FOV = 220
-local MAX_NEAR = 48
+-- Unlocked: scan often enough to acquire. Locked: rarely (index still ticks).
+local SCAN_MS_UNLOCKED = 350
+local SCAN_MS_LOCKED = 900
+local PICK_MS = 50
+local LOCK_GRACE_MS = 500
+local PICK_FOV = 240
+local MAX_NEAR = 14
 
 M._tracking = false
 
@@ -15629,14 +15773,30 @@ local function character_origin()
     return nil
 end
 
-local function refresh_near(scan_origin, radius, allow)
+local function held_tool_cached()
     local now = tick_ms()
-    if now < next_scan_ms then return end
-    next_scan_ms = now + SCAN_MS
+    if cached_tool and (now - cached_tool_ms) < TOOL_CACHE_MS then
+        return cached_tool
+    end
+    farm_tools.load()
+    cached_tool = farm_tools.get_held_farm_tool_name()
+    cached_tool_ms = now
+    return cached_tool
+end
 
-    local out = gather_parts
-    farm_targets.collect_near(scan_origin, radius, out, MAX_NEAR, allow)
-    gather_parts = out
+local function refresh_near(scan_origin, radius, allow, locked)
+    local now = tick_ms()
+    local interval = locked and SCAN_MS_LOCKED or SCAN_MS_UNLOCKED
+    if now < next_scan_ms then
+        -- Still advance spatial index cheaply so new trees appear.
+        farm_targets.tick_index(#gather_parts == 0)
+        return
+    end
+    next_scan_ms = now + interval
+    if #gather_parts == 0 then
+        farm_targets.tick_index(true)
+    end
+    farm_targets.collect_near(scan_origin, radius, gather_parts, MAX_NEAR, allow)
 end
 
 local function ray_origin()
@@ -15647,14 +15807,14 @@ local function effective_radius(tool_name)
     local tool_range = farm_tools.melee_range(tool_name)
     local slider = settings.num(P_RADIUS, 7)
     if slider <= 0 then return 0 end
-    return math.min(slider, tool_range + 0.35)
+    return math.min(slider, tool_range + 0.5)
 end
 
 local function target_valid(part, origin, radius, loose)
     if not env.is_valid(part) then return false end
     local pos = part_position(part)
     if not pos or not origin then return false end
-    local limit = loose and (radius * 1.35) or radius
+    local limit = loose and (radius * 1.4) or radius
     return dist2(pos, origin) <= limit * limit
 end
 
@@ -15683,7 +15843,6 @@ local function pick_target(origin, radius)
                     local sx, sy, on_screen = esp_util.w2s(pos.x, pos.y, pos.z)
                     if on_screen then
                         local fov = math_util.screen_fov_dist(sx, sy, cx, cy)
-                        -- Prefer close + on-screen; small FOV bias so looking at a tree wins.
                         local score = fov * 0.85 + d2 * 2.0e-4
                         if score < best_score then
                             best_score = score
@@ -15748,20 +15907,22 @@ local function clear_lock()
     next_scan_ms = 0
     next_pick_ms = 0
     last_tool = nil
+    cached_tool = nil
+    cached_tool_ms = 0
 end
 
 local function apply_silent(origin, aim)
-    silent_ray.ensure_hook()
+    if not silent_ray.ensure_hook() then
+        debug.error_once("farm:silent", "Silent farm hook unavailable - toggle Silent Farm off for camera aim")
+        return false
+    end
 
-    -- Continuous set_target keeps melee rays on the node even between clicks.
+    -- Continuous set_target only — track(key) fails between LMB presses and used to tear down aim.
     local ok = false
     if silent_ray.set_target then
         ok = silent_ray.set_target(origin, aim, aim) == true
-    end
-    if silent_ray.track then
-        -- Also bind while LMB held (matches HitMelee swing path).
-        local tracked = silent_ray.track(origin, aim, SHOOT_VK, aim) == true
-        ok = ok or tracked
+    elseif silent_ray.track then
+        ok = silent_ray.track(origin, aim, 0x01, aim) == true
     end
 
     if ok then
@@ -15769,7 +15930,6 @@ local function apply_silent(origin, aim)
         return true
     end
 
-    -- Do not tear down on a single failed frame (key-up / transient API miss).
     if M._tracking then
         return true
     end
@@ -15785,7 +15945,7 @@ function M.register_menu()
 
     menu_util.section(T, G.MISC, "Farm")
     menu_util.register_keybind(T, G.MISC, P, "Farm Helper", false)
-    menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", false, root)
+    menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", true, root)
     menu_util.gap(T, G.MISC)
     menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 10, 7, root)
     menu.add_slider_int(T, G.MISC, P_SMOOTH, "Camera Smoothness", 1, 30, 8, root)
@@ -15799,8 +15959,7 @@ function M.update(_dt)
         return
     end
 
-    farm_tools.load()
-    local tool_name = farm_tools.get_held_farm_tool_name()
+    local tool_name = held_tool_cached()
     if not tool_name then
         stop_silent()
         clear_lock()
@@ -15816,23 +15975,20 @@ function M.update(_dt)
     local cam_origin = ray_origin()
     if not cam_origin then
         stop_silent()
-        clear_lock()
         return
     end
 
     local radius = effective_radius(tool_name)
     if radius <= 0 then
         stop_silent()
-        clear_lock()
         return
     end
 
     local allow = farm_tools.gather_kinds(tool_name)
-    -- Scan from character so looking away still finds nearby trees/nodes.
     local scan_origin = character_origin() or cam_origin
     local locked_ok = locked_part and target_valid(locked_part, scan_origin, radius, true)
-    -- Always rate-limited rescan so TreeX / NodeSpark / new nodes appear quickly.
-    refresh_near(scan_origin, radius, allow)
+
+    refresh_near(scan_origin, radius, allow, locked_ok == true)
 
     local target = resolve_target(scan_origin, radius, locked_ok ~= true)
     if not target then
@@ -15848,7 +16004,11 @@ function M.update(_dt)
 
     if silent_mode() then
         if not apply_silent(cam_origin, aim) then
-            stop_silent()
+            -- Fall back to camera so farming still works without silent hook.
+            if camera and camera.look_at then
+                local smooth = math.max(1, settings.num(P_SMOOTH, 8))
+                pcall(camera.look_at, aim.x, aim.y, aim.z, smooth)
+            end
         end
         return
     end
@@ -17987,7 +18147,8 @@ local function collect_world_chams(applied)
     local me_pos = me and me.position
     if not me_pos then return end
 
-    local range = settings.num("april_world_range", 500)
+    -- Hysteresis: keep chams a bit past ESP range to avoid Revert thrash while walking.
+    local range = settings.num("april_world_range", 500) * 1.35
     local range_sq = range * range
 
     for _, entry in ipairs(cache.world) do
@@ -18066,7 +18227,7 @@ function M.register_menu()
             master_id = P,
             is_active = world_chams_active,
             collect = collect_world_chams,
-            rescan_ms = 900,
+            rescan_ms = 1800,
             toggle_ids = toggle_ids,
         })
     end
@@ -18173,21 +18334,40 @@ function M.draw()
 
     local range = settings.num("april_world_range", 500)
     local range_sq = range * range
+    local pad_sq = (range + 40) * (range + 40)
     local draw_boxes = settings.enabled("april_world_boxes")
     local show_name = settings.bool("april_world_show_name", true)
     local show_dist = settings.bool("april_world_show_distance", true)
     local me = env.get_local_player()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
+    local boxes_left = draw_boxes and 48 or 0
 
     for _, entry in ipairs(cache.world) do
         if not settings.enabled(entry.toggle_id) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
 
-        local lx, ly, lz = esp_scan.entry_coords(entry)
-        if not lx then goto continue end
+        -- Coarse cull with cached coords, then refresh main_part for on-frame accuracy.
+        local lx, ly, lz = entry.lx, entry.ly, entry.lz
+        if not lx then
+            if not esp_scan.refresh_entry_position(entry) then goto continue end
+            lx, ly, lz = entry.lx, entry.ly, entry.lz
+            if not lx then goto continue end
+        end
 
         local dist_sq = 0
+        if me_pos then
+            local dx = lx - me_pos.x
+            local dy = ly - me_pos.y
+            local dz = lz - me_pos.z
+            dist_sq = dx * dx + dy * dy + dz * dz
+            if dist_sq > pad_sq then goto continue end
+        end
+
+        esp_scan.refresh_entry_position(entry)
+        lx, ly, lz = entry.lx, entry.ly, entry.lz
+        if not lx then goto continue end
+
         if me_pos then
             local dx = lx - me_pos.x
             local dy = ly - me_pos.y
@@ -18197,8 +18377,9 @@ function M.draw()
         end
 
         local col = settings.color(entry.toggle_id, maps.toggle_color(maps.WORLD_TOGGLES, entry.toggle_id))
-        if draw_boxes then
+        if boxes_left > 0 then
             esp_util.draw_entry_boxes(entry, col, 1)
+            boxes_left = boxes_left - 1
         end
 
         if show_name or show_dist then
@@ -18287,7 +18468,7 @@ local function collect_loot_chams(applied)
     -- Fail closed: without local pos we must NOT cham the whole cache.
     if not me_pos then return end
 
-    local range = settings.num("april_loot_range", 300)
+    local range = settings.num("april_loot_range", 300) * 1.35
     local range_sq = range * range
 
     for _, entry in ipairs(cache.loot) do
@@ -18560,7 +18741,7 @@ function M.register_menu()
             master_id = P,
             is_active = loot_chams_active,
             collect = collect_loot_chams,
-            rescan_ms = 1200,
+            rescan_ms = 2000,
             toggle_ids = toggle_ids,
         })
     end
@@ -18619,32 +18800,52 @@ function M.draw()
 
     local range = settings.num("april_loot_range", 300)
     local range_sq = range * range
+    local pad_sq = (range + 40) * (range + 40)
     local draw_boxes = settings.enabled("april_loot_boxes")
     local show_name = settings.bool("april_loot_show_name", true)
     local show_dist = settings.bool("april_loot_show_distance", true)
     local me = env.get_local_player()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
+    local boxes_left = draw_boxes and 56 or 0
 
     for _, entry in ipairs(cache.loot) do
         if not settings.enabled(entry.toggle_id) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
 
-        local lx, ly, lz = esp_scan.entry_coords(entry)
-        if not lx then goto continue end
+        local lx, ly, lz = entry.lx, entry.ly, entry.lz
+        if not lx then
+            if not esp_scan.refresh_entry_position(entry) then goto continue end
+            lx, ly, lz = entry.lx, entry.ly, entry.lz
+            if not lx then goto continue end
+        end
 
         local dist_sq = 0
+        local unlimited = UNLIMITED_RANGE[entry.toggle_id]
+        if me_pos and not unlimited then
+            local dx = lx - me_pos.x
+            local dy = ly - me_pos.y
+            local dz = lz - me_pos.z
+            dist_sq = dx * dx + dy * dy + dz * dz
+            if dist_sq > pad_sq then goto continue end
+        end
+
+        esp_scan.refresh_entry_position(entry)
+        lx, ly, lz = entry.lx, entry.ly, entry.lz
+        if not lx then goto continue end
+
         if me_pos then
             local dx = lx - me_pos.x
             local dy = ly - me_pos.y
             local dz = lz - me_pos.z
             dist_sq = dx * dx + dy * dy + dz * dz
-            if not UNLIMITED_RANGE[entry.toggle_id] and dist_sq > range_sq then goto continue end
+            if not unlimited and dist_sq > range_sq then goto continue end
         end
 
         local col = settings.color(entry.toggle_id, maps.toggle_color(maps.LOOT_TOGGLES, entry.toggle_id))
-        if draw_boxes then
+        if boxes_left > 0 then
             esp_util.draw_entry_boxes(entry, col, 1)
+            boxes_left = boxes_left - 1
         end
 
         if show_name or show_dist then
@@ -18725,7 +18926,7 @@ local function collect_base_chams(applied)
     local me_pos = me and me.position
     if not me_pos then return end
 
-    local range = settings.num("april_base_range", 150)
+    local range = settings.num("april_base_range", 150) * 1.35
     local range_sq = range * range
 
     for _, entry in ipairs(cache.base) do
@@ -18839,7 +19040,7 @@ function M.register_menu()
             master_id = P,
             is_active = base_chams_active,
             collect = collect_base_chams,
-            rescan_ms = 900,
+            rescan_ms = 1800,
             toggle_ids = toggle_ids,
         })
     end
@@ -18962,6 +19163,7 @@ function M.draw()
 
     local range = settings.num("april_base_range", 150)
     local range_sq = range * range
+    local pad_sq = (range + 30) * (range + 30)
     local draw_boxes = settings.enabled("april_base_boxes")
     local show_name = settings.bool("april_base_show_name", true)
     local show_dist = settings.bool("april_base_show_distance", false)
@@ -18969,15 +19171,33 @@ function M.draw()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
     local label_groups = {}
+    local boxes_left = draw_boxes and 40 or 0
+    local rings_left = 6
 
     for _, entry in ipairs(cache.base) do
         if not settings.enabled(entry.toggle_id) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
 
-        local lx, ly, lz = esp_scan.entry_coords(entry)
-        if not lx then goto continue end
+        local lx, ly, lz = entry.lx, entry.ly, entry.lz
+        if not lx then
+            if not esp_scan.refresh_entry_position(entry) then goto continue end
+            lx, ly, lz = entry.lx, entry.ly, entry.lz
+            if not lx then goto continue end
+        end
 
         local dist_sq = 0
+        if me_pos then
+            local dx = lx - me_pos.x
+            local dy = ly - me_pos.y
+            local dz = lz - me_pos.z
+            dist_sq = dx * dx + dy * dy + dz * dz
+            if dist_sq > pad_sq then goto continue end
+        end
+
+        esp_scan.refresh_entry_position(entry)
+        lx, ly, lz = entry.lx, entry.ly, entry.lz
+        if not lx then goto continue end
+
         if me_pos then
             local dx = lx - me_pos.x
             local dy = ly - me_pos.y
@@ -18987,16 +19207,18 @@ function M.draw()
         end
 
         local col = settings.color(entry.toggle_id, maps.toggle_color(maps.BASE_TOGGLES, entry.toggle_id))
-        if draw_boxes then
+        if boxes_left > 0 then
             esp_util.draw_entry_boxes(entry, col, 1)
+            boxes_left = boxes_left - 1
         end
 
         local ring_id = maps.turret_ring_toggle(entry.toggle_id)
-        if ring_id and settings.enabled(ring_id) then
+        if ring_id and settings.enabled(ring_id) and rings_left > 0 then
             local activation = turret_stats.activation_range(entry.name)
             if activation then
                 local ring_col = { col[1], col[2], col[3], 0.35 }
                 desync_vis.draw_sphere_ring(lx, ly, lz, activation, ring_col, 1.5)
+                rings_left = rings_left - 1
             end
         end
 
@@ -25774,7 +25996,7 @@ local function build_misc()
             title = "Utility",
             items = {
                 kb("april_farm_helper", "Farm Helper", false),
-                cb("april_farm_silent", "Silent Farm", false, nil, "april_farm_helper"),
+                cb("april_farm_silent", "Silent Farm", true, nil, "april_farm_helper"),
                 sl("april_farm_radius", "Farm Range (studs)", 1, 10, 7, false, "april_farm_helper"),
                 sl("april_farm_smooth", "Camera Smoothness", 1, 30, 8, false, "april_farm_helper"),
                 sep(),

@@ -493,7 +493,7 @@ local function build_misc()
             title = "Utility",
             items = {
                 kb("april_farm_helper", "Farm Helper", false),
-                cb("april_farm_silent", "Silent Farm", false, nil, "april_farm_helper"),
+                cb("april_farm_silent", "Silent Farm", true, nil, "april_farm_helper"),
                 sl("april_farm_radius", "Farm Range (studs)", 1, 10, 7, false, "april_farm_helper"),
                 sl("april_farm_smooth", "Camera Smoothness", 1, 30, 8, false, "april_farm_helper"),
                 sep(),
