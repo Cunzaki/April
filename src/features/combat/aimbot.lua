@@ -1,6 +1,5 @@
 local settings = April.require("core.settings")
 local targeting = April.require("features.combat.targeting")
-local player_state = April.require("game.player_state")
 local weapons = April.require("game.weapons")
 local combat_origin = April.require("game.combat_origin")
 local draw_util = April.require("core.draw_util")
@@ -9,10 +8,9 @@ local combat_menu = April.require("features.combat.combat_menu")
 local silent_ray = April.require("core.silent_ray")
 local silent_resolve = April.require("features.combat.silent_resolve")
 local silent_whitelist = April.require("features.combat.silent_whitelist")
-local manip_math = April.require("core.manip_math")
-local desync_vis = April.require("core.desync_vis")
+local bullet_hud = April.require("features.combat.bullet_hud")
+local body_peek = April.require("features.combat.body_peek")
 local theme = April.require("core.ui_theme")
-local esp_util = April.require("core.esp_util")
 
 local M = {}
 local locked_target = nil
@@ -50,114 +48,7 @@ local function holding_weapon()
     return false
 end
 
-local MANIP_LABELS = {
-    direct = "MANIP: CLEAR SHOT",
-    ready = "MANIP: RAY READY",
-    scanning = "MANIP: SCANNING",
-    blocked = "MANIP: NO PEEK",
-    off = "",
-}
-
-local function draw_extend_bar(cx, cy, fov, info)
-    if not settings.bool(PREFIX .. "manip_extend", false) then return end
-    if not info then return end
-    if info.state ~= "scanning" and info.state ~= "ready" and info.state ~= "direct" then return end
-
-    local has_target = info.state == "ready" or info.state == "direct"
-    local prog = has_target and 1 or math.max(0, math.min(1, info.scan_progress or 0))
-
-    local bar_w, bar_h = 120, 6
-    local x = cx - bar_w * 0.5
-    local y = cy + fov + 8
-    local fill_w = bar_w * prog
-    local fill_col = has_target and theme.GREEN or { 1 - prog, prog, 0.15, 0.95 }
-    local bg_col = theme.alpha(theme.PANEL_DEEP, 0.85)
-    local border_col = has_target and theme.alpha(theme.GREEN, 0.55) or theme.alpha(theme.RED, 0.5)
-
-    if draw and draw.rect_filled then
-        draw.rect_filled(x, y, bar_w, bar_h, bg_col)
-        if fill_w > 0.5 then
-            draw.rect_filled(x, y, fill_w, bar_h, fill_col)
-        end
-        if draw.rect then
-            draw.rect(x, y, bar_w, bar_h, border_col, 1)
-        end
-    end
-end
-
-local function draw_manip_status(cx, cy, fov, info)
-    if not info or info.state == "off" then return end
-    if not settings.bool(PREFIX .. "manip_status", false) then return end
-
-    local ready = info.state == "ready" or info.state == "direct"
-    local text = MANIP_LABELS[info.state] or "MANIP: ..."
-    local col = ready and theme.GREEN or (info.state == "scanning" and theme.ORANGE or theme.RED)
-
-    local tw = theme.text_w(text, 11)
-    local pad_x, pad_y = 10, 4
-    local w = tw + pad_x * 2
-    local h = 18
-    local x = cx - w * 0.5
-    local extend_bar = settings.bool(PREFIX .. "manip_extend", false)
-    local y = cy + fov + (extend_bar and 22 or 10)
-
-    theme.draw_panel(x, y, w, h, {
-        bg = theme.alpha(theme.PANEL_DEEP, 0.9),
-        border = theme.alpha(ready and theme.GREEN or theme.RED, 0.45),
-        accent = theme.alpha(col, 0.85),
-        accent_w = 2,
-    })
-    draw_util.text_centered(cx, y + pad_y, text, col, 11)
-end
-
-local function draw_manip_peek(info)
-    if not settings.bool(PREFIX .. "manip_peek_vis", false) then return end
-    if not info or not info.peek then return end
-    if info.state ~= "ready" then return end
-
-    local body = combat_origin.get_server_origin()
-    if not body then return end
-
-    local peek = info.peek
-    local col_peek = { 1, 0.85, 0.2, 0.95 }
-    local show_labels = settings.bool(PREFIX .. "manip_status", false)
-    local eye_y = peek.y + manip_math.eye_offset_y()
-
-    desync_vis.draw_cross(peek.x, eye_y, peek.z, 0.85, col_peek, 2)
-    if show_labels then
-        desync_vis.draw_labeled(peek.x, eye_y, peek.z, "PEEK", col_peek, 11)
-    end
-    desync_vis.draw_link(body, peek, { col_peek[1], col_peek[2], col_peek[3], 0.3 }, 1)
-
-    local ray_from = manip_math.peek_track_origin(peek)
-    if ray_from and cached_track.aim then
-        desync_vis.draw_link(ray_from, cached_track.aim, { 1, 0.45, 0.2, 0.55 }, 1.5)
-    end
-end
-
-local function draw_tp_ray_path(info)
-    if not info then return end
-    if info.state ~= "tp" and info.state ~= "ready" then return end
-    if not settings.bool(PREFIX .. "tp_ray_vis", false) then return end
-    if info.state == "tp" and not settings.bool(PREFIX .. "bullet_tp", false) then return end
-    if info.state == "ready" and not settings.bool(PREFIX .. "bullet_manip", false) then return end
-
-    local path = info.tp_path
-    if not path or #path < 2 then return end
-
-    local col = settings.color(PREFIX .. "tp_ray_vis", { 0.95, 0.45, 1, 0.9 })
-    for i = 1, #path - 1 do
-        local a, b = path[i], path[i + 1]
-        esp_util.draw_world_line(a.x, a.y, a.z, b.x, b.y, b.z, col, 1.5)
-    end
-
-    local hook = cached_track.origin
-    local aim = info.hitpart or cached_track.aim
-    if hook and aim then
-        desync_vis.draw_cross(hook.x, hook.y, hook.z, 0.45, { 1, 0.85, 0.2, 0.95 }, 2)
-        desync_vis.draw_link(hook, aim, { col[1], col[2], col[3], 0.35 }, 1)
-    end
-end
+local P_BULLET = "april_bullet_enabled"
 
 function M.register_menu()
     local G = menu_util.G
@@ -171,26 +62,29 @@ function M.register_menu()
         line_color = theme.RED,
     })
 
+    menu.add_checkbox(T, G.SILENT_AIM, P_BULLET, "Enable Bullet", false)
+    combat_menu.register_bullet(T, G.SILENT_AIM, PREFIX, P_BULLET)
+
     menu_util.bind_children(P_MASTER, {
         PREFIX .. "target_type", PREFIX .. "bone",
         PREFIX .. "filters",
         PREFIX .. "whitelist_ids", PREFIX .. "whitelist_clear",
         PREFIX .. "targets", PREFIX .. "options",
-        PREFIX .. "hitscan",
-        PREFIX .. "bullet_tp", PREFIX .. "tp_method", PREFIX .. "tp_ray_vis",
-        PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_extend", PREFIX .. "manip_extend_dist",
-        PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
         PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
         PREFIX .. "hit_chance", PREFIX .. "max_dist", PREFIX .. "fov",
     })
 
-    menu_util.bind_children(PREFIX .. "bullet_tp", {
-        PREFIX .. "tp_method", PREFIX .. "tp_ray_vis",
+    menu_util.bind_children(P_BULLET, {
+        PREFIX .. "hitscan",
+        PREFIX .. "bullet_tp",
+        PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_extend", PREFIX .. "manip_extend_dist",
+        "april_bullet_body_peek",
+        PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
     })
 
     menu_util.bind_children(PREFIX .. "bullet_manip", {
         PREFIX .. "manip_dist", PREFIX .. "manip_extend", PREFIX .. "manip_extend_dist",
-        PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
+        "april_bullet_body_peek",
     })
 
     menu_util.bind_children(PREFIX .. "manip_extend", {
@@ -202,95 +96,132 @@ function M.register_menu()
     })
 end
 
-local function active()
+local function silent_active()
     return settings.enabled(P_MASTER) and silent_ray.available()
 end
 
-local function update_target(cx, cy, fov)
+local function bullet_track_active()
+    return settings.bool(P_BULLET, false)
+        and silent_resolve.any_bullet_feature()
+        and silent_ray.available()
+end
+
+local function active()
+    return silent_active() or bullet_track_active()
+end
+
+local function update_target(cx, cy, fov, find_opts)
     local sticky = settings.multi(PREFIX .. "options", 1, false)
     local now = tick_ms()
+    find_opts = find_opts or {}
 
-    if sticky and locked_target then
-        if not targeting.is_target_valid(locked_target, PREFIX, cx, cy, fov) then
-            locked_target = nil
-        end
+    if locked_target and targeting.is_npc_target(locked_target) then
+        locked_target = targeting.refresh_npc_target(locked_target)
+    end
+
+    if locked_target and not targeting.is_target_valid(locked_target, PREFIX, cx, cy, fov, find_opts) then
+        locked_target = nil
     end
 
     if locked_target and sticky then
         return
     end
 
-    if now - last_target_scan < TARGET_SCAN_MS then
+    if sticky and now - last_target_scan < TARGET_SCAN_MS then
         return
     end
     last_target_scan = now
-    locked_target = targeting.find_target(cx, cy, fov, PREFIX)
+    locked_target = targeting.find_target(cx, cy, fov, PREFIX, find_opts)
 end
 
-function M.update(_dt)
+function M.update(dt)
+    bullet_hud.update(dt)
     cached_track.origin = nil
     cached_track.aim = nil
     cached_track.manip = { state = "off" }
     cached_track.tracking = false
+
+    -- Ragebot owns the silent hook while active.
+    local rage_on = settings.enabled("april_rage_enabled")
+    if rage_on then
+        locked_target = nil
+        fire_was_down = false
+        shot_allowed = true
+        body_peek.tick(nil, nil)
+        return
+    end
 
     if not active() then
         locked_target = nil
         fire_was_down = false
         shot_allowed = true
         silent_ray.stop()
+        body_peek.tick(nil, nil)
         return
     end
 
     silent_ray.ensure_hook()
 
+    local sw, sh = targeting.screen_center()
+    local cx, cy = sw * 0.5, sh * 0.5
+    local use_silent_fov = silent_active()
+    local fov = use_silent_fov and settings.num(PREFIX .. "fov", 150) or 99999
+    local find_opts = use_silent_fov and {} or { ignore_fov = true }
+    if silent_resolve.bypass_visibility() then
+        find_opts.ignore_visible = true
+    end
+
     if not holding_weapon() then
         silent_ray.stop()
-        local sw, sh = targeting.screen_center()
-        local cx, cy = sw * 0.5, sh * 0.5
-        local fov = settings.num(PREFIX .. "fov", 150)
-        update_target(cx, cy, fov)
+        if use_silent_fov then
+            update_target(cx, cy, fov, find_opts)
+        end
         return
     end
 
     combat_origin.sync_weapon(weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name())
 
-    local sw, sh = targeting.screen_center()
-    local cx, cy = sw * 0.5, sh * 0.5
-    local fov = settings.num(PREFIX .. "fov", 150)
+    update_target(cx, cy, fov, find_opts)
 
-    update_target(cx, cy, fov)
-
-    -- Middle-click toggles whitelist on current / FOV target (even if filtered out later).
     local wl_target = locked_target
     if not wl_target or not targeting.is_aim_target(wl_target) then
-        wl_target = targeting.find_target(cx, cy, fov, PREFIX, { ignore_whitelist = true })
+        wl_target = targeting.find_target(cx, cy, fov, PREFIX, {
+            ignore_whitelist = true,
+            ignore_fov = find_opts.ignore_fov,
+            ignore_visible = find_opts.ignore_visible,
+        })
     end
     silent_whitelist.tick(wl_target, PREFIX)
 
     if not locked_target or not targeting.is_aim_target(locked_target) then
         silent_ray.stop()
+        body_peek.tick(nil, nil)
         return
     end
 
-    -- Hit chance rolls once per mouse-down (not every frame).
-    local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)
-    if firing and not fire_was_down then
-        local hit_chance = settings.num(PREFIX .. "hit_chance", 100)
-        if hit_chance >= 100 then
+    -- Hit chance only for silent aim mouse-fire (not bullet-only).
+    if use_silent_fov then
+        local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)
+        if firing and not fire_was_down then
+            local hit_chance = settings.num(PREFIX .. "hit_chance", 100)
+            if hit_chance >= 100 then
+                shot_allowed = true
+            else
+                local roll = math.random(1, 100)
+                shot_allowed = roll <= hit_chance
+            end
+        elseif not firing then
             shot_allowed = true
-        else
-            local roll = math.random(1, 100)
-            shot_allowed = roll <= hit_chance
         end
-    elseif not firing then
-        shot_allowed = true
-    end
-    fire_was_down = firing and true or false
+        fire_was_down = firing and true or false
 
-    if not shot_allowed then
-        -- Miss this click: stop tracking once, do not re-call native stop every frame.
-        silent_ray.stop()
-        return
+        if not shot_allowed then
+            silent_ray.stop()
+            return
+        end
+    else
+        shot_allowed = true
+        fire_was_down = false
     end
 
     local ok_resolve, origin, aim, manip_info = pcall(silent_resolve.resolve_track, locked_target, PREFIX, cx, cy)
@@ -309,22 +240,28 @@ function M.update(_dt)
     local info = cached_track.manip
     local ok_track = false
     local hit = info.hitpart or aim
-    if info.use_curve and silent_ray.track_curve then
-        -- Track straight to hitpart; curve path is visual-only.
-        ok_track = silent_ray.track_curve(
-            origin, hit, info.weapon, SHOOT_VK, hit
-        ) == true
-        if not info.curve_path and silent_ray.last_curve then
-            local curve = silent_ray.last_curve()
-            if curve and curve.path then
-                info.curve_path = curve.path
+    local track_aim = aim
+    if use_silent_fov then
+        if info.use_curve and silent_ray.track_curve then
+            ok_track = silent_ray.track_curve(
+                origin, hit, info.weapon, SHOOT_VK, hit
+            ) == true
+            if not info.curve_path and silent_ray.last_curve then
+                local curve = silent_ray.last_curve()
+                if curve and curve.path then
+                    info.curve_path = curve.path
+                end
             end
+        else
+            ok_track = silent_ray.track(origin, track_aim, SHOOT_VK, hit) == true
         end
     else
-        ok_track = silent_ray.track(origin, hit, SHOOT_VK, hit) == true
+        -- Bullet-only: per-frame set (works without holding LMB).
+        ok_track = silent_ray.set_target(origin, track_aim, hit) == true
     end
-    cached_track.aim = hit
+    cached_track.aim = track_aim
     cached_track.tracking = ok_track
+    body_peek.tick(locked_target, hit)
 end
 
 function M.get_target()
@@ -357,7 +294,7 @@ function M.draw()
     local cx, cy = sw * 0.5, sh * 0.5
     local fov = settings.num(PREFIX .. "fov", 150)
 
-    if active() and settings.bool(PREFIX .. "draw_fov", false) then
+    if silent_active() and settings.bool(PREFIX .. "draw_fov", false) then
         local col = settings.color(PREFIX .. "draw_fov", { 0.4, 0.9, 1, 1 })
         local filled = settings.num(PREFIX .. "fov_style", 1) == 1
 
@@ -373,17 +310,11 @@ function M.draw()
         end
     end
 
-    if active() and settings.bool(PREFIX .. "bullet_manip", false) then
-        draw_extend_bar(cx, cy, fov, cached_track.manip)
-        draw_manip_status(cx, cy, fov, cached_track.manip)
-        draw_manip_peek(cached_track.manip)
+    if settings.bool(P_BULLET, false) then
+        bullet_hud.draw(cx, cy, fov, cached_track)
     end
 
-    if active() then
-        draw_tp_ray_path(cached_track.manip)
-    end
-
-    if active() and locked_target and settings.bool(PREFIX .. "target_line", false) then
+    if silent_active() and locked_target and settings.bool(PREFIX .. "target_line", false) then
         local col = settings.color(PREFIX .. "target_line", { 1, 0.25, 0.25, 1 })
         local aim = snapline_aim_point(cx, cy)
         if aim then

@@ -145,10 +145,6 @@ function M.is_held_display(name)
     return HELD_TYPES[t] == true
 end
 
-local function rbx_id_from_image(img, variant)
-    return image_id_from_table(img, variant)
-end
-
 function M.get_by_id(id)
     if type(id) ~= "number" then return nil end
     if not loaded then M.load() end

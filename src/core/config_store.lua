@@ -15,10 +15,18 @@ local EXCLUDE = {
     april_cfg_autoload_slot = true,
     april_cfg_autoload_profile = true,
     april_debug_overlay = true,
-    april_gm_held_weapon = true,
 }
 
 local MENU_KEYS = {
+    "april_ui_theme_preset", "april_ui_window_opacity", "april_ui_panel_opacity",
+    "april_ui_border_strength", "april_ui_corner_style", "april_ui_scale", "april_ui_density",
+    "april_ui_bg_dim", "april_ui_motion_profile", "april_ui_reduce_motion",
+    "april_ui_custom_colors", "april_ui_custom_anim", "april_ui_show_cursor_dot",
+    "april_ui_accent_anim", "april_ui_anim_speed", "april_ui_menu_fade",
+    "april_ui_anim_targets", "april_ui_color_overrides", "april_ui_per_element",
+    "april_ui_style_title", "april_ui_style_section", "april_ui_style_slider",
+    "april_ui_style_scroll", "april_ui_style_sidebar", "april_ui_style_checkbox",
+    "april_ui_style_overlay", "april_ui_window_x", "april_ui_window_y",
     "april_esp_text_size",
     "april_player_enabled", "april_player_enabled_mode",
     "april_player_box_mode",
@@ -26,15 +34,18 @@ local MENU_KEYS = {
     "april_player_show_name", "april_player_show_distance",
     "april_player_show_weapon",
     "april_player_clan_tag",
-    "april_player_flag_downed", "april_player_flag_safezone", "april_player_flag_vip",
+    "april_player_flag_downed", "april_player_flag_safezone",
     "april_player_flag_staff", "april_player_flag_reviving",
     "april_player_esp_filters", "april_player_esp_flags",
-    "april_player_chams", "april_player_chams_mode", "april_player_chams_color",
     "april_player_range",
         "april_target_overlay", "april_target_overlay_gear_size", "april_target_overlay_top",
+    "april_crosshair_source", "april_target_gear_source",
     "april_crosshair_enabled", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
     "april_crosshair_thickness", "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
     "april_crosshair_rainbow", "april_crosshair_rainbow_speed",
+    "april_crosshair_follow", "april_crosshair_follow_smooth",
+    "april_crosshair_spin", "april_crosshair_spin_speed",
+    "april_crosshair_pulse", "april_crosshair_pulse_speed",
     "april_aimbot", "april_aim_key", "april_aim_key_mode",
     "april_aim_target_type", "april_aim_bone",
     "april_aim_filters", "april_aim_whitelist_ids",
@@ -45,13 +56,19 @@ local MENU_KEYS = {
     "april_silent_target_type", "april_silent_bone",
     "april_silent_filters", "april_silent_whitelist_ids",
     "april_silent_targets", "april_silent_options",
-    "april_silent_bullet_tp", "april_silent_tp_method", "april_silent_tp_ray_vis",
+    "april_bullet_enabled", "april_bullet_body_peek",
+    "april_silent_bullet_tp",
     "april_silent_bullet_manip",
     "april_silent_manip_dist", "april_silent_manip_extend", "april_silent_manip_extend_dist",
     "april_silent_manip_status", "april_silent_manip_peek_vis",
     "april_silent_draw_fov", "april_silent_fov_style", "april_silent_target_line",
     "april_silent_hit_chance", "april_silent_max_dist", "april_silent_fov", "april_silent_hitscan",
-    "april_gunmods_enabled", "april_gunmods_enabled_mode", "april_gm_mode", "april_gm_weapon_select",
+    "april_rage_enabled", "april_rage_enabled_mode",
+    "april_rage_target_type", "april_rage_bone",
+    "april_rage_filters", "april_rage_whitelist_ids",
+    "april_rage_targets", "april_rage_options",
+    "april_rage_max_dist", "april_rage_autofire", "april_rage_fire_delay",
+    "april_gunmods_enabled", "april_gunmods_enabled_mode",
     "april_gm_recoil", "april_gm_recoil_pct", "april_gm_spread", "april_gm_spread_pct",
     "april_gm_sway", "april_gm_fire_rate", "april_gm_fire_rate_mult",
     "april_gm_speed", "april_gm_speed_mult",
@@ -90,7 +107,7 @@ local MENU_KEYS = {
     "april_map_enabled", "april_map_enabled_mode", "april_map_zoom", "april_map_size", "april_map_icon_scale",
     "april_map_show_players", "april_map_show_npcs", "april_map_show_loot", "april_map_show_world",
     "april_map_show_base", "april_map_show_waypoints",
-    "april_map_labels",
+    "april_map_labels", "april_map_x", "april_map_y",
     "april_noclip_enabled", "april_noclip_enabled_mode", "april_noclip_speed",
     "april_slowfall_enabled", "april_slowfall_enabled_mode", "april_slowfall_speed",
     "april_fling_enabled", "april_fling_enabled_mode", "april_fling_fov", "april_fling_duration",
@@ -105,10 +122,6 @@ local MENU_KEYS = {
     "april_fakeduck_height",
     "april_fakeduck_spam", "april_fakeduck_spam_mode",
     "april_fakeduck_spam_min", "april_fakeduck_spam_max", "april_fakeduck_spam_ms",
-    "april_bullet_manip_enabled", "april_bullet_manip_enabled_mode", "april_bullet_manip_range", "april_bullet_manip_speed",
-    "april_bullet_manip_debug", "april_bullet_manip_console", "april_bullet_manip_vis",
-    "april_bullet_manip_vis_style", "april_bullet_manip_vis_size",
-    "april_bullet_manip_vis_link", "april_bullet_manip_vis_labels", "april_bullet_manip_vis_peek",
     "april_keybinds_enabled", "april_keybinds_active_only", "april_keybinds_show_unbound", "april_keybinds_show_mode",
     "april_keybinds_x", "april_keybinds_y",
     "april_mod_checker_enabled", "april_mod_checker_interval",
@@ -116,12 +129,15 @@ local MENU_KEYS = {
 }
 
 local COLOR_KEYS = {
+    "april_ui_accent", "april_ui_col_title", "april_ui_col_section",
+    "april_ui_col_slider", "april_ui_col_scroll", "april_ui_col_sidebar",
+    "april_ui_col_checkbox", "april_ui_col_overlay",
     "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
     "april_aimbot", "april_aim_draw_fov", "april_aim_target_line",
-    "april_silent_aim", "april_silent_draw_fov", "april_silent_target_line", "april_silent_tp_ray_vis",
+    "april_silent_aim", "april_silent_draw_fov", "april_silent_target_line",
     "april_player_enabled", "april_player_skeleton", "april_player_show_name", "april_player_clan_tag",
     "april_player_show_distance", "april_player_show_weapon",
-    "april_player_flag_downed", "april_player_flag_safezone", "april_player_flag_vip",
+    "april_player_flag_downed", "april_player_flag_safezone",
     "april_player_flag_staff", "april_player_flag_reviving",
     "april_stone_node", "april_metal_node", "april_phosphate_node", "april_corn_plant", "april_tomato_plant",
     "april_pumpkin_plant", "april_lemon_plant", "april_raspberry_plant", "april_blueberry_plant",
@@ -138,10 +154,9 @@ local COLOR_KEYS = {
     "april_steel_door", "april_steel_double_door", "april_garage_door", "april_trap_door",
     "april_triangle_trap_door", "april_small_battery", "april_medium_battery", "april_large_battery",
     "april_solar_panel", "april_windmill",
-    "april_wp_draw", "april_map_bg", "april_map_grid", "april_map_player_col", "april_map_npc_col", "april_map_loot_col",
-    "april_map_world_col", "april_map_base_col", "april_map_wp_col", "april_map_local",
+    "april_wp_draw", "april_map_player_col", "april_map_npc_col", "april_map_loot_col",
+    "april_map_world_col", "april_map_base_col", "april_map_wp_col",
     "april_desync_visualizer",
-    "april_bullet_manip_vis_server", "april_bullet_manip_vis_local", "april_bullet_manip_vis_peek", "april_bullet_manip_vis_link",
 }
 
 local LEGACY_HOTKEY_TO_CHECKBOX = {
@@ -157,7 +172,6 @@ local LEGACY_HOTKEY_TO_CHECKBOX = {
     april_noclip_enabled_key = "april_noclip_enabled",
     april_slowfall_enabled_key = "april_slowfall_enabled",
     april_desync_enabled_key = "april_desync_enabled",
-    april_bullet_manip_enabled_key = "april_bullet_manip_enabled",
     april_mod_checker_enabled_key = "april_mod_checker_enabled",
 }
 
@@ -176,8 +190,8 @@ local HOTKEY_KEYS = {
     "april_desync_enabled",
     "april_antiaim_enabled",
     "april_fakeduck_enabled",
-    "april_bullet_manip_enabled",
     "april_silent_aim",
+    "april_rage_enabled",
     "april_player_enabled",
     "april_ui_menu_key",
 }
@@ -276,6 +290,13 @@ local function collect_menu_keys()
         local weapons = April.require("game.weapons")
         for _, name in ipairs(weapons.recoil_weapon_names()) do
             add(weapons.slug(name))
+        end
+    end)
+
+    pcall(function()
+        local fb = April.require("core.feature_bind")
+        for _, entry in ipairs(fb.list_entries()) do
+            add(fb.hide_key_id(entry.id))
         end
     end)
 
@@ -456,7 +477,12 @@ function M.load_slot(slot, opts)
 
     pcall(function()
         local gun_mods = April.require("features.combat.gun_mods")
-        gun_mods._apply_dirty = true
+        if gun_mods.schedule_apply then
+            gun_mods.schedule_apply(1500)
+        else
+            gun_mods._apply_dirty = true
+            gun_mods._defer_until = (utility and utility.get_tick_count and utility.get_tick_count() or 0) + 1500
+        end
     end)
 
     return true

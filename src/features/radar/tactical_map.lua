@@ -6,9 +6,14 @@ local player_state = April.require("game.player_state")
 local menu_util = April.require("core.menu_util")
 local esp_scan = April.require("game.esp_scan")
 local theme = April.require("core.ui_theme")
+local overlay_theme = April.require("core.overlay_theme")
+local panel_drag = April.require("core.panel_drag")
 
 local M = {}
 local P = "april_map_enabled"
+local X_ID = "april_map_x"
+local Y_ID = "april_map_y"
+local TITLE_H = 24
 
 local function get_camera_yaw()
     if camera and camera.get_angles then
@@ -118,58 +123,91 @@ local function draw_radar_label(lx, ly, text, col, x, y, w, h, fs)
     if ly < y + 4 then return end
 
     if draw.rect_filled then
-        draw.rect_filled(lx - 2, ly - 1, tw + 4, th, { 0.04, 0.05, 0.07, 0.82 }, 3)
+        draw.rect_filled(lx - 3, ly - 2, tw + 6, th + 2, theme.PANEL_DEEP, 0)
+    end
+    if draw.rect then
+        draw.rect(lx - 3, ly - 2, tw + 6, th + 2, theme.BORDER, 0, 1)
     end
     draw_util.text(lx, ly, text, col, fs)
 end
 
-local function draw_blip(mx, my, scale, col, clamped)
+local function draw_blip(mx, my, scale, col, clamped, shape)
     local alpha = clamped and 0.72 or 1
     local c = { col[1], col[2], col[3], (col[4] or 1) * alpha }
     local r = math.max(2, scale - (clamped and 1 or 0))
-    if draw and draw.circle_filled then
-        draw.circle_filled(mx, my, r + 1, { c[1], c[2], c[3], c[4] * 0.25 }, 10)
+    local edge = theme.alpha(theme.PANEL_DEEP, math.min(0.95, c[4]))
+    shape = shape or "circle"
+
+    if shape == "square" and draw and draw.rect_filled then
+        draw.rect_filled(mx - r - 1, my - r - 1, (r + 1) * 2, (r + 1) * 2, edge, 0)
+        draw.rect_filled(mx - r, my - r, r * 2, r * 2, c, 0)
+    elseif shape == "diamond" and draw and draw.poly_filled then
+        draw.poly_filled({
+            { mx, my - r - 1 }, { mx + r + 1, my },
+            { mx, my + r + 1 }, { mx - r - 1, my },
+        }, edge)
+        draw.poly_filled({
+            { mx, my - r }, { mx + r, my },
+            { mx, my + r }, { mx - r, my },
+        }, c)
+    elseif shape == "waypoint" and draw and draw.circle_filled then
+        draw.circle_filled(mx, my, r + 2, edge, 12)
+        draw.circle_filled(mx, my, r + 1, c, 12)
+        draw.circle_filled(mx, my, math.max(1, r - 1), theme.PANEL_DEEP, 10)
+    elseif draw and draw.circle_filled then
+        draw.circle_filled(mx, my, r + 1, edge, 10)
         draw.circle_filled(mx, my, r, c, 10)
     else
         draw_util.circle(mx, my, r, c, true)
     end
 end
 
-local function draw_map_item(wx, wz, col, label, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, layout)
+local function draw_map_item(wx, wz, col, label, shape, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, layout)
     if not wx or not wz then return end
 
     local mx, my = world_to_map(wx, wz, view_x, view_z, map_cx, map_cy, zoom, yaw)
+    local clamped
     mx, my, clamped = clamp_to_disc(mx, my, map_cx, map_cy, layout.radius)
 
-    draw_blip(mx, my, scale, col, clamped)
+    draw_blip(mx, my, scale, col, clamped, shape)
 
     if settings.bool("april_map_labels", false) and not clamped then
         draw_radar_label(mx, my, short_label(label), col, layout.x, layout.y, layout.w, layout.h, 9)
     end
 end
 
-local function draw_radar_frame(layout, bg, border, grid)
+local function draw_radar_frame(layout, bg, grid, zoom)
     local x, y, w, h = layout.x, layout.y, layout.w, layout.h
     local cx, cy = layout.cx, layout.cy
 
+    overlay_theme.draw_panel(x, y, w, h, "TACTICAL RADAR")
+
     if draw.rect_filled then
-        draw.rect_filled(x, y, w, h, bg, theme.ROUND)
-        draw.rect_filled(x + 2, y + 2, w - 4, 18, { 0.06, 0.07, 0.09, 0.95 }, 4)
+        draw.rect_filled(x + 7, y + TITLE_H + 5, w - 14, h - TITLE_H - 12, bg, 0)
     end
     if draw.rect then
-        draw.rect(x, y, w, h, border, theme.ROUND, 1)
+        draw.rect(x + 7, y + TITLE_H + 5, w - 14, h - TITLE_H - 12, theme.BORDER, 0, 1)
     end
 
-    draw_util.text(x + 8, y + 4, "RADAR", theme.TEXT, 10)
+    local zoom_text = string.format("x%.2f", zoom)
+    local zoom_w = theme.text_w(zoom_text, 9)
+    draw_util.text(x + w - zoom_w - 8, y + 7, zoom_text, theme.TEXT_DIM, 9)
 
     if draw and draw.circle then
-        draw.circle(cx, cy, layout.radius, grid, 48, 1)
-        draw.circle(cx, cy, layout.radius * 0.66, grid, 48, 1)
-        draw.circle(cx, cy, layout.radius * 0.33, grid, 48, 1)
+        draw.circle(cx, cy, layout.radius, theme.alpha(grid, 0.42), 24, 1)
+        draw.circle(cx, cy, layout.radius * 0.66, grid, 24, 1)
+        draw.circle(cx, cy, layout.radius * 0.33, grid, 24, 1)
+    end
+    if draw and draw.line then
+        draw.line(cx - layout.radius, cy, cx + layout.radius, cy, theme.alpha(grid, 0.72), 1)
+        draw.line(cx, cy - layout.radius, cx, cy + layout.radius, theme.alpha(grid, 0.72), 1)
     end
 
-    local n_x, n_y = cx, cy - layout.radius + 10
-    draw_util.text(n_x - 3, n_y - 6, "N", theme.alpha(theme.CYAN, 0.9), 10)
+    local card = theme.alpha(overlay_theme.accent(), 0.92)
+    draw_util.text(cx - 3, cy - layout.radius + 5, "N", card, 9)
+    draw_util.text(cx + layout.radius - 10, cy - 5, "E", theme.TEXT_DIM, 9)
+    draw_util.text(cx - 3, cy + layout.radius - 14, "S", theme.TEXT_DIM, 9)
+    draw_util.text(cx - layout.radius + 5, cy - 5, "W", theme.TEXT_DIM, 9)
 end
 
 local function draw_local_blip(layout, col, body_x, body_z, view_x, view_z, zoom, yaw)
@@ -180,14 +218,22 @@ local function draw_local_blip(layout, col, body_x, body_z, view_x, view_z, zoom
         mx, my = clamp_to_disc(mx, my, cx, cy, layout.radius)
     end
 
-    if draw and draw.line then
-        local tip_x, tip_y = cx, cy - 10
-        draw.line(mx, my, tip_x, tip_y, theme.alpha(col, 0.85), 2)
-        draw.line(tip_x, tip_y - 4, tip_x - 3, tip_y + 2, theme.alpha(col, 0.85), 2)
-        draw.line(tip_x, tip_y - 4, tip_x + 3, tip_y + 2, theme.alpha(col, 0.85), 2)
+    local r = layout.scale + 2
+    if draw and draw.poly_filled then
+        draw.poly_filled({
+            { mx, my - r - 2 },
+            { mx + r, my + r },
+            { mx, my + math.max(1, r - 2) },
+            { mx - r, my + r },
+        }, col)
+    elseif draw and draw.line then
+        draw.line(mx, my - r, mx - r, my + r, col, 2)
+        draw.line(mx - r, my + r, mx + r, my + r, col, 2)
+        draw.line(mx + r, my + r, mx, my - r, col, 2)
     end
-
-    draw_blip(mx, my, layout.scale + 1, col, false)
+    if draw and draw.circle then
+        draw.circle(mx, my, r + 2, theme.alpha(col, 0.32), 16, 1)
+    end
 end
 
 function M.register_menu()
@@ -206,29 +252,40 @@ function M.register_menu()
     menu.add_checkbox(T, G.RADAR, "april_map_show_waypoints", "Radar Show Waypoints", true, root)
     menu.add_checkbox(T, G.RADAR, "april_map_labels", "Radar Show Labels", false, root)
 
-    menu.add_colorpicker(T, G.RADAR, "april_map_bg", "Radar Background", theme.MAP_BG, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_grid", "Radar Grid", theme.MAP_GRID, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_player_col", "Radar Players Color", theme.RED, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_npc_col", "Radar NPCs Color", theme.ORANGE, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_loot_col", "Radar Loot Color", { 1, 0.85, 0.35, 1 }, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_world_col", "Radar Resources Color", theme.GREEN, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_base_col", "Radar Base Color", { 0.55, 0.55, 1, 1 }, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_wp_col", "Radar Waypoints Color", theme.CYAN, root)
-    menu.add_colorpicker(T, G.RADAR, "april_map_local", "Radar You Color", theme.CYAN, root)
 
     menu_util.gap(T, G.RADAR)
     menu.add_slider_int(T, G.RADAR, "april_map_zoom", "Radar Zoom Level", 0.05, 5.0, 1.0, "%.2f", root)
     menu.add_slider_int(T, G.RADAR, "april_map_size", "Radar Size", 140, 420, 240, root)
     menu.add_slider_int(T, G.RADAR, "april_map_icon_scale", "Radar Blip Size", 2, 6, 3, root)
+    menu_util.button(T, G.RADAR, "april_map_reset_position", "Reset Radar Position", function()
+        local sw = select(1, draw_util.screen_size())
+        local size = settings.num("april_map_size", 240)
+        local rx, ry = sw - size - 16, 16
+        if menu and menu.set then
+            pcall(menu.set, X_ID, rx)
+            pcall(menu.set, Y_ID, ry)
+        end
+        pcall(function()
+            local state = April.require("ui.gs_state")
+            state.set(X_ID, rx)
+            state.set(Y_ID, ry)
+        end)
+    end)
 
     menu_util.bind_children(P, {
         "april_map_show_players", "april_map_show_npcs", "april_map_show_loot",
         "april_map_show_world", "april_map_show_base", "april_map_show_waypoints",
         "april_map_labels",
-        "april_map_bg", "april_map_grid", "april_map_player_col", "april_map_npc_col",
+        "april_map_player_col", "april_map_npc_col",
         "april_map_loot_col", "april_map_world_col", "april_map_base_col",
-        "april_map_wp_col", "april_map_local",
-        "april_map_zoom", "april_map_size", "april_map_icon_scale",
+        "april_map_wp_col",
+        "april_map_zoom", "april_map_size", "april_map_icon_scale", "april_map_reset_position",
     })
 end
 
@@ -238,26 +295,34 @@ function M.draw()
     if not settings.enabled(P) then return end
     if not draw then return end
 
+    overlay_theme.sync()
     local sw, sh = draw_util.screen_size()
     local size = settings.num("april_map_size", 240)
-    local x, y = sw - size - 16, 16
+    local default_x, default_y = sw - size - 16, 16
+    local x, y = panel_drag.update(
+        "tactical_radar", X_ID, Y_ID, size, TITLE_H, sw, sh, default_x, default_y
+    )
+    x, y = panel_drag.clamp(x, y, size, size, sw, sh, X_ID, Y_ID)
     local w, h = size, size
-    local cx, cy = x + w * 0.5, y + h * 0.5
-    local radius = math.min(w, h) * 0.5 - 14
+    local body_y, body_h = y + TITLE_H, h - TITLE_H
+    local cx, cy = x + w * 0.5, body_y + body_h * 0.5
+    local radius = math.min(w, body_h) * 0.5 - 12
     local zoom = settings.num("april_map_zoom", 1.0)
     local scale = settings.num("april_map_icon_scale", 3)
 
-    local layout = { x = x, y = y, w = w, h = h, cx = cx, cy = cy, radius = radius, scale = scale }
+    local layout = {
+        x = x, y = y, w = w, h = h, cx = cx, cy = cy,
+        radius = radius, label_radius = math.max(24, radius - 28), scale = scale,
+    }
 
-    local bg = settings.color("april_map_bg", theme.MAP_BG)
-    local grid = settings.color("april_map_grid", theme.MAP_GRID)
-    local border = theme.BORDER_CYAN
+    local bg = theme.MAP_BG
+    local grid = theme.MAP_GRID
 
     local cam_x, _, cam_z, body_x, _, body_z = get_view_origin()
     local yaw = get_camera_yaw()
     local view_x, view_z = cam_x, cam_z
 
-    draw_radar_frame(layout, bg, border, grid)
+    draw_radar_frame(layout, bg, grid, zoom)
 
     if settings.bool("april_map_show_world", false) then
         local col = settings.color("april_map_world_col", theme.GREEN)
@@ -265,7 +330,7 @@ function M.draw()
             if env.is_valid(item.inst) then
                 local wx, wz = entry_world_xz(item)
                 if wx then
-                    draw_map_item(wx, wz, col, item.name, view_x, view_z, cx, cy, zoom, yaw, scale, layout)
+                    draw_map_item(wx, wz, col, item.name, "diamond", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
                 end
             end
         end
@@ -277,7 +342,7 @@ function M.draw()
             if env.is_valid(item.inst) then
                 local wx, wz = entry_world_xz(item)
                 if wx then
-                    draw_map_item(wx, wz, col, item.name, view_x, view_z, cx, cy, zoom, yaw, scale, layout)
+                    draw_map_item(wx, wz, col, item.name, "square", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
                 end
             end
         end
@@ -289,7 +354,7 @@ function M.draw()
             if env.is_valid(item.inst) then
                 local wx, wz = entry_world_xz(item)
                 if wx then
-                    draw_map_item(wx, wz, col, item.name, view_x, view_z, cx, cy, zoom, yaw, scale, layout)
+                    draw_map_item(wx, wz, col, item.name, "diamond", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
                 end
             end
         end
@@ -301,7 +366,7 @@ function M.draw()
             if env.is_valid(entry.inst) then
                 local wx, wz = entry_world_xz(entry)
                 if wx then
-                    draw_map_item(wx, wz, col, entry.name, view_x, view_z, cx, cy, zoom, yaw, scale, layout)
+                    draw_map_item(wx, wz, col, entry.name, "circle", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
                 end
             end
         end
@@ -311,7 +376,7 @@ function M.draw()
         local col = settings.color("april_map_wp_col", theme.CYAN)
         for i, wp in pairs(cache.waypoints) do
             if wp and wp.pos then
-                draw_map_item(wp.pos.x, wp.pos.z, col, wp.name or ("WP" .. i), view_x, view_z, cx, cy, zoom, yaw, scale, layout)
+                draw_map_item(wp.pos.x, wp.pos.z, col, wp.name or ("WP" .. i), "waypoint", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
             end
         end
     end
@@ -321,12 +386,12 @@ function M.draw()
         for _, p in ipairs(entity.get_players()) do
             if player_state.is_combat_target(p) and p.position then
                 local label = (p.display_name and p.display_name ~= "" and p.display_name) or p.name
-                draw_map_item(p.position.x, p.position.z, col, label, view_x, view_z, cx, cy, zoom, yaw, scale, layout)
+                draw_map_item(p.position.x, p.position.z, col, label, "circle", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
             end
         end
     end
 
-    local local_col = settings.color("april_map_local", theme.CYAN)
+    local local_col = overlay_theme.accent()
     draw_local_blip(layout, local_col, body_x, body_z, view_x, view_z, zoom, yaw)
 end
 

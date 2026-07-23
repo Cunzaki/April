@@ -199,12 +199,4 @@ function M.curve_for_weapon(origin, hit, weapon_name, steps)
     return M.curve_to_hit(origin, hit, stats.speed, stats.gravity, steps)
 end
 
--- Silent aim point is always the hitpart. Curve is for visuals only
--- (silent hook projectiles are near-hitscan; aiming above the head misses).
-function M.silent_aim_point(muzzle, hit, weapon_name)
-    local curve = M.curve_for_weapon(muzzle, hit, weapon_name, 24)
-    if not curve then return hit, nil end
-    return hit, curve
-end
-
 return M

@@ -1,5 +1,6 @@
 local draw_util = April.require("core.draw_util")
 local theme = April.require("core.ui_theme")
+local overlay_theme = April.require("core.overlay_theme")
 local text_util = April.require("core.text_util")
 
 local M = {}
@@ -67,6 +68,7 @@ end
 function M.draw()
     if #queue == 0 or not draw then return end
 
+    overlay_theme.sync()
     local now = tick()
     local font = 13
     local pad = 12
@@ -105,12 +107,13 @@ function M.draw()
             local a = n.alpha or 1
 
             theme.draw_panel(x, y, box_w, box_h, {
-                bg = theme.alpha(theme.PANEL, 0.94 * a),
-                border = theme.alpha(theme.BORDER_CYAN, 0.55 * a),
+                bg = theme.alpha(overlay_theme.panel_bg(), 0.94 * a),
+                border = theme.alpha(overlay_theme.border(), 0.58 * a),
                 accent = theme.alpha(accent, a),
                 accent_w = 2,
-                rounding = theme.ROUND,
+                rounding = 0,
             })
+            overlay_theme.draw_accent_bar(x + 2, y, box_w - 3, 2, a)
 
             if draw.text then
                 draw.text(x + pad, y + pad - 1, n.msg, theme.alpha(theme.TEXT, a), font)

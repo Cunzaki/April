@@ -1,6 +1,5 @@
 local menu_util = April.require("core.menu_util")
 local debug = April.require("core.debug")
-local scheduler = April.require("core.scheduler")
 local bootstrap = April.require("game.bootstrap")
 
 local M = {}
@@ -11,9 +10,11 @@ M._menu_registered = false
 M.FEATURE_ORDER = {
     "features.combat.camera_aimbot",
     "features.combat.aimbot",
+    "features.combat.ragebot",
+    "features.combat.body_peek",
     "features.combat.gun_mods",
     "features.visuals.target_overlay",
-    "features.visuals.crosshair",
+    "features.visuals.target_visuals",
     "features.visuals.player_esp",
     "features.world.world_esp",
     "features.world.loot_esp",
@@ -126,7 +127,6 @@ function M.update(dt)
     local runservice = April.require("core.runservice")
     runservice.dispatch(dt)
 
-    scheduler.tick()
     April.require("core.incremental_scan").tick()
     for i, feat in ipairs(M.features) do
         if feat.update then

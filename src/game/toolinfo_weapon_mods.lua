@@ -43,12 +43,14 @@ end
 
 local function restore_weapon(live_w, old_w)
     if not live_w or not old_w then return end
-    if old_w.Burst ~= nil then
-        live_w.Burst = old_w.Burst
-    end
-    if old_w.BurstRPM ~= nil then
-        live_w.BurstRPM = old_w.BurstRPM
-    end
+    pcall(function()
+        if old_w.Burst ~= nil then
+            live_w.Burst = old_w.Burst
+        end
+        if old_w.BurstRPM ~= nil then
+            live_w.BurstRPM = old_w.BurstRPM
+        end
+    end)
 end
 
 local function apply_weapon(live_w, old_w, opts)
@@ -56,14 +58,16 @@ local function apply_weapon(live_w, old_w, opts)
     local changed = false
 
     if opts.double_tap then
-        if live_w.Burst ~= nil or (old_w and old_w.Burst ~= nil) then
-            live_w.Burst = 2
-            live_w.BurstRPM = 10000
-            changed = true
-        end
+        local ok = pcall(function()
+            if live_w.Burst ~= nil or (old_w and old_w.Burst ~= nil) then
+                live_w.Burst = 2
+                live_w.BurstRPM = 10000
+                changed = true
+            end
+        end)
+        if not ok then return false end
     elseif old_w then
-        if old_w.Burst ~= nil then live_w.Burst = old_w.Burst end
-        if old_w.BurstRPM ~= nil then live_w.BurstRPM = old_w.BurstRPM end
+        restore_weapon(live_w, old_w)
     end
 
     return changed
@@ -76,78 +80,90 @@ function M.invalidate()
 end
 
 function M.reset()
-    local toolinfo = bootstrap.get_module("ToolInfo")
-    if not toolinfo or not M._baseline then
+    local ok = pcall(function()
+        local toolinfo = bootstrap.get_module("ToolInfo")
+        if not toolinfo or not M._baseline then
+            M._applied = false
+            M._last_sig = nil
+            return false
+        end
+
+        for name, entry in pairs(toolinfo) do
+            if type(entry) == "table" and type(entry.Weapon) == "table" then
+                restore_weapon(entry.Weapon, baseline_weapon(name))
+            end
+        end
+
         M._applied = false
         M._last_sig = nil
-        return false
+        return true
+    end)
+    if not ok then
+        M._applied = false
+        M._last_sig = nil
     end
-
-    for name, entry in pairs(toolinfo) do
-        if type(entry) == "table" and type(entry.Weapon) == "table" then
-            restore_weapon(entry.Weapon, baseline_weapon(name))
-        end
-    end
-
-    M._applied = false
-    M._last_sig = nil
-    return true
+    return ok
 end
 
 -- opts: { double_tap }
--- weapon_name: nil = all weapons (global), string = that weapon only
+-- weapon_name: patch only the held weapon when provided
 function M.apply(opts, weapon_name)
     opts = opts or {}
-    local toolinfo = bootstrap.get_module("ToolInfo")
-    if not toolinfo then
-        return false, 0, "ToolInfo not ready"
-    end
-    if not ensure_baseline(toolinfo) then
-        return false, 0, "ToolInfo baseline failed"
-    end
 
-    local any = opts.double_tap == true
-    if not any then
-        if M._applied then
-            M.reset()
+    local ok, success, count, msg = pcall(function()
+        local toolinfo = bootstrap.get_module("ToolInfo")
+        if not toolinfo then
+            return false, 0, "ToolInfo not ready"
         end
-        return true, 0, "no toolinfo mods"
-    end
-
-    local sig = table.concat({
-        opts.double_tap and "1" or "0",
-        tostring(weapon_name or "*"),
-    }, ":")
-
-    if sig == M._last_sig and M._applied then
-        return true, 0, "unchanged"
-    end
-
-    for name, entry in pairs(toolinfo) do
-        if type(entry) == "table" and type(entry.Weapon) == "table" then
-            restore_weapon(entry.Weapon, baseline_weapon(name))
+        if not ensure_baseline(toolinfo) then
+            return false, 0, "ToolInfo baseline failed"
         end
-    end
 
-    local count = 0
-    if weapon_name then
-        local live_w = weapon_entry(toolinfo, weapon_name)
-        if apply_weapon(live_w, baseline_weapon(weapon_name), opts) then
-            count = 1
+        local any = opts.double_tap == true
+        if not any then
+            if M._applied then
+                M.reset()
+            end
+            return true, 0, "no toolinfo mods"
         end
-    else
+
+        if not weapon_name or weapon_name == "" then
+            return false, 0, "Equip a gun first"
+        end
+
+        local sig = table.concat({
+            opts.double_tap and "1" or "0",
+            tostring(weapon_name),
+        }, ":")
+
+        if sig == M._last_sig and M._applied then
+            return true, 0, "unchanged"
+        end
+
         for name, entry in pairs(toolinfo) do
             if type(entry) == "table" and type(entry.Weapon) == "table" then
-                if apply_weapon(entry.Weapon, baseline_weapon(name), opts) then
-                    count = count + 1
-                end
+                restore_weapon(entry.Weapon, baseline_weapon(name))
             end
         end
-    end
 
-    M._applied = count > 0 or any
-    M._last_sig = sig
-    return true, count, string.format("%d weapon(s) patched", count)
+        local patched = 0
+        local live_w = weapon_entry(toolinfo, weapon_name)
+        if apply_weapon(live_w, baseline_weapon(weapon_name), opts) then
+            patched = 1
+        end
+
+        M._applied = patched > 0
+        M._last_sig = sig
+        if patched > 0 then
+            return true, patched, string.format("%d weapon(s) patched", patched)
+        end
+        return false, 0, "Weapon does not support burst"
+    end)
+
+    if not ok then
+        return false, 0, tostring(success)
+    end
+    return success, count, msg
 end
 
 return M

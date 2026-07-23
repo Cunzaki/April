@@ -78,17 +78,23 @@ local function update_target(cx, cy, fov)
     local sticky = settings.multi(PREFIX .. "options", combat_menu.OPT_STICKY, false)
     local now = tick_ms()
 
-    if sticky and locked_target then
-        if not targeting.is_target_valid(locked_target, PREFIX, cx, cy, fov) then
-            locked_target = nil
-        end
+    -- NPCs: refresh live head every frame (stale lx/ly/lz + look_at = glued lock).
+    if locked_target and targeting.is_npc_target(locked_target) then
+        locked_target = targeting.refresh_npc_target(locked_target)
+    end
+
+    -- Always drop invalid locks (silent parity). Sticky only skips reacquire.
+    if locked_target and not targeting.is_target_valid(locked_target, PREFIX, cx, cy, fov) then
+        locked_target = nil
+        smoothed_aim = nil
     end
 
     if locked_target and sticky then
         return
     end
 
-    if now - last_target_scan < TARGET_SCAN_MS then
+    -- Non-sticky: rescan every frame so FOV pick matches where you look (like silent).
+    if sticky and now - last_target_scan < TARGET_SCAN_MS then
         return
     end
     last_target_scan = now

@@ -10,10 +10,27 @@ local player_gear = April.require("game.player_gear")
 local M = {}
 local P = "april_npc_enabled"
 local POS_REFRESH_BATCH = 8
+local BOUNDS_TTL_MS = 1200
 
 M._pos_idx = 0
 M._draw_targets = {}
 M._draw_frame = -1
+M._bounds_cache = {}
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function bounds_key(entry)
+    if entry.entity then
+        local p = entry.entity
+        return "e:" .. tostring(p.user_id or 0) .. ":" .. tostring(p.name or "")
+    end
+    if entry.inst then
+        return "i:" .. tostring(entry.inst.Address or entry.inst.address or entry.inst)
+    end
+    return "n:" .. tostring(entry.name or "?")
+end
 
 function M.register_menu()
     local G = menu_util.G
@@ -24,8 +41,8 @@ function M.register_menu()
     menu_util.register_keybind(T, G.WORLD, P, "NPC ESP", false, { colorpicker = { 1, 0.3, 0.3, 1 } })
     menu.add_checkbox(T, G.WORLD, "april_npc_soldiers", "Soldiers", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, menu_util.parent(P, { colorpicker = { 1, 0.5, 0.1, 1 } }))
-    menu.add_combo(T, G.WORLD, "april_npc_box_mode", "NPC Box Mode", { "None", "2D", "Corner" }, 0, root)
-    menu.add_checkbox(T, G.WORLD, "april_npc_health", "NPC Health Bar", false, root)
+    menu.add_combo(T, G.WORLD, "april_npc_box_mode", "NPC Box", { "None", "2D", "Corner" }, 1, root)
+    menu.add_checkbox(T, G.WORLD, "april_npc_health", "NPC Health Bar", true, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "NPC Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_show_name", "NPC Show Name", true,
         menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
@@ -173,40 +190,25 @@ local function frame_draw_targets()
     return collect_draw_targets(M._draw_targets)
 end
 
-local function screen_bounds(entry)
-    if entry.entity and entry.entity.get_bounds then
-        local b = entry.entity:get_bounds()
-        if b and b.valid and b.w > 0 and b.h > 0 then
-            return b
+local function resolve_npc_bounds(entry, dist)
+    local key = bounds_key(entry)
+    local now = tick_ms()
+    local fresh = esp_util.npc_screen_bounds(entry, {
+        dist = dist,
+        point_size = esp_util.dist_point_size(dist),
+    })
+    return esp_util.hold_bounds(M._bounds_cache, key, fresh, now, BOUNDS_TTL_MS)
+end
+
+local function read_npc_hp(entry)
+    if entry.entity then
+        local hp = tonumber(entry.entity.health)
+        local max_hp = tonumber(entry.entity.max_health)
+        if hp and max_hp and max_hp > 0 then
+            return hp, max_hp
         end
     end
-
-    if entry.inst then
-        return esp_util.model_screen_bounds(entry.inst)
-    end
-
-    return nil
-end
-
-local function draw_npc_box(bounds, col, box_mode)
-    if not bounds or not bounds.valid then return end
-    local x, y, w, h = bounds.x, bounds.y, bounds.w, bounds.h
-    if box_mode == 1 then
-        draw_util.box_esp(x, y, w, h, col, 0)
-    else
-        draw_util.box_esp(x, y, w, h, col, 1)
-    end
-end
-
-local function draw_npc_health(bounds, entry)
-    if not settings.bool("april_npc_health", false) then return end
-    if not bounds or not bounds.valid or not draw or not draw.health_bar then return end
-
-    local hp, max_hp
-    if entry.entity then
-        hp = entry.entity.health
-        max_hp = entry.entity.max_health
-    elseif entry.inst then
+    if entry.inst and env.is_valid(entry.inst) then
         local hum = env.safe_call(function()
             if entry.inst.find_first_child_of_class then
                 return entry.inst:find_first_child_of_class("Humanoid")
@@ -214,20 +216,21 @@ local function draw_npc_health(bounds, entry)
             return entry.inst:FindFirstChild("Humanoid")
         end)
         if hum then
-            hp = hum.Health or hum.health
-            max_hp = hum.MaxHealth or hum.max_health
+            local hp = tonumber(hum.Health or hum.health)
+            local max_hp = tonumber(hum.MaxHealth or hum.max_health)
+            if hp and max_hp and max_hp > 0 then
+                return hp, max_hp
+            end
         end
     end
-
-    if not hp or not max_hp or max_hp <= 0 then return end
-    -- Flush against box left edge (was -6, left a visible gap).
-    draw.health_bar(bounds.x - 1, bounds.y, bounds.h, hp, max_hp)
+    return nil, nil
 end
 
 function M.update(_dt)
     if not settings.enabled(P) then
         M._draw_targets = {}
         M._draw_frame = -1
+        M._bounds_cache = {}
         return
     end
 
@@ -250,10 +253,19 @@ function M.draw()
 
     local range = settings.num("april_npc_range", 500)
     local range_sq = range * range
-    local box_mode = settings.num("april_npc_box_mode", 0)
+    local box_mode = settings.num("april_npc_box_mode", 1)
+    local show_health = settings.bool("april_npc_health", true)
     local text_size = esp_util.text_size()
     local me = env.get_local_player()
     local me_pos = me and me.position
+    local now = tick_ms()
+
+    -- Prune stale hold cache
+    for key, ent in pairs(M._bounds_cache) do
+        if not ent or (now - (ent.t or 0)) > BOUNDS_TTL_MS * 3 then
+            M._bounds_cache[key] = nil
+        end
+    end
 
     for _, entry in ipairs(frame_draw_targets()) do
         if not kind_enabled(entry.kind) then goto continue end
@@ -279,36 +291,62 @@ function M.draw()
         end
         if not lx then goto continue end
 
-        local dist_sq = 0
+        local dist = 0
         if me_pos then
             local dx = lx - me_pos.x
             local dy = ly - me_pos.y
             local dz = lz - me_pos.z
-            dist_sq = dx * dx + dy * dy + dz * dz
+            local dist_sq = dx * dx + dy * dy + dz * dz
             if dist_sq > range_sq then goto continue end
+            dist = math.sqrt(dist_sq)
         end
 
-        local bounds = screen_bounds(entry)
-        local label_y = ly
+        local _, _, head_vis = esp_util.w2s(lx, ly, lz)
 
-        if bounds and bounds.valid then
-            label_y = bounds.y
-        else
-            local sx, sy, vis = esp_util.w2s(lx, ly, lz)
-            if not vis then
+        -- Skeleton is independent of box bounds (same as player ESP).
+        if settings.bool("april_npc_skeleton", false) then
+            local sk = settings.color("april_npc_skeleton", { 1, 1, 1, 0.85 })
+            if entry.entity and entry.entity.get_bones_screen then
+                esp_util.draw_player_skeleton(entry.entity, sk, 1)
+            elseif entry.inst then
+                esp_util.draw_model_skeleton(entry.inst, sk, 1)
+            end
+        end
+
+        local bounds = resolve_npc_bounds(entry, dist)
+        if not esp_util.bounds_usable(bounds) then
+            if not head_vis then goto continue end
+            local size = esp_util.dist_point_size(dist)
+            bounds = esp_util.guard_tiny_bounds(
+                esp_util.point_screen_bounds(lx, ly, lz, size),
+                dist
+            )
+            if not esp_util.bounds_usable(bounds) then goto continue end
+        elseif not head_vis then
+            local sw, sh = draw_util.screen_size()
+            local cx = bounds.x + bounds.w * 0.5
+            local cy = bounds.y + bounds.h * 0.5
+            local margin = 120
+            if cx < -margin or cy < -margin or cx > sw + margin or cy > sh + margin then
                 goto continue
             end
-            label_y = sy
         end
 
+        local ts = text_size
+        if dist > 250 then
+            ts = math.max(11, ts - 1)
+        end
+
+        local cx = bounds.x + bounds.w * 0.5
         local label = entry.name or "NPC"
         local show_name = settings.bool("april_npc_show_name", true)
         local show_dist = settings.bool("april_npc_show_distance", true)
         local show_wpn = settings.bool("april_npc_show_weapon", false)
 
-        local lines = {}
+        -- Top labels match player ESP (name / weapon above, distance below).
+        local top = {}
         if show_name then
-            lines[#lines + 1] = {
+            top[#top + 1] = {
                 text = label,
                 col = settings.color("april_npc_show_name", col),
             }
@@ -322,55 +360,43 @@ function M.draw()
                 pcall(function() wpn = player_gear.held_name_from_character(entry.inst) end)
             end
             if wpn and wpn ~= "" then
-                lines[#lines + 1] = {
+                top[#top + 1] = {
                     text = tostring(wpn),
                     col = settings.color("april_npc_show_weapon", { 0.82, 0.84, 0.88, 0.92 }),
                 }
             end
         end
+
+        if #top > 0 then
+            local ty = bounds.y - 4 - (#top * (ts + 1))
+            for i = 1, #top do
+                draw_util.text_centered(cx, ty + (i - 1) * (ts + 1), top[i].text, top[i].col, ts)
+            end
+        end
+
+        -- Same box + health path as player ESP (1px-gap custom bar via health_bar_on_box).
+        if box_mode == 1 then
+            draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 0)
+        elseif box_mode == 2 then
+            draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 1)
+        end
+
+        if show_health then
+            local hp, max_hp = read_npc_hp(entry)
+            if hp and max_hp then
+                draw_util.health_bar_on_box(bounds, hp, max_hp)
+            end
+        end
+
         if show_dist and me_pos then
-            lines[#lines + 1] = {
-                text = string.format("%dm", math.floor(math.sqrt(dist_sq))),
-                col = settings.color("april_npc_show_distance", { 0.82, 0.84, 0.88, 0.92 }),
-            }
+            draw_util.text_centered(
+                cx,
+                bounds.y + bounds.h + 3,
+                string.format("%dm", math.floor(dist + 0.5)),
+                settings.color("april_npc_show_distance", { 0.82, 0.84, 0.88, 0.92 }),
+                ts
+            )
         end
-
-        if #lines > 0 then
-            local tx = bounds and bounds.valid and (bounds.x + bounds.w * 0.5) or nil
-            local base_y = label_y - 4 - (#lines * (text_size + 1))
-            for i = 1, #lines do
-                local ty = base_y + (i - 1) * (text_size + 1)
-                local line_col = lines[i].col or col
-                if bounds and bounds.valid and tx then
-                    draw_util.text_centered(tx, ty, lines[i].text, line_col, text_size)
-                else
-                    local sx, sy, vis = esp_util.w2s(lx, ly, lz)
-                    if vis then
-                        draw_util.text_centered(sx, sy - 14 + (i - 1) * (text_size + 1), lines[i].text, line_col, text_size)
-                    end
-                end
-            end
-        end
-
-        if settings.bool("april_npc_skeleton", false) then
-            local sk = settings.color("april_npc_skeleton", { 1, 1, 1, 0.85 })
-            if entry.entity and entry.entity.get_bones_screen then
-                esp_util.draw_player_skeleton(entry.entity, sk, 1.5)
-            elseif entry.inst then
-                esp_util.draw_model_skeleton(entry.inst, sk, 1.5)
-            end
-        end
-
-        if box_mode > 0 then
-            if not bounds or not bounds.valid then
-                bounds = screen_bounds(entry)
-            end
-            if bounds and bounds.valid then
-                draw_npc_box(bounds, col, box_mode)
-            end
-        end
-
-        draw_npc_health(bounds, entry)
 
         ::continue::
     end

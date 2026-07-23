@@ -31,7 +31,6 @@ M.COL_SIDEBAR = "april_ui_col_sidebar"
 M.COL_CHECKBOX = "april_ui_col_checkbox"
 M.COL_OVERLAY = "april_ui_col_overlay"
 
-local DEFAULT_ACCENT = { 0.78, 0.20, 0.92, 1 }
 local transitions = {}
 
 local function clamp(v, a, b)
@@ -53,6 +52,10 @@ end
 
 -- Persistent transition value for hover/active UI elements.
 function M.transition(id, target, rate)
+    if M.reduce_motion() then
+        transitions[id] = { value = target and 1 or 0, at = M.now() }
+        return target and 1 or 0
+    end
     local now = M.now()
     local entry = transitions[id]
     if not entry then
@@ -66,6 +69,26 @@ function M.transition(id, target, rate)
     local speed = rate or 12
     local alpha = 1 - math.exp(-speed * dt)
     entry.value = M.lerp(entry.value or 0, goal, alpha)
+    return entry.value
+end
+
+-- Numeric exponential smoothing for scroll positions and other continuous values.
+function M.smooth(id, target, rate)
+    if M.reduce_motion() then
+        transitions[id] = { value = target, at = M.now() }
+        return target
+    end
+    local now = M.now()
+    local entry = transitions[id]
+    if not entry then
+        entry = { value = target, at = now }
+        transitions[id] = entry
+        return target
+    end
+    local dt = math.min(math.max(now - (entry.at or now), 0), 0.1)
+    entry.at = now
+    local alpha = 1 - math.exp(-(rate or 14) * dt)
+    entry.value = M.lerp(entry.value or target, target, alpha)
     return entry.value
 end
 
@@ -104,6 +127,20 @@ function M.speed()
     return clamp(n, 1, 100) * 0.028
 end
 
+function M.reduce_motion()
+    return settings().bool("april_ui_reduce_motion", false)
+end
+
+function M.motion_profile()
+    return clamp(math.floor(settings().num("april_ui_motion_profile", 1) + 0.5), 0, 2)
+end
+
+function M.motion_rate(base)
+    if M.reduce_motion() then return 1000 end
+    local mul = ({ 0.72, 1.0, 1.28 })[M.motion_profile() + 1]
+    return (base or 12) * mul
+end
+
 function M.phase()
     return M.now() * M.speed()
 end
@@ -134,9 +171,9 @@ end
 
 function M.base_accent()
     if not M.colors_enabled() then
-        return DEFAULT_ACCENT
+        return theme.PRESET_ACCENT or { 0.78, 0.20, 0.92, 1 }
     end
-    return settings().color("april_ui_accent", DEFAULT_ACCENT)
+    return settings().color("april_ui_accent", theme.PRESET_ACCENT or { 0.78, 0.20, 0.92, 1 })
 end
 
 function M.color_override_enabled(target_index)
@@ -161,6 +198,7 @@ function M.anim_target_enabled(target_index)
 end
 
 function M.sync_theme()
+    theme.sync()
     local col = M.base_accent()
     theme.ACCENT = { col[1], col[2], col[3], col[4] or 1 }
     local pulse = 0.62 + 0.38 * math.sin(M.phase() * 2.2)
@@ -242,16 +280,17 @@ function M.draw_bar_h(x, y, w, h, scroll_t, style_id, color_id, color_target)
     if w <= 0 or h <= 0 then return end
     scroll_t = scroll_t or 0
     local base = M.element_color(color_target, color_id)
+    local alpha = (base[4] or 1) * (theme.GLOBAL_ALPHA or 1)
     local mode = M.resolve_mode(style_id)
     if mode == 0 then
-        M.rect(x, y, w, h, base, true)
+        M.rect(x, y, w, h, theme.alpha(base, alpha), true)
         return
     end
-    local segs = math.max(16, math.floor(w / 4))
+    local segs = math.min(64, math.max(12, math.floor(w / 8)))
     local sw = w / segs
     for i = 0, segs - 1 do
         local t = (i / segs + scroll_t) % 1
-        M.rect(x + i * sw, y, sw + 0.75, h, M.accent_at_mode(mode, base, t, 1), true)
+        M.rect(x + i * sw, y, sw + 0.75, h, M.accent_at_mode(mode, base, t, alpha), true)
     end
 end
 
@@ -259,22 +298,23 @@ function M.draw_bar_v(x, y, w, h, scroll_t, style_id, color_id, color_target)
     if w <= 0 or h <= 0 then return end
     scroll_t = scroll_t or 0
     local base = M.element_color(color_target, color_id)
+    local alpha = (base[4] or 1) * (theme.GLOBAL_ALPHA or 1)
     local mode = M.resolve_mode(style_id)
     if mode == 0 then
-        M.rect(x, y, w, h, base, true)
+        M.rect(x, y, w, h, theme.alpha(base, alpha), true)
         return
     end
-    local segs = math.max(8, math.floor(h / 4))
+    local segs = math.min(48, math.max(8, math.floor(h / 8)))
     local sh = h / segs
     for i = 0, segs - 1 do
         local t = (i / segs + scroll_t) % 1
-        M.rect(x, y + i * sh, w, sh + 0.75, M.accent_at_mode(mode, base, t, 1), true)
+        M.rect(x, y + i * sh, w, sh + 0.75, M.accent_at_mode(mode, base, t, alpha), true)
     end
 end
 
 function M.draw_flat(x, y, w, h, style_id, color_id, color_target)
     local base = M.element_color(color_target, color_id)
-    M.rect(x, y, w, h, base, true)
+    M.rect(x, y, w, h, theme.alpha(base, (base[4] or 1) * (theme.GLOBAL_ALPHA or 1)), true)
 end
 
 function M.section_scroll()
@@ -326,7 +366,8 @@ function M.tab_icon_color()
     if not M.anim_target_enabled(M.TARGET_SIDEBAR) then
         return base
     end
-    return M.accent_at_mode(M.resolve_mode(M.STYLE_SIDEBAR), base, M.phase() * 0.03, 1)
+    return M.accent_at_mode(M.resolve_mode(M.STYLE_SIDEBAR), base, M.phase() * 0.03,
+        (base[4] or 1) * (theme.GLOBAL_ALPHA or 1))
 end
 
 function M.hover_tint(base, hot)
@@ -344,8 +385,8 @@ function M.hover_tint(base, hot)
 end
 
 function M.interactive_fill(id, base, hover, active)
-    local h = M.transition("hover:" .. tostring(id), hover, 15)
-    local a = M.transition("active:" .. tostring(id), active, 20)
+    local h = M.transition("hover:" .. tostring(id), hover, M.motion_rate(15))
+    local a = M.transition("active:" .. tostring(id), active, M.motion_rate(20))
     local col = M.mix(base, hover and theme.BUTTON_HOVER or theme.HOVER, M.ease_out_cubic(h))
     return M.mix(col, M.element_color(M.TARGET_CHECKBOX, M.COL_CHECKBOX), a * 0.16)
 end
@@ -355,14 +396,14 @@ function M.checkbox_fill()
     if not M.anim_target_enabled(M.TARGET_CHECKBOX) then
         return base
     end
-    return M.accent_at_mode(M.resolve_mode(M.STYLE_CHECKBOX), base, M.phase() * 0.04, 1)
+    return M.accent_at_mode(M.resolve_mode(M.STYLE_CHECKBOX), base, M.phase() * 0.04,
+        (base[4] or 1) * (theme.GLOBAL_ALPHA or 1))
 end
 
 function M.menu_fade()
-    if not M.colors_enabled() or not settings().bool("april_ui_menu_fade", false) then
-        return 1
-    end
-    return clamp(0.86 + math.sin(M.now() * 0.001) * 0.02, 0.86, 1)
+    if M.reduce_motion() then return 1 end
+    if not settings().bool("april_ui_menu_fade", false) then return 1 end
+    return clamp(0.93 + math.sin(M.now() * 1.5) * 0.035, 0.88, 0.98)
 end
 
 function M.panel_bg()
@@ -378,6 +419,18 @@ function M.panel_bg()
         bg[3] - dim * 0.04,
         bg[4] or 1,
     }
+end
+
+function M.menu_open_progress(want_open)
+    return M.transition("menu:open", want_open, M.motion_rate(15))
+end
+
+function M.tab_progress(tab_id)
+    return M.transition("tab-content:" .. tostring(tab_id), true, M.motion_rate(18))
+end
+
+function M.clear_tab_progress(tab_id)
+    transitions["tab-content:" .. tostring(tab_id)] = { value = 0, at = M.now() }
 end
 
 return M

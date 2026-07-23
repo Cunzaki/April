@@ -35,7 +35,6 @@ const ORDER = [
   "core/image_cache.lua",
   "core/esp_util.lua",
   "core/gpu_chams.lua",
-  "core/scheduler.lua",
   "core/incremental_scan.lua",
   "core/menu_util.lua",
   "core/ballistic.lua",
@@ -43,15 +42,12 @@ const ORDER = [
   "core/fflag_mem.lua",
   "core/manip_math.lua",
   "core/desync_vis.lua",
-  "core/packet_desync.lua",
   "core/angle_util.lua",
-  "core/camera_util.lua",
   "core/cframe_move.lua",
   "core/runservice.lua",
   "core/misc_gate.lua",
   "core/movement_ctrl.lua",
   "core/config_store.lua",
-  "core/memory_string.lua",
   "game/module_scan.lua",
   "game/bootstrap.lua",
   "game/folders.lua",
@@ -59,10 +55,8 @@ const ORDER = [
   "game/attachment_images.lua",
   "game/item_catalog.lua",
   "game/items.lua",
-  "game/armor_map.lua",
   "game/weapons.lua",
   "game/gc_weapon_mods.lua",
-  "game/weapon_profile_store.lua",
   "game/gun_mod_profiles.lua",
   "game/combat_stats.lua",
   "game/combat_origin.lua",
@@ -75,26 +69,26 @@ const ORDER = [
   "game/npcs.lua",
   "game/turret_stats.lua",
   "game/esp_maps.lua",
-  "game/fallen_anims.lua",
-  "core/anim_player.lua",
   "game/esp_scan.lua",
   "game/toolinfo_weapon_mods.lua",
   "features/combat/silent_whitelist.lua",
   "features/combat/bullet_tp_ray.lua",
   "features/combat/combat_menu.lua",
   "features/combat/targeting.lua",
+  "features/combat/active_target.lua",
   "features/combat/silent_resolve.lua",
+  "features/combat/bullet_hud.lua",
   "features/combat/camera_aimbot.lua",
+  "features/combat/body_peek.lua",
   "features/combat/aimbot.lua",
-  "game/combat_target.lua",
+  "features/combat/ragebot.lua",
   "features/combat/perfect_farm.lua",
   "features/combat/gun_mods.lua",
   "features/utility/mod_checker.lua",
   "features/visuals/player_esp.lua",
   "features/visuals/target_overlay.lua",
+  "features/visuals/target_visuals.lua",
   "features/visuals/crosshair.lua",
-  "features/visuals/bullet_tracers.lua",
-  "features/visuals/hitmarkers.lua",
   "features/world/world_esp.lua",
   "features/world/loot_esp.lua",
   "features/world/base_esp.lua",
@@ -113,6 +107,8 @@ const ORDER = [
   "ui/gs_input.lua",
   "ui/gs_state.lua",
   "ui/gs_anim.lua",
+  "game/esp_maps.lua",
+  "ui/tooltips.lua",
   "ui/menu_shim.lua",
   "ui/combat_labels.lua",
   "ui/gs_icons.lua",
@@ -131,7 +127,7 @@ const header = `--[[
 ]]
 
 April = {
-    version = "3.88.19",
+    version = "3.95.4",
     debug = false,
     _mods = {},
     bundled = true,
@@ -212,7 +208,7 @@ for (const rel of ORDER) {
 fs.writeFileSync(OUT, header + body + footer);
 console.log("Built", path.relative(ROOT, OUT), `(${(fs.statSync(OUT).size / 1024).toFixed(1)} KB)`);
 
-const VERSION = "3.85.36";
+const VERSION = "3.95.8";
 const loader = `-- April loader — paste this into Vector as "Script 1.lua" (small file, always pulls latest build).
 local tick = 0
 pcall(function()

@@ -219,4 +219,18 @@ function M.get_fire_origin()
     return frame.muzzle or frame.server
 end
 
+-- HumanoidRootPart is above the feet; drop to just under the feet for terrain-valid rays.
+local HRP_TO_FEET = 2.85
+local BELOW_FEET = 0.45
+
+function M.get_feet_below_origin()
+    local body = M.get_server_origin()
+    if not body then return nil end
+    return {
+        x = body.x,
+        y = body.y - HRP_TO_FEET - BELOW_FEET,
+        z = body.z,
+    }
+end
+
 return M

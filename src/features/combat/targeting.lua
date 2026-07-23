@@ -8,7 +8,6 @@ local esp_util = April.require("core.esp_util")
 local player_state = April.require("game.player_state")
 local silent_whitelist = April.require("features.combat.silent_whitelist")
 local cache = April.require("core.cache")
-local npcs = April.require("game.npcs")
 local env = April.require("core.env")
 
 local M = {}
@@ -26,6 +25,14 @@ end
 local function npc_enabled(entry, prefix)
     if not entry then return false end
     return settings.multi(prefix .. "targets", 2, false)
+end
+
+local function same_npc_inst(a, b)
+    if not a or not b then return false end
+    if a == b then return true end
+    local aa = a.Address or a.address
+    local ba = b.Address or b.address
+    return aa ~= nil and aa == ba
 end
 
 local function read_npc_health(model)
@@ -62,21 +69,69 @@ function M.is_aim_target(target)
     return player_state.is_combat_target(target)
 end
 
+-- Prefer live Head part; cached lx/ly/lz is only a fallback (stale coords glue camera aimbot).
 local function npc_head_world(entry)
     if not entry then
         return nil
     end
-    if entry.lx then
-        return { x = entry.lx, y = entry.ly, z = entry.lz }
-    end
     local head = entry.head
+    if (not head or not env.is_valid(head)) and entry.inst and env.is_valid(entry.inst) then
+        head = env.safe_call(function()
+            return entry.inst:find_first_child("Head") or entry.inst:FindFirstChild("Head")
+        end)
+        if head then
+            entry.head = head
+        end
+    end
     if head and env.is_valid(head) then
         local pos = head.Position or head.position
         if pos and pos.x then
+            entry.lx, entry.ly, entry.lz = pos.x, pos.y, pos.z
             return { x = pos.x, y = pos.y, z = pos.z }
         end
     end
+    if entry.lx then
+        return { x = entry.lx, y = entry.ly, z = entry.lz }
+    end
     return nil
+end
+
+-- Rebind a sticky NPC lock to the current cache entry + live head (or nil if gone).
+function M.refresh_npc_target(target)
+    if not M.is_npc_target(target) or not target.inst then
+        return nil
+    end
+    if not env.is_valid(target.inst) then
+        return nil
+    end
+
+    local found = nil
+    if cache.npcs then
+        for _, entry in ipairs(cache.npcs) do
+            if same_npc_inst(entry.inst, target.inst) then
+                found = entry
+                break
+            end
+        end
+    end
+
+    if found then
+        target.inst = found.inst
+        target.head = found.head
+        target.name = found.name or target.name
+        target.kind = found.kind or target.kind
+        target.lx = found.lx
+        target.ly = found.ly
+        target.lz = found.lz
+    end
+
+    if not M.is_npc_alive(target) then
+        return nil
+    end
+    if not npc_head_world(target) then
+        return nil
+    end
+    return target
 end
 
 local function npc_distance(entry, origin)
@@ -221,6 +276,9 @@ function M.bone_world(target, bone)
     if not target then return nil end
 
     if M.is_npc_target(target) then
+        if not M.refresh_npc_target(target) then
+            return nil
+        end
         return npc_head_world(target)
     end
 
@@ -376,6 +434,12 @@ function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
 end
 
 function M.is_target_valid(target, prefix, cx, cy, fov_px, opts)
+    opts = opts or {}
+    if M.is_npc_target(target) then
+        target = M.refresh_npc_target(target)
+        if not target then return false end
+    end
+
     if not M.is_aim_target(target) then return false end
 
     local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
@@ -391,6 +455,10 @@ function M.is_target_valid(target, prefix, cx, cy, fov_px, opts)
 
     if not M.passes_filters(target, prefix, base, origin, opts) then return false end
 
+    if opts.ignore_fov then
+        return true
+    end
+
     local sx, sy, on_screen = w2s(base.x, base.y, base.z)
     if not on_screen then return false end
 
@@ -399,6 +467,7 @@ function M.is_target_valid(target, prefix, cx, cy, fov_px, opts)
 end
 
 local function consider_target(target, prefix, screen_bone, use_fov, fov_px, origin, filter_visible, cx, cy, best, best_score, opts)
+    opts = opts or {}
     if not M.within_max_distance(target, origin, prefix) then
         return best, best_score
     end
@@ -416,13 +485,21 @@ local function consider_target(target, prefix, screen_bone, use_fov, fov_px, ori
     end
 
     local sx, sy, on_screen = w2s(base.x, base.y, base.z)
-    if not on_screen then
-        return best, best_score
+    local fov_dist = math.huge
+    if on_screen then
+        fov_dist = math_util.screen_fov_dist(sx, sy, cx, cy)
     end
 
-    local fov_dist = math_util.screen_fov_dist(sx, sy, cx, cy)
-    if fov_dist > fov_px then
-        return best, best_score
+    if not opts.ignore_fov then
+        if not on_screen then
+            return best, best_score
+        end
+        if fov_dist > fov_px then
+            return best, best_score
+        end
+    elseif not on_screen and use_fov then
+        -- Rage / no-FOV: still prefer on-screen when scoring by crosshair.
+        fov_dist = 1e6
     end
 
     local score
@@ -446,7 +523,8 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
         screen_bone = M.effective_aim_bone(screen_bone, weapons.cached_held_ranged())
     end
     local use_fov = opts.force_crosshair_priority or M.target_priority_crosshair(prefix)
-    local best, best_score = nil, use_fov and fov_px or math.huge
+    -- ignore_fov skips the FOV clamp but still allows crosshair scoring when selected.
+    local best, best_score = nil, use_fov and math.huge or math.huge
     local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
     local filter_visible = not opts.ignore_visible and settings.multi(prefix .. "filters", 2, false)
     local target_players = settings.multi(prefix .. "targets", 1, true)

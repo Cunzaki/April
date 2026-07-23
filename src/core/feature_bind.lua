@@ -106,6 +106,14 @@ function M.mode_name(id)
     return M.MODES[M.mode_index(id) + 1] or "Toggle"
 end
 
+function M.hide_key_id(id)
+    return id .. "_hide_kb"
+end
+
+function M.is_hidden_from_list(id)
+    return settings.bool(M.hide_key_id(id), false)
+end
+
 function M.is_always(id)
     return M.mode_index(id) == 0
 end

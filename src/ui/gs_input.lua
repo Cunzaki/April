@@ -313,12 +313,16 @@ function M.draw_cursor()
     end)
     if not show then return end
     local x, y = M.mx, M.my
-    local col = { 0.75, 0.15, 0.83, 1 }
+    local theme = April.require("ui.gs_theme")
+    local anim = April.require("ui.gs_anim")
+    local col = theme.ACCENT or { 0.75, 0.15, 0.83, 1 }
+    local press = anim.transition("cursor:press", M.lmb, anim.motion_rate(26))
+    local inner = 3.5 + press * 1.5
     if draw.circle_filled then
-        draw.circle_filled(x, y, 4.5, col, 14)
+        draw.circle_filled(x, y, inner, col, 14)
     end
     if draw.circle then
-        draw.circle(x, y, 5.5, { 1, 1, 1, 0.9 }, 16, 1.4)
+        draw.circle(x, y, 5.5 + press, theme.TEXT_ACTIVE, 16, 1.2)
     end
 end
 

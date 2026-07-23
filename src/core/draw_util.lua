@@ -68,34 +68,51 @@ function M.health_bar(x, y, h, hp, max_hp)
     draw.health_bar(x, y, h, hp, max_hp)
 end
 
--- Custom vertical HP bar that scales with box height (readable far away).
+-- Pixel-precise HP bar. Native draw.health_bar has built-in left padding so it
+-- always leaves a gap next to our box — do not use it for ESP.
 function M.health_bar_nice(x, y, h, hp, max_hp, bar_w)
-    if not draw or not hp or not max_hp or max_hp <= 0 then return end
-    h = math.max(8, h)
-    bar_w = math.max(3, bar_w or math.floor(h * 0.07 + 0.5))
-    local pct = math_util.clamp(hp / max_hp, 0, 1)
-    local fill_h = math.max(1, h * pct)
+    if not draw or not draw.rect_filled then return end
+    if not hp or not max_hp or max_hp <= 0 then return end
 
-    if draw.rect_filled then
-        draw.rect_filled(x, y, bar_w, h, { 0, 0, 0, 0.55 }, 1)
-        -- green -> yellow -> red
+    h = math.max(4, h)
+    bar_w = math.max(2, math.min(4, bar_w or 3))
+    local pct = math_util.clamp(hp / max_hp, 0, 1)
+    local fill_h = math.max(0, math.floor(h * pct + 0.5))
+
+    -- Empty track
+    draw.rect_filled(x, y, bar_w, h, { 0.08, 0.08, 0.08, 0.85 })
+
+    if fill_h > 0 then
         local r, g, b
         if pct > 0.5 then
             local t = (pct - 0.5) * 2
-            r, g, b = 1 - t, 1, 0.25
+            r, g, b = (1 - t) * 0.95, 1, 0.15
         else
             local t = pct * 2
-            r, g, b = 1, t, 0.2
+            r, g, b = 1, t * 0.9, 0.12
         end
-        draw.rect_filled(x, y + (h - fill_h), bar_w, fill_h, { r, g, b, 0.95 }, 1)
-    elseif draw.health_bar then
-        draw.health_bar(x + bar_w, y, h, hp, max_hp)
-        return bar_w
+        draw.rect_filled(x, y + (h - fill_h), bar_w, fill_h, { r, g, b, 1 })
     end
-    if draw.rect then
-        draw.rect(x, y, bar_w, h, { 0, 0, 0, 0.85 }, 1, 1)
-    end
+
     return bar_w
+end
+
+-- HP bar flush to the left edge of the ESP box (0px gap, no overlap).
+function M.health_bar_on_box(bounds, hp, max_hp)
+    if not bounds or not bounds.valid or not hp or not max_hp or max_hp <= 0 then
+        return
+    end
+    local h = bounds.h or 0
+    if h < 4 then return end
+
+    local bar_w = 3
+    if h >= 40 then
+        bar_w = 4
+    elseif h <= 14 then
+        bar_w = 2
+    end
+    -- 1px gap so the bar sits next to the box without overlapping.
+    M.health_bar_nice(bounds.x - bar_w - 1, bounds.y, h, hp, max_hp, bar_w)
 end
 
 function M.line(x1, y1, x2, y2, col, thick)

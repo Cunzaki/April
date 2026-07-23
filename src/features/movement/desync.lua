@@ -21,6 +21,8 @@ local old_phys, old_send = nil, nil
 local was_active = false
 local anchor_pos = nil
 
+local peek_hold = false
+
 local function now()
     if utility and utility.get_time then return utility.get_time() end
     return os.clock()
@@ -76,6 +78,31 @@ local function active()
     return settings.enabled(P)
 end
 
+function M.peek_begin()
+    if peek_hold then return end
+    peek_hold = true
+    pcall(fflag_mem.refresh)
+    if not active() then
+        apply_rates(0, 60)
+        old_phys, old_send = 0, 60
+        last_flag_apply = now()
+    end
+end
+
+function M.peek_end()
+    if not peek_hold then return end
+    peek_hold = false
+    if not active() then
+        restore_rates()
+        anchor_pos = nil
+        was_active = false
+    end
+end
+
+function M.peek_held()
+    return peek_hold
+end
+
 local function disable_desync()
     if menu and menu.set then
         pcall(menu.set, P, false)
@@ -122,7 +149,9 @@ end
 
 function M.update(_dt)
     if not misc_gate.movement_allowed() then return end
-    local on = active()
+    local user_on = active()
+    local held = peek_hold
+    local on = user_on or held
     local t = now()
 
     if was_active and not on then
@@ -130,7 +159,7 @@ function M.update(_dt)
         anchor_pos = nil
     end
 
-    if on and not was_active then
+    if user_on and not was_active then
         pcall(fflag_mem.refresh)
         local root = get_root()
         anchor_pos = capture_pos(root)
@@ -145,7 +174,7 @@ function M.update(_dt)
     local phys, send = compute_rates(t)
     local root = get_root()
 
-    if root and anchor_pos then
+    if user_on and root and anchor_pos then
         local pos = capture_pos(root)
         if pos and dist_from_anchor(pos) > RANGE_RADIUS then
             restore_rates()
@@ -165,7 +194,7 @@ end
 
 function M.draw()
     if not misc_gate.movement_allowed() then return end
-    if not active() then return end
+    if not active() and not peek_hold then return end
     draw_visualizer()
 end
 

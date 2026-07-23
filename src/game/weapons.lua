@@ -40,6 +40,8 @@ local FALLBACK_STATS = {
     ["Salvaged RPG"] = { speed = 100, gravity = 0.12 },
     ["Military Grenade Launcher"] = { speed = 350, gravity = 0.55 },
     ["Salvaged Grenade Launcher"] = { speed = 350, gravity = 0.55 },
+    ["Wooden Spear"] = { speed = 130, gravity = 0.35 },
+    ["Stone Spear"] = { speed = 150, gravity = 0.35 },
 }
 
 M._last_held = nil
@@ -86,7 +88,13 @@ local MELEE_NAME_HINTS = {
     "candy cane", "carrot blade", "boulder", "saw bat",
 }
 
+local function is_spear_name(name)
+    if not name or name == "" then return false end
+    return name:lower():find("spear", 1, true) ~= nil
+end
+
 local function name_looks_melee(name)
+    if is_spear_name(name) then return false end
     local n = (name or ""):lower()
     for _, hint in ipairs(MELEE_NAME_HINTS) do
         if n:find(hint, 1, true) then return true end
@@ -98,6 +106,7 @@ function M.is_ranged_weapon_name(name)
     if not name or name == "" then return false end
     local lower = name:lower()
     if lower:find("bow", 1, true) or lower:find("crossbow", 1, true) then return true end
+    if is_spear_name(name) then return true end
     if name_looks_melee(name) then return false end
 
     if not loaded then M.load() end

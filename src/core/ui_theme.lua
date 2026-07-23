@@ -30,6 +30,65 @@ M.GREEN       = { 0.35, 0.85, 0.55, 1 }
 M.ROUND       = 4
 M.MAP_BG      = { 13 / 255, 13 / 255, 13 / 255, 0.95 }
 M.MAP_GRID    = { 0, 195 / 255, 227 / 255, 0.06 }
+M.ACCENT      = M.CYAN
+M.HEADER      = M.PANEL_DEEP
+M.GLASS_HIGHLIGHT = { 1, 1, 1, 0.04 }
+
+local function copy_alpha(col, alpha)
+    return { col[1], col[2], col[3], alpha == nil and (col[4] or 1) or alpha }
+end
+
+local function mix(a, b, t, alpha)
+    return {
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+        a[3] + (b[3] - a[3]) * t,
+        alpha == nil and 1 or alpha,
+    }
+end
+
+-- Synchronize every draw HUD token with the active custom-menu theme.
+-- Called before feature drawing, so it also works while the menu is closed.
+function M.sync()
+    local ok_anim, anim = pcall(function()
+        return April.require("ui.gs_anim")
+    end)
+    if ok_anim and anim and anim.sync_theme then
+        pcall(anim.sync_theme)
+    end
+
+    local ok, gs = pcall(function()
+        return April.require("ui.gs_theme")
+    end)
+    if not ok or not gs then return false end
+
+    local accent = gs.ACCENT or M.CYAN
+    M.ACCENT = copy_alpha(accent, 1)
+    M.CYAN = copy_alpha(accent, 1) -- compatibility: legacy chrome now follows accent
+    M.CYAN_SOFT = copy_alpha(accent, 0.35)
+    M.CYAN_GLOW = copy_alpha(accent, 0.18)
+
+    M.BG = copy_alpha(gs.BG or M.BG, math.min(0.96, (gs.WINDOW_ALPHA or 0.86) + 0.04))
+    M.PANEL = copy_alpha(gs.PANEL or M.PANEL, math.min(0.96, (gs.PANEL_ALPHA or 0.72) + 0.10))
+    M.PANEL_DEEP = copy_alpha(gs.BG_INNER or M.PANEL_DEEP, math.min(0.94, (gs.PANEL_ALPHA or 0.72) + 0.08))
+    M.HEADER = copy_alpha(gs.PANEL_ALT or M.PANEL_DEEP, math.min(0.98, (gs.PANEL_ALPHA or 0.72) + 0.16))
+    M.SLOT = copy_alpha(gs.BUTTON or M.SLOT, math.min(0.92, (gs.PANEL_ALPHA or 0.72) + 0.08))
+    M.SLOT_HELD = mix(M.SLOT, accent, 0.28, 0.94)
+    M.SLOT_EMPTY = copy_alpha(gs.CHECK_OFF or M.SLOT_EMPTY, 0.58)
+
+    M.TEXT = copy_alpha(gs.TEXT_ACTIVE or M.TEXT, 0.97)
+    M.TEXT_DIM = copy_alpha(gs.TEXT_DIM or M.TEXT_DIM, 0.96)
+    M.TEXT_MUTED = copy_alpha(gs.TEXT or M.TEXT_MUTED, 0.78)
+    M.BORDER = copy_alpha(gs.BORDER_SOFT or M.BORDER, (gs.BORDER_SOFT and gs.BORDER_SOFT[4]) or 0.35)
+    M.BORDER_CYAN = copy_alpha(gs.BORDER_HOT or accent, 0.72)
+    M.GLASS_HIGHLIGHT = copy_alpha(gs.GLASS_HIGHLIGHT or M.GLASS_HIGHLIGHT)
+
+    -- Panel chrome is always square; small semantic glyphs can remain circular.
+    M.ROUND = 0
+    M.MAP_BG = copy_alpha(gs.BG_INNER or M.BG, 0.90)
+    M.MAP_GRID = copy_alpha(accent, 0.10)
+    return true
+end
 
 function M.alpha(col, a)
     return { col[1], col[2], col[3], a }

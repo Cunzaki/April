@@ -13,7 +13,7 @@ local P = "april_keybinds_enabled"
 local X_ID = "april_keybinds_x"
 local Y_ID = "april_keybinds_y"
 local PANEL_W = 260
-local TITLE_H = 22
+local TITLE_H = 24
 
 local function strip_enable_prefix(label)
     if type(label) ~= "string" then return tostring(label or "?") end
@@ -35,6 +35,9 @@ local function collect_rows()
             goto continue
         end
         if only_active and not active then
+            goto continue
+        end
+        if feature_bind.is_hidden_from_list(id) then
             goto continue
         end
 
@@ -100,10 +103,7 @@ function M.draw()
     )
     x, y = panel_drag.clamp(x, y, PANEL_W, height, sw, sh)
 
-    theme.draw_panel(x, y, PANEL_W, height, overlay_theme.panel_opts())
-    overlay_theme.draw_accent_bar(x + 1, y, PANEL_W - 2, 2)
-
-    draw_util.text(x + pad, y + 5, "Keybinds", theme.TEXT, 12)
+    overlay_theme.draw_panel(x, y, PANEL_W, height, "KEYBINDS")
 
     local ry = y + TITLE_H
     if #rows == 0 then
@@ -120,6 +120,9 @@ function M.draw()
 
         local label = row.label
         if #label > max_label then label = label:sub(1, math.max(1, max_label - 2)) .. ".." end
+        if row.active and draw and draw.rect_filled then
+            draw.rect_filled(x + 3, ry + 2, 2, row_h - 5, theme.alpha(accent, 0.82), 0)
+        end
         draw_util.text(x + pad, ry, label, name_col, 11)
 
         local right = row.key

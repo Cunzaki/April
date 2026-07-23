@@ -28,7 +28,7 @@ end
 
 function M.available()
     return raycast
-        and raycast.track_silent_target
+        and (raycast.track_silent_target or raycast.set_silent_target)
         and raycast.stop_silent_tracking
 end
 
@@ -90,28 +90,11 @@ function M.last_curve()
     return M._last_curve
 end
 
--- Direct ray to aim (legacy / bullet TP).
-function M.track(origin, aim_point, shoot_vk, hitpart)
-    M._last_ok = false
-    M._last_curve = nil
-
-    if not aim_point then
-        return false
-    end
-
-    origin = origin or M.get_camera_origin()
-    if not origin then
-        return false
-    end
-
-    if not M.ensure_hook() then
-        return false
-    end
-
+local function build_dir(origin, aim_point)
     local ox, oy, oz = unpack_pos(origin)
     local ax, ay, az = unpack_pos(aim_point)
     if not ox or not ax then
-        return false
+        return nil, nil
     end
 
     local dx, dy, dz = ax - ox, ay - oy, az - oz
@@ -130,10 +113,84 @@ function M.track(origin, aim_point, shoot_vk, hitpart)
             dir = make_vec3(dx, dy, dz)
         end
     else
-        -- API example: direction = target - origin (not pre-normalized).
         dir = make_vec3(dx, dy, dz)
     end
-    local origin_v = make_vec3(ox, oy, oz)
+
+    return make_vec3(ox, oy, oz), dir
+end
+
+-- Per-frame silent override (no key hold). Used by ragebot autofire.
+function M.set_target(origin, aim_point, hitpart)
+    M._last_ok = false
+    M._last_curve = nil
+
+    if not aim_point then
+        return false
+    end
+
+    origin = origin or M.get_camera_origin()
+    if not origin then
+        return false
+    end
+
+    if not M.ensure_hook() then
+        return false
+    end
+
+    if not raycast.set_silent_target then
+        return false
+    end
+
+    local origin_v, dir = build_dir(origin, aim_point)
+    if not origin_v or not dir then
+        return false
+    end
+
+    local ox, oy, oz = unpack_pos(origin)
+    local ax, ay, az = unpack_pos(aim_point)
+    M._last_origin = { x = ox, y = oy, z = oz }
+    if hitpart and hitpart.x then
+        M._last_target = { x = hitpart.x, y = hitpart.y, z = hitpart.z }
+    else
+        M._last_target = { x = ax, y = ay, z = az }
+    end
+
+    local ok_call, ok = pcall(raycast.set_silent_target, origin_v, dir)
+    ok = ok_call and (ok == true or ok == nil)
+    M._last_ok = ok
+    tracking = ok
+    return ok
+end
+
+-- Direct ray to aim (legacy / bullet TP). Key-held track for silent aim.
+function M.track(origin, aim_point, shoot_vk, hitpart)
+    M._last_ok = false
+    M._last_curve = nil
+
+    if not aim_point then
+        return false
+    end
+
+    origin = origin or M.get_camera_origin()
+    if not origin then
+        return false
+    end
+
+    if not M.ensure_hook() then
+        return false
+    end
+
+    if not raycast.track_silent_target then
+        return M.set_target(origin, aim_point, hitpart)
+    end
+
+    local origin_v, dir = build_dir(origin, aim_point)
+    if not origin_v or not dir then
+        return false
+    end
+
+    local ox, oy, oz = unpack_pos(origin)
+    local ax, ay, az = unpack_pos(aim_point)
     local key = shoot_vk or 0x01
 
     M._last_origin = { x = ox, y = oy, z = oz }

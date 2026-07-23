@@ -5,8 +5,10 @@ local image_cache = April.require("core.image_cache")
 local items = April.require("game.items")
 local player_gear = April.require("game.player_gear")
 local player_state = April.require("game.player_state")
-local targeting = April.require("features.combat.targeting")
+local active_target = April.require("features.combat.active_target")
 local text_util = April.require("core.text_util")
+local theme = April.require("core.ui_theme")
+local overlay_theme = April.require("core.overlay_theme")
 
 local M = {}
 
@@ -21,15 +23,6 @@ local last_poll_ms = 0
 
 M._target = nil
 M._layout = nil
-
-local SLOT_BG = { 0.14, 0.14, 0.16, 0.72 }
-local HELD_BG = { 0.52, 0.12, 0.14, 0.9 }
-local HELD_EDGE = { 0.95, 0.28, 0.32, 0.85 }
-local ATT_BG = { 0.16, 0.16, 0.18, 0.82 }
-local ATT_EDGE = { 0.45, 0.45, 0.48, 0.5 }
-local EMPTY_BG = { 0.08, 0.08, 0.1, 0.55 }
-local EMPTY_EDGE = { 1, 1, 1, 0.12 }
-local ROUND = 5
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -68,44 +61,10 @@ local function resolve_image_key(piece)
     return nil
 end
 
-local function crosshair_center()
-    local sw, sh = draw_util.screen_size()
-    return sw * 0.5, sh * 0.5
-end
-
-local function overlay_aim_config()
-    local silent_on = settings.enabled("april_silent_aim")
-    local aim_on = settings.enabled("april_aimbot")
-    local silent_fov = silent_on and settings.num("april_silent_fov", 150) or nil
-    local aim_fov = aim_on and settings.num("april_aim_fov", 120) or nil
-
-    -- No aimbot FOVs on: still pick nearest in a quiet 100px radius (no FOV circle drawn).
-    if not silent_fov and not aim_fov then
-        return 100, "april_silent_"
-    end
-    if silent_fov and aim_fov then
-        if silent_fov >= aim_fov then
-            return silent_fov, "april_silent_"
-        end
-        return aim_fov, "april_aim_"
-    end
-    if silent_fov then
-        return silent_fov, "april_silent_"
-    end
-    return aim_fov, "april_aim_"
-end
-
 local function find_overlay_target()
-    local fov, prefix = overlay_aim_config()
-    if not fov or not prefix then return nil end
-
-    local cx, cy = crosshair_center()
-    return targeting.find_target(cx, cy, fov, prefix, {
-        ignore_whitelist = true,
-        ignore_visible = true,
-        players_only = true,
-        force_crosshair_priority = true,
-    })
+    local target = active_target.get_target(nil, active_target.SOURCE_GEAR)
+    if target then return target end
+    return nil
 end
 
 local function get_gear(player)
@@ -237,8 +196,6 @@ local function held_piece(held)
     return { name = held }
 end
 
-local LABEL_COL = { 0.55, 0.55, 0.58, 0.85 }
-
 local function split_words(text)
     local words = {}
     for word in text:gmatch("%S+") do
@@ -337,7 +294,7 @@ local function draw_fitted_label(x, y, size, text)
             x + size * 0.5 - tw * 0.5,
             ty + (i - 1) * line_h,
             line,
-            LABEL_COL,
+            theme.TEXT_MUTED,
             chosen_fs
         )
     end
@@ -345,25 +302,25 @@ end
 
 local function draw_slot(x, y, size, key, piece, style)
     local pad = 3
-    local bg = SLOT_BG
-    local edge = nil
+    local bg = overlay_theme.slot()
+    local edge = overlay_theme.border()
 
     if style == "held" then
-        bg = HELD_BG
-        edge = HELD_EDGE
+        bg = overlay_theme.slot("held")
+        edge = theme.alpha(overlay_theme.accent(), 0.88)
     elseif style == "attachment" then
-        bg = ATT_BG
-        edge = ATT_EDGE
+        bg = theme.alpha(overlay_theme.slot(), 0.82)
     elseif style == "empty" then
-        bg = EMPTY_BG
-        edge = EMPTY_EDGE
+        bg = overlay_theme.slot("empty")
+        edge = theme.alpha(theme.BORDER, 0.28)
     end
 
-    draw.rect_filled(x, y, size, size, bg, ROUND)
-    if edge and draw.rect then
-        draw.rect(x, y, size, size, edge, ROUND, 1.5)
-    elseif style == "empty" and draw.rect then
-        draw.rect(x, y, size, size, EMPTY_EDGE, ROUND, 1)
+    draw.rect_filled(x, y, size, size, bg, 0)
+    if draw.rect then
+        draw.rect(x, y, size, size, edge, 0, style == "held" and 1.5 or 1)
+    end
+    if style == "held" and draw.rect_filled then
+        draw.rect_filled(x + 1, y + 1, size - 2, 2, overlay_theme.accent(), 0)
     end
 
     if not piece then return end
@@ -393,15 +350,17 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.VISUALS)
 
-    menu_util.section(T, G.VISUALS, "Combat HUD")
-    menu_util.register_keybind(T, G.VISUALS, P, "Target Gear", false)
+    menu_util.section(T, G.VISUALS, "Target Gear")
+    menu_util.register_keybind(T, G.VISUALS, P, "Target Gear Overlay", false)
 
     local root = menu_util.parent(P)
+    menu.add_combo(T, G.VISUALS, "april_target_gear_source", "Target From",
+        active_target.SOURCE_NAMES, 0, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, root)
 
     menu_util.bind_children(P, {
-        P .. "_gear_size", P .. "_top",
+        "april_target_gear_source", P .. "_gear_size", P .. "_top",
     })
 end
 
@@ -452,6 +411,7 @@ function M.draw()
     if not settings.enabled(P) then return end
     if not draw or not draw.text or not draw.rect_filled then return end
 
+    overlay_theme.sync()
     local target = M._target
     local layout = M._layout
     if not target or not layout then return end
@@ -461,10 +421,25 @@ function M.draw()
     local cx = sw * 0.5
 
     local name = text_util.sanitize(target.display_name or target.name or "Unknown")
-    local nw = select(1, draw.get_text_size(name, layout.name_fs))
-    draw.text(cx - nw * 0.5, top, name, { 1, 1, 1, 1 }, layout.name_fs)
+    local content_w = math.max(layout.held_row_w, layout.row_w)
+    local panel_w = math.max(220, content_w + 18)
+    local panel_h = 24 + 8 + layout.held_sz + layout.row_gap + layout.gear_sz + 9
+    if not held_piece(layout.held) and layout.filled == 0 then
+        panel_h = panel_h + 16
+    end
+    local panel_x = cx - panel_w * 0.5
+    overlay_theme.draw_panel(panel_x, top, panel_w, panel_h, "TARGET LOADOUT", { title_center = true })
 
-    local y = top + layout.name_fs + 6
+    local max_name_w = panel_w - 114
+    local header_name = name
+    while #header_name > 1 and select(1, draw.get_text_size(header_name, 10)) > max_name_w do
+        header_name = header_name:sub(1, -2)
+    end
+    if header_name ~= name then header_name = header_name .. ".." end
+    local nw = select(1, draw.get_text_size(header_name, 10))
+    draw.text(panel_x + panel_w - nw - 8, top + 7, header_name, overlay_theme.accent(), 10)
+
+    local y = top + 32
     local held = held_piece(layout.held)
     local row_x = cx - layout.held_row_w * 0.5
 
@@ -490,7 +465,7 @@ function M.draw()
     if not held and layout.filled == 0 then
         local hint = "No gear detected"
         local hw = select(1, draw.get_text_size(hint, 10))
-        draw.text(cx - hw * 0.5, y + layout.gear_sz + 6, hint, { 0.55, 0.55, 0.58, 0.85 }, 10)
+        draw.text(cx - hw * 0.5, y + layout.gear_sz + 6, hint, theme.TEXT_DIM, 10)
     end
 end
 

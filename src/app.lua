@@ -32,6 +32,7 @@ function M.on_frame()
     end
 
     debug.guard("tabs.update", tabs.update, dt)
+    debug.guard("overlay_theme.sync", April.require("core.overlay_theme").sync)
     debug.guard("tabs.draw", tabs.draw)
     debug.guard("notify.draw", notify.draw)
     debug.guard("custom_menu.draw", custom_menu.draw)

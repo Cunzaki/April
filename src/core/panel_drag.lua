@@ -41,11 +41,14 @@ local function blocked()
     return false
 end
 
-function M.clamp(x, y, w, panel_h, sw, sh)
+function M.clamp(x, y, w, panel_h, sw, sh, x_id, y_id)
+    local old_x, old_y = x, y
     w = math.max(160, math.min(420, math.floor(w or 260)))
     panel_h = math.max(40, math.floor(panel_h or 80))
     x = math.max(0, math.min(math.max(0, sw - w), math.floor(x or 0)))
     y = math.max(0, math.min(math.max(0, sh - panel_h), math.floor(y or 0)))
+    if x_id and x ~= old_x then persist_num(x_id, x) end
+    if y_id and y ~= old_y then persist_num(y_id, y) end
     return x, y, w
 end
 

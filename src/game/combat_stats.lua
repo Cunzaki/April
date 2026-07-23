@@ -3,40 +3,14 @@ local weapons = April.require("game.weapons")
 
 local M = {}
 
-local function profiles_mod()
-    return April.require("game.gun_mod_profiles")
-end
-
-local function store_mod()
-    return April.require("game.weapon_profile_store")
-end
-
 local function inventory_mod()
     return April.require("game.inventory")
 end
 
-local function profile_speed_mult(held)
+local function profile_speed_mult()
     if not settings.enabled("april_gunmods_enabled") then return 0 end
-
-    if settings.enabled("april_gm_speed") then
-        return settings.num("april_gm_speed_mult", 100)
-    end
-
-    if not held then return 0 end
-
-    local profiles = profiles_mod()
-    local store = store_mod()
-
-    if profiles.is_global_mode() then
-        local p = store.read_editor()
-        if not p or not p.speed then return 0 end
-        return p.speed_mult or 0
-    end
-
-    local p = store.read_editor()
-    if p and p.speed then return p.speed_mult or 0 end
-
-    return 0
+    if not settings.enabled("april_gm_speed") then return 0 end
+    return settings.num("april_gm_speed_mult", 100)
 end
 
 local function ammo_modifiers()
@@ -61,7 +35,7 @@ function M.get_effective_stats(weapon_name)
     local is_bow = base.is_bow
         or (weapon_name and (weapon_name:find("Bow", 1, true) or weapon_name:find("Crossbow", 1, true)))
 
-    local sm = profile_speed_mult(weapon_name)
+    local sm = profile_speed_mult()
     if sm ~= 0 then
         speed = speed * (1 + sm)
     end

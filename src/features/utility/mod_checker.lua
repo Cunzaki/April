@@ -367,14 +367,11 @@ local function draw_staff_panel(x, y, width, rows)
     local count = math.max(#rows, 1)
     local height = TITLE_H + count * row_h + 6
 
-    theme.draw_panel(x, y, width, height, overlay_theme.panel_opts())
-    overlay_theme.draw_accent_bar(x + 1, y, width - 2, 2)
-
-    local title = "Staff In Lobby"
+    local title = "STAFF IN LOBBY"
     if #rows > 1 then
         title = title .. " (" .. #rows .. ")"
     end
-    draw_util.text(x + pad, y + 6, title, theme.TEXT, 12)
+    overlay_theme.draw_panel(x, y, width, height, title)
 
     local div_y = y + TITLE_H
     if draw.line then

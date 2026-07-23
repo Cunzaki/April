@@ -29,10 +29,13 @@ M._last_apply_ms = 0
 M._last_refresh_ms = 0
 M._fail_streak = 0
 M._session_token = nil
+M._disabled_until = 0
 
-local MIN_APPLY_GAP_MS = 280
-local MIN_REFRESH_GAP_MS = 4000
-local FAIL_BACKOFF_MS = 1200
+local MIN_APPLY_GAP_MS = 450
+local MIN_REFRESH_GAP_MS = 5000
+local FAIL_BACKOFF_MS = 1500
+local MAX_FAIL_STREAK = 8
+local COOLDOWN_MS = 15000
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -65,6 +68,30 @@ function M.in_game()
     return env.get_local_player() ~= nil
 end
 
+function M.cooldown_remaining_ms()
+    local now = tick_ms()
+    if M._disabled_until <= now then return 0 end
+    return M._disabled_until - now
+end
+
+local function note_failure(reason)
+    M._fail_streak = M._fail_streak + 1
+    if M._fail_streak >= MAX_FAIL_STREAK then
+        M._disabled_until = tick_ms() + COOLDOWN_MS
+        M._fail_streak = 0
+        M._last_node_count = 0
+        debug.warn_once("gun_mods:cooldown", "Gun mods paused after repeated GC failures: " .. tostring(reason))
+    end
+end
+
+local function note_success(patched)
+    M._fail_streak = 0
+    M._disabled_until = 0
+    if patched and patched > 0 then
+        M._last_node_count = math.max(M._last_node_count, patched)
+    end
+end
+
 local function sanitize_payload(mods)
     local out = {}
     for k, v in pairs(mods) do
@@ -89,12 +116,6 @@ local function warm_nodes(keys)
     local ok, result = pcall(getgc, keys)
     if ok and type(result) == "number" then
         count = result
-    end
-    if count <= 0 then
-        ok, result = pcall(getgc, M.WEAPON_FIND_KEYS)
-        if ok and type(result) == "number" then
-            count = result
-        end
     end
     return count
 end
@@ -125,6 +146,11 @@ function M.apply_weapon(mods, opts)
         return false, 0, "GC API unavailable"
     end
 
+    local now = tick_ms()
+    if M._disabled_until > now then
+        return false, 0, "GC cooling down"
+    end
+
     local payload = sanitize_payload(mods)
     if not next(payload) then
         return false, 0, "No modifiers selected"
@@ -134,7 +160,6 @@ function M.apply_weapon(mods, opts)
         return false, 0, "Enter a match first"
     end
 
-    local now = tick_ms()
     local gap = MIN_APPLY_GAP_MS
     if M._fail_streak > 2 then
         gap = FAIL_BACKOFF_MS
@@ -147,13 +172,10 @@ function M.apply_weapon(mods, opts)
 
     local patch_keys = keys_for_payload(payload)
     local warm = warm_nodes(patch_keys)
-    if warm <= 0 then
-        warm = warm_nodes(M.WEAPON_FIND_KEYS)
-    end
     M._last_node_count = math.max(M._last_node_count, warm)
 
     if warm <= 0 then
-        M._fail_streak = M._fail_streak + 1
+        note_failure("no nodes")
         debug.warn_once("gun_mods:nodes", "GC still warming - equip a gun, enable a mod option, keep master on")
         return false, 0, "GC warming - equip gun and wait a moment"
     end
@@ -162,26 +184,19 @@ function M.apply_weapon(mods, opts)
     local ok, result = pcall(applygc, patch_keys, payload)
     if ok and type(result) == "number" then
         patched = result
-    end
-
-    -- One fallback only (avoid spam that correlates with long-session crashes)
-    if patched <= 0 then
-        ok, result = pcall(applygc, M.WEAPON_FIND_KEYS, payload)
-        if ok and type(result) == "number" then
-            patched = result
-        end
+    elseif not ok then
+        note_failure(result)
+        return false, 0, "GC apply failed"
     end
 
     M._last_apply_ms = tick_ms()
 
     if patched > 0 then
-        M._last_node_count = math.max(M._last_node_count, patched)
-        M._fail_streak = 0
+        note_success(patched)
         return true, patched, string.format("%d node(s) patched", patched)
     end
 
-    M._fail_streak = M._fail_streak + 1
-    -- Cold miss: allow one forced refresh next call
+    note_failure("zero patch")
     if M._fail_streak == 1 then
         M._last_node_count = 0
     end
@@ -220,6 +235,10 @@ end
 
 function M.status_text()
     if not has_api() then return "GC: unavailable" end
+    local cd = M.cooldown_remaining_ms()
+    if cd > 0 then
+        return string.format("GC cooling down (%ds)", math.ceil(cd / 1000))
+    end
     return string.format("GC nodes: %d", M._last_node_count)
 end
 

@@ -3,7 +3,6 @@ local env = April.require("core.env")
 local draw_util = April.require("core.draw_util")
 local esp_util = April.require("core.esp_util")
 local menu_util = April.require("core.menu_util")
-local gpu_chams = April.require("core.gpu_chams")
 local player_state = April.require("game.player_state")
 local player_gear = April.require("game.player_gear")
 local npcs = April.require("game.npcs")
@@ -12,9 +11,6 @@ local mod_ids = April.require("game.mod_ids")
 
 local M = {}
 local P = "april_player_enabled"
-local CHAMS = "april_player_chams"
-local CHAMS_MODE = "april_player_chams_mode"
-local CHAMS_COLOR = "april_player_chams_color"
 local FILTERS = "april_player_esp_filters"
 local FLAGS = "april_player_esp_flags"
 
@@ -28,12 +24,11 @@ local ID_BOX = "april_player_box_mode"
 local ID_RANGE = "april_player_range"
 local ID_FLAG_DOWN = "april_player_flag_downed"
 local ID_FLAG_SZ = "april_player_flag_safezone"
-local ID_FLAG_VIP = "april_player_flag_vip"
 local ID_FLAG_STAFF = "april_player_flag_staff"
 local ID_FLAG_REVIVE = "april_player_flag_reviving"
 
 local F_TEAM, F_SAFEZONE, F_SKIP_DOWNED = 1, 2, 3
-local FL_DOWNED, FL_SAFEZONE, FL_VIP, FL_STAFF, FL_REVIVING = 1, 2, 3, 4, 5
+local FL_DOWNED, FL_SAFEZONE, FL_STAFF, FL_REVIVING = 1, 2, 3, 4
 
 local DEFAULT_BOX = { 1, 0.35, 0.35, 1 }
 local DEFAULT_TEXT = { 1, 0.35, 0.35, 1 }
@@ -42,7 +37,6 @@ local DEFAULT_MUTED = { 0.82, 0.84, 0.88, 0.92 }
 local DEFAULT_FLAG = {
     DOWN = { 1, 0.35, 0.35, 1 },
     SZ = { 0.35, 0.85, 1, 1 },
-    VIP = { 1, 0.78, 0.15, 1 },
     STAFF = { 1, 0.33, 0.33, 1 },
     REVIVE = { 0.45, 1, 0.55, 1 },
 }
@@ -50,7 +44,7 @@ local DEFAULT_FLAG = {
 local _wpn_cache = {}
 local _bounds_cache = {}
 local WPN_TTL_MS = 220
-local BOUNDS_TTL_MS = 600
+local BOUNDS_TTL_MS = 1200
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -86,12 +80,6 @@ local function resolve_color(_p)
     return box_color()
 end
 
-local function players_chams_active()
-    if not gpu_chams.available() then return false end
-    if not settings.enabled(P) then return false end
-    return settings.bool(CHAMS, false)
-end
-
 local function filter_opts()
     local downed = 1
     if settings.multi(FILTERS, F_SKIP_DOWNED, false) then
@@ -117,35 +105,6 @@ local function passes_player_filters(p, opts)
         return false
     end
     return true
-end
-
-local function collect_player_chams(applied)
-    local me = env.get_local_player()
-    local me_pos = me and me.position
-    if not me_pos then return end
-
-    local range = settings.num(ID_RANGE, 500)
-    local range_sq = range * range
-    local opts = filter_opts()
-    if not entity or not entity.get_players then return end
-
-    for _, p in ipairs(entity.get_players()) do
-        if not passes_player_filters(p, opts) then goto continue end
-
-        local pos = p.position or p.head_position
-        if pos then
-            local dx = (pos.x or 0) - me_pos.x
-            local dy = (pos.y or 0) - me_pos.y
-            local dz = (pos.z or 0) - me_pos.z
-            if (dx * dx + dy * dy + dz * dz) > range_sq then goto continue end
-        end
-
-        local char = p.character
-        if not char or not env.is_valid(char) then goto continue end
-        gpu_chams.cham_player_character(char, applied)
-
-        ::continue::
-    end
 end
 
 local function set_multi_defaults(id, values)
@@ -183,13 +142,12 @@ function M.register_menu()
     set_multi_defaults(FILTERS, { true, false, false })
 
     menu.add_multicombo(T, G.VISUALS, FLAGS, "ESP Flags", {
-        "Downed", "Safezone", "VIP", "Staff", "Reviving",
-    }, { false, false, false, false, false }, { parent = P })
-    set_multi_defaults(FLAGS, { true, true, true, true, true })
+        "Downed", "Safezone", "Staff", "Reviving",
+    }, { false, false, false, false }, { parent = P })
+    set_multi_defaults(FLAGS, { true, true, true, true })
 
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_DOWN, "Flag Downed Color", DEFAULT_FLAG.DOWN, { parent = P })
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_SZ, "Flag Safezone Color", DEFAULT_FLAG.SZ, { parent = P })
-    menu.add_colorpicker(T, G.VISUALS, ID_FLAG_VIP, "Flag VIP Color", DEFAULT_FLAG.VIP, { parent = P })
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_STAFF, "Flag Staff Color", DEFAULT_FLAG.STAFF, { parent = P })
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_REVIVE, "Flag Reviving Color", DEFAULT_FLAG.REVIVE, { parent = P })
 
@@ -200,14 +158,10 @@ function M.register_menu()
         ID_BOX, ID_HEALTH, ID_SKELETON,
         ID_NAME, ID_CLAN, ID_DIST, ID_WEAPON,
         FILTERS, FLAGS,
-        ID_FLAG_DOWN, ID_FLAG_SZ, ID_FLAG_VIP, ID_FLAG_STAFF, ID_FLAG_REVIVE,
+        ID_FLAG_DOWN, ID_FLAG_SZ, ID_FLAG_STAFF, ID_FLAG_REVIVE,
         ID_RANGE,
     }
     menu_util.bind_children(P, children)
-
-    if gpu_chams.available() then
-        pcall(function() gpu_chams.clear_owner("players") end)
-    end
 end
 
 local function clan_tag_color(snap, menu_col)
@@ -232,9 +186,6 @@ local function collect_side_tags(p, snap, show_clan, clan_menu_col, flag_cols)
         }
     end
 
-    if flag_on(FL_VIP) and snap.vip then
-        out[#out + 1] = { text = "[VIP]", col = flag_cols.vip }
-    end
     if flag_on(FL_SAFEZONE) and snap.safezone then
         out[#out + 1] = { text = "[SZ]", col = flag_cols.sz }
     end
@@ -273,47 +224,35 @@ local function resolve_bounds(p, pos, dist)
     local key = cache_key(p)
     local now = tick_ms()
 
-    local bounds = esp_util.player_screen_bounds(p, {
+    local fresh = esp_util.player_screen_bounds(p, {
         dist = dist,
         point_size = esp_util.dist_point_size(dist),
     })
 
-    if bounds and bounds.valid then
-        _bounds_cache[key] = { bounds = bounds, t = now, dist = dist }
-        return bounds
-    end
-
-    local cached = _bounds_cache[key]
-    if cached and cached.bounds and (now - cached.t) < BOUNDS_TTL_MS then
-        local cd = cached.dist or dist
-        if not dist or not cd or math.abs(dist - cd) < 40 then
-            return cached.bounds
-        end
-    end
-
-    if pos then
+    if not esp_util.bounds_usable(fresh) and pos then
         local size = esp_util.dist_point_size(dist)
-        bounds = esp_util.point_screen_bounds(pos.x, pos.y, pos.z, size)
-        if bounds and bounds.valid then
-            _bounds_cache[key] = { bounds = bounds, t = now, dist = dist }
-            return bounds
+        fresh = esp_util.point_screen_bounds(pos.x, pos.y, pos.z, size)
+        if fresh then
+            fresh = esp_util.guard_tiny_bounds(fresh, dist)
         end
     end
 
-    return nil
+    return esp_util.hold_bounds(_bounds_cache, key, fresh, now, BOUNDS_TTL_MS)
 end
 
 local function is_on_screen(bounds, pos)
+    if pos then
+        local _, _, on = esp_util.w2s(pos.x, pos.y, pos.z)
+        if on then return true end
+    end
     if bounds and bounds.valid then
         local sw, sh = draw_util.screen_size()
         local cx = bounds.x + bounds.w * 0.5
         local cy = bounds.y + bounds.h * 0.5
-        local margin = 80
+        local margin = 120
         return cx > -margin and cy > -margin and cx < sw + margin and cy < sh + margin
     end
-    if not pos then return false end
-    local _, _, on = esp_util.w2s(pos.x, pos.y, pos.z)
-    return on == true
+    return false
 end
 
 function M.update(_dt)
@@ -348,7 +287,6 @@ function M.draw()
     local flag_cols = {
         down = settings.color(ID_FLAG_DOWN, DEFAULT_FLAG.DOWN),
         sz = settings.color(ID_FLAG_SZ, DEFAULT_FLAG.SZ),
-        vip = settings.color(ID_FLAG_VIP, DEFAULT_FLAG.VIP),
         staff = settings.color(ID_FLAG_STAFF, DEFAULT_FLAG.STAFF),
         revive = settings.color(ID_FLAG_REVIVE, DEFAULT_FLAG.REVIVE),
     }
@@ -371,8 +309,21 @@ function M.draw()
 
         local snap = player_state.esp_state(p)
         local col = resolve_color(p)
+
+        -- Skeleton uses bone projections directly (stable at range) — draw even if box fails.
+        if show_skel then
+            if p.get_bones_screen then
+                esp_util.draw_player_skeleton(p, skel_col, 1)
+            elseif p.character then
+                esp_util.draw_model_skeleton(p.character, skel_col, 1)
+            end
+        end
+
         local bounds = resolve_bounds(p, pos, dist)
-        if not bounds or not bounds.valid or not is_on_screen(bounds, pos) then
+        if not is_on_screen(bounds, pos) then
+            goto continue
+        end
+        if not esp_util.bounds_usable(bounds) then
             goto continue
         end
 
@@ -382,7 +333,6 @@ function M.draw()
         end
 
         local cx = bounds.x + bounds.w * 0.5
-        local box_ok = bounds.w >= 4 and bounds.h >= 8
 
         -- Top: name + weapon only (never clan - clan is on the right with tags)
         local top = {}
@@ -403,7 +353,7 @@ function M.draw()
             end
         end
 
-        -- Right: clan tag + attribute flags (VIP / SZ / DOWN / staff / revive)
+        -- Right: clan tag + attribute flags (SZ / DOWN / staff / revive)
         local side = collect_side_tags(p, snap, show_clan, clan_menu_col, flag_cols)
         if #side > 0 then
             local rx = bounds.x + bounds.w + 4
@@ -419,31 +369,14 @@ function M.draw()
             end
         end
 
-        if box_ok then
-            if box_mode == 1 then
-                draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 0)
-            elseif box_mode == 2 then
-                draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 1)
-            end
-
-            if show_health then
-                local hp, max_hp = p.health, p.max_health
-                if hp and max_hp and max_hp > 0 then
-                    if draw and draw.health_bar then
-                        draw.health_bar(bounds.x - 5, bounds.y, bounds.h, hp, max_hp)
-                    else
-                        draw_util.health_bar_nice(bounds.x - 5, bounds.y, bounds.h, hp, max_hp, 3)
-                    end
-                end
-            end
+        if box_mode == 1 then
+            draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 0)
+        elseif box_mode == 2 then
+            draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 1)
         end
 
-        if show_skel then
-            if p.get_bones_screen then
-                esp_util.draw_player_skeleton(p, skel_col, 1)
-            elseif p.character then
-                esp_util.draw_model_skeleton(p.character, skel_col, 1)
-            end
+        if show_health then
+            draw_util.health_bar_on_box(bounds, p.health, p.max_health)
         end
 
         if show_dist then
