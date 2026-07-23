@@ -388,52 +388,32 @@ function M.draw()
 
     local range = settings.num("april_loot_range", 300)
     local range_sq = range * range
-    local pad_sq = (range + 40) * (range + 40)
     local draw_boxes = settings.enabled("april_loot_boxes")
     local show_name = settings.bool("april_loot_show_name", true)
     local show_dist = settings.bool("april_loot_show_distance", true)
     local me = env.get_local_player()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
-    local boxes_left = draw_boxes and 56 or 0
 
     for _, entry in ipairs(cache.loot) do
         if not settings.enabled(entry.toggle_id) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
 
-        local lx, ly, lz = entry.lx, entry.ly, entry.lz
-        if not lx then
-            if not esp_scan.refresh_entry_position(entry) then goto continue end
-            lx, ly, lz = entry.lx, entry.ly, entry.lz
-            if not lx then goto continue end
-        end
-
-        local dist_sq = 0
-        local unlimited = UNLIMITED_RANGE[entry.toggle_id]
-        if me_pos and not unlimited then
-            local dx = lx - me_pos.x
-            local dy = ly - me_pos.y
-            local dz = lz - me_pos.z
-            dist_sq = dx * dx + dy * dy + dz * dz
-            if dist_sq > pad_sq then goto continue end
-        end
-
-        esp_scan.refresh_entry_position(entry)
-        lx, ly, lz = entry.lx, entry.ly, entry.lz
+        local lx, ly, lz = esp_scan.entry_coords(entry)
         if not lx then goto continue end
 
+        local dist_sq = 0
         if me_pos then
             local dx = lx - me_pos.x
             local dy = ly - me_pos.y
             local dz = lz - me_pos.z
             dist_sq = dx * dx + dy * dy + dz * dz
-            if not unlimited and dist_sq > range_sq then goto continue end
+            if not UNLIMITED_RANGE[entry.toggle_id] and dist_sq > range_sq then goto continue end
         end
 
         local col = settings.color(entry.toggle_id, maps.toggle_color(maps.LOOT_TOGGLES, entry.toggle_id))
-        if boxes_left > 0 then
+        if draw_boxes then
             esp_util.draw_entry_boxes(entry, col, 1)
-            boxes_left = boxes_left - 1
         end
 
         if show_name or show_dist then

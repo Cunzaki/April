@@ -285,7 +285,6 @@ function M.draw()
 
     local range = settings.num("april_base_range", 150)
     local range_sq = range * range
-    local pad_sq = (range + 30) * (range + 30)
     local draw_boxes = settings.enabled("april_base_boxes")
     local show_name = settings.bool("april_base_show_name", true)
     local show_dist = settings.bool("april_base_show_distance", false)
@@ -293,33 +292,15 @@ function M.draw()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
     local label_groups = {}
-    local boxes_left = draw_boxes and 40 or 0
-    local rings_left = 6
 
     for _, entry in ipairs(cache.base) do
         if not settings.enabled(entry.toggle_id) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
 
-        local lx, ly, lz = entry.lx, entry.ly, entry.lz
-        if not lx then
-            if not esp_scan.refresh_entry_position(entry) then goto continue end
-            lx, ly, lz = entry.lx, entry.ly, entry.lz
-            if not lx then goto continue end
-        end
-
-        local dist_sq = 0
-        if me_pos then
-            local dx = lx - me_pos.x
-            local dy = ly - me_pos.y
-            local dz = lz - me_pos.z
-            dist_sq = dx * dx + dy * dy + dz * dz
-            if dist_sq > pad_sq then goto continue end
-        end
-
-        esp_scan.refresh_entry_position(entry)
-        lx, ly, lz = entry.lx, entry.ly, entry.lz
+        local lx, ly, lz = esp_scan.entry_coords(entry)
         if not lx then goto continue end
 
+        local dist_sq = 0
         if me_pos then
             local dx = lx - me_pos.x
             local dy = ly - me_pos.y
@@ -329,18 +310,16 @@ function M.draw()
         end
 
         local col = settings.color(entry.toggle_id, maps.toggle_color(maps.BASE_TOGGLES, entry.toggle_id))
-        if boxes_left > 0 then
+        if draw_boxes then
             esp_util.draw_entry_boxes(entry, col, 1)
-            boxes_left = boxes_left - 1
         end
 
         local ring_id = maps.turret_ring_toggle(entry.toggle_id)
-        if ring_id and settings.enabled(ring_id) and rings_left > 0 then
+        if ring_id and settings.enabled(ring_id) then
             local activation = turret_stats.activation_range(entry.name)
             if activation then
                 local ring_col = { col[1], col[2], col[3], 0.35 }
                 desync_vis.draw_sphere_ring(lx, ly, lz, activation, ring_col, 1.5)
-                rings_left = rings_left - 1
             end
         end
 

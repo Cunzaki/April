@@ -718,8 +718,14 @@ function M.draw_entry_boxes(entry, col, thick)
     local env = April.require("core.env")
     if not env.is_valid(entry.inst) then return end
 
+    -- Prefer stable hydrated box (static resources don't move). Avoid re-reading
+    -- part vectors every frame — that was laggy and produced broken boxes.
+    if entry.box then
+        M.draw_oriented_box(entry.box, col, thick)
+        return
+    end
+
     local scan = April.require("game.esp_scan")
-    -- Always refresh box from cached main_part so draw stays on-frame without folder scans.
     local main = entry.main_part
     if not main or not env.is_valid(main) then
         main = scan.find_main_part(entry.inst)
@@ -728,12 +734,7 @@ function M.draw_entry_boxes(entry, col, thick)
     local box = main and scan.read_part_box(main)
     if box then
         entry.box = box
-        entry.lx = box.x
-        entry.ly = box.y + box.hy + 0.25
-        entry.lz = box.z
         M.draw_oriented_box(box, col, thick)
-    elseif entry.box then
-        M.draw_oriented_box(entry.box, col, thick)
     end
 end
 
