@@ -2,8 +2,8 @@
   Gather hit parts near the player (dump hierarchy):
   Trees: TreeX.Main (preferred) -> Main
   Nodes: NodeSpark.Main (preferred) -> Main
-  Plants: Main + Item
   Vegetation: CactusPart / Forest_Log Main|Branch
+  (Plants are interact-pick, not melee gather — not scanned here.)
 ]]
 
 local env = April.require("core.env")
@@ -78,11 +78,6 @@ function M.hit_part_from_model(model, kind_hint)
         return cactus, "cactus"
     end
 
-    if find_child(model, "Item") then
-        local part = main_from(model)
-        if part then return part, "plants" end
-    end
-
     local name = (inst_name(model) or ""):lower()
     if name:find("log", 1, true) or name:find("forest_log", 1, true) then
         local part = main_from(model) or find_child(model, "Branch")
@@ -108,11 +103,6 @@ function M.hit_part_from_model(model, kind_hint)
         if part then return part, "logs" end
     end
 
-    if kind_hint == "plants" then
-        local part = main_from(model)
-        if part then return part, "plants" end
-    end
-
     -- Last resort: model Main (covers odd Desert/Tree variants).
     local part = main_from(model)
     if part then
@@ -121,10 +111,10 @@ function M.hit_part_from_model(model, kind_hint)
     return nil, nil
 end
 
+-- Only dump folders that hold melee gatherables.
 local FOLDER_SPECS = {
     { key = "nodes", kind = "nodes" },
     { trees = true, kind = "trees" },
-    { key = "plants", kind = "plants" },
     { key = "vegetation", kind = "vegetation" },
 }
 
@@ -154,7 +144,7 @@ local function kind_allowed(kind, allow)
 end
 
 -- Scan every child in gather folders; keep only parts within range.
--- `allow` optional: { trees=true, nodes=true, logs=true, cactus=true, plants=true }
+-- `allow` optional: { trees=true, nodes=true, logs=true, cactus=true }
 -- Returns list of BaseParts (hit parts).
 function M.collect_near(origin, radius, out, max_out, allow)
     out = out or {}

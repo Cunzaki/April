@@ -121,7 +121,7 @@ M.BY_ID = {
     april_fling_enabled = "Launches nearby entities upward.",
 
     -- Utility
-    april_farm_helper = "Automatically farms nearby nodes and plants.",
+    april_farm_helper = "Automatically farms nearby trees, nodes, logs, and cactus.",
     april_farm_silent = "Uses silent aim while farm helper is active.",
     april_anti_afk = "Prevents idle kick by simulating activity.",
     april_mod_checker_enabled = "Alerts you when staff or mods join the server.",

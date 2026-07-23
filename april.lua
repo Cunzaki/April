@@ -1,12 +1,12 @@
 --[[
     April Fallen — Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-23T19:47:16.210Z
+    Built: 2026-07-23T19:52:50.510Z
     UI: custom Gamesense menu (INSERT) — Vector menu tabs disabled
 ]]
 
 April = {
-    version = "3.96.6",
+    version = "3.96.7",
     debug = false,
     _mods = {},
     bundled = true,
@@ -6246,7 +6246,7 @@ local MENU_KEYS = {
     "april_farm_silent",
     "april_world_enabled", "april_world_enabled_mode", "april_stone_node", "april_metal_node", "april_phosphate_node",
     "april_corn_plant", "april_tomato_plant", "april_pumpkin_plant", "april_lemon_plant",
-    "april_raspberry_plant", "april_blueberry_plant", "april_wool_plant", "april_hemp_plant",
+    "april_raspberry_plant", "april_blueberry_plant", "april_wool_plant",
     "april_deer", "april_boar", "april_wolf",
     "april_world_boxes", "april_world_show_name", "april_world_show_distance", "april_world_range",
     "april_world_chams", "april_world_chams_mode", "april_world_chams_color",
@@ -6309,7 +6309,7 @@ local COLOR_KEYS = {
     "april_player_flag_staff", "april_player_flag_reviving",
     "april_stone_node", "april_metal_node", "april_phosphate_node", "april_corn_plant", "april_tomato_plant",
     "april_pumpkin_plant", "april_lemon_plant", "april_raspberry_plant", "april_blueberry_plant",
-    "april_wool_plant", "april_hemp_plant", "april_deer", "april_boar", "april_wolf",
+    "april_wool_plant", "april_deer", "april_boar", "april_wolf",
     "april_dropped_item", "april_wooden_crate", "april_metal_crate", "april_steel_crate", "april_food_crate",
     "april_timed_crate", "april_care_package", "april_btr_crate", "april_body_bag", "april_sleeper",
     "april_trash_can", "april_oil_barrel", "april_small_egg", "april_medium_egg", "april_large_egg",
@@ -10707,8 +10707,8 @@ April._mods["game.farm_targets"] = (function()
   Gather hit parts near the player (dump hierarchy):
   Trees: TreeX.Main (preferred) -> Main
   Nodes: NodeSpark.Main (preferred) -> Main
-  Plants: Main + Item
   Vegetation: CactusPart / Forest_Log Main|Branch
+  (Plants are interact-pick, not melee gather — not scanned here.)
 ]]
 
 local env = April.require("core.env")
@@ -10783,11 +10783,6 @@ function M.hit_part_from_model(model, kind_hint)
         return cactus, "cactus"
     end
 
-    if find_child(model, "Item") then
-        local part = main_from(model)
-        if part then return part, "plants" end
-    end
-
     local name = (inst_name(model) or ""):lower()
     if name:find("log", 1, true) or name:find("forest_log", 1, true) then
         local part = main_from(model) or find_child(model, "Branch")
@@ -10813,11 +10808,6 @@ function M.hit_part_from_model(model, kind_hint)
         if part then return part, "logs" end
     end
 
-    if kind_hint == "plants" then
-        local part = main_from(model)
-        if part then return part, "plants" end
-    end
-
     -- Last resort: model Main (covers odd Desert/Tree variants).
     local part = main_from(model)
     if part then
@@ -10826,10 +10816,10 @@ function M.hit_part_from_model(model, kind_hint)
     return nil, nil
 end
 
+-- Only dump folders that hold melee gatherables.
 local FOLDER_SPECS = {
     { key = "nodes", kind = "nodes" },
     { trees = true, kind = "trees" },
-    { key = "plants", kind = "plants" },
     { key = "vegetation", kind = "vegetation" },
 }
 
@@ -10859,7 +10849,7 @@ local function kind_allowed(kind, allow)
 end
 
 -- Scan every child in gather folders; keep only parts within range.
--- `allow` optional: { trees=true, nodes=true, logs=true, cactus=true, plants=true }
+-- `allow` optional: { trees=true, nodes=true, logs=true, cactus=true }
 -- Returns list of BaseParts (hit parts).
 function M.collect_near(origin, radius, out, max_out, allow)
     out = out or {}
@@ -11735,8 +11725,10 @@ M.NODE_LABELS = {
     ["Phosphate_Node"] = "Phosphate Node",
 }
 
-M.NODE_FOLDERS = { "vegetation", "nodes" }
+-- Dump: Workspace.Nodes only (Stone/Metal/Phosphate). Not Vegetation.
+M.NODE_FOLDERS = { "nodes" }
 
+-- Dump Workspace.Plants only — no Hemp in this game.
 M.PLANT_MAP = {
     ["Corn Plant"] = "april_corn_plant",
     ["Tomato Plant"] = "april_tomato_plant",
@@ -11745,8 +11737,6 @@ M.PLANT_MAP = {
     ["Raspberry Plant"] = "april_raspberry_plant",
     ["Blueberry Plant"] = "april_blueberry_plant",
     ["Wool Plant"] = "april_wool_plant",
-    ["Hemp Plant"] = "april_hemp_plant",
-    ["Hemp"] = "april_hemp_plant",
 }
 
 M.PLANT_LABELS = {
@@ -11757,11 +11747,9 @@ M.PLANT_LABELS = {
     ["Raspberry Plant"] = "Raspberry Plant",
     ["Blueberry Plant"] = "Blueberry Plant",
     ["Wool Plant"] = "Wool Plant",
-    ["Hemp Plant"] = "Hemp Plant",
-    ["Hemp"] = "Hemp",
 }
 
-M.PLANT_FOLDERS = { "plants", "vegetation" }
+M.PLANT_FOLDERS = { "plants" }
 
 M.ANIMAL_MAP = {
     ["PREFAB_ANIMAL_DEER"] = "april_deer",
@@ -11798,7 +11786,6 @@ M.WORLD_TOGGLES = {
     { id = "april_raspberry_plant", label = "Raspberry Plant", color = { 0.9, 0.2, 0.4, 1 } },
     { id = "april_blueberry_plant", label = "Blueberry Plant", color = { 0.3, 0.4, 0.9, 1 } },
     { id = "april_wool_plant", label = "Wool Plant", color = { 0.85, 0.85, 0.9, 1 } },
-    { id = "april_hemp_plant", label = "Hemp Plant", color = { 0.3, 0.7, 0.25, 1 } },
     { id = "april_deer", label = "Deer", color = { 0.6, 0.4, 0.2, 1 } },
     { id = "april_boar", label = "Wild Boar", color = { 0.4, 0.3, 0.2, 1 } },
     { id = "april_wolf", label = "Wolf", color = { 0.5, 0.5, 0.5, 1 } },
@@ -22947,8 +22934,10 @@ M.NODE_LABELS = {
     ["Phosphate_Node"] = "Phosphate Node",
 }
 
-M.NODE_FOLDERS = { "vegetation", "nodes" }
+-- Dump: Workspace.Nodes only (Stone/Metal/Phosphate). Not Vegetation.
+M.NODE_FOLDERS = { "nodes" }
 
+-- Dump Workspace.Plants only — no Hemp in this game.
 M.PLANT_MAP = {
     ["Corn Plant"] = "april_corn_plant",
     ["Tomato Plant"] = "april_tomato_plant",
@@ -22957,8 +22946,6 @@ M.PLANT_MAP = {
     ["Raspberry Plant"] = "april_raspberry_plant",
     ["Blueberry Plant"] = "april_blueberry_plant",
     ["Wool Plant"] = "april_wool_plant",
-    ["Hemp Plant"] = "april_hemp_plant",
-    ["Hemp"] = "april_hemp_plant",
 }
 
 M.PLANT_LABELS = {
@@ -22969,11 +22956,9 @@ M.PLANT_LABELS = {
     ["Raspberry Plant"] = "Raspberry Plant",
     ["Blueberry Plant"] = "Blueberry Plant",
     ["Wool Plant"] = "Wool Plant",
-    ["Hemp Plant"] = "Hemp Plant",
-    ["Hemp"] = "Hemp",
 }
 
-M.PLANT_FOLDERS = { "plants", "vegetation" }
+M.PLANT_FOLDERS = { "plants" }
 
 M.ANIMAL_MAP = {
     ["PREFAB_ANIMAL_DEER"] = "april_deer",
@@ -23010,7 +22995,6 @@ M.WORLD_TOGGLES = {
     { id = "april_raspberry_plant", label = "Raspberry Plant", color = { 0.9, 0.2, 0.4, 1 } },
     { id = "april_blueberry_plant", label = "Blueberry Plant", color = { 0.3, 0.4, 0.9, 1 } },
     { id = "april_wool_plant", label = "Wool Plant", color = { 0.85, 0.85, 0.9, 1 } },
-    { id = "april_hemp_plant", label = "Hemp Plant", color = { 0.3, 0.7, 0.25, 1 } },
     { id = "april_deer", label = "Deer", color = { 0.6, 0.4, 0.2, 1 } },
     { id = "april_boar", label = "Wild Boar", color = { 0.4, 0.3, 0.2, 1 } },
     { id = "april_wolf", label = "Wolf", color = { 0.5, 0.5, 0.5, 1 } },
@@ -23274,7 +23258,7 @@ M.BY_ID = {
     april_fling_enabled = "Launches nearby entities upward.",
 
     -- Utility
-    april_farm_helper = "Automatically farms nearby nodes and plants.",
+    april_farm_helper = "Automatically farms nearby trees, nodes, logs, and cactus.",
     april_farm_silent = "Uses silent aim while farm helper is active.",
     april_anti_afk = "Prevents idle kick by simulating activity.",
     april_mod_checker_enabled = "Alerts you when staff or mods join the server.",
