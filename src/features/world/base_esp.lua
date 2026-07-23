@@ -1,3 +1,12 @@
+--[[
+  Base ESP — same cache / incremental-scan system as world + loot.
+
+  - M._static + rebuild → cache.base
+  - iscan begin/step/complete (shared thread budget)
+  - prune_invalid on cache.should_prune()
+  - draw filters by range on_frame (no custom per-frame hydrate)
+]]
+
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
 local folders = April.require("game.folders")
@@ -16,6 +25,8 @@ local P = "april_base_enabled"
 local CHAMS_ID = "april_base_chams"
 local CHAMS_MODE = "april_base_chams_mode"
 local CHAMS_COLOR = "april_base_chams_color"
+
+M._static = {}
 
 local function base_chams_labels()
     local labels = {}
@@ -69,19 +80,21 @@ local function collect_base_chams(applied)
     end
 end
 
-local function append_base_entry(state, model, type_name, toggle_id)
-    if not model or not env.is_valid(model) then return end
-    if not esp_scan.find_main_part(model) and not esp_scan.is_part(model) then return end
-
-    state.seen = state.seen or {}
-    local key = tostring(model.Address or model) .. ":" .. toggle_id
-    if state.seen[key] then return end
-    state.seen[key] = true
-
-    table.insert(state.out, esp_scan.make_entry(model, type_name, toggle_id))
+local function rebuild_cache()
+    cache.base = {}
+    for _, entry in ipairs(M._static) do
+        table.insert(cache.base, entry)
+    end
 end
 
-local function collect_base_container(state, container, type_name, toggle_id)
+local function append_base_model(out, model, type_name, toggle_id)
+    if not env.is_valid(model) then return end
+    if not esp_scan.find_main_part(model) and not esp_scan.is_part(model) then return end
+    table.insert(out, esp_scan.make_entry(model, type_name, toggle_id, { dynamic = false }))
+end
+
+-- Mirror loot collect_loot_container, but sleep-bag aware.
+local function collect_base_container(container, type_name, toggle_id, out)
     if not env.is_valid(container) then return end
 
     if type_name == "Sleeping Bag" then
@@ -92,31 +105,23 @@ local function collect_base_container(state, container, type_name, toggle_id)
                 or container:FindFirstChild("Sleeping_Bag")
         end)
         if bag and env.is_valid(bag) then
-            append_base_entry(state, bag, type_name, toggle_id)
+            append_base_model(out, bag, type_name, toggle_id)
             return
         end
     end
 
     local cn = container.ClassName or container.class_name
-    if cn == "Model" then
-        append_base_entry(state, container, type_name, toggle_id)
+    if cn == "Model" or esp_scan.is_part(container) then
+        append_base_model(out, container, type_name, toggle_id)
         return
     end
 
-    if esp_scan.find_main_part(container) or esp_scan.is_part(container) then
-        append_base_entry(state, container, type_name, toggle_id)
-    end
-
     local subs = env.safe_call(function() return container:get_children() end) or {}
-    for _, child in ipairs(subs) do
-        if not env.is_valid(child) then goto child_continue end
-        local cc = child.ClassName or child.class_name
-        if cc == "Model" then
-            append_base_entry(state, child, type_name, toggle_id)
-        elseif esp_scan.find_main_part(child) or esp_scan.is_part(child) then
-            append_base_entry(state, child, type_name, toggle_id)
+    for _, model in ipairs(subs) do
+        local mc = model.ClassName or model.class_name
+        if mc == "Model" or esp_scan.is_part(model) or esp_scan.find_main_part(model) then
+            append_base_model(out, model, type_name, toggle_id)
         end
-        ::child_continue::
     end
 end
 
@@ -173,18 +178,21 @@ function M.register_menu()
     menu_util.bind_children(P, child_ids)
 end
 
-function M.begin_scan()
+-- Same shape as loot begin/step/complete (nested folder walk, one child per batch unit).
+function M.begin_static_scan()
     return {
-        areas = nil,
         ai = 1,
-        items = nil,
-        ii = 1,
+        phase = "top",
+        ci = 1,
+        sub_ci = 1,
+        areas = nil,
+        children = nil,
+        subs = nil,
         out = {},
-        seen = {},
     }
 end
 
-function M.step_scan(state, batch)
+function M.step_static_scan(state, batch)
     if not state.areas then
         state.areas = env.safe_call(function()
             local bases = folders.from_key("bases")
@@ -192,8 +200,6 @@ function M.step_scan(state, batch)
             return bases:get_children()
         end) or {}
         state.ai = 1
-        state.items = nil
-        state.ii = 1
     end
 
     local processed = 0
@@ -203,8 +209,9 @@ function M.step_scan(state, batch)
             return true
         end
 
-        if not state.items then
-            local area = state.areas[state.ai]
+        local area = state.areas[state.ai]
+
+        if not state.children then
             if not env.is_valid(area) then
                 state.ai = state.ai + 1
                 processed = processed + 1
@@ -218,35 +225,80 @@ function M.step_scan(state, batch)
                 goto continue
             end
 
+            state.phase = "top"
+            state.ci = 1
+            state.sub_ci = 1
+            state.subs = nil
+
+            -- Same as loot nested: area children are type folders (or the area itself is typed).
             if maps.BASE_MAP[area_name] then
-                state.items = { area }
-                local children = env.safe_call(function() return area:get_children() end) or {}
-                for _, child in ipairs(children) do
-                    state.items[#state.items + 1] = child
-                end
+                state.children = { area }
             else
-                state.items = env.safe_call(function() return area:get_children() end) or {}
+                state.children = env.safe_call(function() return area:get_children() end) or {}
             end
-            state.ii = 1
         end
 
-        if state.ii > #state.items then
+        if state.ci > #state.children then
             state.ai = state.ai + 1
-            state.items = nil
+            state.children = nil
+            state.subs = nil
             goto continue
         end
 
-        local type_folder = state.items[state.ii]
-        state.ii = state.ii + 1
-        processed = processed + 1
+        local child = state.children[state.ci]
 
-        if not env.is_valid(type_folder) then goto continue end
+        if state.phase == "top" then
+            if not env.is_valid(child) then
+                state.ci = state.ci + 1
+                processed = processed + 1
+                goto continue
+            end
 
-        local type_name = type_folder.Name or type_folder.name or ""
-        local toggle_id = maps.BASE_MAP[type_name]
-        if not toggle_id then goto continue end
+            local name = child.Name or child.name
+            local toggle_id = name and maps.BASE_MAP[name]
 
-        collect_base_container(state, type_folder, type_name, toggle_id)
+            if toggle_id then
+                -- Emit models one-at-a-time (base folders are denser than loot crates).
+                state.subs = env.safe_call(function()
+                    local cn = child.ClassName or child.class_name
+                    if cn == "Model" or esp_scan.is_part(child) then
+                        return { child }
+                    end
+                    if name == "Sleeping Bag" then
+                        local bag = child:find_first_child("SleepingBag")
+                            or child:FindFirstChild("SleepingBag")
+                            or child:find_first_child("Sleeping_Bag")
+                            or child:FindFirstChild("Sleeping_Bag")
+                        if bag then return { bag } end
+                    end
+                    return child:get_children()
+                end) or {}
+                state.sub_ci = 1
+                state.phase = "models"
+                state._type_name = name
+                state._toggle_id = toggle_id
+            else
+                state.ci = state.ci + 1
+                processed = processed + 1
+            end
+        else
+            if not state.subs or state.sub_ci > #state.subs then
+                state.phase = "top"
+                state.ci = state.ci + 1
+                state.subs = nil
+                state._type_name = nil
+                state._toggle_id = nil
+                goto continue
+            end
+
+            local model = state.subs[state.sub_ci]
+            state.sub_ci = state.sub_ci + 1
+            processed = processed + 1
+
+            if env.is_valid(model) then
+                append_base_model(state.out, model, state._type_name, state._toggle_id)
+            end
+        end
 
         ::continue::
     end
@@ -254,21 +306,31 @@ function M.step_scan(state, batch)
     return false
 end
 
-function M.complete_scan(state)
-    cache.base = esp_scan.merge_entries(cache.base, state.out)
+function M.complete_static_scan(state)
+    M._static = esp_scan.merge_entries(M._static, state.out)
+    rebuild_cache()
     cache.stats.last_base_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
+-- Aliases so older call sites / map code keep working.
+M.begin_scan = M.begin_static_scan
+M.step_scan = M.step_static_scan
+M.complete_scan = M.complete_static_scan
+
 function M.scan()
-    local state = M.begin_scan()
-    while not M.step_scan(state, 9999) do end
-    M.complete_scan(state)
+    local state = M.begin_static_scan()
+    while not M.step_static_scan(state, 9999) do end
+    M.complete_static_scan(state)
 end
 
 function M.update(_dt)
-    if settings.enabled(P) then
+    local map_base = settings.enabled("april_map_enabled") and settings.enabled("april_map_show_base")
+    local base_on = settings.enabled(P)
+
+    if base_on or map_base then
         if cache.should_prune() then
-            cache.prune_invalid(cache.base)
+            cache.prune_invalid(M._static)
+            rebuild_cache()
         end
     end
 
@@ -291,7 +353,6 @@ function M.draw()
     local me = env.get_local_player()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
-    local label_groups = {}
 
     for _, entry in ipairs(cache.base) do
         if not settings.enabled(entry.toggle_id) then goto continue end
@@ -318,8 +379,7 @@ function M.draw()
         if ring_id and settings.enabled(ring_id) then
             local activation = turret_stats.activation_range(entry.name)
             if activation then
-                local ring_col = { col[1], col[2], col[3], 0.35 }
-                desync_vis.draw_sphere_ring(lx, ly, lz, activation, ring_col, 1.5)
+                desync_vis.draw_sphere_ring(lx, ly, lz, activation, { col[1], col[2], col[3], 0.35 }, 1.5)
             end
         end
 
@@ -336,26 +396,12 @@ function M.draw()
                     end
                 end
                 if label ~= "" then
-                    local gk = string.format("%d:%d:%d",
-                        math.floor(lx * 2), math.floor(ly * 2), math.floor(lz * 2))
-                    local group = label_groups[gk]
-                    if not group then
-                        group = { sx = sx, sy = sy, lines = {} }
-                        label_groups[gk] = group
-                    end
-                    group.lines[#group.lines + 1] = { label = label, col = col }
+                    draw_util.text_centered(sx, sy, label, col, text_size)
                 end
             end
         end
 
         ::continue::
-    end
-
-    for _, group in pairs(label_groups) do
-        for i, line in ipairs(group.lines) do
-            local offset = (i - 1) * (text_size + 2)
-            draw_util.text_centered(group.sx, group.sy - offset, line.label, line.col, text_size)
-        end
     end
 end
 

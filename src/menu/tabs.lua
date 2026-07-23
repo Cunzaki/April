@@ -75,10 +75,11 @@ function M.setup_scans()
     local base_esp = April.require("features.world.base_esp")
     local npc_esp = April.require("features.world.npc_esp")
 
+    -- Shared budget for world / loot / base / npc — one incremental thread.
     iscan.configure({ budget_ms = 6, items_per_step = 18 })
 
     local SCAN_MS = cache.WORKSPACE_SCAN_MS or 1000
-    local DROPS_SCAN_MS = cache.DROPS_SCAN_MS or 2500
+    local DROPS_SCAN_MS = cache.DROPS_SCAN_MS or 3500
 
     local function map_on(layer)
         return function()
@@ -111,7 +112,7 @@ function M.setup_scans()
 
     iscan.register("base", SCAN_MS, function()
         return settings.enabled("april_base_enabled") or map_on("base")()
-    end, base_esp.begin_scan, base_esp.step_scan, base_esp.complete_scan, 480)
+    end, base_esp.begin_static_scan, base_esp.step_static_scan, base_esp.complete_static_scan, 480)
 
     iscan.register("npcs", SCAN_MS, function()
         if settings.enabled("april_npc_enabled") then return true end
