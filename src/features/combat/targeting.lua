@@ -5,6 +5,7 @@ local combat_origin = April.require("game.combat_origin")
 local combat_menu = April.require("features.combat.combat_menu")
 local math_util = April.require("core.math_util")
 local esp_util = April.require("core.esp_util")
+local ep = April.require("core.entity_props")
 local player_state = April.require("game.player_state")
 local silent_whitelist = April.require("features.combat.silent_whitelist")
 local cache = April.require("core.cache")
@@ -263,10 +264,15 @@ function M.within_max_distance(target, origin, prefix)
         return dist == nil or dist <= max_d
     end
 
-    local dist = target.distance_to and target:distance_to(origin) or nil
-    if not dist and target.position and origin then
-        local pos = target.position
-        dist = math_util.distance3((pos.x or 0) - origin.x, (pos.y or 0) - origin.y, (pos.z or 0) - origin.z)
+    local dist = ep.distance_to(target, origin)
+    if not dist and origin then
+        local pos = ep.position(target)
+        if pos then
+            local px, py, pz = esp_util.vec3_pos(pos)
+            if px then
+                dist = math_util.distance3(px - origin.x, py - origin.y, pz - origin.z)
+            end
+        end
     end
 
     return dist == nil or dist <= max_d
@@ -282,32 +288,33 @@ function M.bone_world(target, bone)
         return npc_head_world(target)
     end
 
-    if not target.is_alive then return nil end
+    if ep.is_alive(target) == false then return nil end
     if bone == "Closest" then return nil end
 
-    if bone == "Head" and target.head_position then
-        local pos = target.head_position
-        return { x = pos.x, y = pos.y, z = pos.z }
+    local head_pos = ep.head_position(target)
+    if bone == "Head" and head_pos then
+        local x, y, z = esp_util.vec3_pos(head_pos)
+        if x then return { x = x, y = y, z = z } end
     end
 
-    if target.character then
+    local char = ep.character(target)
+    if char then
         local part = env.safe_call(function()
-            return target.character:find_first_child(bone) or target.character:FindFirstChild(bone)
+            return char:find_first_child(bone) or char:FindFirstChild(bone)
         end)
         if part and env.is_valid(part) then
-            local ppos = part.Position or part.position
-            if ppos and ppos.x then
-                return { x = ppos.x, y = ppos.y, z = ppos.z }
-            end
+            local x, y, z = esp_util.vec3_pos(part.Position or part.position)
+            if x then return { x = x, y = y, z = z } end
         end
     end
 
-    if target.position then
-        local pos = target.position
+    local root_pos = ep.position(target)
+    if root_pos then
         if bone == "Head" then
             return nil
         end
-        return { x = pos.x, y = pos.y, z = pos.z }
+        local x, y, z = esp_util.vec3_pos(root_pos)
+        if x then return { x = x, y = y, z = z } end
     end
     return nil
 end
@@ -318,11 +325,9 @@ function M.closest_bone_world(target, cx, cy)
     if M.is_npc_target(target) then
         return npc_head_world(target)
     end
-    if target and target.get_bones_screen then
-        local ok, bones = pcall(function()
-            return target:get_bones_screen()
-        end)
-        if ok and type(bones) == "table" then
+    if target then
+        local bones = ep.get_bones_screen(target)
+        if type(bones) == "table" then
             local best_name, best_dist = nil, math.huge
             for name, entry in pairs(bones) do
                 if type(entry) == "table" and type(name) == "string" and name ~= "Closest" then
@@ -506,7 +511,7 @@ local function consider_target(target, prefix, screen_bone, use_fov, fov_px, ori
     if M.is_npc_target(target) then
         score = use_fov and fov_dist or (npc_distance(target, origin) or fov_dist)
     else
-        score = use_fov and fov_dist or (target.distance_to and origin and target:distance_to(origin) or fov_dist)
+        score = use_fov and fov_dist or (origin and (ep.distance_to(target, origin) or fov_dist) or fov_dist)
     end
 
     if score < best_score then
@@ -530,8 +535,8 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
     local target_players = settings.multi(prefix .. "targets", 1, true)
     local target_npcs = not opts.players_only and settings.multi(prefix .. "targets", 2, false)
 
-    if target_players and entity and entity.get_players then
-        for _, p in ipairs(entity.get_players()) do
+    if target_players then
+        for _, p in ipairs(ep.get_players()) do
             if player_state.is_combat_target(p) then
                 best, best_score = consider_target(
                     p, prefix, screen_bone, use_fov, fov_px, origin, filter_visible, cx, cy, best, best_score, opts

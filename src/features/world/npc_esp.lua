@@ -2,6 +2,7 @@ local settings = April.require("core.settings")
 local cache = April.require("core.cache")
 local draw_util = April.require("core.draw_util")
 local esp_util = April.require("core.esp_util")
+local ep = April.require("core.entity_props")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
 local npcs = April.require("game.npcs")
@@ -24,7 +25,7 @@ end
 local function bounds_key(entry)
     if entry.entity then
         local p = entry.entity
-        return "e:" .. tostring(p.user_id or 0) .. ":" .. tostring(p.name or "")
+        return "e:" .. tostring(ep.user_id(p) or 0) .. ":" .. tostring(ep.name(p) or "")
     end
     if entry.inst then
         return "i:" .. tostring(entry.inst.Address or entry.inst.address or entry.inst)
@@ -41,6 +42,7 @@ function M.register_menu()
     menu_util.register_keybind(T, G.WORLD, P, "NPC ESP", false, { colorpicker = { 1, 0.3, 0.3, 1 } })
     menu.add_checkbox(T, G.WORLD, "april_npc_soldiers", "Soldiers", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, menu_util.parent(P, { colorpicker = { 1, 0.5, 0.1, 1 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_heli", "Helicopters (Attack Heli)", false, menu_util.parent(P, { colorpicker = { 0.85, 0.2, 0.25, 1 } }))
     menu.add_combo(T, G.WORLD, "april_npc_box_mode", "NPC Box", { "None", "2D", "Corner" }, 1, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_health", "NPC Health Bar", true, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "NPC Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
@@ -55,7 +57,7 @@ function M.register_menu()
     menu.add_slider_int(T, G.WORLD, "april_npc_range", "NPC Range", 50, 2000, 500, root)
 
     menu_util.bind_children(P, {
-        "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode", "april_npc_health",
+        "april_npc_soldiers", "april_npc_bosses", "april_npc_heli", "april_npc_box_mode", "april_npc_health",
         "april_npc_skeleton", "april_npc_show_name", "april_npc_show_distance",
         "april_npc_show_weapon", "april_npc_range",
     })
@@ -83,21 +85,24 @@ end
 local function kind_enabled(kind)
     if kind == "soldier" then return settings.bool("april_npc_soldiers", false) end
     if kind == "boss" then return settings.bool("april_npc_bosses", false) end
+    if kind == "heli" then return settings.bool("april_npc_heli", false) end
     return false
 end
 
 local function kind_color(kind)
     if kind == "boss" then return settings.color("april_npc_bosses", { 1, 0.5, 0.1, 1 }) end
+    if kind == "heli" then return settings.color("april_npc_heli", { 0.85, 0.2, 0.25, 1 }) end
     return settings.color("april_npc_soldiers", { 1, 0.3, 0.3, 1 })
 end
 
 local function entity_addr(p)
     if not p then return nil end
-    if p.character then
-        local addr = p.character.Address or p.character.address
+    local char = ep.character(p)
+    if char then
+        local addr = char.Address or char.address
         if addr then return tostring(addr) end
     end
-    return (p.name or "?") .. ":" .. tostring(p.user_id or 0)
+    return (ep.name(p) or "?") .. ":" .. tostring(ep.user_id(p) or 0)
 end
 
 local function instance_addr(entry)
@@ -108,33 +113,39 @@ end
 local function refresh_npc_position(entry)
     if entry.entity then
         local p = entry.entity
-        if not p.is_alive then return false end
-        if p.head_position then
-            local pos = p.head_position
-            entry.lx = pos.x
-            entry.ly = pos.y
-            entry.lz = pos.z
-            return true
-        end
-        if p.position then
-            local pos = p.position
-            entry.lx = pos.x
-            entry.ly = pos.y
-            entry.lz = pos.z
+        if ep.is_alive(p) == false then return false end
+        local x, y, z = esp_util.vec3_pos(ep.head_position(p) or ep.position(p))
+        if x then
+            entry.lx, entry.ly, entry.lz = x, y, z
             return true
         end
         return false
     end
 
     if not entry or not env.is_valid(entry.inst) then return false end
-    local head = entry.head
-    if head and env.is_valid(head) then
-        local pos = head.Position or head.position
-        if pos and pos.x then
-            entry.lx = pos.x
-            entry.ly = pos.y
-            entry.lz = pos.z
-            return true
+
+    local anchor = entry.anchor or entry.head
+    if (not anchor or not env.is_valid(anchor)) and entry.inst then
+        local esp_scan = April.require("game.esp_scan")
+        anchor = esp_scan.find_main_part(entry.inst)
+        entry.anchor = anchor
+        if entry.kind ~= "heli" then
+            entry.head = anchor
+        end
+    end
+
+    if anchor and env.is_valid(anchor) then
+        local pos = anchor.Position or anchor.position
+        if pos then
+            local x = pos.x or pos.X
+            local y = pos.y or pos.Y
+            local z = pos.z or pos.Z
+            if x and y and z then
+                entry.lx = x
+                entry.ly = y
+                entry.lz = z
+                return true
+            end
         end
     end
     return false
@@ -147,26 +158,28 @@ local function collect_draw_targets(into)
     end
     local seen = {}
 
-    if entity and entity.get_players then
-        for _, p in ipairs(entity.get_players()) do
-            if p.is_local or not p.is_alive then goto continue end
+    for _, p in ipairs(ep.get_players()) do
+        if ep.is_local(p) or ep.is_alive(p) == false then goto continue end
 
-            local kind = npcs.kind(p.name)
-            if not kind then goto continue end
-            if not p.is_workspace_entity and p.user_id ~= 0 then goto continue end
+        local pname = ep.name(p)
+        local kind = npcs.kind(pname)
+        if not kind then goto continue end
+        -- Workspace NPCs: IsWorkspaceEntity, or UserId == 0
+        local uid = ep.user_id(p) or 0
+        if not ep.is_workspace_entity(p) and uid ~= 0 then goto continue end
 
-            local addr = entity_addr(p)
-            if addr and seen[addr] then goto continue end
-            if addr then seen[addr] = true end
+        local addr = entity_addr(p)
+        if addr and seen[addr] then goto continue end
+        if addr then seen[addr] = true end
 
-            out[#out + 1] = {
-                entity = p,
-                name = p.name,
-                kind = kind,
-            }
+        out[#out + 1] = {
+            entity = p,
+            name = npcs.display_name(pname, kind),
+            raw_name = pname,
+            kind = kind,
+        }
 
-            ::continue::
-        end
+        ::continue::
     end
 
     for _, entry in ipairs(cache.npcs or {}) do
@@ -209,18 +222,13 @@ local function read_npc_hp(entry)
         end
     end
     if entry.inst and env.is_valid(entry.inst) then
-        local hum = env.safe_call(function()
-            if entry.inst.find_first_child_of_class then
-                return entry.inst:find_first_child_of_class("Humanoid")
-            end
-            return entry.inst:FindFirstChild("Humanoid")
-        end)
-        if hum then
-            local hp = tonumber(hum.Health or hum.health)
-            local max_hp = tonumber(hum.MaxHealth or hum.max_health)
-            if hp and max_hp and max_hp > 0 then
-                return hp, max_hp
-            end
+        local health = npcs.read_health(entry.inst)
+        if health and health.hp and health.max_hp and health.max_hp > 0 then
+            return health.hp, health.max_hp
+        end
+        if health and health.hp and health.max_hp == nil then
+            -- Attribute Health without MaxHealth — still draw a filled bar.
+            return health.hp, health.hp
         end
     end
     return nil, nil
@@ -257,10 +265,12 @@ function M.draw()
     local show_health = settings.bool("april_npc_health", true)
     local text_size = esp_util.text_size()
     local me = env.get_local_player()
-    local me_pos = me and me.position
+    local mx, my, mz = nil, nil, nil
+    if me then
+        mx, my, mz = esp_util.vec3_pos(me.position)
+    end
     local now = tick_ms()
 
-    -- Prune stale hold cache
     for key, ent in pairs(M._bounds_cache) do
         if not ent or (now - (ent.t or 0)) > BOUNDS_TTL_MS * 3 then
             M._bounds_cache[key] = nil
@@ -268,137 +278,138 @@ function M.draw()
     end
 
     for _, entry in ipairs(frame_draw_targets()) do
-        if not kind_enabled(entry.kind) then goto continue end
+        local ok, err = pcall(function()
+            if not kind_enabled(entry.kind) then return end
 
-        if entry.entity then
-            if not entry.entity.is_alive then goto continue end
-        elseif not env.is_valid(entry.inst) then
-            goto continue
-        end
-
-        local col = kind_color(entry.kind)
-
-        local lx, ly, lz = entry.lx, entry.ly, entry.lz
-        if not lx then
-            refresh_npc_position(entry)
-            lx, ly, lz = entry.lx, entry.ly, entry.lz
-        end
-
-        if not lx and entry.entity and entry.entity.position then
-            local pos = entry.entity.position
-            lx, ly, lz = pos.x, pos.y, pos.z
-            entry.lx, entry.ly, entry.lz = lx, ly, lz
-        end
-        if not lx then goto continue end
-
-        local dist = 0
-        if me_pos then
-            local dx = lx - me_pos.x
-            local dy = ly - me_pos.y
-            local dz = lz - me_pos.z
-            local dist_sq = dx * dx + dy * dy + dz * dz
-            if dist_sq > range_sq then goto continue end
-            dist = math.sqrt(dist_sq)
-        end
-
-        local _, _, head_vis = esp_util.w2s(lx, ly, lz)
-
-        -- Skeleton is independent of box bounds (same as player ESP).
-        if settings.bool("april_npc_skeleton", false) then
-            local sk = settings.color("april_npc_skeleton", { 1, 1, 1, 0.85 })
-            if entry.entity and entry.entity.get_bones_screen then
-                esp_util.draw_player_skeleton(entry.entity, sk, 1)
-            elseif entry.inst then
-                esp_util.draw_model_skeleton(entry.inst, sk, 1)
-            end
-        end
-
-        local bounds = resolve_npc_bounds(entry, dist)
-        if not esp_util.bounds_usable(bounds) then
-            if not head_vis then goto continue end
-            local size = esp_util.dist_point_size(dist)
-            bounds = esp_util.guard_tiny_bounds(
-                esp_util.point_screen_bounds(lx, ly, lz, size),
-                dist
-            )
-            if not esp_util.bounds_usable(bounds) then goto continue end
-        elseif not head_vis then
-            local sw, sh = draw_util.screen_size()
-            local cx = bounds.x + bounds.w * 0.5
-            local cy = bounds.y + bounds.h * 0.5
-            local margin = 120
-            if cx < -margin or cy < -margin or cx > sw + margin or cy > sh + margin then
-                goto continue
-            end
-        end
-
-        local ts = text_size
-        if dist > 250 then
-            ts = math.max(11, ts - 1)
-        end
-
-        local cx = bounds.x + bounds.w * 0.5
-        local label = entry.name or "NPC"
-        local show_name = settings.bool("april_npc_show_name", true)
-        local show_dist = settings.bool("april_npc_show_distance", true)
-        local show_wpn = settings.bool("april_npc_show_weapon", false)
-
-        -- Top labels match player ESP (name / weapon above, distance below).
-        local top = {}
-        if show_name then
-            top[#top + 1] = {
-                text = label,
-                col = settings.color("april_npc_show_name", col),
-            }
-        end
-        if show_wpn then
-            local wpn = nil
             if entry.entity then
-                pcall(function() wpn = player_gear.held_name(entry.entity) end)
+                if ep.is_alive(entry.entity) == false then return end
+            elseif not env.is_valid(entry.inst) then
+                return
             end
-            if (not wpn or wpn == "") and entry.inst then
-                pcall(function() wpn = player_gear.held_name_from_character(entry.inst) end)
+
+            local col = kind_color(entry.kind)
+
+            local lx, ly, lz = entry.lx, entry.ly, entry.lz
+            if not lx then
+                refresh_npc_position(entry)
+                lx, ly, lz = entry.lx, entry.ly, entry.lz
             end
-            if wpn and wpn ~= "" then
+
+            if not lx and entry.entity then
+                lx, ly, lz = esp_util.vec3_pos(ep.head_position(entry.entity) or ep.position(entry.entity))
+                if lx then
+                    entry.lx, entry.ly, entry.lz = lx, ly, lz
+                end
+            end
+            if not lx then return end
+
+            local dist = 0
+            if mx then
+                local dx = lx - mx
+                local dy = ly - my
+                local dz = lz - mz
+                local dist_sq = dx * dx + dy * dy + dz * dz
+                if dist_sq > range_sq then return end
+                dist = math.sqrt(dist_sq)
+            end
+
+            local _, _, head_vis = esp_util.w2s(lx, ly, lz)
+
+            if entry.kind ~= "heli" and settings.bool("april_npc_skeleton", false) then
+                local sk = settings.color("april_npc_skeleton", { 1, 1, 1, 0.85 })
+                if entry.entity and ep.get_bones_screen(entry.entity) then
+                    esp_util.draw_player_skeleton(entry.entity, sk, 1)
+                elseif entry.inst then
+                    esp_util.draw_model_skeleton(entry.inst, sk, 1)
+                end
+            end
+
+            local bounds = resolve_npc_bounds(entry, dist)
+            if not esp_util.bounds_usable(bounds) then
+                if not head_vis then return end
+                local size = esp_util.dist_point_size(dist)
+                bounds = esp_util.guard_tiny_bounds(
+                    esp_util.point_screen_bounds(lx, ly, lz, size),
+                    dist
+                )
+                if not esp_util.bounds_usable(bounds) then return end
+            elseif not head_vis then
+                local sw, sh = draw_util.screen_size()
+                local bcx = bounds.x + bounds.w * 0.5
+                local bcy = bounds.y + bounds.h * 0.5
+                local margin = 120
+                if bcx < -margin or bcy < -margin or bcx > sw + margin or bcy > sh + margin then
+                    return
+                end
+            end
+
+            local ts = text_size
+            if dist > 250 then
+                ts = math.max(11, ts - 1)
+            end
+
+            local cx = bounds.x + bounds.w * 0.5
+            local label = entry.name or "NPC"
+            local show_name = settings.bool("april_npc_show_name", true)
+            local show_dist = settings.bool("april_npc_show_distance", true)
+            local show_wpn = settings.bool("april_npc_show_weapon", false)
+
+            local top = {}
+            if show_name then
                 top[#top + 1] = {
-                    text = tostring(wpn),
-                    col = settings.color("april_npc_show_weapon", { 0.82, 0.84, 0.88, 0.92 }),
+                    text = label,
+                    col = settings.color("april_npc_show_name", col),
                 }
             end
-        end
-
-        if #top > 0 then
-            local ty = bounds.y - 4 - (#top * (ts + 1))
-            for i = 1, #top do
-                draw_util.text_centered(cx, ty + (i - 1) * (ts + 1), top[i].text, top[i].col, ts)
+            if show_wpn then
+                local wpn = nil
+                if entry.entity then
+                    pcall(function() wpn = player_gear.held_name(entry.entity) end)
+                end
+                if (not wpn or wpn == "") and entry.inst then
+                    pcall(function() wpn = player_gear.held_name_from_character(entry.inst) end)
+                end
+                if wpn and wpn ~= "" then
+                    top[#top + 1] = {
+                        text = tostring(wpn),
+                        col = settings.color("april_npc_show_weapon", { 0.82, 0.84, 0.88, 0.92 }),
+                    }
+                end
             end
-        end
 
-        -- Same box + health path as player ESP (1px-gap custom bar via health_bar_on_box).
-        if box_mode == 1 then
-            draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 0)
-        elseif box_mode == 2 then
-            draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 1)
-        end
-
-        if show_health then
-            local hp, max_hp = read_npc_hp(entry)
-            if hp and max_hp then
-                draw_util.health_bar_on_box(bounds, hp, max_hp)
+            if #top > 0 then
+                local ty = bounds.y - 4 - (#top * (ts + 1))
+                for i = 1, #top do
+                    draw_util.text_centered(cx, ty + (i - 1) * (ts + 1), top[i].text, top[i].col, ts)
+                end
             end
-        end
 
-        if show_dist and me_pos then
-            draw_util.text_centered(
-                cx,
-                bounds.y + bounds.h + 3,
-                string.format("%dm", math.floor(dist + 0.5)),
-                settings.color("april_npc_show_distance", { 0.82, 0.84, 0.88, 0.92 }),
-                ts
-            )
-        end
+            if box_mode == 1 then
+                draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 0)
+            elseif box_mode == 2 then
+                draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 1)
+            end
 
-        ::continue::
+            if show_health then
+                local hp, max_hp = read_npc_hp(entry)
+                if hp and max_hp then
+                    draw_util.health_bar_on_box(bounds, hp, max_hp)
+                end
+            end
+
+            if show_dist and mx then
+                draw_util.text_centered(
+                    cx,
+                    bounds.y + bounds.h + 3,
+                    string.format("%dm", math.floor(dist + 0.5)),
+                    settings.color("april_npc_show_distance", { 0.82, 0.84, 0.88, 0.92 }),
+                    ts
+                )
+            end
+        end)
+        if not ok then
+            April.require("core.debug").error_once("npc_esp:" .. tostring(entry and entry.name), err)
+        end
     end
 end
 

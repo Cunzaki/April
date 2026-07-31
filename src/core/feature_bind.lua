@@ -12,28 +12,16 @@ local migrated = {}
 local function migrate_mode(mode_id)
     if not mode_id or migrated[mode_id] then return end
     migrated[mode_id] = true
-    -- Legacy 2-mode storage: 0 = Toggle, 1 = Hold
-    -- New: 0 = Always, 1 = Hold, 2 = Toggle
-    -- One-shot per mode id so a later Always (0) choice is kept.
+    -- Legacy 0→2 (Toggle) migration removed: ESP defaults are Always (0) now,
+    -- and rewriting 0→2 made "Player ESP" look enabled while never drawing under Hold/Toggle quirks.
     local flag = mode_id .. "_v3m"
     local state = nil
     pcall(function()
         state = April.require("ui.gs_state")
     end)
-    if state and state.get(flag) then return end
-
-    local raw = tonumber(settings.get(mode_id, nil))
-    if raw == 0 then
-        if menu and menu.set then
-            pcall(menu.set, mode_id, 2)
-        end
-        if state then state.set(mode_id, 2) end
-    end
     if state then
         state.define(flag, true)
         state.set(flag, true)
-    elseif menu and menu.set then
-        pcall(menu.set, flag, true)
     end
 end
 
@@ -97,9 +85,9 @@ end
 
 function M.mode_index(id)
     local e = registry[id]
-    if not e then return 2 end
+    if not e then return 0 end
     migrate_mode(e.mode_id)
-    return settings.combo_index(e.mode_id, M.MODES, 2)
+    return settings.combo_index(e.mode_id, M.MODES, 0)
 end
 
 function M.mode_name(id)
@@ -139,7 +127,8 @@ function M.active(id)
     if mode == 1 then -- Hold
         if not M.armed(id) then return false end
         local key = M.get_key(id)
-        if key <= 0 then return false end
+        -- No key bound: treat Hold like Always so ESP doesn't silently vanish.
+        if key <= 0 then return true end
         return input and input.is_key_down and input.is_key_down(key)
     end
 

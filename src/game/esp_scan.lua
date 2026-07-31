@@ -31,6 +31,12 @@ function M.find_main_part(model)
     end)
     if hrp and M.is_part(hrp) then return hrp end
 
+    -- Vehicles / AttackHeli often expose PrimaryPart instead of Main.
+    local primary = env.safe_call(function()
+        return model.PrimaryPart or model.primary_part
+    end)
+    if primary and M.is_part(primary) then return primary end
+
     local children = env.safe_call(function() return model:get_children() end) or {}
     for _, child in ipairs(children) do
         if M.is_part(child) then return child end

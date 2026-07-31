@@ -293,7 +293,8 @@ function M.register_keybind(T, G, id, label, default, extra)
 
     local mode_id = id .. "_mode"
     local mode_label = label .. " Bind Mode"
-    menu.add_combo(T, G, mode_id, mode_label, { "Always", "Hold", "Toggle" }, 2, M.parent(id))
+    -- Default Always so enabling the checkbox draws immediately (Hold with no key = invisible).
+    menu.add_combo(T, G, mode_id, mode_label, { "Always", "Hold", "Toggle" }, 0, M.parent(id))
 
     April.require("core.feature_bind").register({
         id = id,

@@ -8,10 +8,20 @@ function M.white(r, g, b, a)
 end
 
 function M.text_centered(x, y, text, col, size)
-    if not draw or not draw.text or not draw.get_text_size then return end
+    if not draw then return end
+    pcall(function()
+        April.require("core.api_aliases").apply()
+    end)
+    local text_fn = draw.text or draw.Text
+    local size_fn = draw.get_text_size or draw.GetTextSize
+    if not text_fn then return end
     text = text_util.sanitize(text)
-    local tw, th = draw.get_text_size(text, size or 14)
-    draw.text(x - tw * 0.5, y, text, col, size or 14)
+    size = size or 14
+    local tw = 0
+    if size_fn then
+        tw = select(1, size_fn(text, size)) or 0
+    end
+    text_fn(x - tw * 0.5, y, text, col, size)
 end
 
 -- Stronger silhouette for far ESP (extra soft shadow under auto outline).
@@ -28,8 +38,13 @@ function M.text_centered_strong(x, y, text, col, size)
 end
 
 function M.text_outlined(x, y, text, col, size)
-    if not draw or not draw.text then return end
-    draw.text(x, y, text_util.sanitize(text), col, size or 14)
+    if not draw then return end
+    pcall(function()
+        April.require("core.api_aliases").apply()
+    end)
+    local text_fn = draw.text or draw.Text
+    if not text_fn then return end
+    text_fn(x, y, text_util.sanitize(text), col, size or 14)
 end
 
 function M.text(x, y, text, col, size)
@@ -38,12 +53,23 @@ end
 
 function M.box_esp(x, y, w, h, col, style)
     if not draw then return end
-    if style == 1 and draw.corner_box then
-        draw.corner_box(x, y, w, h, col)
+    pcall(function()
+        April.require("core.api_aliases").apply()
+    end)
+    local corner = draw.corner_box or draw.CornerBox
+    local box = draw.box or draw.Box
+    local rect = draw.rect or draw.Rect
+    if style == 1 and corner then
+        corner(x, y, w, h, col)
         return
     end
-    if draw.box then
-        draw.box(x, y, w, h, col, 0, style or 0)
+    -- New API: draw.Box(x, y, w, h, color, style?)
+    if box then
+        box(x, y, w, h, col, style or 0)
+        return
+    end
+    if rect then
+        rect(x, y, w, h, col)
     end
 end
 
@@ -71,7 +97,12 @@ end
 -- Pixel-precise HP bar. Native draw.health_bar has built-in left padding so it
 -- always leaves a gap next to our box — do not use it for ESP.
 function M.health_bar_nice(x, y, h, hp, max_hp, bar_w)
-    if not draw or not draw.rect_filled then return end
+    if not draw then return end
+    pcall(function()
+        April.require("core.api_aliases").apply()
+    end)
+    local fill = draw.rect_filled or draw.RectFilled
+    if not fill then return end
     if not hp or not max_hp or max_hp <= 0 then return end
 
     h = math.max(4, h)
@@ -80,7 +111,7 @@ function M.health_bar_nice(x, y, h, hp, max_hp, bar_w)
     local fill_h = math.max(0, math.floor(h * pct + 0.5))
 
     -- Empty track
-    draw.rect_filled(x, y, bar_w, h, { 0.08, 0.08, 0.08, 0.85 })
+    fill(x, y, bar_w, h, { 0.08, 0.08, 0.08, 0.85 })
 
     if fill_h > 0 then
         local r, g, b
@@ -91,7 +122,7 @@ function M.health_bar_nice(x, y, h, hp, max_hp, bar_w)
             local t = pct * 2
             r, g, b = 1, t * 0.9, 0.12
         end
-        draw.rect_filled(x, y + (h - fill_h), bar_w, fill_h, { r, g, b, 1 })
+        fill(x, y + (h - fill_h), bar_w, fill_h, { r, g, b, 1 })
     end
 
     return bar_w
@@ -116,8 +147,10 @@ function M.health_bar_on_box(bounds, hp, max_hp)
 end
 
 function M.line(x1, y1, x2, y2, col, thick)
-    if not draw or not draw.line then return end
-    draw.line(x1, y1, x2, y2, col, thick or 1)
+    if not draw then return end
+    local line = draw.line or draw.Line
+    if not line then return end
+    line(x1, y1, x2, y2, col, thick or 1)
 end
 
 --- Screen snapline from bottom-center to target (classic ESP style).
@@ -148,10 +181,13 @@ end
 
 function M.screen_size()
     local w, h
-    if draw and draw.get_screen_size then
-        w, h = draw.get_screen_size()
-    elseif utility and utility.get_screen_size then
-        w, h = utility.get_screen_size()
+    if draw then
+        local fn = draw.get_screen_size or draw.GetScreenSize
+        if fn then w, h = fn() end
+    end
+    if (not w or w <= 0) and utility then
+        local fn = utility.get_screen_size or utility.GetScreenSize
+        if fn then w, h = fn() end
     end
     if not w or w <= 0 then w = 1920 end
     if not h or h <= 0 then h = 1080 end

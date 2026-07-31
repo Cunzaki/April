@@ -1,5 +1,6 @@
 local settings = April.require("core.settings")
 local env = April.require("core.env")
+local ep = April.require("core.entity_props")
 local draw_util = April.require("core.draw_util")
 local esp_util = April.require("core.esp_util")
 local menu_util = April.require("core.menu_util")
@@ -51,7 +52,7 @@ local function tick_ms()
 end
 
 local function cache_key(p)
-    return tostring(p.user_id or 0) .. ":" .. tostring(p.name or "")
+    return tostring(ep.user_id(p) or 0) .. ":" .. tostring(ep.name(p) or "")
 end
 
 local function held_weapon_name(p)
@@ -93,9 +94,12 @@ local function filter_opts()
 end
 
 local function passes_player_filters(p, opts)
-    if not p or p.is_local then return false end
-    if p.is_workspace_entity or (p.user_id or 0) == 0 then return false end
-    if npcs.kind(p.name) then return false end
+    if not p or ep.is_local(p) then return false end
+    -- Workspace NPCs only. Do NOT use UserId==0: Vector's entity cache currently
+    -- reports UserId=0 for every real player (API regression; w2s/bounds still work).
+    if ep.is_workspace_entity(p) then return false end
+    local pname = ep.name(p)
+    if npcs.kind(pname) then return false end
     if not player_state.is_combat_target(p) then return false end
     if opts.team and not player_state.passes_team_check(p) then return false end
     if opts.downed ~= 1 and not player_state.passes_downed_check(p, opts.downed) then
@@ -266,9 +270,26 @@ end
 function M.update(_dt)
 end
 
+local function player_world_pos(p)
+    local x, y, z = esp_util.vec3_pos(ep.head_position(p))
+    if x then return x, y, z end
+    return esp_util.vec3_pos(ep.position(p))
+end
+
+local function me_world_pos(me)
+    if not me then return nil end
+    local x, y, z = esp_util.vec3_pos(ep.position(me) or ep.head_position(me))
+    if x then return { x = x, y = y, z = z } end
+    return nil
+end
+
 function M.draw()
     if not settings.enabled(P) then return end
-    if not entity or not entity.get_players then return end
+    ep.ensure_api_aliases()
+    local players = ep.get_players()
+    if #players == 0 and not (entity and (entity.get_players or entity.GetPlayers)) then
+        return
+    end
 
     local now = tick_ms()
     prune_bounds_cache(now)
@@ -277,8 +298,7 @@ function M.draw()
     local range = settings.num(ID_RANGE, 500)
     local range_sq = range * range
     local box_mode = settings.num(ID_BOX, 1)
-    local me = env.get_local_player()
-    local me_pos = me and me.position
+    local me_pos = me_world_pos(env.get_local_player())
     local opts = filter_opts()
 
     local show_health = settings.bool(ID_HEALTH, true)
@@ -300,105 +320,135 @@ function M.draw()
         revive = settings.color(ID_FLAG_REVIVE, DEFAULT_FLAG.REVIVE),
     }
 
-    for _, p in ipairs(entity.get_players()) do
-        if not passes_player_filters(p, opts) then goto continue end
+    for _, p in ipairs(players) do
+        -- Isolate per-player errors so one bad snapshot cannot blank all ESP.
+        local ok, err = pcall(function()
+            if not passes_player_filters(p, opts) then return end
 
-        local pos = p.head_position or p.position
-        if not pos then goto continue end
+            local px, py, pz = player_world_pos(p)
+            if not px then return end
+            local pos = { x = px, y = py, z = pz }
 
-        local dist = 0
-        if me_pos then
-            local dx = (pos.x or 0) - me_pos.x
-            local dy = (pos.y or 0) - me_pos.y
-            local dz = (pos.z or 0) - me_pos.z
-            local dist_sq = dx * dx + dy * dy + dz * dz
-            if dist_sq > range_sq then goto continue end
-            dist = math.sqrt(dist_sq)
-        end
-
-        local snap = player_state.esp_state(p)
-        local col = resolve_color(p)
-
-        -- Skeleton uses bone projections directly (stable at range) — draw even if box fails.
-        if show_skel then
-            if p.get_bones_screen then
-                esp_util.draw_player_skeleton(p, skel_col, 1)
-            elseif p.character then
-                esp_util.draw_model_skeleton(p.character, skel_col, 1)
+            local dist = 0
+            if me_pos then
+                local dx = px - me_pos.x
+                local dy = py - me_pos.y
+                local dz = pz - me_pos.z
+                local dist_sq = dx * dx + dy * dy + dz * dz
+                if dist_sq > range_sq then return end
+                dist = math.sqrt(dist_sq)
             end
-        end
 
-        local bounds = resolve_bounds(p, pos, dist)
-        if not is_on_screen(bounds, pos) then
-            goto continue
-        end
-        if not esp_util.bounds_usable(bounds) then
-            goto continue
-        end
+            local snap = nil
+            pcall(function()
+                snap = player_state.esp_state(p)
+            end)
+            local col = resolve_color(p)
 
-        local ts = esp_util.text_size()
-        if dist > 250 then
-            ts = math.max(11, ts - 1)
-        end
-
-        local cx = bounds.x + bounds.w * 0.5
-
-        -- Top: name + weapon only (never clan - clan is on the right with tags)
-        local top = {}
-        if show_name then
-            top[#top + 1] = { text = p.name or "?", col = name_col }
-        end
-        if show_wpn then
-            local wpn = held_weapon_name(p)
-            if wpn and wpn ~= "" then
-                top[#top + 1] = { text = tostring(wpn), col = wpn_col }
+            if show_skel then
+                local bones = ep.get_bones_screen(p)
+                if bones then
+                    esp_util.draw_player_skeleton(p, skel_col, 1)
+                else
+                    local char = ep.character(p)
+                    if char then
+                        esp_util.draw_model_skeleton(char, skel_col, 1)
+                    end
+                end
             end
-        end
 
-        if #top > 0 then
-            local ty = bounds.y - 4 - (#top * (ts + 1))
-            for i = 1, #top do
-                draw_util.text_centered(cx, ty + (i - 1) * (ts + 1), top[i].text, top[i].col, ts)
+            -- Prefer native GetBounds (PascalCase API) before our projection fallbacks.
+            local bounds = ep.get_bounds(p)
+            if not esp_util.bounds_usable(bounds) then
+                bounds = resolve_bounds(p, pos, dist)
             end
-        end
+            if not is_on_screen(bounds, pos) then
+                local bx, by, bvis = ep.get_bone_screen(p, "Head")
+                if bvis then
+                    local size = esp_util.dist_point_size(dist)
+                    bounds = {
+                        x = bx - size * 0.5,
+                        y = by - size,
+                        w = size,
+                        h = size * 2,
+                        valid = true,
+                    }
+                else
+                    return
+                end
+            end
+            if not esp_util.bounds_usable(bounds) then
+                local size = esp_util.dist_point_size(dist)
+                bounds = esp_util.guard_tiny_bounds(
+                    esp_util.point_screen_bounds(px, py, pz, size),
+                    dist
+                )
+            end
+            if not esp_util.bounds_usable(bounds) then return end
 
-        -- Right: clan tag + attribute flags (SZ / DOWN / staff / revive)
-        local side = collect_side_tags(p, snap, show_clan, clan_menu_col, flag_cols)
-        if #side > 0 then
-            local rx = bounds.x + bounds.w + 4
-            local ry = bounds.y
-            for i = 1, #side do
-                draw_util.text(
-                    rx,
-                    ry + (i - 1) * (ts + 1),
-                    side[i].text,
-                    side[i].col,
+            local ts = esp_util.text_size()
+            if dist > 250 then
+                ts = math.max(11, ts - 1)
+            end
+
+            local cx = bounds.x + bounds.w * 0.5
+
+            local top = {}
+            if show_name then
+                top[#top + 1] = { text = ep.name(p) or "?", col = name_col }
+            end
+            if show_wpn then
+                local wpn = held_weapon_name(p) or ep.tool_name(p)
+                if wpn and wpn ~= "" then
+                    top[#top + 1] = { text = tostring(wpn), col = wpn_col }
+                end
+            end
+
+            if #top > 0 then
+                local ty = bounds.y - 4 - (#top * (ts + 1))
+                for i = 1, #top do
+                    draw_util.text_centered(cx, ty + (i - 1) * (ts + 1), top[i].text, top[i].col, ts)
+                end
+            end
+
+            local side = collect_side_tags(p, snap, show_clan, clan_menu_col, flag_cols)
+            if #side > 0 then
+                local rx = bounds.x + bounds.w + 4
+                local ry = bounds.y
+                for i = 1, #side do
+                    draw_util.text(
+                        rx,
+                        ry + (i - 1) * (ts + 1),
+                        side[i].text,
+                        side[i].col,
+                        ts
+                    )
+                end
+            end
+
+            if box_mode == 1 then
+                draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 0)
+            elseif box_mode == 2 then
+                draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 1)
+            end
+
+            if show_health then
+                draw_util.health_bar_on_box(bounds, ep.health(p), ep.max_health(p))
+            end
+
+            if show_dist then
+                draw_util.text_centered(
+                    cx,
+                    bounds.y + bounds.h + 3,
+                    string.format("%dm", math.floor(dist + 0.5)),
+                    dist_col,
                     ts
                 )
             end
+        end)
+        if not ok then
+            April.require("core.debug").error_once("player_esp:" .. tostring(p and ep.name(p)), err)
         end
-
-        if box_mode == 1 then
-            draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 0)
-        elseif box_mode == 2 then
-            draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 1)
-        end
-
-        if show_health then
-            draw_util.health_bar_on_box(bounds, p.health, p.max_health)
-        end
-
-        if show_dist then
-            draw_util.text_centered(
-                cx,
-                bounds.y + bounds.h + 3,
-                string.format("%dm", math.floor(dist + 0.5)),
-                dist_col,
-                ts
-            )
-        end
-
-        ::continue::
     end
 end
 

@@ -41,13 +41,17 @@ M.SKELETON_PAIRS = {
 }
 
 -- Must be declared before any M.* that closes over it (Lua local scoping).
+-- Vector3 userdata from the new API exposes .X/.Y/.Z (PascalCase).
 local function vec3_pos(v)
     if not v then return nil end
     if type(v) == "number" then return nil end
-    local x = tonumber(v.x or v.X or v[1])
-    local y = tonumber(v.y or v.Y or v[2])
-    local z = tonumber(v.z or v.Z or v[3])
-    if not x or not y or not z then return nil end
+    local x, y, z
+    local ok = pcall(function()
+        x = tonumber(v.x or v.X or v[1])
+        y = tonumber(v.y or v.Y or v[2])
+        z = tonumber(v.z or v.Z or v[3])
+    end)
+    if not ok or not x or not y or not z then return nil end
     return x, y, z
 end
 M.vec3_pos = vec3_pos
@@ -56,20 +60,62 @@ function M.text_size()
     return settings.num("april_esp_text_size", 13)
 end
 
+local function normalize_w2s(a, b, c)
+    -- Multi-return: sx, sy, visible
+    if type(a) == "number" and type(b) == "number" then
+        local vis = c
+        if vis == nil then vis = true end
+        if vis == 0 or vis == false then return a, b, false end
+        return a, b, vis and true or false
+    end
+    -- Table return: {x,y,visible} / {X,Y,Visible} / {sx,sy,on_screen}
+    if type(a) == "table" then
+        local sx = tonumber(a.x or a.X or a.sx or a[1])
+        local sy = tonumber(a.y or a.Y or a.sy or a[2])
+        local vis = a.visible
+        if vis == nil then vis = a.Visible end
+        if vis == nil then vis = a.on_screen end
+        if vis == nil then vis = a[3] end
+        if vis == nil then vis = true end
+        if not sx or not sy then return 0, 0, false end
+        if vis == 0 or vis == false then return sx, sy, false end
+        return sx, sy, true
+    end
+    return 0, 0, false
+end
+
+local function call_w2s(fn, x, y, z)
+    if not fn then return 0, 0, false end
+    -- New API: utility.WorldToScreen(vec3) or (x,y,z)
+    local ok, a, b, c = pcall(fn, x, y, z)
+    if ok then return normalize_w2s(a, b, c) end
+    return 0, 0, false
+end
+
 function M.w2s(x, y, z)
+    -- Allow passing a Vector3 / vector-like value as the first arg.
+    if y == nil and x ~= nil then
+        local vx, vy, vz = vec3_pos(x)
+        if vx then
+            x, y, z = vx, vy, vz
+        end
+    end
     x = tonumber(x)
     y = tonumber(y)
     z = tonumber(z)
     if not x or not y or not z then
         return 0, 0, false
     end
-    if draw and draw.world_to_screen then
-        return draw.world_to_screen(x, y, z)
-    end
-    if utility and utility.world_to_screen then
-        return utility.world_to_screen(x, y, z)
-    end
-    return 0, 0, false
+
+    local draw_fn = draw and (draw.world_to_screen or draw.WorldToScreen or draw.worldToScreen)
+    local sx, sy, vis = call_w2s(draw_fn, x, y, z)
+    if vis then return sx, sy, true end
+
+    local util_fn = utility and (utility.world_to_screen or utility.WorldToScreen or utility.worldToScreen)
+    sx, sy, vis = call_w2s(util_fn, x, y, z)
+    if vis then return sx, sy, true end
+
+    return sx or 0, sy or 0, false
 end
 
 function M.draw_skeleton_bones(bones, col, thick)
@@ -93,8 +139,9 @@ function M.draw_skeleton_bones(bones, col, thick)
 end
 
 function M.draw_player_skeleton(player, col, thick)
-    if not player or not player.get_bones_screen then return end
-    local bones = player:get_bones_screen()
+    if not player then return end
+    local ep = April.require("core.entity_props")
+    local bones = ep.get_bones_screen(player)
     if not bones then return end
     M.draw_skeleton_bones(bones, col, thick)
 end
@@ -168,16 +215,17 @@ end
 
 -- Build screen AABB from entity bone projections (same source as skeleton = stable).
 function M.bones_screen_bounds(player)
-    if not player or not player.get_bones_screen then return nil end
-    local bones = player:get_bones_screen()
+    if not player then return nil end
+    local ep = April.require("core.entity_props")
+    local bones = ep.get_bones_screen(player)
     if not bones then return nil end
 
     local min_x, min_y, max_x, max_y
     local any = false
     for _, pt in pairs(bones) do
         if pt then
-            local x = pt.x or pt[1]
-            local y = pt.y or pt[2]
+            local x = tonumber(pt.x or pt.X or pt[1])
+            local y = tonumber(pt.y or pt.Y or pt[2])
             if x and y then
                 any = true
                 min_x = min_x and math.min(min_x, x) or x
@@ -303,10 +351,11 @@ function M.head_feet_screen_bounds(player, opts)
     if not player then return nil end
     opts = opts or {}
     local env = April.require("core.env")
+    local ep = April.require("core.entity_props")
 
-    local hx, hy, hz = M.vec3_pos(player.head_position)
+    local hx, hy, hz = M.vec3_pos(ep.head_position(player))
     if not hx then
-        local char = player.character
+        local char = ep.character(player)
         if char and env.is_valid(char) then
             local head = env.safe_call(function()
                 return char:find_first_child("Head") or char:FindFirstChild("Head")
@@ -317,8 +366,9 @@ function M.head_feet_screen_bounds(player, opts)
         end
     end
     if not hx then
-        if player.character then
-            return head_feet_from_model(player.character, opts)
+        local char = ep.character(player)
+        if char then
+            return head_feet_from_model(char, opts)
         end
         return nil
     end
@@ -327,7 +377,7 @@ function M.head_feet_screen_bounds(player, opts)
     if not vis then return nil end
 
     local fx, fy, fz
-    local char = player.character
+    local char = ep.character(player)
     if char and env.is_valid(char) then
         for _, name in ipairs({ "LeftFoot", "RightFoot", "LeftLowerLeg", "RightLowerLeg" }) do
             local foot = env.safe_call(function()
@@ -340,7 +390,7 @@ function M.head_feet_screen_bounds(player, opts)
         end
     end
     if not fx then
-        fx, fy, fz = M.vec3_pos(player.position)
+        fx, fy, fz = M.vec3_pos(ep.position(player))
         if fx then fy = fy - 2.8 end
     end
     if not fx then
@@ -359,19 +409,24 @@ function M.head_feet_screen_bounds(player, opts)
     )
 end
 
--- Stable character box: bones (skeleton source) -> model -> head/feet -> get_bounds last.
--- Preferring bones avoids far-range get_bounds flicker that skips box/name/health.
+-- Stable character box: get_bounds -> bones -> model -> head/feet -> point.
 function M.player_screen_bounds(player, opts)
     if not player then return nil end
     opts = opts or {}
     local dist = opts.dist
+    local ep = April.require("core.entity_props")
+
+    local gb = ep.get_bounds(player)
+    if M.bounds_usable(gb) then
+        return M.guard_tiny_bounds(gb, dist)
+    end
 
     local b = M.bones_screen_bounds(player)
     if M.bounds_usable(b) then
         return M.guard_tiny_bounds(b, dist)
     end
 
-    local model = player.character
+    local model = ep.character(player)
     if model then
         b = M.model_screen_bounds(model)
         if M.bounds_usable(b) then
@@ -384,10 +439,12 @@ function M.player_screen_bounds(player, opts)
         return M.guard_tiny_bounds(b, dist)
     end
 
-    if player.get_bounds then
-        local gb = player:get_bounds()
-        if M.bounds_usable(gb) then
-            return M.guard_tiny_bounds(gb, dist)
+    local hx, hy, hz = M.vec3_pos(ep.head_position(player))
+    if hx then
+        local size = opts.point_size or M.dist_point_size(dist)
+        b = M.point_screen_bounds(hx, hy, hz, size)
+        if M.bounds_usable(b) then
+            return M.guard_tiny_bounds(b, dist)
         end
     end
 
@@ -440,8 +497,9 @@ function M.draw_model_skeleton(model, col, thick)
         end)
         if not part or not env.is_valid(part) then return end
         local pos = part.Position or part.position
-        if not pos or pos.x == nil then return end
-        local sx, sy, vis = M.w2s(pos.x, pos.y, pos.z)
+        local px, py, pz = M.vec3_pos(pos)
+        if not px then return end
+        local sx, sy, vis = M.w2s(px, py, pz)
         if vis then screen[name] = { x = sx, y = sy } end
     end
 

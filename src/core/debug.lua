@@ -62,10 +62,14 @@ function M.register_frame_hook(fn)
         return false
     end
 
+    -- New Vector API: OnFrame / onFrame / on_frame all accepted.
+    _G.OnFrame = fn
+    _G.onFrame = fn
     _G.on_frame = fn
 
     if callbacks and callbacks.add then
-        callbacks.add("on_frame", fn)
+        pcall(callbacks.add, "on_frame", fn)
+        pcall(callbacks.add, "OnFrame", fn)
     end
 
     if draw then

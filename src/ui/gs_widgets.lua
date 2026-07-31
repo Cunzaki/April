@@ -1217,7 +1217,7 @@ function M.keybind(x, y, w, id, label, default_on)
     state.define(id, default_on == true)
     local mode_id = id .. "_mode"
     local hide_id = id .. "_hide_kb"
-    state.define(mode_id, 2) -- default Toggle (Always=0, Hold=1, Toggle=2)
+    state.define(mode_id, 0) -- default Always (Always=0, Hold=1, Toggle=2)
     state.define(hide_id, false)
 
     local h = theme.ROW_H

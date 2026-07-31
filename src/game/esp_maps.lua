@@ -98,6 +98,7 @@ M.LOOT_MAP = {
     ["Wooden Boat"] = "april_wooden_boat",
     ["Military Boat"] = "april_military_boat",
     ["Salvaged Flycopter"] = "april_flycopter",
+    ["Heli Crate"] = "april_heli_crate",
 }
 
 M.LOOT_TOGGLES = {
@@ -119,6 +120,7 @@ M.LOOT_TOGGLES = {
     { id = "april_wooden_boat", label = "Wooden Boat", color = { 0.55, 0.35, 0.15, 1 } },
     { id = "april_military_boat", label = "Military Boat", color = { 0.35, 0.45, 0.35, 1 } },
     { id = "april_flycopter", label = "Salvaged Flycopter", color = { 0.6, 0.6, 0.65, 1 } },
+    { id = "april_heli_crate", label = "Heli Crate", color = { 0.75, 0.25, 0.2, 1 } },
 }
 
 M.LOOT_SCAN_FOLDERS = { "loners", "vegetation", "military", "events", "monuments" }

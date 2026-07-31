@@ -1,12 +1,12 @@
 --[[
-    April Fallen — Fallen Survival for Project Vector
+    April Fallen - Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-23T23:19:06.366Z
-    UI: custom Gamesense menu (INSERT) — Vector menu tabs disabled
+    Built: 2026-07-31T23:46:58.618Z
+    UI: custom Gamesense menu (INSERT) - Vector menu tabs disabled
 ]]
 
 April = {
-    version = "3.97.3",
+    version = "3.98.5",
     debug = false,
     _mods = {},
     bundled = true,
@@ -24,7 +24,7 @@ function April.require(path)
 end
 
 
--- ── core/env.lua ──
+-- â”€â”€ core/env.lua â”€â”€
 April._mods["core.env"] = (function()
 local M = {}
 
@@ -47,21 +47,65 @@ function M.safe_call(fn, ...)
     return nil
 end
 
+-- Identity still readable on a live handle. Used when utility.is_valid false-negatives
+-- (seen on Player instances and, post-update / Potassium, some workspace Folders/Models).
+local function has_identity(inst)
+    local ok, cn = pcall(function()
+        return inst.ClassName or inst.class_name
+    end)
+    if ok and cn ~= nil and cn ~= "" then return true end
+    local ok2, name = pcall(function()
+        return inst.Name or inst.name
+    end)
+    return ok2 and name ~= nil and name ~= ""
+end
+
 function M.is_valid(inst)
-    if not inst or not utility then return false end
-    return utility.is_valid(inst)
+    if not inst then return false end
+
+    if utility and utility.is_valid then
+        local ok, valid = pcall(utility.is_valid, inst)
+        if ok and valid == true then
+            return true
+        end
+        -- False-negative guard: prune_invalid + folder walks used to wipe all ESP
+        -- when is_valid rejected still-usable workspace instances.
+        if ok and valid == false then
+            return has_identity(inst)
+        end
+    end
+
+    return has_identity(inst)
 end
 
 function M.get_workspace()
     if game and game.workspace then return game.workspace end
+    local via_service = M.safe_call(function()
+        if game.get_service then return game.get_service("Workspace") end
+        if game.GetService then return game:GetService("Workspace") end
+        return nil
+    end)
+    if via_service then return via_service end
     return M.safe_call(function() return workspace end)
 end
 
 function M.get_local_player()
-    if entity and entity.get_local_player then
-        return entity.get_local_player()
+    local ep = April and April.require and April.require("core.entity_props")
+    if ep and ep.get_local_player then
+        local lp = ep.get_local_player()
+        if lp then return lp end
     end
-    if game and game.local_player then return game.local_player end
+    if entity then
+        local fn = entity.get_local_player or entity.GetLocalPlayer
+        if fn then
+            local ok, lp = pcall(fn)
+            if ok and lp then return lp end
+        end
+    end
+    if game then
+        local lp = game.local_player or game.LocalPlayer
+        if lp then return lp end
+    end
     return nil
 end
 
@@ -69,11 +113,310 @@ function M.get_replicated_storage()
     return M.safe_call(function() return game.get_service("ReplicatedStorage") end)
 end
 
+function M.get_attribute(inst, key)
+    if not inst or not key then return nil end
+    local ok, v = pcall(function()
+        if inst.get_attribute then return inst:get_attribute(key) end
+        return nil
+    end)
+    if ok and v ~= nil then return v end
+    ok, v = pcall(function()
+        if inst.GetAttribute then return inst:GetAttribute(key) end
+        return nil
+    end)
+    if ok and v ~= nil then return v end
+    return nil
+end
+
 return M
 
 end)()
 
--- ── core/math_util.lua ──
+-- â”€â”€ core/api_aliases.lua â”€â”€
+April._mods["core.api_aliases"] = (function()
+-- Map new Vector PascalCase APIs onto the snake_case names April uses everywhere.
+-- Safe to call every frame — assignment is cheap and idempotent.
+
+local M = {}
+
+local function alias(tbl, snake, pascal)
+    if not tbl then return end
+    if tbl[snake] == nil and tbl[pascal] ~= nil then
+        tbl[snake] = tbl[pascal]
+    end
+    if tbl[pascal] == nil and tbl[snake] ~= nil then
+        tbl[pascal] = tbl[snake]
+    end
+end
+
+function M.apply()
+    if entity then
+        alias(entity, "get_players", "GetPlayers")
+        alias(entity, "get_local_player", "GetLocalPlayer")
+        alias(entity, "get_player_count", "GetPlayerCount")
+    end
+
+    if draw then
+        alias(draw, "line", "Line")
+        alias(draw, "rect", "Rect")
+        alias(draw, "rect_filled", "RectFilled")
+        alias(draw, "circle", "Circle")
+        alias(draw, "circle_filled", "CircleFilled")
+        alias(draw, "text", "Text")
+        alias(draw, "get_text_size", "GetTextSize")
+        alias(draw, "box", "Box")
+        alias(draw, "corner_box", "CornerBox")
+        alias(draw, "health_bar", "HealthBar")
+        alias(draw, "world_to_screen", "WorldToScreen")
+        alias(draw, "get_screen_size", "GetScreenSize")
+        alias(draw, "poly", "Poly")
+        alias(draw, "poly_closed", "PolyClosed")
+        alias(draw, "poly_filled", "PolyFilled")
+        alias(draw, "compute_hull", "ComputeHull")
+        alias(draw, "chams_player", "ChamsPlayer")
+        alias(draw, "chams", "Chams")
+        alias(draw, "get_player_hulls", "GetPlayerHulls")
+        alias(draw, "load_image", "LoadImage")
+        alias(draw, "image", "Image")
+        alias(draw, "image_loaded", "ImageLoaded")
+        alias(draw, "image_failed", "ImageFailed")
+        alias(draw, "image_size", "ImageSize")
+        alias(draw, "free_image", "FreeImage")
+        alias(draw, "window", "Window")
+        -- Legacy wrong names some April code used
+        if draw.filled_rect == nil then
+            draw.filled_rect = draw.rect_filled or draw.RectFilled
+        end
+        if draw.filled_circle == nil then
+            draw.filled_circle = draw.circle_filled or draw.CircleFilled
+        end
+    end
+
+    if utility then
+        alias(utility, "world_to_screen", "WorldToScreen")
+        alias(utility, "get_screen_size", "GetScreenSize")
+        alias(utility, "get_mouse_pos", "GetMousePos")
+        alias(utility, "get_tick_count", "GetTickCount")
+        alias(utility, "get_delta_time", "GetDeltaTime")
+        alias(utility, "is_valid", "IsValid")
+        alias(utility, "load_url", "LoadUrl")
+        alias(utility, "http_get", "HttpGet")
+    end
+
+    if input then
+        alias(input, "is_key_down", "IsKeyDown")
+        alias(input, "is_mouse_down", "IsMouseDown")
+    end
+
+    if game then
+        alias(game, "local_player", "LocalPlayer")
+        alias(game, "players", "Players")
+        alias(game, "workspace", "Workspace")
+        alias(game, "get_service", "GetService")
+    end
+end
+
+return M
+
+end)()
+
+-- â”€â”€ core/entity_props.lua â”€â”€
+April._mods["core.entity_props"] = (function()
+-- Vector entity player fields: new API docs use PascalCase (Name, UserId, Position…).
+-- Older builds exposed snake_case. Read both so ESP/targeting keep working.
+
+local M = {}
+
+function M.ensure_api_aliases()
+    local ok, aliases = pcall(function()
+        return April.require("core.api_aliases")
+    end)
+    if ok and aliases and aliases.apply then
+        aliases.apply()
+    end
+end
+
+function M.get_players()
+    M.ensure_api_aliases()
+    if not entity then return {} end
+    local fn = entity.get_players or entity.GetPlayers
+    if not fn then return {} end
+    local ok, list = pcall(fn)
+    if ok and type(list) == "table" then return list end
+    return {}
+end
+
+function M.get_local_player()
+    M.ensure_api_aliases()
+    if not entity then return nil end
+    local fn = entity.get_local_player or entity.GetLocalPlayer
+    if not fn then return nil end
+    local ok, lp = pcall(fn)
+    if ok then return lp end
+    return nil
+end
+
+local function raw_get(obj, key)
+    if obj == nil or key == nil then return nil end
+    local ok, v = pcall(function()
+        return obj[key]
+    end)
+    if ok and v ~= nil then return v end
+    return nil
+end
+
+function M.get(obj, ...)
+    local n = select("#", ...)
+    for i = 1, n do
+        local v = raw_get(obj, select(i, ...))
+        if v ~= nil then return v end
+    end
+    return nil
+end
+
+function M.call(obj, ...)
+    if not obj then return nil end
+    local n = select("#", ...)
+    for i = 1, n do
+        local name = select(i, ...)
+        local fn = raw_get(obj, name)
+        if type(fn) == "function" then
+            return function(...)
+                return fn(obj, ...)
+            end
+        end
+    end
+    return nil
+end
+
+function M.name(p)
+    return M.get(p, "Name", "name", "DisplayName", "display_name")
+end
+
+function M.display_name(p)
+    return M.get(p, "DisplayName", "display_name", "Name", "name")
+end
+
+function M.user_id(p)
+    local uid = tonumber(M.get(p, "UserId", "user_id"))
+    if uid and uid ~= 0 then return uid end
+    -- Vector entity cache may leave UserId at 0; fall back to Player instance.
+    local pl = M.player_inst(p)
+    if pl then
+        local ok, v = pcall(function()
+            return pl.UserId or pl.user_id
+        end)
+        if ok then
+            uid = tonumber(v)
+            if uid and uid ~= 0 then return uid end
+        end
+    end
+    return uid
+end
+
+function M.is_local(p)
+    local v = M.get(p, "IsLocal", "is_local")
+    return v == true
+end
+
+function M.is_alive(p)
+    local v = M.get(p, "IsAlive", "is_alive")
+    if v ~= nil then return v == true end
+    return nil
+end
+
+function M.is_workspace_entity(p)
+    local v = M.get(p, "IsWorkspaceEntity", "is_workspace_entity")
+    return v == true
+end
+
+function M.health(p)
+    return tonumber(M.get(p, "Health", "health"))
+end
+
+function M.max_health(p)
+    return tonumber(M.get(p, "MaxHealth", "max_health"))
+end
+
+function M.team(p)
+    return M.get(p, "Team", "team")
+end
+
+function M.has_team(p)
+    local v = M.get(p, "HasTeam", "has_team")
+    return v == true
+end
+
+function M.character(p)
+    return M.get(p, "Character", "character")
+end
+
+function M.humanoid(p)
+    return M.get(p, "Humanoid", "humanoid")
+end
+
+function M.player_inst(p)
+    return M.get(p, "Player", "player")
+end
+
+function M.position(p)
+    return M.get(p, "Position", "position")
+end
+
+function M.head_position(p)
+    return M.get(p, "HeadPosition", "head_position") or M.position(p)
+end
+
+function M.velocity(p)
+    return M.get(p, "Velocity", "velocity")
+end
+
+function M.tool_name(p)
+    return M.get(p, "ToolName", "tool_name")
+end
+
+function M.get_bounds(p)
+    local fn = M.call(p, "GetBounds", "get_bounds", "getBounds")
+    if not fn then return nil end
+    local ok, b = pcall(fn)
+    if ok then return b end
+    return nil
+end
+
+function M.get_bones_screen(p)
+    local fn = M.call(p, "GetBonesScreen", "get_bones_screen", "getBonesScreen")
+    if not fn then return nil end
+    local ok, bones = pcall(fn)
+    if ok then return bones end
+    return nil
+end
+
+function M.get_bone_screen(p, bone)
+    local fn = M.call(p, "GetBoneScreen", "get_bone_screen", "getBoneScreen")
+    if not fn then return 0, 0, false end
+    local ok, x, y, vis = pcall(fn, bone)
+    if not ok then return 0, 0, false end
+    return x, y, vis
+end
+
+function M.distance_to(p, origin)
+    local fn = M.call(p, "DistanceTo", "distance_to", "distanceTo")
+    if not fn then return nil end
+    local ok, d
+    if origin ~= nil then
+        ok, d = pcall(fn, origin)
+    else
+        ok, d = pcall(fn)
+    end
+    if ok then return tonumber(d) end
+    return nil
+end
+
+return M
+
+end)()
+
+-- â”€â”€ core/math_util.lua â”€â”€
 April._mods["core.math_util"] = (function()
 local M = {}
 
@@ -107,7 +450,7 @@ return M
 
 end)()
 
--- ── core/text_util.lua ──
+-- â”€â”€ core/text_util.lua â”€â”€
 April._mods["core.text_util"] = (function()
 local M = {}
 
@@ -141,7 +484,7 @@ return M
 
 end)()
 
--- ── core/cache.lua ──
+-- â”€â”€ core/cache.lua â”€â”€
 April._mods["core.cache"] = (function()
 local M = {}
 
@@ -248,7 +591,7 @@ return M
 
 end)()
 
--- ── core/capabilities.lua ──
+-- â”€â”€ core/capabilities.lua â”€â”€
 April._mods["core.capabilities"] = (function()
 local M = {}
 
@@ -290,7 +633,7 @@ return M
 
 end)()
 
--- ── core/debug.lua ──
+-- â”€â”€ core/debug.lua â”€â”€
 April._mods["core.debug"] = (function()
 local M = {}
 
@@ -356,10 +699,14 @@ function M.register_frame_hook(fn)
         return false
     end
 
+    -- New Vector API: OnFrame / onFrame / on_frame all accepted.
+    _G.OnFrame = fn
+    _G.onFrame = fn
     _G.on_frame = fn
 
     if callbacks and callbacks.add then
-        callbacks.add("on_frame", fn)
+        pcall(callbacks.add, "on_frame", fn)
+        pcall(callbacks.add, "OnFrame", fn)
     end
 
     if draw then
@@ -385,7 +732,7 @@ return M
 
 end)()
 
--- ── game/mod_ids.lua ──
+-- â”€â”€ game/mod_ids.lua â”€â”€
 April._mods["game.mod_ids"] = (function()
 local M = {}
 
@@ -823,7 +1170,7 @@ return M
 
 end)()
 
--- ── game/mod_group.lua ──
+-- â”€â”€ game/mod_group.lua â”€â”€
 April._mods["game.mod_group"] = (function()
 local debug = April.require("core.debug")
 
@@ -1117,7 +1464,7 @@ return M
 
 end)()
 
--- ── core/settings.lua ──
+-- â”€â”€ core/settings.lua â”€â”€
 April._mods["core.settings"] = (function()
 local M = {}
 
@@ -1234,7 +1581,7 @@ return M
 
 end)()
 
--- ── core/feature_bind.lua ──
+-- â”€â”€ core/feature_bind.lua â”€â”€
 April._mods["core.feature_bind"] = (function()
 local settings = April.require("core.settings")
 
@@ -1250,28 +1597,16 @@ local migrated = {}
 local function migrate_mode(mode_id)
     if not mode_id or migrated[mode_id] then return end
     migrated[mode_id] = true
-    -- Legacy 2-mode storage: 0 = Toggle, 1 = Hold
-    -- New: 0 = Always, 1 = Hold, 2 = Toggle
-    -- One-shot per mode id so a later Always (0) choice is kept.
+    -- Legacy 0→2 (Toggle) migration removed: ESP defaults are Always (0) now,
+    -- and rewriting 0→2 made "Player ESP" look enabled while never drawing under Hold/Toggle quirks.
     local flag = mode_id .. "_v3m"
     local state = nil
     pcall(function()
         state = April.require("ui.gs_state")
     end)
-    if state and state.get(flag) then return end
-
-    local raw = tonumber(settings.get(mode_id, nil))
-    if raw == 0 then
-        if menu and menu.set then
-            pcall(menu.set, mode_id, 2)
-        end
-        if state then state.set(mode_id, 2) end
-    end
     if state then
         state.define(flag, true)
         state.set(flag, true)
-    elseif menu and menu.set then
-        pcall(menu.set, flag, true)
     end
 end
 
@@ -1335,9 +1670,9 @@ end
 
 function M.mode_index(id)
     local e = registry[id]
-    if not e then return 2 end
+    if not e then return 0 end
     migrate_mode(e.mode_id)
-    return settings.combo_index(e.mode_id, M.MODES, 2)
+    return settings.combo_index(e.mode_id, M.MODES, 0)
 end
 
 function M.mode_name(id)
@@ -1377,7 +1712,8 @@ function M.active(id)
     if mode == 1 then -- Hold
         if not M.armed(id) then return false end
         local key = M.get_key(id)
-        if key <= 0 then return false end
+        -- No key bound: treat Hold like Always so ESP doesn't silently vanish.
+        if key <= 0 then return true end
         return input and input.is_key_down and input.is_key_down(key)
     end
 
@@ -1433,7 +1769,7 @@ return M
 
 end)()
 
--- ── core/aim_key.lua ──
+-- â”€â”€ core/aim_key.lua â”€â”€
 April._mods["core.aim_key"] = (function()
 -- Aim-key state (Always / Hold / Toggle) separate from feature master toggle.
 local settings = April.require("core.settings")
@@ -1494,7 +1830,7 @@ return M
 
 end)()
 
--- ── core/draw_util.lua ──
+-- â”€â”€ core/draw_util.lua â”€â”€
 April._mods["core.draw_util"] = (function()
 local math_util = April.require("core.math_util")
 local text_util = April.require("core.text_util")
@@ -1506,10 +1842,20 @@ function M.white(r, g, b, a)
 end
 
 function M.text_centered(x, y, text, col, size)
-    if not draw or not draw.text or not draw.get_text_size then return end
+    if not draw then return end
+    pcall(function()
+        April.require("core.api_aliases").apply()
+    end)
+    local text_fn = draw.text or draw.Text
+    local size_fn = draw.get_text_size or draw.GetTextSize
+    if not text_fn then return end
     text = text_util.sanitize(text)
-    local tw, th = draw.get_text_size(text, size or 14)
-    draw.text(x - tw * 0.5, y, text, col, size or 14)
+    size = size or 14
+    local tw = 0
+    if size_fn then
+        tw = select(1, size_fn(text, size)) or 0
+    end
+    text_fn(x - tw * 0.5, y, text, col, size)
 end
 
 -- Stronger silhouette for far ESP (extra soft shadow under auto outline).
@@ -1526,8 +1872,13 @@ function M.text_centered_strong(x, y, text, col, size)
 end
 
 function M.text_outlined(x, y, text, col, size)
-    if not draw or not draw.text then return end
-    draw.text(x, y, text_util.sanitize(text), col, size or 14)
+    if not draw then return end
+    pcall(function()
+        April.require("core.api_aliases").apply()
+    end)
+    local text_fn = draw.text or draw.Text
+    if not text_fn then return end
+    text_fn(x, y, text_util.sanitize(text), col, size or 14)
 end
 
 function M.text(x, y, text, col, size)
@@ -1536,12 +1887,23 @@ end
 
 function M.box_esp(x, y, w, h, col, style)
     if not draw then return end
-    if style == 1 and draw.corner_box then
-        draw.corner_box(x, y, w, h, col)
+    pcall(function()
+        April.require("core.api_aliases").apply()
+    end)
+    local corner = draw.corner_box or draw.CornerBox
+    local box = draw.box or draw.Box
+    local rect = draw.rect or draw.Rect
+    if style == 1 and corner then
+        corner(x, y, w, h, col)
         return
     end
-    if draw.box then
-        draw.box(x, y, w, h, col, 0, style or 0)
+    -- New API: draw.Box(x, y, w, h, color, style?)
+    if box then
+        box(x, y, w, h, col, style or 0)
+        return
+    end
+    if rect then
+        rect(x, y, w, h, col)
     end
 end
 
@@ -1569,7 +1931,12 @@ end
 -- Pixel-precise HP bar. Native draw.health_bar has built-in left padding so it
 -- always leaves a gap next to our box — do not use it for ESP.
 function M.health_bar_nice(x, y, h, hp, max_hp, bar_w)
-    if not draw or not draw.rect_filled then return end
+    if not draw then return end
+    pcall(function()
+        April.require("core.api_aliases").apply()
+    end)
+    local fill = draw.rect_filled or draw.RectFilled
+    if not fill then return end
     if not hp or not max_hp or max_hp <= 0 then return end
 
     h = math.max(4, h)
@@ -1578,7 +1945,7 @@ function M.health_bar_nice(x, y, h, hp, max_hp, bar_w)
     local fill_h = math.max(0, math.floor(h * pct + 0.5))
 
     -- Empty track
-    draw.rect_filled(x, y, bar_w, h, { 0.08, 0.08, 0.08, 0.85 })
+    fill(x, y, bar_w, h, { 0.08, 0.08, 0.08, 0.85 })
 
     if fill_h > 0 then
         local r, g, b
@@ -1589,7 +1956,7 @@ function M.health_bar_nice(x, y, h, hp, max_hp, bar_w)
             local t = pct * 2
             r, g, b = 1, t * 0.9, 0.12
         end
-        draw.rect_filled(x, y + (h - fill_h), bar_w, fill_h, { r, g, b, 1 })
+        fill(x, y + (h - fill_h), bar_w, fill_h, { r, g, b, 1 })
     end
 
     return bar_w
@@ -1614,8 +1981,10 @@ function M.health_bar_on_box(bounds, hp, max_hp)
 end
 
 function M.line(x1, y1, x2, y2, col, thick)
-    if not draw or not draw.line then return end
-    draw.line(x1, y1, x2, y2, col, thick or 1)
+    if not draw then return end
+    local line = draw.line or draw.Line
+    if not line then return end
+    line(x1, y1, x2, y2, col, thick or 1)
 end
 
 --- Screen snapline from bottom-center to target (classic ESP style).
@@ -1646,10 +2015,13 @@ end
 
 function M.screen_size()
     local w, h
-    if draw and draw.get_screen_size then
-        w, h = draw.get_screen_size()
-    elseif utility and utility.get_screen_size then
-        w, h = utility.get_screen_size()
+    if draw then
+        local fn = draw.get_screen_size or draw.GetScreenSize
+        if fn then w, h = fn() end
+    end
+    if (not w or w <= 0) and utility then
+        local fn = utility.get_screen_size or utility.GetScreenSize
+        if fn then w, h = fn() end
     end
     if not w or w <= 0 then w = 1920 end
     if not h or h <= 0 then h = 1080 end
@@ -1683,7 +2055,7 @@ return M
 
 end)()
 
--- ── core/vk_names.lua ──
+-- â”€â”€ core/vk_names.lua â”€â”€
 April._mods["core.vk_names"] = (function()
 -- Shared VK -> label map (matches custom UI keybind chips).
 local M = {}
@@ -1722,7 +2094,7 @@ return M
 
 end)()
 
--- ── core/panel_drag.lua ──
+-- â”€â”€ core/panel_drag.lua â”€â”€
 April._mods["core.panel_drag"] = (function()
 -- Draggable overlay panels (mod checker, keybind viewer). Position persists via menu/gs_state.
 local settings = April.require("core.settings")
@@ -1818,7 +2190,7 @@ return M
 
 end)()
 
--- ── core/ui_theme.lua ──
+-- â”€â”€ core/ui_theme.lua â”€â”€
 April._mods["core.ui_theme"] = (function()
 local draw_util = April.require("core.draw_util")
 local text_util = April.require("core.text_util")
@@ -2144,7 +2516,7 @@ return M
 
 end)()
 
--- ── core/overlay_theme.lua ──
+-- â”€â”€ core/overlay_theme.lua â”€â”€
 April._mods["core.overlay_theme"] = (function()
 -- Theme helpers for draggable overlay panels (keybind viewer, mod checker).
 local ui_theme = April.require("core.ui_theme")
@@ -2256,7 +2628,7 @@ return M
 
 end)()
 
--- ── core/notify.lua ──
+-- â”€â”€ core/notify.lua â”€â”€
 April._mods["core.notify"] = (function()
 local draw_util = April.require("core.draw_util")
 local theme = April.require("core.ui_theme")
@@ -2388,7 +2760,7 @@ return M
 
 end)()
 
--- ── game/asset_urls.lua ──
+-- â”€â”€ game/asset_urls.lua â”€â”€
 April._mods["game.asset_urls"] = (function()
 local M = {}
 
@@ -2439,7 +2811,7 @@ return M
 
 end)()
 
--- ── core/image_cache.lua ──
+-- â”€â”€ core/image_cache.lua â”€â”€
 April._mods["core.image_cache"] = (function()
 --[[
     Vector on_frame pattern (stable v3.65-3.69):
@@ -2603,7 +2975,7 @@ return M
 
 end)()
 
--- ── core/esp_util.lua ──
+-- â”€â”€ core/esp_util.lua â”€â”€
 April._mods["core.esp_util"] = (function()
 local draw_util = April.require("core.draw_util")
 local settings = April.require("core.settings")
@@ -2648,13 +3020,17 @@ M.SKELETON_PAIRS = {
 }
 
 -- Must be declared before any M.* that closes over it (Lua local scoping).
+-- Vector3 userdata from the new API exposes .X/.Y/.Z (PascalCase).
 local function vec3_pos(v)
     if not v then return nil end
     if type(v) == "number" then return nil end
-    local x = tonumber(v.x or v.X or v[1])
-    local y = tonumber(v.y or v.Y or v[2])
-    local z = tonumber(v.z or v.Z or v[3])
-    if not x or not y or not z then return nil end
+    local x, y, z
+    local ok = pcall(function()
+        x = tonumber(v.x or v.X or v[1])
+        y = tonumber(v.y or v.Y or v[2])
+        z = tonumber(v.z or v.Z or v[3])
+    end)
+    if not ok or not x or not y or not z then return nil end
     return x, y, z
 end
 M.vec3_pos = vec3_pos
@@ -2663,20 +3039,62 @@ function M.text_size()
     return settings.num("april_esp_text_size", 13)
 end
 
+local function normalize_w2s(a, b, c)
+    -- Multi-return: sx, sy, visible
+    if type(a) == "number" and type(b) == "number" then
+        local vis = c
+        if vis == nil then vis = true end
+        if vis == 0 or vis == false then return a, b, false end
+        return a, b, vis and true or false
+    end
+    -- Table return: {x,y,visible} / {X,Y,Visible} / {sx,sy,on_screen}
+    if type(a) == "table" then
+        local sx = tonumber(a.x or a.X or a.sx or a[1])
+        local sy = tonumber(a.y or a.Y or a.sy or a[2])
+        local vis = a.visible
+        if vis == nil then vis = a.Visible end
+        if vis == nil then vis = a.on_screen end
+        if vis == nil then vis = a[3] end
+        if vis == nil then vis = true end
+        if not sx or not sy then return 0, 0, false end
+        if vis == 0 or vis == false then return sx, sy, false end
+        return sx, sy, true
+    end
+    return 0, 0, false
+end
+
+local function call_w2s(fn, x, y, z)
+    if not fn then return 0, 0, false end
+    -- New API: utility.WorldToScreen(vec3) or (x,y,z)
+    local ok, a, b, c = pcall(fn, x, y, z)
+    if ok then return normalize_w2s(a, b, c) end
+    return 0, 0, false
+end
+
 function M.w2s(x, y, z)
+    -- Allow passing a Vector3 / vector-like value as the first arg.
+    if y == nil and x ~= nil then
+        local vx, vy, vz = vec3_pos(x)
+        if vx then
+            x, y, z = vx, vy, vz
+        end
+    end
     x = tonumber(x)
     y = tonumber(y)
     z = tonumber(z)
     if not x or not y or not z then
         return 0, 0, false
     end
-    if draw and draw.world_to_screen then
-        return draw.world_to_screen(x, y, z)
-    end
-    if utility and utility.world_to_screen then
-        return utility.world_to_screen(x, y, z)
-    end
-    return 0, 0, false
+
+    local draw_fn = draw and (draw.world_to_screen or draw.WorldToScreen or draw.worldToScreen)
+    local sx, sy, vis = call_w2s(draw_fn, x, y, z)
+    if vis then return sx, sy, true end
+
+    local util_fn = utility and (utility.world_to_screen or utility.WorldToScreen or utility.worldToScreen)
+    sx, sy, vis = call_w2s(util_fn, x, y, z)
+    if vis then return sx, sy, true end
+
+    return sx or 0, sy or 0, false
 end
 
 function M.draw_skeleton_bones(bones, col, thick)
@@ -2700,8 +3118,9 @@ function M.draw_skeleton_bones(bones, col, thick)
 end
 
 function M.draw_player_skeleton(player, col, thick)
-    if not player or not player.get_bones_screen then return end
-    local bones = player:get_bones_screen()
+    if not player then return end
+    local ep = April.require("core.entity_props")
+    local bones = ep.get_bones_screen(player)
     if not bones then return end
     M.draw_skeleton_bones(bones, col, thick)
 end
@@ -2775,16 +3194,17 @@ end
 
 -- Build screen AABB from entity bone projections (same source as skeleton = stable).
 function M.bones_screen_bounds(player)
-    if not player or not player.get_bones_screen then return nil end
-    local bones = player:get_bones_screen()
+    if not player then return nil end
+    local ep = April.require("core.entity_props")
+    local bones = ep.get_bones_screen(player)
     if not bones then return nil end
 
     local min_x, min_y, max_x, max_y
     local any = false
     for _, pt in pairs(bones) do
         if pt then
-            local x = pt.x or pt[1]
-            local y = pt.y or pt[2]
+            local x = tonumber(pt.x or pt.X or pt[1])
+            local y = tonumber(pt.y or pt.Y or pt[2])
             if x and y then
                 any = true
                 min_x = min_x and math.min(min_x, x) or x
@@ -2910,10 +3330,11 @@ function M.head_feet_screen_bounds(player, opts)
     if not player then return nil end
     opts = opts or {}
     local env = April.require("core.env")
+    local ep = April.require("core.entity_props")
 
-    local hx, hy, hz = M.vec3_pos(player.head_position)
+    local hx, hy, hz = M.vec3_pos(ep.head_position(player))
     if not hx then
-        local char = player.character
+        local char = ep.character(player)
         if char and env.is_valid(char) then
             local head = env.safe_call(function()
                 return char:find_first_child("Head") or char:FindFirstChild("Head")
@@ -2924,8 +3345,9 @@ function M.head_feet_screen_bounds(player, opts)
         end
     end
     if not hx then
-        if player.character then
-            return head_feet_from_model(player.character, opts)
+        local char = ep.character(player)
+        if char then
+            return head_feet_from_model(char, opts)
         end
         return nil
     end
@@ -2934,7 +3356,7 @@ function M.head_feet_screen_bounds(player, opts)
     if not vis then return nil end
 
     local fx, fy, fz
-    local char = player.character
+    local char = ep.character(player)
     if char and env.is_valid(char) then
         for _, name in ipairs({ "LeftFoot", "RightFoot", "LeftLowerLeg", "RightLowerLeg" }) do
             local foot = env.safe_call(function()
@@ -2947,7 +3369,7 @@ function M.head_feet_screen_bounds(player, opts)
         end
     end
     if not fx then
-        fx, fy, fz = M.vec3_pos(player.position)
+        fx, fy, fz = M.vec3_pos(ep.position(player))
         if fx then fy = fy - 2.8 end
     end
     if not fx then
@@ -2966,19 +3388,24 @@ function M.head_feet_screen_bounds(player, opts)
     )
 end
 
--- Stable character box: bones (skeleton source) -> model -> head/feet -> get_bounds last.
--- Preferring bones avoids far-range get_bounds flicker that skips box/name/health.
+-- Stable character box: get_bounds -> bones -> model -> head/feet -> point.
 function M.player_screen_bounds(player, opts)
     if not player then return nil end
     opts = opts or {}
     local dist = opts.dist
+    local ep = April.require("core.entity_props")
+
+    local gb = ep.get_bounds(player)
+    if M.bounds_usable(gb) then
+        return M.guard_tiny_bounds(gb, dist)
+    end
 
     local b = M.bones_screen_bounds(player)
     if M.bounds_usable(b) then
         return M.guard_tiny_bounds(b, dist)
     end
 
-    local model = player.character
+    local model = ep.character(player)
     if model then
         b = M.model_screen_bounds(model)
         if M.bounds_usable(b) then
@@ -2991,10 +3418,12 @@ function M.player_screen_bounds(player, opts)
         return M.guard_tiny_bounds(b, dist)
     end
 
-    if player.get_bounds then
-        local gb = player:get_bounds()
-        if M.bounds_usable(gb) then
-            return M.guard_tiny_bounds(gb, dist)
+    local hx, hy, hz = M.vec3_pos(ep.head_position(player))
+    if hx then
+        local size = opts.point_size or M.dist_point_size(dist)
+        b = M.point_screen_bounds(hx, hy, hz, size)
+        if M.bounds_usable(b) then
+            return M.guard_tiny_bounds(b, dist)
         end
     end
 
@@ -3047,8 +3476,9 @@ function M.draw_model_skeleton(model, col, thick)
         end)
         if not part or not env.is_valid(part) then return end
         local pos = part.Position or part.position
-        if not pos or pos.x == nil then return end
-        local sx, sy, vis = M.w2s(pos.x, pos.y, pos.z)
+        local px, py, pz = M.vec3_pos(pos)
+        if not px then return end
+        local sx, sy, vis = M.w2s(px, py, pz)
         if vis then screen[name] = { x = sx, y = sy } end
     end
 
@@ -3419,7 +3849,7 @@ return M
 
 end)()
 
--- ── core/gpu_chams.lua ──
+-- â”€â”€ core/gpu_chams.lua â”€â”€
 April._mods["core.gpu_chams"] = (function()
 -- GPU instance chams with a double-buffer applied set.
 --
@@ -3920,7 +4350,7 @@ return M
 
 end)()
 
--- ── core/incremental_scan.lua ──
+-- â”€â”€ core/incremental_scan.lua â”€â”€
 April._mods["core.incremental_scan"] = (function()
 local debug = April.require("core.debug")
 
@@ -4024,7 +4454,7 @@ return M
 
 end)()
 
--- ── core/menu_util.lua ──
+-- â”€â”€ core/menu_util.lua â”€â”€
 April._mods["core.menu_util"] = (function()
 local M = {}
 
@@ -4321,7 +4751,8 @@ function M.register_keybind(T, G, id, label, default, extra)
 
     local mode_id = id .. "_mode"
     local mode_label = label .. " Bind Mode"
-    menu.add_combo(T, G, mode_id, mode_label, { "Always", "Hold", "Toggle" }, 2, M.parent(id))
+    -- Default Always so enabling the checkbox draws immediately (Hold with no key = invisible).
+    menu.add_combo(T, G, mode_id, mode_label, { "Always", "Hold", "Toggle" }, 0, M.parent(id))
 
     April.require("core.feature_bind").register({
         id = id,
@@ -4338,7 +4769,7 @@ return M
 
 end)()
 
--- ── core/ballistic.lua ──
+-- â”€â”€ core/ballistic.lua â”€â”€
 April._mods["core.ballistic"] = (function()
 local math_util = April.require("core.math_util")
 
@@ -4545,7 +4976,7 @@ return M
 
 end)()
 
--- ── core/silent_ray.lua ──
+-- â”€â”€ core/silent_ray.lua â”€â”€
 April._mods["core.silent_ray"] = (function()
 local ballistic = April.require("core.ballistic")
 
@@ -4780,7 +5211,7 @@ return M
 
 end)()
 
--- ── core/fflag_mem.lua ──
+-- â”€â”€ core/fflag_mem.lua â”€â”€
 April._mods["core.fflag_mem"] = (function()
 local M = {}
 
@@ -4879,7 +5310,7 @@ return M
 
 end)()
 
--- ── core/manip_math.lua ──
+-- â”€â”€ core/manip_math.lua â”€â”€
 April._mods["core.manip_math"] = (function()
 local M = {}
 
@@ -5178,7 +5609,7 @@ return M
 
 end)()
 
--- ── core/desync_vis.lua ──
+-- â”€â”€ core/desync_vis.lua â”€â”€
 April._mods["core.desync_vis"] = (function()
 local esp_util = April.require("core.esp_util")
 local draw_util = April.require("core.draw_util")
@@ -5285,7 +5716,7 @@ return M
 
 end)()
 
--- ── core/angle_util.lua ──
+-- â”€â”€ core/angle_util.lua â”€â”€
 April._mods["core.angle_util"] = (function()
 -- Shared yaw / flat-direction helpers for movement features.
 
@@ -5414,7 +5845,7 @@ return M
 
 end)()
 
--- ── core/cframe_move.lua ──
+-- â”€â”€ core/cframe_move.lua â”€â”€
 April._mods["core.cframe_move"] = (function()
 -- Soft movement helpers. Prefer velocity writes on HRP only - avoid position
 -- teleports, limb velocity spam, and insane pulse values (those ban).
@@ -5750,7 +6181,7 @@ return M
 
 end)()
 
--- ── core/runservice.lua ──
+-- â”€â”€ core/runservice.lua â”€â”€
 April._mods["core.runservice"] = (function()
 -- RunService sim hooks. Prefer Heartbeat:Connect; fall back to on_frame dispatch.
 local env = April.require("core.env")
@@ -5961,7 +6392,7 @@ return M
 
 end)()
 
--- ── core/misc_gate.lua ──
+-- â”€â”€ core/misc_gate.lua â”€â”€
 April._mods["core.misc_gate"] = (function()
 local runservice = April.require("core.runservice")
 
@@ -5975,7 +6406,7 @@ return M
 
 end)()
 
--- ── core/movement_ctrl.lua ──
+-- â”€â”€ core/movement_ctrl.lua â”€â”€
 April._mods["core.movement_ctrl"] = (function()
 -- Fly / Slowfall - HRP velocity on RunService Heartbeat (falls back to on_frame).
 
@@ -6199,7 +6630,7 @@ return M
 
 end)()
 
--- ── core/config_store.lua ──
+-- â”€â”€ core/config_store.lua â”€â”€
 April._mods["core.config_store"] = (function()
 local cache = April.require("core.cache")
 
@@ -6289,10 +6720,11 @@ local MENU_KEYS = {
     "april_steel_crate", "april_food_crate", "april_timed_crate", "april_care_package", "april_btr_crate",
     "april_body_bag", "april_sleeper", "april_trash_can", "april_oil_barrel",
     "april_small_egg", "april_medium_egg", "april_large_egg",
-    "april_wooden_boat", "april_military_boat", "april_flycopter",
+    "april_wooden_boat", "april_military_boat", "april_flycopter", "april_heli_crate",
     "april_loot_boxes", "april_loot_show_name", "april_loot_show_distance", "april_loot_range",
     "april_loot_chams", "april_loot_chams_mode", "april_loot_chams_color",
-    "april_npc_enabled", "april_npc_enabled_mode", "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode",
+    "april_npc_enabled", "april_npc_enabled_mode", "april_npc_soldiers", "april_npc_bosses", "april_npc_heli",
+    "april_npc_box_mode",
     "april_npc_health", "april_npc_skeleton",
     "april_npc_show_name", "april_npc_show_distance", "april_npc_show_weapon", "april_npc_range",
     "april_anti_afk",
@@ -6348,8 +6780,8 @@ local COLOR_KEYS = {
     "april_dropped_item", "april_wooden_crate", "april_metal_crate", "april_steel_crate", "april_food_crate",
     "april_timed_crate", "april_care_package", "april_btr_crate", "april_body_bag", "april_sleeper",
     "april_trash_can", "april_oil_barrel", "april_small_egg", "april_medium_egg", "april_large_egg",
-    "april_wooden_boat", "april_military_boat", "april_flycopter",
-    "april_npc_soldiers", "april_npc_bosses", "april_npc_skeleton",
+    "april_wooden_boat", "april_military_boat", "april_flycopter", "april_heli_crate",
+    "april_npc_soldiers", "april_npc_bosses", "april_npc_heli", "april_npc_skeleton",
     "april_npc_show_name", "april_npc_show_distance", "april_npc_show_weapon",
     "april_base_cabinet", "april_storage_cabinet", "april_small_box", "april_large_box",
     "april_sleeping_bag", "april_auto_turret", "april_auto_turret_ring", "april_shotgun_turret", "april_shotgun_turret_ring", "april_wooden_door",
@@ -6773,7 +7205,7 @@ return M
 
 end)()
 
--- ── game/module_scan.lua ──
+-- â”€â”€ game/module_scan.lua â”€â”€
 April._mods["game.module_scan"] = (function()
 local M = {}
 
@@ -6915,7 +7347,7 @@ return M
 
 end)()
 
--- ── game/bootstrap.lua ──
+-- â”€â”€ game/bootstrap.lua â”€â”€
 April._mods["game.bootstrap"] = (function()
 local env = April.require("core.env")
 local debug = April.require("core.debug")
@@ -7042,7 +7474,7 @@ return M
 
 end)()
 
--- ── game/folders.lua ──
+-- â”€â”€ game/folders.lua â”€â”€
 April._mods["game.folders"] = (function()
 local env = April.require("core.env")
 
@@ -7071,7 +7503,9 @@ function M.get_folder(...)
             return cur:find_first_child(name)
                 or cur:FindFirstChild(name)
         end)
-        if not env.is_valid(cur) then return nil end
+        -- Only require a non-nil child. Gating on utility.is_valid here used to
+        -- false-negative Folders and kill every workspace ESP scan.
+        if not cur then return nil end
     end
     return cur
 end
@@ -7130,7 +7564,558 @@ return M
 
 end)()
 
--- ── game/item_images.lua ──
+-- â”€â”€ game/esp_maps.lua â”€â”€
+April._mods["game.esp_maps"] = (function()
+local M = {}
+
+M.NODE_MAP = {
+    ["Stone_Node"] = "april_stone_node",
+    ["Metal_Node"] = "april_metal_node",
+    ["Phosphate_Node"] = "april_phosphate_node",
+}
+
+M.NODE_LABELS = {
+    ["Stone_Node"] = "Stone Node",
+    ["Metal_Node"] = "Metal Node",
+    ["Phosphate_Node"] = "Phosphate Node",
+}
+
+M.NODE_FOLDERS = { "nodes" }
+
+M.PLANT_MAP = {
+    ["Corn Plant"] = "april_corn_plant",
+    ["Tomato Plant"] = "april_tomato_plant",
+    ["Pumpkin Plant"] = "april_pumpkin_plant",
+    ["Lemon Plant"] = "april_lemon_plant",
+    ["Raspberry Plant"] = "april_raspberry_plant",
+    ["Blueberry Plant"] = "april_blueberry_plant",
+    ["Wool Plant"] = "april_wool_plant",
+}
+
+M.PLANT_LABELS = {
+    ["Corn Plant"] = "Corn Plant",
+    ["Tomato Plant"] = "Tomato Plant",
+    ["Pumpkin Plant"] = "Pumpkin Plant",
+    ["Lemon Plant"] = "Lemon Plant",
+    ["Raspberry Plant"] = "Raspberry Plant",
+    ["Blueberry Plant"] = "Blueberry Plant",
+    ["Wool Plant"] = "Wool Plant",
+}
+
+M.PLANT_FOLDERS = { "plants" }
+
+M.ANIMAL_MAP = {
+    ["PREFAB_ANIMAL_DEER"] = "april_deer",
+    ["PREFAB_ANIMAL_WILDBOAR"] = "april_boar",
+    ["PREFAB_ANIMAL_WOLF"] = "april_wolf",
+    ["Deer"] = "april_deer",
+    ["Wild Boar"] = "april_boar",
+    ["WildBoar"] = "april_boar",
+    ["Boar"] = "april_boar",
+    ["Wolf"] = "april_wolf",
+}
+
+M.ANIMAL_LABELS = {
+    ["PREFAB_ANIMAL_DEER"] = "Deer",
+    ["PREFAB_ANIMAL_WILDBOAR"] = "Wild Boar",
+    ["PREFAB_ANIMAL_WOLF"] = "Wolf",
+    ["Deer"] = "Deer",
+    ["Wild Boar"] = "Wild Boar",
+    ["WildBoar"] = "Wild Boar",
+    ["Boar"] = "Boar",
+    ["Wolf"] = "Wolf",
+}
+
+M.ANIMAL_FOLDERS = { "animals" }
+
+M.WORLD_TOGGLES = {
+    { id = "april_stone_node", label = "Stone Node", color = { 0.5, 0.5, 0.5, 1 } },
+    { id = "april_metal_node", label = "Metal Node", color = { 0.7, 0.5, 0.3, 1 } },
+    { id = "april_phosphate_node", label = "Phosphate Node", color = { 0.2, 0.8, 0.2, 1 } },
+    { id = "april_corn_plant", label = "Corn Plant", color = { 1, 0.9, 0.3, 1 } },
+    { id = "april_tomato_plant", label = "Tomato Plant", color = { 1, 0.4, 0.3, 1 } },
+    { id = "april_pumpkin_plant", label = "Pumpkin Plant", color = { 1, 0.5, 0.1, 1 } },
+    { id = "april_lemon_plant", label = "Lemon Plant", color = { 1, 0.95, 0.2, 1 } },
+    { id = "april_raspberry_plant", label = "Raspberry Plant", color = { 0.9, 0.2, 0.4, 1 } },
+    { id = "april_blueberry_plant", label = "Blueberry Plant", color = { 0.3, 0.4, 0.9, 1 } },
+    { id = "april_wool_plant", label = "Wool Plant", color = { 0.85, 0.85, 0.9, 1 } },
+    { id = "april_deer", label = "Deer", color = { 0.6, 0.4, 0.2, 1 } },
+    { id = "april_boar", label = "Wild Boar", color = { 0.4, 0.3, 0.2, 1 } },
+    { id = "april_wolf", label = "Wolf", color = { 0.5, 0.5, 0.5, 1 } },
+}
+
+M.LOOT_MAP = {
+    ["Wooden Crate"] = "april_wooden_crate",
+    ["Locked Wooden Crate"] = "april_wooden_crate",
+    ["Locked Metal Crate"] = "april_metal_crate",
+    ["Locked Steel Crate"] = "april_steel_crate",
+    ["Food Crate"] = "april_food_crate",
+    ["Timed Crate"] = "april_timed_crate",
+    ["Care Package"] = "april_care_package",
+    ["BTR Crate"] = "april_btr_crate",
+    ["Body Bag"] = "april_body_bag",
+    ["Sleeper"] = "april_sleeper",
+    ["Trash Can"] = "april_trash_can",
+    ["Oil Barrel"] = "april_oil_barrel",
+    ["Small Egg"] = "april_small_egg",
+    ["Medium Egg"] = "april_medium_egg",
+    ["Large Egg"] = "april_large_egg",
+    ["Small Gift"] = "april_small_egg",
+    ["Medium Gift"] = "april_medium_egg",
+    ["Large Gift"] = "april_large_egg",
+    ["Wooden Boat"] = "april_wooden_boat",
+    ["Military Boat"] = "april_military_boat",
+    ["Salvaged Flycopter"] = "april_flycopter",
+    ["Heli Crate"] = "april_heli_crate",
+}
+
+M.LOOT_TOGGLES = {
+    { id = "april_dropped_item", label = "Dropped Items", color = { 1, 0.8, 0, 1 } },
+    { id = "april_wooden_crate", label = "Wooden Crate", color = { 0.6, 0.4, 0.2, 1 } },
+    { id = "april_metal_crate", label = "Metal Crate", color = { 0.5, 0.5, 0.6, 1 } },
+    { id = "april_steel_crate", label = "Steel Crate", color = { 0.7, 0.7, 0.8, 1 } },
+    { id = "april_food_crate", label = "Food Crate", color = { 0.2, 0.8, 0.2, 1 } },
+    { id = "april_timed_crate", label = "Timed Crate", color = { 1, 0.5, 0, 1 } },
+    { id = "april_care_package", label = "Care Package", color = { 1, 0.2, 0.2, 1 } },
+    { id = "april_btr_crate", label = "BTR Crate", color = { 0.8, 0.15, 0.15, 1 } },
+    { id = "april_body_bag", label = "Body Bag", color = { 0.3, 0.3, 0.3, 1 } },
+    { id = "april_sleeper", label = "Sleepers", color = { 0.8, 0.4, 0.8, 1 } },
+    { id = "april_trash_can", label = "Trash Can", color = { 0.45, 0.45, 0.45, 1 } },
+    { id = "april_oil_barrel", label = "Oil Barrel", color = { 0.2, 0.2, 0.2, 1 } },
+    { id = "april_small_egg", label = "Small Egg / Gift", color = { 0.95, 0.85, 0.5, 1 } },
+    { id = "april_medium_egg", label = "Medium Egg / Gift", color = { 0.9, 0.7, 0.4, 1 } },
+    { id = "april_large_egg", label = "Large Egg / Gift", color = { 0.85, 0.55, 0.3, 1 } },
+    { id = "april_wooden_boat", label = "Wooden Boat", color = { 0.55, 0.35, 0.15, 1 } },
+    { id = "april_military_boat", label = "Military Boat", color = { 0.35, 0.45, 0.35, 1 } },
+    { id = "april_flycopter", label = "Salvaged Flycopter", color = { 0.6, 0.6, 0.65, 1 } },
+    { id = "april_heli_crate", label = "Heli Crate", color = { 0.75, 0.25, 0.2, 1 } },
+}
+
+M.LOOT_SCAN_FOLDERS = { "loners", "vegetation", "military", "events", "monuments" }
+
+M.BASE_MAP = {
+    ["Base Cabinet"] = "april_base_cabinet",
+    ["Storage Cabinet"] = "april_storage_cabinet",
+    ["Cabinet"] = "april_base_cabinet",
+    ["Large Cabinet"] = "april_storage_cabinet",
+    ["Small Storage Box"] = "april_small_box",
+    ["Large Storage Box"] = "april_large_box",
+    ["Small Box"] = "april_small_box",
+    ["Large Box"] = "april_large_box",
+    ["Wooden Door"] = "april_wooden_door",
+    ["Wooden Double Door"] = "april_wooden_double_door",
+    ["Salvaged Metal Door"] = "april_salvaged_door",
+    ["Metal Door"] = "april_metal_door",
+    ["Metal Double Door"] = "april_metal_double_door",
+    ["Steel Door"] = "april_steel_door",
+    ["Steel Double Door"] = "april_steel_double_door",
+    ["Trap Door"] = "april_trap_door",
+    ["Triangle Trap Door"] = "april_triangle_trap_door",
+    ["Garage Door"] = "april_garage_door",
+    ["Sleeping Bag"] = "april_sleeping_bag",
+    ["Shotgun Turret"] = "april_shotgun_turret",
+    ["Auto Turret"] = "april_auto_turret",
+    ["Small Battery"] = "april_small_battery",
+    ["Medium Battery"] = "april_medium_battery",
+    ["Large Battery"] = "april_large_battery",
+    ["Solar Panel"] = "april_solar_panel",
+    ["Windmill"] = "april_windmill",
+}
+
+M.BASE_SKIP_AREAS = {
+    Loners = true,
+    VMs = true,
+    BTRMonumentPaths = true,
+    Benches = true,
+    Wires = true,
+    Ragdolls = true,
+    Fire = true,
+}
+
+M.BASE_TOGGLES = {
+    { id = "april_base_cabinet", label = "Base Cabinet", color = { 1, 0.8, 0, 1 } },
+    { id = "april_storage_cabinet", label = "Storage Cabinet", color = { 0.6, 0.4, 0.2, 1 } },
+    { id = "april_small_box", label = "Small Storage Box", color = { 0.55, 0.35, 0.15, 1 } },
+    { id = "april_large_box", label = "Large Storage Box", color = { 0.45, 0.3, 0.12, 1 } },
+    { id = "april_sleeping_bag", label = "Sleeping Bag", color = { 0.8, 0.2, 0.2, 1 } },
+    { id = "april_auto_turret", label = "Auto Turret", color = { 1, 0.2, 0.2, 1 }, ring_id = "april_auto_turret_ring" },
+    { id = "april_shotgun_turret", label = "Shotgun Turret", color = { 1, 0.35, 0.2, 1 }, ring_id = "april_shotgun_turret_ring" },
+    { id = "april_wooden_door", label = "Wooden Door", color = { 0.5, 0.3, 0.1, 1 } },
+    { id = "april_wooden_double_door", label = "Wooden Double Door", color = { 0.55, 0.32, 0.12, 1 } },
+    { id = "april_metal_door", label = "Metal Door", color = { 0.5, 0.5, 0.6, 1 } },
+    { id = "april_salvaged_door", label = "Salvaged Metal Door", color = { 0.55, 0.52, 0.48, 1 } },
+    { id = "april_metal_double_door", label = "Metal Double Door", color = { 0.52, 0.52, 0.58, 1 } },
+    { id = "april_steel_door", label = "Steel Door", color = { 0.65, 0.65, 0.72, 1 } },
+    { id = "april_steel_double_door", label = "Steel Double Door", color = { 0.62, 0.62, 0.7, 1 } },
+    { id = "april_garage_door", label = "Garage Door", color = { 0.4, 0.4, 0.42, 1 } },
+    { id = "april_trap_door", label = "Trap Door", color = { 0.48, 0.38, 0.22, 1 } },
+    { id = "april_triangle_trap_door", label = "Triangle Trap Door", color = { 0.46, 0.36, 0.2, 1 } },
+    { id = "april_small_battery", label = "Small Battery", color = { 0.2, 0.75, 0.35, 1 } },
+    { id = "april_medium_battery", label = "Medium Battery", color = { 0.15, 0.65, 0.3, 1 } },
+    { id = "april_large_battery", label = "Large Battery", color = { 0.1, 0.55, 0.25, 1 } },
+    { id = "april_solar_panel", label = "Solar Panel", color = { 0.2, 0.4, 0.85, 1 } },
+    { id = "april_windmill", label = "Windmill", color = { 0.75, 0.85, 0.95, 1 } },
+}
+
+function M.toggle_color(list, toggle_id, fallback)
+    for _, t in ipairs(list or {}) do
+        if t.id == toggle_id then
+            return t.color
+        end
+    end
+    return fallback or { 1, 1, 1, 1 }
+end
+
+function M.turret_ring_toggle(toggle_id)
+    for _, t in ipairs(M.BASE_TOGGLES) do
+        if t.id == toggle_id then
+            return t.ring_id
+        end
+    end
+    return nil
+end
+
+return M
+
+end)()
+
+-- â”€â”€ game/esp_scan.lua â”€â”€
+April._mods["game.esp_scan"] = (function()
+local env = April.require("core.env")
+
+local M = {}
+
+local PART_CLASSES = {
+    Part = true,
+    MeshPart = true,
+    UnionOperation = true,
+    WedgePart = true,
+    CornerWedgePart = true,
+}
+
+function M.is_part(inst)
+    if not inst then return false end
+    local cn = inst.ClassName or inst.class_name
+    return PART_CLASSES[cn] == true
+end
+
+function M.find_main_part(model)
+    if not env.is_valid(model) then return nil end
+
+    local main = env.safe_call(function()
+        if model.Main then return model.Main end
+        return model:find_first_child("Main") or model:FindFirstChild("Main")
+    end)
+    if main and M.is_part(main) then return main end
+
+    local hrp = env.safe_call(function()
+        if model.HumanoidRootPart then return model.HumanoidRootPart end
+        return model:find_first_child("HumanoidRootPart") or model:FindFirstChild("HumanoidRootPart")
+    end)
+    if hrp and M.is_part(hrp) then return hrp end
+
+    -- Vehicles / AttackHeli often expose PrimaryPart instead of Main.
+    local primary = env.safe_call(function()
+        return model.PrimaryPart or model.primary_part
+    end)
+    if primary and M.is_part(primary) then return primary end
+
+    local children = env.safe_call(function() return model:get_children() end) or {}
+    for _, child in ipairs(children) do
+        if M.is_part(child) then return child end
+    end
+
+    if M.is_part(model) then return model end
+    return nil
+end
+
+local function vec3(v, axis)
+    if not v then return 0 end
+    if axis == "x" then return v.x or v.X or 0 end
+    if axis == "y" then return v.y or v.Y or 0 end
+    return v.z or v.Z or 0
+end
+
+function M.read_part_box(part)
+    if not env.is_valid(part) or not M.is_part(part) then return nil end
+
+    local pos, size, rv, uv, lv
+    pcall(function()
+        pos = part.Position or part.position
+        size = part.Size or part.size
+        rv = part.RightVector or part.right_vector
+        uv = part.UpVector or part.up_vector
+        lv = part.LookVector or part.look_vector
+    end)
+
+    if not pos or not size then return nil end
+
+    return {
+        x = vec3(pos, "x"),
+        y = vec3(pos, "y"),
+        z = vec3(pos, "z"),
+        hx = vec3(size, "x") * 0.5,
+        hy = vec3(size, "y") * 0.5,
+        hz = vec3(size, "z") * 0.5,
+        rx = rv and vec3(rv, "x") or 1,
+        ry = rv and vec3(rv, "y") or 0,
+        rz = rv and vec3(rv, "z") or 0,
+        ux = uv and vec3(uv, "x") or 0,
+        uy = uv and vec3(uv, "y") or 1,
+        uz = uv and vec3(uv, "z") or 0,
+        lx = lv and vec3(lv, "x") or 0,
+        ly = lv and vec3(lv, "y") or 0,
+        lz = lv and vec3(lv, "z") or 1,
+    }
+end
+
+function M.collect_boxes(model, max_parts)
+    max_parts = max_parts or 6
+    local boxes = {}
+    if not env.is_valid(model) then return boxes end
+
+    local main = M.find_main_part(model)
+    if main then
+        local box = M.read_part_box(main)
+        if box then table.insert(boxes, box) end
+    end
+
+    if #boxes >= max_parts then return boxes end
+
+    local desc = env.safe_call(function() return model:get_descendants() end) or {}
+    for _, inst in ipairs(desc) do
+        if #boxes >= max_parts then break end
+        if M.is_part(inst) and inst ~= main then
+            local cn = inst.ClassName or inst.class_name
+            if cn == "MeshPart" or cn == "Part" then
+                local box = M.read_part_box(inst)
+                if box then table.insert(boxes, box) end
+            end
+        end
+    end
+
+    return boxes
+end
+
+function M.label_position(entry)
+    if not entry or not env.is_valid(entry.inst) then return nil end
+    local main = M.find_main_part(entry.inst)
+    if main then
+        local box = M.read_part_box(main)
+        if box then
+            return box.x, box.y + box.hy + 0.25, box.z
+        end
+        local pos = main.Position or main.position
+        if pos then
+            return vec3(pos, "x"), vec3(pos, "y"), vec3(pos, "z")
+        end
+    end
+    return nil
+end
+
+function M.make_entry(model, name, toggle_id, opts)
+    opts = opts or {}
+    local entry = {
+        inst = model,
+        name = name,
+        toggle_id = toggle_id,
+        dynamic = opts.dynamic == true,
+    }
+    if opts.hydrate ~= false then
+        M.hydrate_entry(entry)
+    end
+    return entry
+end
+
+function M.hydrate_entry(entry)
+    if not entry or not env.is_valid(entry.inst) then return entry end
+
+    local main = M.find_main_part(entry.inst)
+    entry.main_part = main
+
+    if main then
+        local box = M.read_part_box(main)
+        entry.box = box
+        if box then
+            entry.lx = box.x
+            entry.ly = box.y + box.hy + 0.25
+            entry.lz = box.z
+        else
+            local pos = main.Position or main.position
+            if pos then
+                entry.lx = vec3(pos, "x")
+                entry.ly = vec3(pos, "y")
+                entry.lz = vec3(pos, "z")
+            end
+        end
+    end
+
+    return entry
+end
+
+function M.refresh_entry_position(entry)
+    if not entry or not env.is_valid(entry.inst) then return false end
+
+    if entry.main_part and env.is_valid(entry.main_part) then
+        local box = M.read_part_box(entry.main_part)
+        if box then
+            entry.box = box
+            entry.lx = box.x
+            entry.ly = box.y + box.hy + 0.25
+            entry.lz = box.z
+            return true
+        end
+    end
+
+    M.hydrate_entry(entry)
+    return entry.lx ~= nil
+end
+
+function M.entry_coords(entry)
+    if entry and entry.lx and entry.ly and entry.lz then
+        return entry.lx, entry.ly, entry.lz
+    end
+    return M.label_position(entry)
+end
+
+local function entry_key(entry)
+    if not entry or not entry.inst then return nil end
+    return tostring(entry.inst.Address or entry.inst) .. ":" .. tostring(entry.toggle_id or "")
+end
+
+-- Reuse stable entry tables across rescans to avoid GC churn and unbounded growth.
+function M.merge_entries(prev, fresh)
+    local env = April.require("core.env")
+    local prev_by_key = {}
+    for _, entry in ipairs(prev or {}) do
+        local key = entry_key(entry)
+        if key and entry.inst and env.is_valid(entry.inst) then
+            prev_by_key[key] = entry
+        end
+    end
+
+    local out = {}
+    local seen = {}
+    for _, entry in ipairs(fresh or {}) do
+        if not entry or not entry.inst or not env.is_valid(entry.inst) then goto continue end
+        local key = entry_key(entry)
+        if not key or seen[key] then goto continue end
+        seen[key] = true
+        local existing = prev_by_key[key]
+        if existing and env.is_valid(existing.inst) then
+            out[#out + 1] = existing
+        else
+            out[#out + 1] = entry
+        end
+        ::continue::
+    end
+    return out
+end
+
+function M.create_folder_scan(folder_keys, name_map, label_map, dynamic)
+    return {
+        folder_keys = folder_keys,
+        name_map = name_map,
+        label_map = label_map,
+        dynamic = dynamic == true,
+        fi = 1,
+        ci = 1,
+        children = nil,
+        folder = nil,
+        out = {},
+        seen = {},
+    }
+end
+
+function M.folder_scan_step(state, max_items)
+    max_items = max_items or 16
+    local processed = 0
+    local folders_mod = April.require("game.folders")
+
+    while processed < max_items do
+        if state.fi > #state.folder_keys then
+            return true, state.out
+        end
+
+        if not state.folder or not state.children then
+            state.folder = folders_mod.from_key(state.folder_keys[state.fi])
+            state.ci = 1
+            if env.is_valid(state.folder) then
+                state.children = env.safe_call(function() return state.folder:get_children() end) or {}
+            else
+                state.children = {}
+            end
+        end
+
+        if state.ci > #state.children then
+            state.fi = state.fi + 1
+            state.folder = nil
+            state.children = nil
+            goto continue
+        end
+
+        local model = state.children[state.ci]
+        state.ci = state.ci + 1
+        processed = processed + 1
+
+        if not env.is_valid(model) then goto continue end
+
+        local inst_name = model.Name or model.name
+        if not inst_name then goto continue end
+
+        local toggle_id = state.name_map[inst_name]
+        if not toggle_id then goto continue end
+
+        local key = tostring(model.Address or model) .. ":" .. toggle_id
+        if state.seen[key] then goto continue end
+        state.seen[key] = true
+
+        local label = (state.label_map and state.label_map[inst_name]) or inst_name
+        table.insert(state.out, M.make_entry(model, label, toggle_id, { dynamic = state.dynamic }))
+
+        ::continue::
+    end
+
+    return false, state.out
+end
+
+function M.scan_folders(folder_keys, name_map, label_map, dynamic)
+    local folders_mod = April.require("game.folders")
+    local out = {}
+    local seen = {}
+
+    local function add_entry(model, inst_name)
+        local toggle_id = name_map[inst_name]
+        if not toggle_id then return end
+        local key = tostring(model.Address or model) .. ":" .. toggle_id
+        if seen[key] then return end
+        seen[key] = true
+        local label = (label_map and label_map[inst_name]) or inst_name
+        table.insert(out, M.make_entry(model, label, toggle_id, { dynamic = dynamic }))
+    end
+
+    for _, folder_key in ipairs(folder_keys or {}) do
+        local folder = folders_mod.from_key(folder_key)
+        if not env.is_valid(folder) then goto next_folder end
+
+        local children = env.safe_call(function() return folder:get_children() end) or {}
+        for _, model in ipairs(children) do
+            if not env.is_valid(model) then goto continue end
+            local inst_name = model.Name or model.name
+            if inst_name then add_entry(model, inst_name) end
+            ::continue::
+        end
+        ::next_folder::
+    end
+
+    return out
+end
+
+return M
+
+end)()
+
+-- â”€â”€ game/item_images.lua â”€â”€
 April._mods["game.item_images"] = (function()
 -- AUTO-GENERATED by scripts/sync-assets.mjs - do not edit by hand
 -- Sources: Items module Image + SkinsModule (inventory icons only)
@@ -7279,7 +8264,7 @@ return M
 
 end)()
 
--- ── game/attachment_images.lua ──
+-- â”€â”€ game/attachment_images.lua â”€â”€
 April._mods["game.attachment_images"] = (function()
 -- MeshId thumbnails from dump: ReplicatedStorage.Attachments (mesh_assets.tsv)
 local M = {}
@@ -7307,7 +8292,7 @@ return M
 
 end)()
 
--- ── game/item_catalog.lua ──
+-- â”€â”€ game/item_catalog.lua â”€â”€
 April._mods["game.item_catalog"] = (function()
 local M = {}
 
@@ -8055,7 +9040,7 @@ return M
 
 end)()
 
--- ── game/items.lua ──
+-- â”€â”€ game/items.lua â”€â”€
 April._mods["game.items"] = (function()
 local env = April.require("core.env")
 local item_images = April.require("game.item_images")
@@ -8323,7 +9308,7 @@ return M
 
 end)()
 
--- ── game/weapons.lua ──
+-- â”€â”€ game/weapons.lua â”€â”€
 April._mods["game.weapons"] = (function()
 local bootstrap = April.require("game.bootstrap")
 local env = April.require("core.env")
@@ -8847,7 +9832,7 @@ return M
 
 end)()
 
--- ── game/gc_weapon_mods.lua ──
+-- â”€â”€ game/gc_weapon_mods.lua â”€â”€
 April._mods["game.gc_weapon_mods"] = (function()
 -- GC weapon multipliers. Skip refreshgc when warm; rate-limit applygc.
 local debug = April.require("core.debug")
@@ -9097,7 +10082,7 @@ return M
 
 end)()
 
--- ── game/gun_mod_profiles.lua ──
+-- â”€â”€ game/gun_mod_profiles.lua â”€â”€
 April._mods["game.gun_mod_profiles"] = (function()
 local settings = April.require("core.settings")
 local weapons = April.require("game.weapons")
@@ -9245,7 +10230,7 @@ return M
 
 end)()
 
--- ── game/combat_stats.lua ──
+-- â”€â”€ game/combat_stats.lua â”€â”€
 April._mods["game.combat_stats"] = (function()
 local settings = April.require("core.settings")
 local weapons = April.require("game.weapons")
@@ -9309,7 +10294,7 @@ return M
 
 end)()
 
--- ── game/combat_origin.lua ──
+-- â”€â”€ game/combat_origin.lua â”€â”€
 April._mods["game.combat_origin"] = (function()
 local env = April.require("core.env")
 local weapons = April.require("game.weapons")
@@ -9550,7 +10535,7 @@ return M
 
 end)()
 
--- ── game/team_state.lua ──
+-- â”€â”€ game/team_state.lua â”€â”€
 April._mods["game.team_state"] = (function()
 -- Official Fallen party teams (TeamNavigationController) + Roblox Team fallback.
 -- Dump: CharacterScripts.TeamNavigationController - InTeam / CanInvite attrs,
@@ -9663,14 +10648,16 @@ local function members_from_teamlist()
     if #labels == 0 then return nil end
 
     local set, list = {}, {}
-    if not entity or not entity.get_players then return set, list end
-    for _, p in ipairs(entity.get_players()) do
-        local name = p.name
-        local disp = p.display_name
+    local ep = April.require("core.entity_props")
+    local players = ep.get_players()
+    if #players == 0 then return set, list end
+    for _, p in ipairs(players) do
+        local name = ep.name(p)
+        local disp = ep.display_name(p)
         for i = 1, #labels do
             local lab = labels[i]
             if name == lab or disp == lab then
-                add_member(set, list, p.user_id)
+                add_member(set, list, ep.user_id(p))
                 break
             end
         end
@@ -9722,18 +10709,20 @@ function M.party_members()
 end
 
 function M.has_team_highlight(player)
-    if not player or not player.character then return false end
-    local char = player.character
+    local ep = April.require("core.entity_props")
+    local char = ep.character(player)
+    if not char then return false end
     if not env.is_valid(char) then return false end
     local hl = find_child(char, "TeamHighlight")
     return hl ~= nil and env.is_valid(hl)
 end
 
 function M.is_party_teammate(player)
-    if not player or player.is_local then return false end
+    local ep = April.require("core.entity_props")
+    if not player or ep.is_local(player) then return false end
     refresh()
 
-    local uid = tonumber(player.user_id)
+    local uid = ep.user_id(player)
     if uid and cache.members[uid] then
         return true
     end
@@ -9748,18 +10737,31 @@ end
 
 function M.same_roblox_team(player)
     if not player then return false end
-    local lp = entity and entity.get_local_player and entity.get_local_player()
+    local ep = April.require("core.entity_props")
+    local lp = ep.get_local_player()
     if not lp then return false end
-    if not lp.has_team or not player.has_team then return false end
-    if not lp.team or not player.team or lp.team == "" or player.team == "" then
+    if not ep.has_team(lp) or not ep.has_team(player) then return false end
+    local lt = ep.team(lp)
+    local pt = ep.team(player)
+    if not lt or not pt or lt == "" or pt == "" then
         return false
     end
-    return lp.team == player.team
+    -- Place dump Teams service only has Attackers/Defenders (combat shuffle).
+    -- Those are match sides / leftovers — NOT Fallen party allies. Treating them
+    -- as teammates blanks Player ESP while aim can still lock (filters differ).
+    local a = tostring(lt)
+    local b = tostring(pt)
+    if a == "Attackers" or a == "Defenders" or b == "Attackers" or b == "Defenders" then
+        return false
+    end
+    return a == b
 end
 
 -- True if target should be skipped by team check (is ally).
+-- Fallen Survival party = TeamNavigationController FetchTeam / TeamHighlight only.
 function M.is_teammate(player)
-    if not player or player.is_local then return true end
+    local ep = April.require("core.entity_props")
+    if not player or ep.is_local(player) then return true end
     if M.is_party_teammate(player) then return true end
     if M.same_roblox_team(player) then return true end
     return false
@@ -9769,7 +10771,7 @@ return M
 
 end)()
 
--- ── game/player_state.lua ──
+-- â”€â”€ game/player_state.lua â”€â”€
 April._mods["game.player_state"] = (function()
 -- Player ESP state from DataModel.Players.<Name> attributes.
 -- Vector: inst:get_attribute / get_attributes
@@ -9780,6 +10782,7 @@ April._mods["game.player_state"] = (function()
 -- VIP/SafeZone/ClanColor; those only exist on the Player instance.
 
 local env = April.require("core.env")
+local ep = April.require("core.entity_props")
 local team_state = April.require("game.team_state")
 
 local M = {}
@@ -9793,14 +10796,14 @@ local function tick_ms()
 end
 
 local function cache_key(player)
-    local uid = tonumber(player and player.user_id)
+    local uid = ep.user_id(player)
     if uid and uid ~= 0 then return "u:" .. tostring(uid) end
-    return "n:" .. tostring(player and (player.name or player.display_name) or "?")
+    return "n:" .. tostring(ep.name(player) or ep.display_name(player) or "?")
 end
 
 local function players_service()
-    if game and game.players then
-        return game.players
+    if game and (game.players or game.Players) then
+        return game.players or game.Players
     end
     return env.safe_call(function()
         if game.get_service then return game.get_service("Players") end
@@ -10065,7 +11068,9 @@ function M.resolve_player_inst(player)
     local found = nil
 
     if players then
-        local names = { player.name, player.display_name }
+        local pname = ep.name(player)
+        local pdisp = ep.display_name(player)
+        local names = { pname, pdisp }
         for i = 1, #names do
             local want = names[i]
             if want and want ~= "" then
@@ -10075,7 +11080,7 @@ function M.resolve_player_inst(player)
         end
 
         if not found then
-            local uid = tonumber(player.user_id)
+            local uid = ep.user_id(player)
             local kids = env.safe_call(function()
                 if players.get_children then return players:get_children() end
                 if players.GetChildren then return players:GetChildren() end
@@ -10092,8 +11097,8 @@ function M.resolve_player_inst(player)
                 end
                 local n = env.safe_call(function() return pl.Name or pl.name end)
                 local dn = env.safe_call(function() return pl.DisplayName or pl.display_name end)
-                if (player.name and (n == player.name or dn == player.name))
-                    or (player.display_name and (n == player.display_name or dn == player.display_name)) then
+                if (pname and (n == pname or dn == pname))
+                    or (pdisp and (n == pdisp or dn == pdisp)) then
                     found = pl
                     break
                 end
@@ -10400,26 +11405,29 @@ end
 
 function M.is_alive_body(player)
     if not player then return false end
-    if player.is_alive == false then return false end
-    local char = player.character
+    if ep.is_alive(player) == false then return false end
+    local char = ep.character(player)
     if not char then return false end
-    if utility and utility.is_valid and not utility.is_valid(char) then return false end
-    if player.health ~= nil and player.health <= 0 then return false end
+    if not env.is_valid(char) then return false end
+    local hp = ep.health(player)
+    if hp ~= nil and hp <= 0 then return false end
     return true
 end
 
 function M.is_combat_target(player)
-    if not player or player.is_local then return false end
-    if player.is_alive ~= false then return true end
+    if not player or ep.is_local(player) then return false end
+    if ep.is_alive(player) ~= false then return true end
     if M.is_downed(player) then return true end
-    if player.health and player.health > 0 then return true end
+    local hp = ep.health(player)
+    if hp and hp > 0 then return true end
     return false
 end
 
 function M.passes_health_check(player)
     if not player then return false end
-    if player.is_alive then
-        if player.health and player.health <= 0 then return false end
+    if ep.is_alive(player) then
+        local hp = ep.health(player)
+        if hp and hp <= 0 then return false end
         return true
     end
     return M.is_downed(player)
@@ -10449,7 +11457,7 @@ return M
 
 end)()
 
--- ── game/farm_tools.lua ──
+-- â”€â”€ game/farm_tools.lua â”€â”€
 April._mods["game.farm_tools"] = (function()
 local bootstrap = April.require("game.bootstrap")
 local env = April.require("core.env")
@@ -10723,7 +11731,7 @@ return M
 
 end)()
 
--- ── game/farm_targets.lua ──
+-- â”€â”€ game/farm_targets.lua â”€â”€
 April._mods["game.farm_targets"] = (function()
 --[[
   Gather targeting — TreeX / NodeSpark preferred, Main fallback.
@@ -10937,7 +11945,7 @@ return M
 
 end)()
 
--- ── game/inventory.lua ──
+-- â”€â”€ game/inventory.lua â”€â”€
 April._mods["game.inventory"] = (function()
 local env = April.require("core.env")
 local items = April.require("game.items")
@@ -11088,7 +12096,7 @@ return M
 
 end)()
 
--- ── game/player_gear.lua ──
+-- â”€â”€ game/player_gear.lua â”€â”€
 April._mods["game.player_gear"] = (function()
 local env = April.require("core.env")
 local items = April.require("game.items")
@@ -11560,10 +12568,11 @@ return M
 
 end)()
 
--- ── game/npcs.lua ──
+-- â”€â”€ game/npcs.lua â”€â”€
 April._mods["game.npcs"] = (function()
 local env = April.require("core.env")
 local folders = April.require("game.folders")
+local esp_scan = April.require("game.esp_scan")
 
 local M = {}
 
@@ -11572,6 +12581,7 @@ M.HOSTILE_NAMES = {
     Bruno = true,
     Boris = true,
     Brutus = true,
+    AttackHeli = true,
 }
 
 function M.is_hostile_name(name)
@@ -11581,23 +12591,72 @@ end
 function M.kind(name)
     if name == "Soldier" then return "soldier" end
     if name == "Bruno" or name == "Boris" or name == "Brutus" then return "boss" end
+    if name == "AttackHeli" then return "heli" end
     return nil
 end
 
-local function read_health(model)
-    local hum = env.safe_call(function()
+function M.display_name(name, kind)
+    if kind == "heli" or name == "AttackHeli" then
+        return "Attack Heli"
+    end
+    return name
+end
+
+local function read_humanoid(model)
+    return env.safe_call(function()
         if model.find_first_child_of_class then
             return model:find_first_child_of_class("Humanoid")
+        end
+        if model.FindFirstChildOfClass then
+            return model:FindFirstChildOfClass("Humanoid")
         end
         for _, child in ipairs(model:get_children()) do
             if child.ClassName == "Humanoid" then return child end
         end
         return nil
     end)
-    if not hum then return nil end
-    local hp = hum.Health or hum.health
+end
+
+-- Soldiers/bosses: Humanoid.Health. AttackHeli: model attributes Health/MaxHealth (Bench).
+function M.read_health(model)
+    if not env.is_valid(model) then return nil end
+
+    local hum = read_humanoid(model)
+    if hum then
+        local hp = tonumber(hum.Health or hum.health)
+        if hp and hp <= 0 then return nil end
+        local max_hp = tonumber(hum.MaxHealth or hum.max_health)
+        return {
+            source = "humanoid",
+            humanoid = hum,
+            hp = hp,
+            max_hp = max_hp,
+        }
+    end
+
+    local hp = tonumber(env.get_attribute(model, "Health"))
+    local max_hp = tonumber(env.get_attribute(model, "MaxHealth"))
+    if hp == nil and max_hp == nil then return nil end
     if hp and hp <= 0 then return nil end
-    return hum
+    return {
+        source = "attribute",
+        hp = hp,
+        max_hp = max_hp,
+    }
+end
+
+local function find_anchor(model, kind)
+    if kind == "heli" then
+        local main = esp_scan.find_main_part(model)
+        if main then return main end
+    end
+
+    local head = env.safe_call(function()
+        return model:find_first_child("Head") or model:FindFirstChild("Head")
+    end)
+    if head and env.is_valid(head) then return head end
+
+    return esp_scan.find_main_part(model)
 end
 
 local function try_add_npc(out, model, seen)
@@ -11608,95 +12667,183 @@ local function try_add_npc(out, model, seen)
     local name = model.Name or model.name
     if not M.is_hostile_name(name) then return end
 
+    local kind = M.kind(name)
     local addr = model.Address or model.address or tostring(model)
     if seen[addr] then return end
 
-    if not read_health(model) then return end
+    local health = M.read_health(model)
+    -- Soldiers/bosses need a living Humanoid. AttackHeli may exist before Health
+    -- attributes replicate — still ESP once an anchor part exists.
+    if not health and kind ~= "heli" then return end
 
-    local head = env.safe_call(function()
-        return model:find_first_child("Head") or model:FindFirstChild("Head")
-    end)
-    if not head or not env.is_valid(head) then return end
+    local anchor = find_anchor(model, kind)
+    if not anchor or not env.is_valid(anchor) then return end
 
     seen[addr] = true
 
-    local pos = head.Position or head.position
+    local pos = anchor.Position or anchor.position
     local entry = {
         inst = model,
-        name = name,
-        kind = M.kind(name),
-        head = head,
+        name = M.display_name(name, kind),
+        raw_name = name,
+        kind = kind,
+        head = kind ~= "heli" and anchor or nil,
+        anchor = anchor,
+        health_source = health and health.source or nil,
     }
-    if pos and pos.x then
-        entry.lx = pos.x
-        entry.ly = pos.y
-        entry.lz = pos.z
+    if pos and (pos.x or pos.X) then
+        entry.lx = pos.x or pos.X
+        entry.ly = pos.y or pos.Y
+        entry.lz = pos.z or pos.Z
     end
     table.insert(out, entry)
 end
 
+local function enqueue_folder_children(state, folder)
+    if not env.is_valid(folder) then return end
+    local children = env.safe_call(function() return folder:get_children() end) or {}
+    for _, child in ipairs(children) do
+        if env.is_valid(child) then
+            table.insert(state.queue, { inst = child, depth = 0 })
+        end
+    end
+end
+
 function M.begin_scan()
     return {
+        phase = "military",
         monuments = nil,
         mi = 1,
         queue = {},
         qi = 1,
+        events_done = false,
+        workspace_done = false,
         out = {},
         seen = {},
     }
 end
 
 function M.step_scan(state, batch)
-    if not state.monuments then
-        state.monuments = env.safe_call(function()
-            local military = folders.from_key("military")
-            if not env.is_valid(military) then return {} end
-            return military:get_children()
-        end) or {}
-        state.mi = 1
-        state.queue = {}
-        state.qi = 1
-    end
-
     local processed = 0
 
-    while processed < batch do
-        if state.qi > #state.queue then
-            if state.mi > #state.monuments then
-                return true
+    -- Phase 1: Military monuments (soldiers / bosses)
+    if state.phase == "military" then
+        if not state.monuments then
+            state.monuments = env.safe_call(function()
+                local military = folders.from_key("military")
+                if not env.is_valid(military) then return {} end
+                return military:get_children()
+            end) or {}
+            state.mi = 1
+            state.queue = {}
+            state.qi = 1
+        end
+
+        while processed < batch do
+            if state.qi > #state.queue then
+                if state.mi > #state.monuments then
+                    state.phase = "events"
+                    break
+                end
+
+                local monument = state.monuments[state.mi]
+                state.mi = state.mi + 1
+                processed = processed + 1
+
+                if env.is_valid(monument) then
+                    table.insert(state.queue, { inst = monument, depth = 0 })
+                end
+                goto continue
             end
 
-            local monument = state.monuments[state.mi]
-            state.mi = state.mi + 1
+            local item = state.queue[state.qi]
+            state.qi = state.qi + 1
             processed = processed + 1
 
-            if env.is_valid(monument) then
-                table.insert(state.queue, { inst = monument, depth = 0 })
+            local container = item.inst
+            if not env.is_valid(container) or item.depth > 4 then goto continue end
+
+            try_add_npc(state.out, container, state.seen)
+
+            local children = env.safe_call(function() return container:get_children() end) or {}
+            for _, child in ipairs(children) do
+                try_add_npc(state.out, child, state.seen)
+                if item.depth < 4 and env.is_valid(child) then
+                    table.insert(state.queue, { inst = child, depth = item.depth + 1 })
+                end
             end
-            goto continue
+
+            ::continue::
         end
 
-        local item = state.queue[state.qi]
-        state.qi = state.qi + 1
-        processed = processed + 1
-
-        local container = item.inst
-        if not env.is_valid(container) or item.depth > 4 then goto continue end
-
-        try_add_npc(state.out, container, state.seen)
-
-        local children = env.safe_call(function() return container:get_children() end) or {}
-        for _, child in ipairs(children) do
-            try_add_npc(state.out, child, state.seen)
-            if item.depth < 4 and env.is_valid(child) then
-                table.insert(state.queue, { inst = child, depth = item.depth + 1 })
-            end
+        if state.phase == "military" then
+            return false
         end
-
-        ::continue::
     end
 
-    return false
+    -- Phase 2: Workspace.Events (AttackHeli / event vehicles live here, like BTR)
+    if state.phase == "events" then
+        if not state.events_done then
+            state.events_done = true
+            state.queue = {}
+            state.qi = 1
+            local events = folders.from_key("events")
+            enqueue_folder_children(state, events)
+            -- Also walk one level deeper (monument-scoped event folders).
+            local kids = env.safe_call(function()
+                if not env.is_valid(events) then return {} end
+                return events:get_children()
+            end) or {}
+            for _, child in ipairs(kids) do
+                if env.is_valid(child) then
+                    local cn = child.ClassName or child.class_name
+                    if cn == "Folder" or cn == "Model" then
+                        enqueue_folder_children(state, child)
+                    end
+                end
+            end
+        end
+
+        while processed < batch and state.qi <= #state.queue do
+            local item = state.queue[state.qi]
+            state.qi = state.qi + 1
+            processed = processed + 1
+            try_add_npc(state.out, item.inst, state.seen)
+            if item.depth < 2 and env.is_valid(item.inst) then
+                local children = env.safe_call(function() return item.inst:get_children() end) or {}
+                for _, child in ipairs(children) do
+                    try_add_npc(state.out, child, state.seen)
+                    if env.is_valid(child) then
+                        table.insert(state.queue, { inst = child, depth = item.depth + 1 })
+                    end
+                end
+            end
+        end
+
+        if state.qi > #state.queue then
+            state.phase = "workspace_root"
+        else
+            return false
+        end
+    end
+
+    -- Phase 3: Workspace root Models named AttackHeli (server may parent directly)
+    if state.phase == "workspace_root" then
+        if not state.workspace_done then
+            state.workspace_done = true
+            local ws = env.get_workspace()
+            local kids = env.safe_call(function()
+                if not ws then return {} end
+                return ws:get_children()
+            end) or {}
+            for _, child in ipairs(kids) do
+                try_add_npc(state.out, child, state.seen)
+            end
+        end
+        return true
+    end
+
+    return true
 end
 
 function M.complete_scan(state)
@@ -11713,7 +12860,7 @@ return M
 
 end)()
 
--- ── game/turret_stats.lua ──
+-- â”€â”€ game/turret_stats.lua â”€â”€
 April._mods["game.turret_stats"] = (function()
 local M = {}
 
@@ -11740,550 +12887,7 @@ return M
 
 end)()
 
--- ── game/esp_maps.lua ──
-April._mods["game.esp_maps"] = (function()
-local M = {}
-
-M.NODE_MAP = {
-    ["Stone_Node"] = "april_stone_node",
-    ["Metal_Node"] = "april_metal_node",
-    ["Phosphate_Node"] = "april_phosphate_node",
-}
-
-M.NODE_LABELS = {
-    ["Stone_Node"] = "Stone Node",
-    ["Metal_Node"] = "Metal Node",
-    ["Phosphate_Node"] = "Phosphate Node",
-}
-
-M.NODE_FOLDERS = { "nodes" }
-
-M.PLANT_MAP = {
-    ["Corn Plant"] = "april_corn_plant",
-    ["Tomato Plant"] = "april_tomato_plant",
-    ["Pumpkin Plant"] = "april_pumpkin_plant",
-    ["Lemon Plant"] = "april_lemon_plant",
-    ["Raspberry Plant"] = "april_raspberry_plant",
-    ["Blueberry Plant"] = "april_blueberry_plant",
-    ["Wool Plant"] = "april_wool_plant",
-}
-
-M.PLANT_LABELS = {
-    ["Corn Plant"] = "Corn Plant",
-    ["Tomato Plant"] = "Tomato Plant",
-    ["Pumpkin Plant"] = "Pumpkin Plant",
-    ["Lemon Plant"] = "Lemon Plant",
-    ["Raspberry Plant"] = "Raspberry Plant",
-    ["Blueberry Plant"] = "Blueberry Plant",
-    ["Wool Plant"] = "Wool Plant",
-}
-
-M.PLANT_FOLDERS = { "plants" }
-
-M.ANIMAL_MAP = {
-    ["PREFAB_ANIMAL_DEER"] = "april_deer",
-    ["PREFAB_ANIMAL_WILDBOAR"] = "april_boar",
-    ["PREFAB_ANIMAL_WOLF"] = "april_wolf",
-    ["Deer"] = "april_deer",
-    ["Wild Boar"] = "april_boar",
-    ["WildBoar"] = "april_boar",
-    ["Boar"] = "april_boar",
-    ["Wolf"] = "april_wolf",
-}
-
-M.ANIMAL_LABELS = {
-    ["PREFAB_ANIMAL_DEER"] = "Deer",
-    ["PREFAB_ANIMAL_WILDBOAR"] = "Wild Boar",
-    ["PREFAB_ANIMAL_WOLF"] = "Wolf",
-    ["Deer"] = "Deer",
-    ["Wild Boar"] = "Wild Boar",
-    ["WildBoar"] = "Wild Boar",
-    ["Boar"] = "Boar",
-    ["Wolf"] = "Wolf",
-}
-
-M.ANIMAL_FOLDERS = { "animals" }
-
-M.WORLD_TOGGLES = {
-    { id = "april_stone_node", label = "Stone Node", color = { 0.5, 0.5, 0.5, 1 } },
-    { id = "april_metal_node", label = "Metal Node", color = { 0.7, 0.5, 0.3, 1 } },
-    { id = "april_phosphate_node", label = "Phosphate Node", color = { 0.2, 0.8, 0.2, 1 } },
-    { id = "april_corn_plant", label = "Corn Plant", color = { 1, 0.9, 0.3, 1 } },
-    { id = "april_tomato_plant", label = "Tomato Plant", color = { 1, 0.4, 0.3, 1 } },
-    { id = "april_pumpkin_plant", label = "Pumpkin Plant", color = { 1, 0.5, 0.1, 1 } },
-    { id = "april_lemon_plant", label = "Lemon Plant", color = { 1, 0.95, 0.2, 1 } },
-    { id = "april_raspberry_plant", label = "Raspberry Plant", color = { 0.9, 0.2, 0.4, 1 } },
-    { id = "april_blueberry_plant", label = "Blueberry Plant", color = { 0.3, 0.4, 0.9, 1 } },
-    { id = "april_wool_plant", label = "Wool Plant", color = { 0.85, 0.85, 0.9, 1 } },
-    { id = "april_deer", label = "Deer", color = { 0.6, 0.4, 0.2, 1 } },
-    { id = "april_boar", label = "Wild Boar", color = { 0.4, 0.3, 0.2, 1 } },
-    { id = "april_wolf", label = "Wolf", color = { 0.5, 0.5, 0.5, 1 } },
-}
-
-M.LOOT_MAP = {
-    ["Wooden Crate"] = "april_wooden_crate",
-    ["Locked Wooden Crate"] = "april_wooden_crate",
-    ["Locked Metal Crate"] = "april_metal_crate",
-    ["Locked Steel Crate"] = "april_steel_crate",
-    ["Food Crate"] = "april_food_crate",
-    ["Timed Crate"] = "april_timed_crate",
-    ["Care Package"] = "april_care_package",
-    ["BTR Crate"] = "april_btr_crate",
-    ["Body Bag"] = "april_body_bag",
-    ["Sleeper"] = "april_sleeper",
-    ["Trash Can"] = "april_trash_can",
-    ["Oil Barrel"] = "april_oil_barrel",
-    ["Small Egg"] = "april_small_egg",
-    ["Medium Egg"] = "april_medium_egg",
-    ["Large Egg"] = "april_large_egg",
-    ["Small Gift"] = "april_small_egg",
-    ["Medium Gift"] = "april_medium_egg",
-    ["Large Gift"] = "april_large_egg",
-    ["Wooden Boat"] = "april_wooden_boat",
-    ["Military Boat"] = "april_military_boat",
-    ["Salvaged Flycopter"] = "april_flycopter",
-}
-
-M.LOOT_TOGGLES = {
-    { id = "april_dropped_item", label = "Dropped Items", color = { 1, 0.8, 0, 1 } },
-    { id = "april_wooden_crate", label = "Wooden Crate", color = { 0.6, 0.4, 0.2, 1 } },
-    { id = "april_metal_crate", label = "Metal Crate", color = { 0.5, 0.5, 0.6, 1 } },
-    { id = "april_steel_crate", label = "Steel Crate", color = { 0.7, 0.7, 0.8, 1 } },
-    { id = "april_food_crate", label = "Food Crate", color = { 0.2, 0.8, 0.2, 1 } },
-    { id = "april_timed_crate", label = "Timed Crate", color = { 1, 0.5, 0, 1 } },
-    { id = "april_care_package", label = "Care Package", color = { 1, 0.2, 0.2, 1 } },
-    { id = "april_btr_crate", label = "BTR Crate", color = { 0.8, 0.15, 0.15, 1 } },
-    { id = "april_body_bag", label = "Body Bag", color = { 0.3, 0.3, 0.3, 1 } },
-    { id = "april_sleeper", label = "Sleepers", color = { 0.8, 0.4, 0.8, 1 } },
-    { id = "april_trash_can", label = "Trash Can", color = { 0.45, 0.45, 0.45, 1 } },
-    { id = "april_oil_barrel", label = "Oil Barrel", color = { 0.2, 0.2, 0.2, 1 } },
-    { id = "april_small_egg", label = "Small Egg / Gift", color = { 0.95, 0.85, 0.5, 1 } },
-    { id = "april_medium_egg", label = "Medium Egg / Gift", color = { 0.9, 0.7, 0.4, 1 } },
-    { id = "april_large_egg", label = "Large Egg / Gift", color = { 0.85, 0.55, 0.3, 1 } },
-    { id = "april_wooden_boat", label = "Wooden Boat", color = { 0.55, 0.35, 0.15, 1 } },
-    { id = "april_military_boat", label = "Military Boat", color = { 0.35, 0.45, 0.35, 1 } },
-    { id = "april_flycopter", label = "Salvaged Flycopter", color = { 0.6, 0.6, 0.65, 1 } },
-}
-
-M.LOOT_SCAN_FOLDERS = { "loners", "vegetation", "military", "events", "monuments" }
-
-M.BASE_MAP = {
-    ["Base Cabinet"] = "april_base_cabinet",
-    ["Storage Cabinet"] = "april_storage_cabinet",
-    ["Cabinet"] = "april_base_cabinet",
-    ["Large Cabinet"] = "april_storage_cabinet",
-    ["Small Storage Box"] = "april_small_box",
-    ["Large Storage Box"] = "april_large_box",
-    ["Small Box"] = "april_small_box",
-    ["Large Box"] = "april_large_box",
-    ["Wooden Door"] = "april_wooden_door",
-    ["Wooden Double Door"] = "april_wooden_double_door",
-    ["Salvaged Metal Door"] = "april_salvaged_door",
-    ["Metal Door"] = "april_metal_door",
-    ["Metal Double Door"] = "april_metal_double_door",
-    ["Steel Door"] = "april_steel_door",
-    ["Steel Double Door"] = "april_steel_double_door",
-    ["Trap Door"] = "april_trap_door",
-    ["Triangle Trap Door"] = "april_triangle_trap_door",
-    ["Garage Door"] = "april_garage_door",
-    ["Sleeping Bag"] = "april_sleeping_bag",
-    ["Shotgun Turret"] = "april_shotgun_turret",
-    ["Auto Turret"] = "april_auto_turret",
-    ["Small Battery"] = "april_small_battery",
-    ["Medium Battery"] = "april_medium_battery",
-    ["Large Battery"] = "april_large_battery",
-    ["Solar Panel"] = "april_solar_panel",
-    ["Windmill"] = "april_windmill",
-}
-
-M.BASE_SKIP_AREAS = {
-    Loners = true,
-    VMs = true,
-    BTRMonumentPaths = true,
-    Benches = true,
-    Wires = true,
-    Ragdolls = true,
-    Fire = true,
-}
-
-M.BASE_TOGGLES = {
-    { id = "april_base_cabinet", label = "Base Cabinet", color = { 1, 0.8, 0, 1 } },
-    { id = "april_storage_cabinet", label = "Storage Cabinet", color = { 0.6, 0.4, 0.2, 1 } },
-    { id = "april_small_box", label = "Small Storage Box", color = { 0.55, 0.35, 0.15, 1 } },
-    { id = "april_large_box", label = "Large Storage Box", color = { 0.45, 0.3, 0.12, 1 } },
-    { id = "april_sleeping_bag", label = "Sleeping Bag", color = { 0.8, 0.2, 0.2, 1 } },
-    { id = "april_auto_turret", label = "Auto Turret", color = { 1, 0.2, 0.2, 1 }, ring_id = "april_auto_turret_ring" },
-    { id = "april_shotgun_turret", label = "Shotgun Turret", color = { 1, 0.35, 0.2, 1 }, ring_id = "april_shotgun_turret_ring" },
-    { id = "april_wooden_door", label = "Wooden Door", color = { 0.5, 0.3, 0.1, 1 } },
-    { id = "april_wooden_double_door", label = "Wooden Double Door", color = { 0.55, 0.32, 0.12, 1 } },
-    { id = "april_metal_door", label = "Metal Door", color = { 0.5, 0.5, 0.6, 1 } },
-    { id = "april_salvaged_door", label = "Salvaged Metal Door", color = { 0.55, 0.52, 0.48, 1 } },
-    { id = "april_metal_double_door", label = "Metal Double Door", color = { 0.52, 0.52, 0.58, 1 } },
-    { id = "april_steel_door", label = "Steel Door", color = { 0.65, 0.65, 0.72, 1 } },
-    { id = "april_steel_double_door", label = "Steel Double Door", color = { 0.62, 0.62, 0.7, 1 } },
-    { id = "april_garage_door", label = "Garage Door", color = { 0.4, 0.4, 0.42, 1 } },
-    { id = "april_trap_door", label = "Trap Door", color = { 0.48, 0.38, 0.22, 1 } },
-    { id = "april_triangle_trap_door", label = "Triangle Trap Door", color = { 0.46, 0.36, 0.2, 1 } },
-    { id = "april_small_battery", label = "Small Battery", color = { 0.2, 0.75, 0.35, 1 } },
-    { id = "april_medium_battery", label = "Medium Battery", color = { 0.15, 0.65, 0.3, 1 } },
-    { id = "april_large_battery", label = "Large Battery", color = { 0.1, 0.55, 0.25, 1 } },
-    { id = "april_solar_panel", label = "Solar Panel", color = { 0.2, 0.4, 0.85, 1 } },
-    { id = "april_windmill", label = "Windmill", color = { 0.75, 0.85, 0.95, 1 } },
-}
-
-function M.toggle_color(list, toggle_id, fallback)
-    for _, t in ipairs(list or {}) do
-        if t.id == toggle_id then
-            return t.color
-        end
-    end
-    return fallback or { 1, 1, 1, 1 }
-end
-
-function M.turret_ring_toggle(toggle_id)
-    for _, t in ipairs(M.BASE_TOGGLES) do
-        if t.id == toggle_id then
-            return t.ring_id
-        end
-    end
-    return nil
-end
-
-return M
-
-end)()
-
--- ── game/esp_scan.lua ──
-April._mods["game.esp_scan"] = (function()
-local env = April.require("core.env")
-
-local M = {}
-
-local PART_CLASSES = {
-    Part = true,
-    MeshPart = true,
-    UnionOperation = true,
-    WedgePart = true,
-    CornerWedgePart = true,
-}
-
-function M.is_part(inst)
-    if not inst then return false end
-    local cn = inst.ClassName or inst.class_name
-    return PART_CLASSES[cn] == true
-end
-
-function M.find_main_part(model)
-    if not env.is_valid(model) then return nil end
-
-    local main = env.safe_call(function()
-        if model.Main then return model.Main end
-        return model:find_first_child("Main") or model:FindFirstChild("Main")
-    end)
-    if main and M.is_part(main) then return main end
-
-    local hrp = env.safe_call(function()
-        if model.HumanoidRootPart then return model.HumanoidRootPart end
-        return model:find_first_child("HumanoidRootPart") or model:FindFirstChild("HumanoidRootPart")
-    end)
-    if hrp and M.is_part(hrp) then return hrp end
-
-    local children = env.safe_call(function() return model:get_children() end) or {}
-    for _, child in ipairs(children) do
-        if M.is_part(child) then return child end
-    end
-
-    if M.is_part(model) then return model end
-    return nil
-end
-
-local function vec3(v, axis)
-    if not v then return 0 end
-    if axis == "x" then return v.x or v.X or 0 end
-    if axis == "y" then return v.y or v.Y or 0 end
-    return v.z or v.Z or 0
-end
-
-function M.read_part_box(part)
-    if not env.is_valid(part) or not M.is_part(part) then return nil end
-
-    local pos, size, rv, uv, lv
-    pcall(function()
-        pos = part.Position or part.position
-        size = part.Size or part.size
-        rv = part.RightVector or part.right_vector
-        uv = part.UpVector or part.up_vector
-        lv = part.LookVector or part.look_vector
-    end)
-
-    if not pos or not size then return nil end
-
-    return {
-        x = vec3(pos, "x"),
-        y = vec3(pos, "y"),
-        z = vec3(pos, "z"),
-        hx = vec3(size, "x") * 0.5,
-        hy = vec3(size, "y") * 0.5,
-        hz = vec3(size, "z") * 0.5,
-        rx = rv and vec3(rv, "x") or 1,
-        ry = rv and vec3(rv, "y") or 0,
-        rz = rv and vec3(rv, "z") or 0,
-        ux = uv and vec3(uv, "x") or 0,
-        uy = uv and vec3(uv, "y") or 1,
-        uz = uv and vec3(uv, "z") or 0,
-        lx = lv and vec3(lv, "x") or 0,
-        ly = lv and vec3(lv, "y") or 0,
-        lz = lv and vec3(lv, "z") or 1,
-    }
-end
-
-function M.collect_boxes(model, max_parts)
-    max_parts = max_parts or 6
-    local boxes = {}
-    if not env.is_valid(model) then return boxes end
-
-    local main = M.find_main_part(model)
-    if main then
-        local box = M.read_part_box(main)
-        if box then table.insert(boxes, box) end
-    end
-
-    if #boxes >= max_parts then return boxes end
-
-    local desc = env.safe_call(function() return model:get_descendants() end) or {}
-    for _, inst in ipairs(desc) do
-        if #boxes >= max_parts then break end
-        if M.is_part(inst) and inst ~= main then
-            local cn = inst.ClassName or inst.class_name
-            if cn == "MeshPart" or cn == "Part" then
-                local box = M.read_part_box(inst)
-                if box then table.insert(boxes, box) end
-            end
-        end
-    end
-
-    return boxes
-end
-
-function M.label_position(entry)
-    if not entry or not env.is_valid(entry.inst) then return nil end
-    local main = M.find_main_part(entry.inst)
-    if main then
-        local box = M.read_part_box(main)
-        if box then
-            return box.x, box.y + box.hy + 0.25, box.z
-        end
-        local pos = main.Position or main.position
-        if pos then
-            return vec3(pos, "x"), vec3(pos, "y"), vec3(pos, "z")
-        end
-    end
-    return nil
-end
-
-function M.make_entry(model, name, toggle_id, opts)
-    opts = opts or {}
-    local entry = {
-        inst = model,
-        name = name,
-        toggle_id = toggle_id,
-        dynamic = opts.dynamic == true,
-    }
-    if opts.hydrate ~= false then
-        M.hydrate_entry(entry)
-    end
-    return entry
-end
-
-function M.hydrate_entry(entry)
-    if not entry or not env.is_valid(entry.inst) then return entry end
-
-    local main = M.find_main_part(entry.inst)
-    entry.main_part = main
-
-    if main then
-        local box = M.read_part_box(main)
-        entry.box = box
-        if box then
-            entry.lx = box.x
-            entry.ly = box.y + box.hy + 0.25
-            entry.lz = box.z
-        else
-            local pos = main.Position or main.position
-            if pos then
-                entry.lx = vec3(pos, "x")
-                entry.ly = vec3(pos, "y")
-                entry.lz = vec3(pos, "z")
-            end
-        end
-    end
-
-    return entry
-end
-
-function M.refresh_entry_position(entry)
-    if not entry or not env.is_valid(entry.inst) then return false end
-
-    if entry.main_part and env.is_valid(entry.main_part) then
-        local box = M.read_part_box(entry.main_part)
-        if box then
-            entry.box = box
-            entry.lx = box.x
-            entry.ly = box.y + box.hy + 0.25
-            entry.lz = box.z
-            return true
-        end
-    end
-
-    M.hydrate_entry(entry)
-    return entry.lx ~= nil
-end
-
-function M.entry_coords(entry)
-    if entry and entry.lx and entry.ly and entry.lz then
-        return entry.lx, entry.ly, entry.lz
-    end
-    return M.label_position(entry)
-end
-
-local function entry_key(entry)
-    if not entry or not entry.inst then return nil end
-    return tostring(entry.inst.Address or entry.inst) .. ":" .. tostring(entry.toggle_id or "")
-end
-
--- Reuse stable entry tables across rescans to avoid GC churn and unbounded growth.
-function M.merge_entries(prev, fresh)
-    local env = April.require("core.env")
-    local prev_by_key = {}
-    for _, entry in ipairs(prev or {}) do
-        local key = entry_key(entry)
-        if key and entry.inst and env.is_valid(entry.inst) then
-            prev_by_key[key] = entry
-        end
-    end
-
-    local out = {}
-    local seen = {}
-    for _, entry in ipairs(fresh or {}) do
-        if not entry or not entry.inst or not env.is_valid(entry.inst) then goto continue end
-        local key = entry_key(entry)
-        if not key or seen[key] then goto continue end
-        seen[key] = true
-        local existing = prev_by_key[key]
-        if existing and env.is_valid(existing.inst) then
-            out[#out + 1] = existing
-        else
-            out[#out + 1] = entry
-        end
-        ::continue::
-    end
-    return out
-end
-
-function M.create_folder_scan(folder_keys, name_map, label_map, dynamic)
-    return {
-        folder_keys = folder_keys,
-        name_map = name_map,
-        label_map = label_map,
-        dynamic = dynamic == true,
-        fi = 1,
-        ci = 1,
-        children = nil,
-        folder = nil,
-        out = {},
-        seen = {},
-    }
-end
-
-function M.folder_scan_step(state, max_items)
-    max_items = max_items or 16
-    local processed = 0
-    local folders_mod = April.require("game.folders")
-
-    while processed < max_items do
-        if state.fi > #state.folder_keys then
-            return true, state.out
-        end
-
-        if not state.folder or not state.children then
-            state.folder = folders_mod.from_key(state.folder_keys[state.fi])
-            state.ci = 1
-            if env.is_valid(state.folder) then
-                state.children = env.safe_call(function() return state.folder:get_children() end) or {}
-            else
-                state.children = {}
-            end
-        end
-
-        if state.ci > #state.children then
-            state.fi = state.fi + 1
-            state.folder = nil
-            state.children = nil
-            goto continue
-        end
-
-        local model = state.children[state.ci]
-        state.ci = state.ci + 1
-        processed = processed + 1
-
-        if not env.is_valid(model) then goto continue end
-
-        local inst_name = model.Name or model.name
-        if not inst_name then goto continue end
-
-        local toggle_id = state.name_map[inst_name]
-        if not toggle_id then goto continue end
-
-        local key = tostring(model.Address or model) .. ":" .. toggle_id
-        if state.seen[key] then goto continue end
-        state.seen[key] = true
-
-        local label = (state.label_map and state.label_map[inst_name]) or inst_name
-        table.insert(state.out, M.make_entry(model, label, toggle_id, { dynamic = state.dynamic }))
-
-        ::continue::
-    end
-
-    return false, state.out
-end
-
-function M.scan_folders(folder_keys, name_map, label_map, dynamic)
-    local folders_mod = April.require("game.folders")
-    local out = {}
-    local seen = {}
-
-    local function add_entry(model, inst_name)
-        local toggle_id = name_map[inst_name]
-        if not toggle_id then return end
-        local key = tostring(model.Address or model) .. ":" .. toggle_id
-        if seen[key] then return end
-        seen[key] = true
-        local label = (label_map and label_map[inst_name]) or inst_name
-        table.insert(out, M.make_entry(model, label, toggle_id, { dynamic = dynamic }))
-    end
-
-    for _, folder_key in ipairs(folder_keys or {}) do
-        local folder = folders_mod.from_key(folder_key)
-        if not env.is_valid(folder) then goto next_folder end
-
-        local children = env.safe_call(function() return folder:get_children() end) or {}
-        for _, model in ipairs(children) do
-            if not env.is_valid(model) then goto continue end
-            local inst_name = model.Name or model.name
-            if inst_name then add_entry(model, inst_name) end
-            ::continue::
-        end
-        ::next_folder::
-    end
-
-    return out
-end
-
-return M
-
-end)()
-
--- ── game/toolinfo_weapon_mods.lua ──
+-- â”€â”€ game/toolinfo_weapon_mods.lua â”€â”€
 April._mods["game.toolinfo_weapon_mods"] = (function()
 -- Patch live ToolInfo Weapon fields (Double Tap / Burst).
 -- GC applygc only covers *Mult keys; Burst needs direct table writes.
@@ -12457,7 +13061,7 @@ return M
 
 end)()
 
--- ── features/combat/silent_whitelist.lua ──
+-- â”€â”€ features/combat/silent_whitelist.lua â”€â”€
 April._mods["features.combat.silent_whitelist"] = (function()
 -- Player whitelist for combat aim (middle-click toggle). Prefix-aware for silent + camera aim.
 
@@ -12616,7 +13220,7 @@ return M
 
 end)()
 
--- ── features/combat/bullet_tp_ray.lua ──
+-- â”€â”€ features/combat/bullet_tp_ray.lua â”€â”€
 April._mods["features.combat.bullet_tp_ray"] = (function()
 local combat_origin = April.require("game.combat_origin")
 local manip_math = April.require("core.manip_math")
@@ -13177,7 +13781,7 @@ return M
 
 end)()
 
--- ── features/combat/combat_menu.lua ──
+-- â”€â”€ features/combat/combat_menu.lua â”€â”€
 April._mods["features.combat.combat_menu"] = (function()
 local menu_util = April.require("core.menu_util")
 local settings = April.require("core.settings")
@@ -13370,7 +13974,7 @@ return M
 
 end)()
 
--- ── features/combat/targeting.lua ──
+-- â”€â”€ features/combat/targeting.lua â”€â”€
 April._mods["features.combat.targeting"] = (function()
 local settings = April.require("core.settings")
 local weapons = April.require("game.weapons")
@@ -13379,6 +13983,7 @@ local combat_origin = April.require("game.combat_origin")
 local combat_menu = April.require("features.combat.combat_menu")
 local math_util = April.require("core.math_util")
 local esp_util = April.require("core.esp_util")
+local ep = April.require("core.entity_props")
 local player_state = April.require("game.player_state")
 local silent_whitelist = April.require("features.combat.silent_whitelist")
 local cache = April.require("core.cache")
@@ -13637,10 +14242,15 @@ function M.within_max_distance(target, origin, prefix)
         return dist == nil or dist <= max_d
     end
 
-    local dist = target.distance_to and target:distance_to(origin) or nil
-    if not dist and target.position and origin then
-        local pos = target.position
-        dist = math_util.distance3((pos.x or 0) - origin.x, (pos.y or 0) - origin.y, (pos.z or 0) - origin.z)
+    local dist = ep.distance_to(target, origin)
+    if not dist and origin then
+        local pos = ep.position(target)
+        if pos then
+            local px, py, pz = esp_util.vec3_pos(pos)
+            if px then
+                dist = math_util.distance3(px - origin.x, py - origin.y, pz - origin.z)
+            end
+        end
     end
 
     return dist == nil or dist <= max_d
@@ -13656,32 +14266,33 @@ function M.bone_world(target, bone)
         return npc_head_world(target)
     end
 
-    if not target.is_alive then return nil end
+    if ep.is_alive(target) == false then return nil end
     if bone == "Closest" then return nil end
 
-    if bone == "Head" and target.head_position then
-        local pos = target.head_position
-        return { x = pos.x, y = pos.y, z = pos.z }
+    local head_pos = ep.head_position(target)
+    if bone == "Head" and head_pos then
+        local x, y, z = esp_util.vec3_pos(head_pos)
+        if x then return { x = x, y = y, z = z } end
     end
 
-    if target.character then
+    local char = ep.character(target)
+    if char then
         local part = env.safe_call(function()
-            return target.character:find_first_child(bone) or target.character:FindFirstChild(bone)
+            return char:find_first_child(bone) or char:FindFirstChild(bone)
         end)
         if part and env.is_valid(part) then
-            local ppos = part.Position or part.position
-            if ppos and ppos.x then
-                return { x = ppos.x, y = ppos.y, z = ppos.z }
-            end
+            local x, y, z = esp_util.vec3_pos(part.Position or part.position)
+            if x then return { x = x, y = y, z = z } end
         end
     end
 
-    if target.position then
-        local pos = target.position
+    local root_pos = ep.position(target)
+    if root_pos then
         if bone == "Head" then
             return nil
         end
-        return { x = pos.x, y = pos.y, z = pos.z }
+        local x, y, z = esp_util.vec3_pos(root_pos)
+        if x then return { x = x, y = y, z = z } end
     end
     return nil
 end
@@ -13692,11 +14303,9 @@ function M.closest_bone_world(target, cx, cy)
     if M.is_npc_target(target) then
         return npc_head_world(target)
     end
-    if target and target.get_bones_screen then
-        local ok, bones = pcall(function()
-            return target:get_bones_screen()
-        end)
-        if ok and type(bones) == "table" then
+    if target then
+        local bones = ep.get_bones_screen(target)
+        if type(bones) == "table" then
             local best_name, best_dist = nil, math.huge
             for name, entry in pairs(bones) do
                 if type(entry) == "table" and type(name) == "string" and name ~= "Closest" then
@@ -13880,7 +14489,7 @@ local function consider_target(target, prefix, screen_bone, use_fov, fov_px, ori
     if M.is_npc_target(target) then
         score = use_fov and fov_dist or (npc_distance(target, origin) or fov_dist)
     else
-        score = use_fov and fov_dist or (target.distance_to and origin and target:distance_to(origin) or fov_dist)
+        score = use_fov and fov_dist or (origin and (ep.distance_to(target, origin) or fov_dist) or fov_dist)
     end
 
     if score < best_score then
@@ -13904,8 +14513,8 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
     local target_players = settings.multi(prefix .. "targets", 1, true)
     local target_npcs = not opts.players_only and settings.multi(prefix .. "targets", 2, false)
 
-    if target_players and entity and entity.get_players then
-        for _, p in ipairs(entity.get_players()) do
+    if target_players then
+        for _, p in ipairs(ep.get_players()) do
             if player_state.is_combat_target(p) then
                 best, best_score = consider_target(
                     p, prefix, screen_bone, use_fov, fov_px, origin, filter_visible, cx, cy, best, best_score, opts
@@ -13946,7 +14555,7 @@ return M
 
 end)()
 
--- ── features/combat/active_target.lua ──
+-- â”€â”€ features/combat/active_target.lua â”€â”€
 April._mods["features.combat.active_target"] = (function()
 -- Resolve the active combat target + aim point from ragebot / silent / aimbot.
 local settings = April.require("core.settings")
@@ -14045,7 +14654,7 @@ return M
 
 end)()
 
--- ── features/combat/silent_resolve.lua ──
+-- â”€â”€ features/combat/silent_resolve.lua â”€â”€
 April._mods["features.combat.silent_resolve"] = (function()
 local settings = April.require("core.settings")
 local combat_origin = April.require("game.combat_origin")
@@ -14295,7 +14904,7 @@ return M
 
 end)()
 
--- ── features/combat/bullet_hud.lua ──
+-- â”€â”€ features/combat/bullet_hud.lua â”€â”€
 April._mods["features.combat.bullet_hud"] = (function()
 -- Themed on-screen HUD for bullet features (hitscan / TP / manip).
 local settings = April.require("core.settings")
@@ -14489,7 +15098,7 @@ return M
 
 end)()
 
--- ── features/combat/camera_aimbot.lua ──
+-- â”€â”€ features/combat/camera_aimbot.lua â”€â”€
 April._mods["features.combat.camera_aimbot"] = (function()
 -- Camera aimbot: velocity + automatic bullet-drop prediction (weapon stats from dump/toolinfo).
 local settings = April.require("core.settings")
@@ -14739,7 +15348,7 @@ return M
 
 end)()
 
--- ── features/combat/body_peek.lua ──
+-- â”€â”€ features/combat/body_peek.lua â”€â”€
 April._mods["features.combat.body_peek"] = (function()
 -- Micro HRP autopeek for bullet manip: desync, move to peek, undesync when target lost/hidden.
 local settings = April.require("core.settings")
@@ -14979,7 +15588,7 @@ return M
 
 end)()
 
--- ── features/combat/aimbot.lua ──
+-- â”€â”€ features/combat/aimbot.lua â”€â”€
 April._mods["features.combat.aimbot"] = (function()
 local settings = April.require("core.settings")
 local targeting = April.require("features.combat.targeting")
@@ -15316,7 +15925,7 @@ return M
 
 end)()
 
--- ── features/combat/ragebot.lua ──
+-- â”€â”€ features/combat/ragebot.lua â”€â”€
 April._mods["features.combat.ragebot"] = (function()
 -- Ragebot: no FOV, range + filters, autofire. Bullet hitscan/TP/manip come only from Bullet section.
 local settings = April.require("core.settings")
@@ -15560,7 +16169,7 @@ return M
 
 end)()
 
--- ── features/combat/perfect_farm.lua ──
+-- â”€â”€ features/combat/perfect_farm.lua â”€â”€
 April._mods["features.combat.perfect_farm"] = (function()
 --[[
   Farm helper — only scans / aims when a gather target is inside tool range.
@@ -15786,7 +16395,7 @@ return M
 
 end)()
 
--- ── features/combat/gun_mods.lua ──
+-- â”€â”€ features/combat/gun_mods.lua â”€â”€
 April._mods["features.combat.gun_mods"] = (function()
 local settings = April.require("core.settings")
 local menu_util = April.require("core.menu_util")
@@ -16258,7 +16867,7 @@ return M
 
 end)()
 
--- ── features/utility/mod_checker.lua ──
+-- â”€â”€ features/utility/mod_checker.lua â”€â”€
 April._mods["features.utility.mod_checker"] = (function()
 local settings = April.require("core.settings")
 local notify = April.require("core.notify")
@@ -16710,10 +17319,11 @@ return M
 
 end)()
 
--- ── features/visuals/player_esp.lua ──
+-- â”€â”€ features/visuals/player_esp.lua â”€â”€
 April._mods["features.visuals.player_esp"] = (function()
 local settings = April.require("core.settings")
 local env = April.require("core.env")
+local ep = April.require("core.entity_props")
 local draw_util = April.require("core.draw_util")
 local esp_util = April.require("core.esp_util")
 local menu_util = April.require("core.menu_util")
@@ -16765,7 +17375,7 @@ local function tick_ms()
 end
 
 local function cache_key(p)
-    return tostring(p.user_id or 0) .. ":" .. tostring(p.name or "")
+    return tostring(ep.user_id(p) or 0) .. ":" .. tostring(ep.name(p) or "")
 end
 
 local function held_weapon_name(p)
@@ -16807,9 +17417,12 @@ local function filter_opts()
 end
 
 local function passes_player_filters(p, opts)
-    if not p or p.is_local then return false end
-    if p.is_workspace_entity or (p.user_id or 0) == 0 then return false end
-    if npcs.kind(p.name) then return false end
+    if not p or ep.is_local(p) then return false end
+    -- Workspace NPCs only. Do NOT use UserId==0: Vector's entity cache currently
+    -- reports UserId=0 for every real player (API regression; w2s/bounds still work).
+    if ep.is_workspace_entity(p) then return false end
+    local pname = ep.name(p)
+    if npcs.kind(pname) then return false end
     if not player_state.is_combat_target(p) then return false end
     if opts.team and not player_state.passes_team_check(p) then return false end
     if opts.downed ~= 1 and not player_state.passes_downed_check(p, opts.downed) then
@@ -16980,9 +17593,26 @@ end
 function M.update(_dt)
 end
 
+local function player_world_pos(p)
+    local x, y, z = esp_util.vec3_pos(ep.head_position(p))
+    if x then return x, y, z end
+    return esp_util.vec3_pos(ep.position(p))
+end
+
+local function me_world_pos(me)
+    if not me then return nil end
+    local x, y, z = esp_util.vec3_pos(ep.position(me) or ep.head_position(me))
+    if x then return { x = x, y = y, z = z } end
+    return nil
+end
+
 function M.draw()
     if not settings.enabled(P) then return end
-    if not entity or not entity.get_players then return end
+    ep.ensure_api_aliases()
+    local players = ep.get_players()
+    if #players == 0 and not (entity and (entity.get_players or entity.GetPlayers)) then
+        return
+    end
 
     local now = tick_ms()
     prune_bounds_cache(now)
@@ -16991,8 +17621,7 @@ function M.draw()
     local range = settings.num(ID_RANGE, 500)
     local range_sq = range * range
     local box_mode = settings.num(ID_BOX, 1)
-    local me = env.get_local_player()
-    local me_pos = me and me.position
+    local me_pos = me_world_pos(env.get_local_player())
     local opts = filter_opts()
 
     local show_health = settings.bool(ID_HEALTH, true)
@@ -17014,105 +17643,135 @@ function M.draw()
         revive = settings.color(ID_FLAG_REVIVE, DEFAULT_FLAG.REVIVE),
     }
 
-    for _, p in ipairs(entity.get_players()) do
-        if not passes_player_filters(p, opts) then goto continue end
+    for _, p in ipairs(players) do
+        -- Isolate per-player errors so one bad snapshot cannot blank all ESP.
+        local ok, err = pcall(function()
+            if not passes_player_filters(p, opts) then return end
 
-        local pos = p.head_position or p.position
-        if not pos then goto continue end
+            local px, py, pz = player_world_pos(p)
+            if not px then return end
+            local pos = { x = px, y = py, z = pz }
 
-        local dist = 0
-        if me_pos then
-            local dx = (pos.x or 0) - me_pos.x
-            local dy = (pos.y or 0) - me_pos.y
-            local dz = (pos.z or 0) - me_pos.z
-            local dist_sq = dx * dx + dy * dy + dz * dz
-            if dist_sq > range_sq then goto continue end
-            dist = math.sqrt(dist_sq)
-        end
-
-        local snap = player_state.esp_state(p)
-        local col = resolve_color(p)
-
-        -- Skeleton uses bone projections directly (stable at range) — draw even if box fails.
-        if show_skel then
-            if p.get_bones_screen then
-                esp_util.draw_player_skeleton(p, skel_col, 1)
-            elseif p.character then
-                esp_util.draw_model_skeleton(p.character, skel_col, 1)
+            local dist = 0
+            if me_pos then
+                local dx = px - me_pos.x
+                local dy = py - me_pos.y
+                local dz = pz - me_pos.z
+                local dist_sq = dx * dx + dy * dy + dz * dz
+                if dist_sq > range_sq then return end
+                dist = math.sqrt(dist_sq)
             end
-        end
 
-        local bounds = resolve_bounds(p, pos, dist)
-        if not is_on_screen(bounds, pos) then
-            goto continue
-        end
-        if not esp_util.bounds_usable(bounds) then
-            goto continue
-        end
+            local snap = nil
+            pcall(function()
+                snap = player_state.esp_state(p)
+            end)
+            local col = resolve_color(p)
 
-        local ts = esp_util.text_size()
-        if dist > 250 then
-            ts = math.max(11, ts - 1)
-        end
-
-        local cx = bounds.x + bounds.w * 0.5
-
-        -- Top: name + weapon only (never clan - clan is on the right with tags)
-        local top = {}
-        if show_name then
-            top[#top + 1] = { text = p.name or "?", col = name_col }
-        end
-        if show_wpn then
-            local wpn = held_weapon_name(p)
-            if wpn and wpn ~= "" then
-                top[#top + 1] = { text = tostring(wpn), col = wpn_col }
+            if show_skel then
+                local bones = ep.get_bones_screen(p)
+                if bones then
+                    esp_util.draw_player_skeleton(p, skel_col, 1)
+                else
+                    local char = ep.character(p)
+                    if char then
+                        esp_util.draw_model_skeleton(char, skel_col, 1)
+                    end
+                end
             end
-        end
 
-        if #top > 0 then
-            local ty = bounds.y - 4 - (#top * (ts + 1))
-            for i = 1, #top do
-                draw_util.text_centered(cx, ty + (i - 1) * (ts + 1), top[i].text, top[i].col, ts)
+            -- Prefer native GetBounds (PascalCase API) before our projection fallbacks.
+            local bounds = ep.get_bounds(p)
+            if not esp_util.bounds_usable(bounds) then
+                bounds = resolve_bounds(p, pos, dist)
             end
-        end
+            if not is_on_screen(bounds, pos) then
+                local bx, by, bvis = ep.get_bone_screen(p, "Head")
+                if bvis then
+                    local size = esp_util.dist_point_size(dist)
+                    bounds = {
+                        x = bx - size * 0.5,
+                        y = by - size,
+                        w = size,
+                        h = size * 2,
+                        valid = true,
+                    }
+                else
+                    return
+                end
+            end
+            if not esp_util.bounds_usable(bounds) then
+                local size = esp_util.dist_point_size(dist)
+                bounds = esp_util.guard_tiny_bounds(
+                    esp_util.point_screen_bounds(px, py, pz, size),
+                    dist
+                )
+            end
+            if not esp_util.bounds_usable(bounds) then return end
 
-        -- Right: clan tag + attribute flags (SZ / DOWN / staff / revive)
-        local side = collect_side_tags(p, snap, show_clan, clan_menu_col, flag_cols)
-        if #side > 0 then
-            local rx = bounds.x + bounds.w + 4
-            local ry = bounds.y
-            for i = 1, #side do
-                draw_util.text(
-                    rx,
-                    ry + (i - 1) * (ts + 1),
-                    side[i].text,
-                    side[i].col,
+            local ts = esp_util.text_size()
+            if dist > 250 then
+                ts = math.max(11, ts - 1)
+            end
+
+            local cx = bounds.x + bounds.w * 0.5
+
+            local top = {}
+            if show_name then
+                top[#top + 1] = { text = ep.name(p) or "?", col = name_col }
+            end
+            if show_wpn then
+                local wpn = held_weapon_name(p) or ep.tool_name(p)
+                if wpn and wpn ~= "" then
+                    top[#top + 1] = { text = tostring(wpn), col = wpn_col }
+                end
+            end
+
+            if #top > 0 then
+                local ty = bounds.y - 4 - (#top * (ts + 1))
+                for i = 1, #top do
+                    draw_util.text_centered(cx, ty + (i - 1) * (ts + 1), top[i].text, top[i].col, ts)
+                end
+            end
+
+            local side = collect_side_tags(p, snap, show_clan, clan_menu_col, flag_cols)
+            if #side > 0 then
+                local rx = bounds.x + bounds.w + 4
+                local ry = bounds.y
+                for i = 1, #side do
+                    draw_util.text(
+                        rx,
+                        ry + (i - 1) * (ts + 1),
+                        side[i].text,
+                        side[i].col,
+                        ts
+                    )
+                end
+            end
+
+            if box_mode == 1 then
+                draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 0)
+            elseif box_mode == 2 then
+                draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 1)
+            end
+
+            if show_health then
+                draw_util.health_bar_on_box(bounds, ep.health(p), ep.max_health(p))
+            end
+
+            if show_dist then
+                draw_util.text_centered(
+                    cx,
+                    bounds.y + bounds.h + 3,
+                    string.format("%dm", math.floor(dist + 0.5)),
+                    dist_col,
                     ts
                 )
             end
+        end)
+        if not ok then
+            April.require("core.debug").error_once("player_esp:" .. tostring(p and ep.name(p)), err)
         end
-
-        if box_mode == 1 then
-            draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 0)
-        elseif box_mode == 2 then
-            draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 1)
-        end
-
-        if show_health then
-            draw_util.health_bar_on_box(bounds, p.health, p.max_health)
-        end
-
-        if show_dist then
-            draw_util.text_centered(
-                cx,
-                bounds.y + bounds.h + 3,
-                string.format("%dm", math.floor(dist + 0.5)),
-                dist_col,
-                ts
-            )
-        end
-
-        ::continue::
     end
 end
 
@@ -17120,7 +17779,7 @@ return M
 
 end)()
 
--- ── features/visuals/target_overlay.lua ──
+-- â”€â”€ features/visuals/target_overlay.lua â”€â”€
 April._mods["features.visuals.target_overlay"] = (function()
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
@@ -17597,7 +18256,7 @@ return M
 
 end)()
 
--- ── features/visuals/target_visuals.lua ──
+-- â”€â”€ features/visuals/target_visuals.lua â”€â”€
 April._mods["features.visuals.target_visuals"] = (function()
 -- Target visuals: custom crosshair, smooth follow-target, and motion effects.
 local settings = April.require("core.settings")
@@ -17855,13 +18514,13 @@ return M
 
 end)()
 
--- ── features/visuals/crosshair.lua ──
+-- â”€â”€ features/visuals/crosshair.lua â”€â”€
 April._mods["features.visuals.crosshair"] = (function()
 return April.require("features.visuals.target_visuals")
 
 end)()
 
--- ── features/world/world_esp.lua ──
+-- â”€â”€ features/world/world_esp.lua â”€â”€
 April._mods["features.world.world_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -18150,7 +18809,7 @@ return M
 
 end)()
 
--- ── features/world/loot_esp.lua ──
+-- â”€â”€ features/world/loot_esp.lua â”€â”€
 April._mods["features.world.loot_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -18596,7 +19255,7 @@ return M
 
 end)()
 
--- ── features/world/base_esp.lua ──
+-- â”€â”€ features/world/base_esp.lua â”€â”€
 April._mods["features.world.base_esp"] = (function()
 --[[
   Base ESP — same cache / incremental-scan system as world + loot.
@@ -19009,12 +19668,13 @@ return M
 
 end)()
 
--- ── features/world/npc_esp.lua ──
+-- â”€â”€ features/world/npc_esp.lua â”€â”€
 April._mods["features.world.npc_esp"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
 local draw_util = April.require("core.draw_util")
 local esp_util = April.require("core.esp_util")
+local ep = April.require("core.entity_props")
 local env = April.require("core.env")
 local menu_util = April.require("core.menu_util")
 local npcs = April.require("game.npcs")
@@ -19037,7 +19697,7 @@ end
 local function bounds_key(entry)
     if entry.entity then
         local p = entry.entity
-        return "e:" .. tostring(p.user_id or 0) .. ":" .. tostring(p.name or "")
+        return "e:" .. tostring(ep.user_id(p) or 0) .. ":" .. tostring(ep.name(p) or "")
     end
     if entry.inst then
         return "i:" .. tostring(entry.inst.Address or entry.inst.address or entry.inst)
@@ -19054,6 +19714,7 @@ function M.register_menu()
     menu_util.register_keybind(T, G.WORLD, P, "NPC ESP", false, { colorpicker = { 1, 0.3, 0.3, 1 } })
     menu.add_checkbox(T, G.WORLD, "april_npc_soldiers", "Soldiers", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, menu_util.parent(P, { colorpicker = { 1, 0.5, 0.1, 1 } }))
+    menu.add_checkbox(T, G.WORLD, "april_npc_heli", "Helicopters (Attack Heli)", false, menu_util.parent(P, { colorpicker = { 0.85, 0.2, 0.25, 1 } }))
     menu.add_combo(T, G.WORLD, "april_npc_box_mode", "NPC Box", { "None", "2D", "Corner" }, 1, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_health", "NPC Health Bar", true, root)
     menu.add_checkbox(T, G.WORLD, "april_npc_skeleton", "NPC Skeleton", false, menu_util.parent(P, { colorpicker = { 1, 1, 1, 0.85 } }))
@@ -19068,7 +19729,7 @@ function M.register_menu()
     menu.add_slider_int(T, G.WORLD, "april_npc_range", "NPC Range", 50, 2000, 500, root)
 
     menu_util.bind_children(P, {
-        "april_npc_soldiers", "april_npc_bosses", "april_npc_box_mode", "april_npc_health",
+        "april_npc_soldiers", "april_npc_bosses", "april_npc_heli", "april_npc_box_mode", "april_npc_health",
         "april_npc_skeleton", "april_npc_show_name", "april_npc_show_distance",
         "april_npc_show_weapon", "april_npc_range",
     })
@@ -19096,21 +19757,24 @@ end
 local function kind_enabled(kind)
     if kind == "soldier" then return settings.bool("april_npc_soldiers", false) end
     if kind == "boss" then return settings.bool("april_npc_bosses", false) end
+    if kind == "heli" then return settings.bool("april_npc_heli", false) end
     return false
 end
 
 local function kind_color(kind)
     if kind == "boss" then return settings.color("april_npc_bosses", { 1, 0.5, 0.1, 1 }) end
+    if kind == "heli" then return settings.color("april_npc_heli", { 0.85, 0.2, 0.25, 1 }) end
     return settings.color("april_npc_soldiers", { 1, 0.3, 0.3, 1 })
 end
 
 local function entity_addr(p)
     if not p then return nil end
-    if p.character then
-        local addr = p.character.Address or p.character.address
+    local char = ep.character(p)
+    if char then
+        local addr = char.Address or char.address
         if addr then return tostring(addr) end
     end
-    return (p.name or "?") .. ":" .. tostring(p.user_id or 0)
+    return (ep.name(p) or "?") .. ":" .. tostring(ep.user_id(p) or 0)
 end
 
 local function instance_addr(entry)
@@ -19121,33 +19785,39 @@ end
 local function refresh_npc_position(entry)
     if entry.entity then
         local p = entry.entity
-        if not p.is_alive then return false end
-        if p.head_position then
-            local pos = p.head_position
-            entry.lx = pos.x
-            entry.ly = pos.y
-            entry.lz = pos.z
-            return true
-        end
-        if p.position then
-            local pos = p.position
-            entry.lx = pos.x
-            entry.ly = pos.y
-            entry.lz = pos.z
+        if ep.is_alive(p) == false then return false end
+        local x, y, z = esp_util.vec3_pos(ep.head_position(p) or ep.position(p))
+        if x then
+            entry.lx, entry.ly, entry.lz = x, y, z
             return true
         end
         return false
     end
 
     if not entry or not env.is_valid(entry.inst) then return false end
-    local head = entry.head
-    if head and env.is_valid(head) then
-        local pos = head.Position or head.position
-        if pos and pos.x then
-            entry.lx = pos.x
-            entry.ly = pos.y
-            entry.lz = pos.z
-            return true
+
+    local anchor = entry.anchor or entry.head
+    if (not anchor or not env.is_valid(anchor)) and entry.inst then
+        local esp_scan = April.require("game.esp_scan")
+        anchor = esp_scan.find_main_part(entry.inst)
+        entry.anchor = anchor
+        if entry.kind ~= "heli" then
+            entry.head = anchor
+        end
+    end
+
+    if anchor and env.is_valid(anchor) then
+        local pos = anchor.Position or anchor.position
+        if pos then
+            local x = pos.x or pos.X
+            local y = pos.y or pos.Y
+            local z = pos.z or pos.Z
+            if x and y and z then
+                entry.lx = x
+                entry.ly = y
+                entry.lz = z
+                return true
+            end
         end
     end
     return false
@@ -19160,26 +19830,28 @@ local function collect_draw_targets(into)
     end
     local seen = {}
 
-    if entity and entity.get_players then
-        for _, p in ipairs(entity.get_players()) do
-            if p.is_local or not p.is_alive then goto continue end
+    for _, p in ipairs(ep.get_players()) do
+        if ep.is_local(p) or ep.is_alive(p) == false then goto continue end
 
-            local kind = npcs.kind(p.name)
-            if not kind then goto continue end
-            if not p.is_workspace_entity and p.user_id ~= 0 then goto continue end
+        local pname = ep.name(p)
+        local kind = npcs.kind(pname)
+        if not kind then goto continue end
+        -- Workspace NPCs: IsWorkspaceEntity, or UserId == 0
+        local uid = ep.user_id(p) or 0
+        if not ep.is_workspace_entity(p) and uid ~= 0 then goto continue end
 
-            local addr = entity_addr(p)
-            if addr and seen[addr] then goto continue end
-            if addr then seen[addr] = true end
+        local addr = entity_addr(p)
+        if addr and seen[addr] then goto continue end
+        if addr then seen[addr] = true end
 
-            out[#out + 1] = {
-                entity = p,
-                name = p.name,
-                kind = kind,
-            }
+        out[#out + 1] = {
+            entity = p,
+            name = npcs.display_name(pname, kind),
+            raw_name = pname,
+            kind = kind,
+        }
 
-            ::continue::
-        end
+        ::continue::
     end
 
     for _, entry in ipairs(cache.npcs or {}) do
@@ -19222,18 +19894,13 @@ local function read_npc_hp(entry)
         end
     end
     if entry.inst and env.is_valid(entry.inst) then
-        local hum = env.safe_call(function()
-            if entry.inst.find_first_child_of_class then
-                return entry.inst:find_first_child_of_class("Humanoid")
-            end
-            return entry.inst:FindFirstChild("Humanoid")
-        end)
-        if hum then
-            local hp = tonumber(hum.Health or hum.health)
-            local max_hp = tonumber(hum.MaxHealth or hum.max_health)
-            if hp and max_hp and max_hp > 0 then
-                return hp, max_hp
-            end
+        local health = npcs.read_health(entry.inst)
+        if health and health.hp and health.max_hp and health.max_hp > 0 then
+            return health.hp, health.max_hp
+        end
+        if health and health.hp and health.max_hp == nil then
+            -- Attribute Health without MaxHealth — still draw a filled bar.
+            return health.hp, health.hp
         end
     end
     return nil, nil
@@ -19270,10 +19937,12 @@ function M.draw()
     local show_health = settings.bool("april_npc_health", true)
     local text_size = esp_util.text_size()
     local me = env.get_local_player()
-    local me_pos = me and me.position
+    local mx, my, mz = nil, nil, nil
+    if me then
+        mx, my, mz = esp_util.vec3_pos(me.position)
+    end
     local now = tick_ms()
 
-    -- Prune stale hold cache
     for key, ent in pairs(M._bounds_cache) do
         if not ent or (now - (ent.t or 0)) > BOUNDS_TTL_MS * 3 then
             M._bounds_cache[key] = nil
@@ -19281,137 +19950,138 @@ function M.draw()
     end
 
     for _, entry in ipairs(frame_draw_targets()) do
-        if not kind_enabled(entry.kind) then goto continue end
+        local ok, err = pcall(function()
+            if not kind_enabled(entry.kind) then return end
 
-        if entry.entity then
-            if not entry.entity.is_alive then goto continue end
-        elseif not env.is_valid(entry.inst) then
-            goto continue
-        end
-
-        local col = kind_color(entry.kind)
-
-        local lx, ly, lz = entry.lx, entry.ly, entry.lz
-        if not lx then
-            refresh_npc_position(entry)
-            lx, ly, lz = entry.lx, entry.ly, entry.lz
-        end
-
-        if not lx and entry.entity and entry.entity.position then
-            local pos = entry.entity.position
-            lx, ly, lz = pos.x, pos.y, pos.z
-            entry.lx, entry.ly, entry.lz = lx, ly, lz
-        end
-        if not lx then goto continue end
-
-        local dist = 0
-        if me_pos then
-            local dx = lx - me_pos.x
-            local dy = ly - me_pos.y
-            local dz = lz - me_pos.z
-            local dist_sq = dx * dx + dy * dy + dz * dz
-            if dist_sq > range_sq then goto continue end
-            dist = math.sqrt(dist_sq)
-        end
-
-        local _, _, head_vis = esp_util.w2s(lx, ly, lz)
-
-        -- Skeleton is independent of box bounds (same as player ESP).
-        if settings.bool("april_npc_skeleton", false) then
-            local sk = settings.color("april_npc_skeleton", { 1, 1, 1, 0.85 })
-            if entry.entity and entry.entity.get_bones_screen then
-                esp_util.draw_player_skeleton(entry.entity, sk, 1)
-            elseif entry.inst then
-                esp_util.draw_model_skeleton(entry.inst, sk, 1)
-            end
-        end
-
-        local bounds = resolve_npc_bounds(entry, dist)
-        if not esp_util.bounds_usable(bounds) then
-            if not head_vis then goto continue end
-            local size = esp_util.dist_point_size(dist)
-            bounds = esp_util.guard_tiny_bounds(
-                esp_util.point_screen_bounds(lx, ly, lz, size),
-                dist
-            )
-            if not esp_util.bounds_usable(bounds) then goto continue end
-        elseif not head_vis then
-            local sw, sh = draw_util.screen_size()
-            local cx = bounds.x + bounds.w * 0.5
-            local cy = bounds.y + bounds.h * 0.5
-            local margin = 120
-            if cx < -margin or cy < -margin or cx > sw + margin or cy > sh + margin then
-                goto continue
-            end
-        end
-
-        local ts = text_size
-        if dist > 250 then
-            ts = math.max(11, ts - 1)
-        end
-
-        local cx = bounds.x + bounds.w * 0.5
-        local label = entry.name or "NPC"
-        local show_name = settings.bool("april_npc_show_name", true)
-        local show_dist = settings.bool("april_npc_show_distance", true)
-        local show_wpn = settings.bool("april_npc_show_weapon", false)
-
-        -- Top labels match player ESP (name / weapon above, distance below).
-        local top = {}
-        if show_name then
-            top[#top + 1] = {
-                text = label,
-                col = settings.color("april_npc_show_name", col),
-            }
-        end
-        if show_wpn then
-            local wpn = nil
             if entry.entity then
-                pcall(function() wpn = player_gear.held_name(entry.entity) end)
+                if ep.is_alive(entry.entity) == false then return end
+            elseif not env.is_valid(entry.inst) then
+                return
             end
-            if (not wpn or wpn == "") and entry.inst then
-                pcall(function() wpn = player_gear.held_name_from_character(entry.inst) end)
+
+            local col = kind_color(entry.kind)
+
+            local lx, ly, lz = entry.lx, entry.ly, entry.lz
+            if not lx then
+                refresh_npc_position(entry)
+                lx, ly, lz = entry.lx, entry.ly, entry.lz
             end
-            if wpn and wpn ~= "" then
+
+            if not lx and entry.entity then
+                lx, ly, lz = esp_util.vec3_pos(ep.head_position(entry.entity) or ep.position(entry.entity))
+                if lx then
+                    entry.lx, entry.ly, entry.lz = lx, ly, lz
+                end
+            end
+            if not lx then return end
+
+            local dist = 0
+            if mx then
+                local dx = lx - mx
+                local dy = ly - my
+                local dz = lz - mz
+                local dist_sq = dx * dx + dy * dy + dz * dz
+                if dist_sq > range_sq then return end
+                dist = math.sqrt(dist_sq)
+            end
+
+            local _, _, head_vis = esp_util.w2s(lx, ly, lz)
+
+            if entry.kind ~= "heli" and settings.bool("april_npc_skeleton", false) then
+                local sk = settings.color("april_npc_skeleton", { 1, 1, 1, 0.85 })
+                if entry.entity and ep.get_bones_screen(entry.entity) then
+                    esp_util.draw_player_skeleton(entry.entity, sk, 1)
+                elseif entry.inst then
+                    esp_util.draw_model_skeleton(entry.inst, sk, 1)
+                end
+            end
+
+            local bounds = resolve_npc_bounds(entry, dist)
+            if not esp_util.bounds_usable(bounds) then
+                if not head_vis then return end
+                local size = esp_util.dist_point_size(dist)
+                bounds = esp_util.guard_tiny_bounds(
+                    esp_util.point_screen_bounds(lx, ly, lz, size),
+                    dist
+                )
+                if not esp_util.bounds_usable(bounds) then return end
+            elseif not head_vis then
+                local sw, sh = draw_util.screen_size()
+                local bcx = bounds.x + bounds.w * 0.5
+                local bcy = bounds.y + bounds.h * 0.5
+                local margin = 120
+                if bcx < -margin or bcy < -margin or bcx > sw + margin or bcy > sh + margin then
+                    return
+                end
+            end
+
+            local ts = text_size
+            if dist > 250 then
+                ts = math.max(11, ts - 1)
+            end
+
+            local cx = bounds.x + bounds.w * 0.5
+            local label = entry.name or "NPC"
+            local show_name = settings.bool("april_npc_show_name", true)
+            local show_dist = settings.bool("april_npc_show_distance", true)
+            local show_wpn = settings.bool("april_npc_show_weapon", false)
+
+            local top = {}
+            if show_name then
                 top[#top + 1] = {
-                    text = tostring(wpn),
-                    col = settings.color("april_npc_show_weapon", { 0.82, 0.84, 0.88, 0.92 }),
+                    text = label,
+                    col = settings.color("april_npc_show_name", col),
                 }
             end
-        end
-
-        if #top > 0 then
-            local ty = bounds.y - 4 - (#top * (ts + 1))
-            for i = 1, #top do
-                draw_util.text_centered(cx, ty + (i - 1) * (ts + 1), top[i].text, top[i].col, ts)
+            if show_wpn then
+                local wpn = nil
+                if entry.entity then
+                    pcall(function() wpn = player_gear.held_name(entry.entity) end)
+                end
+                if (not wpn or wpn == "") and entry.inst then
+                    pcall(function() wpn = player_gear.held_name_from_character(entry.inst) end)
+                end
+                if wpn and wpn ~= "" then
+                    top[#top + 1] = {
+                        text = tostring(wpn),
+                        col = settings.color("april_npc_show_weapon", { 0.82, 0.84, 0.88, 0.92 }),
+                    }
+                end
             end
-        end
 
-        -- Same box + health path as player ESP (1px-gap custom bar via health_bar_on_box).
-        if box_mode == 1 then
-            draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 0)
-        elseif box_mode == 2 then
-            draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 1)
-        end
-
-        if show_health then
-            local hp, max_hp = read_npc_hp(entry)
-            if hp and max_hp then
-                draw_util.health_bar_on_box(bounds, hp, max_hp)
+            if #top > 0 then
+                local ty = bounds.y - 4 - (#top * (ts + 1))
+                for i = 1, #top do
+                    draw_util.text_centered(cx, ty + (i - 1) * (ts + 1), top[i].text, top[i].col, ts)
+                end
             end
-        end
 
-        if show_dist and me_pos then
-            draw_util.text_centered(
-                cx,
-                bounds.y + bounds.h + 3,
-                string.format("%dm", math.floor(dist + 0.5)),
-                settings.color("april_npc_show_distance", { 0.82, 0.84, 0.88, 0.92 }),
-                ts
-            )
-        end
+            if box_mode == 1 then
+                draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 0)
+            elseif box_mode == 2 then
+                draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 1)
+            end
 
-        ::continue::
+            if show_health then
+                local hp, max_hp = read_npc_hp(entry)
+                if hp and max_hp then
+                    draw_util.health_bar_on_box(bounds, hp, max_hp)
+                end
+            end
+
+            if show_dist and mx then
+                draw_util.text_centered(
+                    cx,
+                    bounds.y + bounds.h + 3,
+                    string.format("%dm", math.floor(dist + 0.5)),
+                    settings.color("april_npc_show_distance", { 0.82, 0.84, 0.88, 0.92 }),
+                    ts
+                )
+            end
+        end)
+        if not ok then
+            April.require("core.debug").error_once("npc_esp:" .. tostring(entry and entry.name), err)
+        end
     end
 end
 
@@ -19419,7 +20089,7 @@ return M
 
 end)()
 
--- ── features/movement/exploits.lua ──
+-- â”€â”€ features/movement/exploits.lua â”€â”€
 April._mods["features.movement.exploits"] = (function()
 local menu_util = April.require("core.menu_util")
 
@@ -19468,7 +20138,7 @@ return M
 
 end)()
 
--- ── features/movement/fling.lua ──
+-- â”€â”€ features/movement/fling.lua â”€â”€
 April._mods["features.movement.fling"] = (function()
 local settings = April.require("core.settings")
 local env = April.require("core.env")
@@ -20140,7 +20810,7 @@ return M
 
 end)()
 
--- ── features/movement/desync.lua ──
+-- â”€â”€ features/movement/desync.lua â”€â”€
 April._mods["features.movement.desync"] = (function()
 local settings = April.require("core.settings")
 local env = April.require("core.env")
@@ -20346,7 +21016,7 @@ return M
 
 end)()
 
--- ── features/movement/anti_aim.lua ──
+-- â”€â”€ features/movement/anti_aim.lua â”€â”€
 April._mods["features.movement.anti_aim"] = (function()
 --[[
   Anti-Aim - continuous body yaw (AutoRotate off + CFrame / angular velocity).
@@ -20648,7 +21318,7 @@ return M
 
 end)()
 
--- ── features/movement/fake_duck.lua ──
+-- â”€â”€ features/movement/fake_duck.lua â”€â”€
 April._mods["features.movement.fake_duck"] = (function()
 --[[
   Fake Duck - look crouched (IsCrouch / hip) while moving at stand/sprint speed.
@@ -20958,7 +21628,7 @@ return M
 
 end)()
 
--- ── features/radar/waypoints.lua ──
+-- â”€â”€ features/radar/waypoints.lua â”€â”€
 April._mods["features.radar.waypoints"] = (function()
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
@@ -21051,7 +21721,7 @@ return M
 
 end)()
 
--- ── features/radar/tactical_map.lua ──
+-- â”€â”€ features/radar/tactical_map.lua â”€â”€
 April._mods["features.radar.tactical_map"] = (function()
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
@@ -21454,7 +22124,7 @@ return M
 
 end)()
 
--- ── features/utility/keybind_viewer.lua ──
+-- â”€â”€ features/utility/keybind_viewer.lua â”€â”€
 April._mods["features.utility.keybind_viewer"] = (function()
 local settings = April.require("core.settings")
 local menu_util = April.require("core.menu_util")
@@ -21598,7 +22268,7 @@ return M
 
 end)()
 
--- ── features/utility/anti_afk.lua ──
+-- â”€â”€ features/utility/anti_afk.lua â”€â”€
 April._mods["features.utility.anti_afk"] = (function()
 -- Anti-AFK: Roblox kicks ~20m idle. Nudge input every 14m while enabled.
 
@@ -21668,7 +22338,7 @@ return M
 
 end)()
 
--- ── features/utility/config.lua ──
+-- â”€â”€ features/utility/config.lua â”€â”€
 April._mods["features.utility.config"] = (function()
 local settings = April.require("core.settings")
 local menu_util = April.require("core.menu_util")
@@ -21782,7 +22452,7 @@ return M
 
 end)()
 
--- ── ui/gs_theme.lua ──
+-- â”€â”€ ui/gs_theme.lua â”€â”€
 April._mods["ui.gs_theme"] = (function()
 -- Runtime dark-glass palette for April's draw-only UI.
 -- Vector exposes alpha + rounded primitives, but no backdrop blur or custom fonts.
@@ -21971,7 +22641,7 @@ return M
 
 end)()
 
--- ── ui/gs_input.lua ──
+-- â”€â”€ ui/gs_input.lua â”€â”€
 April._mods["ui.gs_input"] = (function()
 -- Mouse / key helpers. Raw cursor only - no windowed offset correction.
 --
@@ -22305,7 +22975,7 @@ return M
 
 end)()
 
--- ── ui/gs_state.lua ──
+-- â”€â”€ ui/gs_state.lua â”€â”€
 April._mods["ui.gs_state"] = (function()
 -- Shared settings store for the custom UI (backs menu shim + settings reads).
 local M = {}
@@ -22446,7 +23116,7 @@ return M
 
 end)()
 
--- ── ui/gs_anim.lua ──
+-- â”€â”€ ui/gs_anim.lua â”€â”€
 April._mods["ui.gs_anim"] = (function()
 -- Animated accent bars + per-element theme sync for the custom UI.
 local theme = April.require("ui.gs_theme")
@@ -22887,220 +23557,7 @@ return M
 
 end)()
 
--- ── game/esp_maps.lua ──
-April._mods["game.esp_maps"] = (function()
-local M = {}
-
-M.NODE_MAP = {
-    ["Stone_Node"] = "april_stone_node",
-    ["Metal_Node"] = "april_metal_node",
-    ["Phosphate_Node"] = "april_phosphate_node",
-}
-
-M.NODE_LABELS = {
-    ["Stone_Node"] = "Stone Node",
-    ["Metal_Node"] = "Metal Node",
-    ["Phosphate_Node"] = "Phosphate Node",
-}
-
-M.NODE_FOLDERS = { "nodes" }
-
-M.PLANT_MAP = {
-    ["Corn Plant"] = "april_corn_plant",
-    ["Tomato Plant"] = "april_tomato_plant",
-    ["Pumpkin Plant"] = "april_pumpkin_plant",
-    ["Lemon Plant"] = "april_lemon_plant",
-    ["Raspberry Plant"] = "april_raspberry_plant",
-    ["Blueberry Plant"] = "april_blueberry_plant",
-    ["Wool Plant"] = "april_wool_plant",
-}
-
-M.PLANT_LABELS = {
-    ["Corn Plant"] = "Corn Plant",
-    ["Tomato Plant"] = "Tomato Plant",
-    ["Pumpkin Plant"] = "Pumpkin Plant",
-    ["Lemon Plant"] = "Lemon Plant",
-    ["Raspberry Plant"] = "Raspberry Plant",
-    ["Blueberry Plant"] = "Blueberry Plant",
-    ["Wool Plant"] = "Wool Plant",
-}
-
-M.PLANT_FOLDERS = { "plants" }
-
-M.ANIMAL_MAP = {
-    ["PREFAB_ANIMAL_DEER"] = "april_deer",
-    ["PREFAB_ANIMAL_WILDBOAR"] = "april_boar",
-    ["PREFAB_ANIMAL_WOLF"] = "april_wolf",
-    ["Deer"] = "april_deer",
-    ["Wild Boar"] = "april_boar",
-    ["WildBoar"] = "april_boar",
-    ["Boar"] = "april_boar",
-    ["Wolf"] = "april_wolf",
-}
-
-M.ANIMAL_LABELS = {
-    ["PREFAB_ANIMAL_DEER"] = "Deer",
-    ["PREFAB_ANIMAL_WILDBOAR"] = "Wild Boar",
-    ["PREFAB_ANIMAL_WOLF"] = "Wolf",
-    ["Deer"] = "Deer",
-    ["Wild Boar"] = "Wild Boar",
-    ["WildBoar"] = "Wild Boar",
-    ["Boar"] = "Boar",
-    ["Wolf"] = "Wolf",
-}
-
-M.ANIMAL_FOLDERS = { "animals" }
-
-M.WORLD_TOGGLES = {
-    { id = "april_stone_node", label = "Stone Node", color = { 0.5, 0.5, 0.5, 1 } },
-    { id = "april_metal_node", label = "Metal Node", color = { 0.7, 0.5, 0.3, 1 } },
-    { id = "april_phosphate_node", label = "Phosphate Node", color = { 0.2, 0.8, 0.2, 1 } },
-    { id = "april_corn_plant", label = "Corn Plant", color = { 1, 0.9, 0.3, 1 } },
-    { id = "april_tomato_plant", label = "Tomato Plant", color = { 1, 0.4, 0.3, 1 } },
-    { id = "april_pumpkin_plant", label = "Pumpkin Plant", color = { 1, 0.5, 0.1, 1 } },
-    { id = "april_lemon_plant", label = "Lemon Plant", color = { 1, 0.95, 0.2, 1 } },
-    { id = "april_raspberry_plant", label = "Raspberry Plant", color = { 0.9, 0.2, 0.4, 1 } },
-    { id = "april_blueberry_plant", label = "Blueberry Plant", color = { 0.3, 0.4, 0.9, 1 } },
-    { id = "april_wool_plant", label = "Wool Plant", color = { 0.85, 0.85, 0.9, 1 } },
-    { id = "april_deer", label = "Deer", color = { 0.6, 0.4, 0.2, 1 } },
-    { id = "april_boar", label = "Wild Boar", color = { 0.4, 0.3, 0.2, 1 } },
-    { id = "april_wolf", label = "Wolf", color = { 0.5, 0.5, 0.5, 1 } },
-}
-
-M.LOOT_MAP = {
-    ["Wooden Crate"] = "april_wooden_crate",
-    ["Locked Wooden Crate"] = "april_wooden_crate",
-    ["Locked Metal Crate"] = "april_metal_crate",
-    ["Locked Steel Crate"] = "april_steel_crate",
-    ["Food Crate"] = "april_food_crate",
-    ["Timed Crate"] = "april_timed_crate",
-    ["Care Package"] = "april_care_package",
-    ["BTR Crate"] = "april_btr_crate",
-    ["Body Bag"] = "april_body_bag",
-    ["Sleeper"] = "april_sleeper",
-    ["Trash Can"] = "april_trash_can",
-    ["Oil Barrel"] = "april_oil_barrel",
-    ["Small Egg"] = "april_small_egg",
-    ["Medium Egg"] = "april_medium_egg",
-    ["Large Egg"] = "april_large_egg",
-    ["Small Gift"] = "april_small_egg",
-    ["Medium Gift"] = "april_medium_egg",
-    ["Large Gift"] = "april_large_egg",
-    ["Wooden Boat"] = "april_wooden_boat",
-    ["Military Boat"] = "april_military_boat",
-    ["Salvaged Flycopter"] = "april_flycopter",
-}
-
-M.LOOT_TOGGLES = {
-    { id = "april_dropped_item", label = "Dropped Items", color = { 1, 0.8, 0, 1 } },
-    { id = "april_wooden_crate", label = "Wooden Crate", color = { 0.6, 0.4, 0.2, 1 } },
-    { id = "april_metal_crate", label = "Metal Crate", color = { 0.5, 0.5, 0.6, 1 } },
-    { id = "april_steel_crate", label = "Steel Crate", color = { 0.7, 0.7, 0.8, 1 } },
-    { id = "april_food_crate", label = "Food Crate", color = { 0.2, 0.8, 0.2, 1 } },
-    { id = "april_timed_crate", label = "Timed Crate", color = { 1, 0.5, 0, 1 } },
-    { id = "april_care_package", label = "Care Package", color = { 1, 0.2, 0.2, 1 } },
-    { id = "april_btr_crate", label = "BTR Crate", color = { 0.8, 0.15, 0.15, 1 } },
-    { id = "april_body_bag", label = "Body Bag", color = { 0.3, 0.3, 0.3, 1 } },
-    { id = "april_sleeper", label = "Sleepers", color = { 0.8, 0.4, 0.8, 1 } },
-    { id = "april_trash_can", label = "Trash Can", color = { 0.45, 0.45, 0.45, 1 } },
-    { id = "april_oil_barrel", label = "Oil Barrel", color = { 0.2, 0.2, 0.2, 1 } },
-    { id = "april_small_egg", label = "Small Egg / Gift", color = { 0.95, 0.85, 0.5, 1 } },
-    { id = "april_medium_egg", label = "Medium Egg / Gift", color = { 0.9, 0.7, 0.4, 1 } },
-    { id = "april_large_egg", label = "Large Egg / Gift", color = { 0.85, 0.55, 0.3, 1 } },
-    { id = "april_wooden_boat", label = "Wooden Boat", color = { 0.55, 0.35, 0.15, 1 } },
-    { id = "april_military_boat", label = "Military Boat", color = { 0.35, 0.45, 0.35, 1 } },
-    { id = "april_flycopter", label = "Salvaged Flycopter", color = { 0.6, 0.6, 0.65, 1 } },
-}
-
-M.LOOT_SCAN_FOLDERS = { "loners", "vegetation", "military", "events", "monuments" }
-
-M.BASE_MAP = {
-    ["Base Cabinet"] = "april_base_cabinet",
-    ["Storage Cabinet"] = "april_storage_cabinet",
-    ["Cabinet"] = "april_base_cabinet",
-    ["Large Cabinet"] = "april_storage_cabinet",
-    ["Small Storage Box"] = "april_small_box",
-    ["Large Storage Box"] = "april_large_box",
-    ["Small Box"] = "april_small_box",
-    ["Large Box"] = "april_large_box",
-    ["Wooden Door"] = "april_wooden_door",
-    ["Wooden Double Door"] = "april_wooden_double_door",
-    ["Salvaged Metal Door"] = "april_salvaged_door",
-    ["Metal Door"] = "april_metal_door",
-    ["Metal Double Door"] = "april_metal_double_door",
-    ["Steel Door"] = "april_steel_door",
-    ["Steel Double Door"] = "april_steel_double_door",
-    ["Trap Door"] = "april_trap_door",
-    ["Triangle Trap Door"] = "april_triangle_trap_door",
-    ["Garage Door"] = "april_garage_door",
-    ["Sleeping Bag"] = "april_sleeping_bag",
-    ["Shotgun Turret"] = "april_shotgun_turret",
-    ["Auto Turret"] = "april_auto_turret",
-    ["Small Battery"] = "april_small_battery",
-    ["Medium Battery"] = "april_medium_battery",
-    ["Large Battery"] = "april_large_battery",
-    ["Solar Panel"] = "april_solar_panel",
-    ["Windmill"] = "april_windmill",
-}
-
-M.BASE_SKIP_AREAS = {
-    Loners = true,
-    VMs = true,
-    BTRMonumentPaths = true,
-    Benches = true,
-    Wires = true,
-    Ragdolls = true,
-    Fire = true,
-}
-
-M.BASE_TOGGLES = {
-    { id = "april_base_cabinet", label = "Base Cabinet", color = { 1, 0.8, 0, 1 } },
-    { id = "april_storage_cabinet", label = "Storage Cabinet", color = { 0.6, 0.4, 0.2, 1 } },
-    { id = "april_small_box", label = "Small Storage Box", color = { 0.55, 0.35, 0.15, 1 } },
-    { id = "april_large_box", label = "Large Storage Box", color = { 0.45, 0.3, 0.12, 1 } },
-    { id = "april_sleeping_bag", label = "Sleeping Bag", color = { 0.8, 0.2, 0.2, 1 } },
-    { id = "april_auto_turret", label = "Auto Turret", color = { 1, 0.2, 0.2, 1 }, ring_id = "april_auto_turret_ring" },
-    { id = "april_shotgun_turret", label = "Shotgun Turret", color = { 1, 0.35, 0.2, 1 }, ring_id = "april_shotgun_turret_ring" },
-    { id = "april_wooden_door", label = "Wooden Door", color = { 0.5, 0.3, 0.1, 1 } },
-    { id = "april_wooden_double_door", label = "Wooden Double Door", color = { 0.55, 0.32, 0.12, 1 } },
-    { id = "april_metal_door", label = "Metal Door", color = { 0.5, 0.5, 0.6, 1 } },
-    { id = "april_salvaged_door", label = "Salvaged Metal Door", color = { 0.55, 0.52, 0.48, 1 } },
-    { id = "april_metal_double_door", label = "Metal Double Door", color = { 0.52, 0.52, 0.58, 1 } },
-    { id = "april_steel_door", label = "Steel Door", color = { 0.65, 0.65, 0.72, 1 } },
-    { id = "april_steel_double_door", label = "Steel Double Door", color = { 0.62, 0.62, 0.7, 1 } },
-    { id = "april_garage_door", label = "Garage Door", color = { 0.4, 0.4, 0.42, 1 } },
-    { id = "april_trap_door", label = "Trap Door", color = { 0.48, 0.38, 0.22, 1 } },
-    { id = "april_triangle_trap_door", label = "Triangle Trap Door", color = { 0.46, 0.36, 0.2, 1 } },
-    { id = "april_small_battery", label = "Small Battery", color = { 0.2, 0.75, 0.35, 1 } },
-    { id = "april_medium_battery", label = "Medium Battery", color = { 0.15, 0.65, 0.3, 1 } },
-    { id = "april_large_battery", label = "Large Battery", color = { 0.1, 0.55, 0.25, 1 } },
-    { id = "april_solar_panel", label = "Solar Panel", color = { 0.2, 0.4, 0.85, 1 } },
-    { id = "april_windmill", label = "Windmill", color = { 0.75, 0.85, 0.95, 1 } },
-}
-
-function M.toggle_color(list, toggle_id, fallback)
-    for _, t in ipairs(list or {}) do
-        if t.id == toggle_id then
-            return t.color
-        end
-    end
-    return fallback or { 1, 1, 1, 1 }
-end
-
-function M.turret_ring_toggle(toggle_id)
-    for _, t in ipairs(M.BASE_TOGGLES) do
-        if t.id == toggle_id then
-            return t.ring_id
-        end
-    end
-    return nil
-end
-
-return M
-
-end)()
-
--- ── ui/tooltips.lua ──
+-- â”€â”€ ui/tooltips.lua â”€â”€
 April._mods["ui.tooltips"] = (function()
 -- Hover tooltip copy keyed by setting id (what it does, not how).
 local esp_maps = April.require("game.esp_maps")
@@ -23325,7 +23782,7 @@ return M
 
 end)()
 
--- ── ui/menu_shim.lua ──
+-- â”€â”€ ui/menu_shim.lua â”€â”€
 April._mods["ui.menu_shim"] = (function()
 --[[
   Replaces Vector's menu.* API with a store backed by ui.gs_state.
@@ -23506,7 +23963,7 @@ return M
 
 end)()
 
--- ── ui/combat_labels.lua ──
+-- â”€â”€ ui/combat_labels.lua â”€â”€
 April._mods["ui.combat_labels"] = (function()
 -- Label lists shared by the custom UI catalog (no feature / menu deps).
 local M = {}
@@ -23536,7 +23993,7 @@ return M
 
 end)()
 
--- ── ui/gs_icons.lua ──
+-- â”€â”€ ui/gs_icons.lua â”€â”€
 April._mods["ui.gs_icons"] = (function()
 -- Vector-drawn sidebar icons (sharper Gamesense-style glyphs).
 local theme = April.require("ui.gs_theme")
@@ -23696,7 +24153,7 @@ return M
 
 end)()
 
--- ── ui/gs_widgets.lua ──
+-- â”€â”€ ui/gs_widgets.lua â”€â”€
 April._mods["ui.gs_widgets"] = (function()
 -- Gamesense-style widgets (draw API) backed by ui.gs_state.
 local theme = April.require("ui.gs_theme")
@@ -24917,7 +25374,7 @@ function M.keybind(x, y, w, id, label, default_on)
     state.define(id, default_on == true)
     local mode_id = id .. "_mode"
     local hide_id = id .. "_hide_kb"
-    state.define(mode_id, 2) -- default Toggle (Always=0, Hold=1, Toggle=2)
+    state.define(mode_id, 0) -- default Always (Always=0, Hold=1, Toggle=2)
     state.define(hide_id, false)
 
     local h = theme.ROW_H
@@ -25244,7 +25701,7 @@ return M
 
 end)()
 
--- ── ui/catalog.lua ──
+-- â”€â”€ ui/catalog.lua â”€â”€
 April._mods["ui.catalog"] = (function()
 --[[
   Layout catalog for the custom Gamesense UI.
@@ -25635,8 +26092,8 @@ local function build_world()
         master = "april_npc_enabled",
         items = {
             kb("april_npc_enabled", "NPC ESP", false),
-            multi("april_ui_npc_types", "NPC Types", { "Soldiers", "Bosses" }, { false, false }, nil, {
-                sync_ids = { "april_npc_soldiers", "april_npc_bosses" },
+            multi("april_ui_npc_types", "NPC Types", { "Soldiers", "Bosses", "Helicopters" }, { false, false, false }, nil, {
+                sync_ids = { "april_npc_soldiers", "april_npc_bosses", "april_npc_heli" },
             }),
             combo("april_npc_box_mode", "NPC Box", { "None", "2D", "Corner" }, 1),
             multi("april_ui_npc_elements", "Displayed Elements", {
@@ -25649,6 +26106,7 @@ local function build_world()
             }),
             color("april_npc_soldiers", "Soldier Color", { 1, 0.3, 0.3, 1 }),
             color("april_npc_bosses", "Boss Color", { 1, 0.5, 0.1, 1 }),
+            color("april_npc_heli", "Heli Color", { 0.85, 0.2, 0.25, 1 }),
             color("april_npc_skeleton", "Skeleton Color", { 1, 1, 1, 0.85 }),
             color("april_npc_show_name", "Name Color", { 1, 0.3, 0.3, 1 }),
             color("april_npc_show_distance", "Distance Color", { 0.82, 0.84, 0.88, 0.92 }),
@@ -25910,7 +26368,7 @@ return M
 
 end)()
 
--- ── ui/custom_menu.lua ──
+-- â”€â”€ ui/custom_menu.lua â”€â”€
 April._mods["ui.custom_menu"] = (function()
 --[[
   Gamesense-style custom menu for April.
@@ -26495,7 +26953,7 @@ return M
 
 end)()
 
--- ── menu/tabs.lua ──
+-- â”€â”€ menu/tabs.lua â”€â”€
 April._mods["menu.tabs"] = (function()
 local menu_util = April.require("core.menu_util")
 local debug = April.require("core.debug")
@@ -26684,7 +27142,7 @@ return M
 
 end)()
 
--- ── app.lua ──
+-- â”€â”€ app.lua â”€â”€
 April._mods["app"] = (function()
 local tabs = April.require("menu.tabs")
 local debug = April.require("core.debug")
@@ -26696,6 +27154,9 @@ local initialized = false
 
 function M.init()
     if initialized then return true end
+    pcall(function()
+        April.require("core.entity_props").ensure_api_aliases()
+    end)
     initialized = tabs.init()
     if initialized then
         pcall(custom_menu.init)
@@ -26707,6 +27168,9 @@ function M.on_frame()
     if not initialized then return end
     debug.tick_frame()
 
+    pcall(function()
+        April.require("core.api_aliases").apply()
+    end)
     pcall(function()
         April.require("core.feature_bind").tick()
     end)
@@ -26744,17 +27208,18 @@ local ok, err = pcall(function()
     local app = April.require("app")
 
     if not app.init() then
-        debug.error_once("init", "app.init() returned false — features disabled")
+        debug.error_once("init", "app.init() returned false - features disabled")
         return
     end
 
+    April.require("core.api_aliases").apply()
     April.require("core.movement_ctrl").install()
     April.require("features.movement.fling").install()
     April.require("features.movement.anti_aim").install()
     April.require("features.movement.fake_duck").install()
 
     April._init_ok = true
-    print("[April] v" .. tostring(April.version) .. " — custom UI (INSERT to toggle)")
+    print("[April] v" .. tostring(April.version) .. " - custom UI (INSERT to toggle)")
 
     local c = caps.probe()
     if c.fallen_gc then

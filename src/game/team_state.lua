@@ -109,14 +109,16 @@ local function members_from_teamlist()
     if #labels == 0 then return nil end
 
     local set, list = {}, {}
-    if not entity or not entity.get_players then return set, list end
-    for _, p in ipairs(entity.get_players()) do
-        local name = p.name
-        local disp = p.display_name
+    local ep = April.require("core.entity_props")
+    local players = ep.get_players()
+    if #players == 0 then return set, list end
+    for _, p in ipairs(players) do
+        local name = ep.name(p)
+        local disp = ep.display_name(p)
         for i = 1, #labels do
             local lab = labels[i]
             if name == lab or disp == lab then
-                add_member(set, list, p.user_id)
+                add_member(set, list, ep.user_id(p))
                 break
             end
         end
@@ -168,18 +170,20 @@ function M.party_members()
 end
 
 function M.has_team_highlight(player)
-    if not player or not player.character then return false end
-    local char = player.character
+    local ep = April.require("core.entity_props")
+    local char = ep.character(player)
+    if not char then return false end
     if not env.is_valid(char) then return false end
     local hl = find_child(char, "TeamHighlight")
     return hl ~= nil and env.is_valid(hl)
 end
 
 function M.is_party_teammate(player)
-    if not player or player.is_local then return false end
+    local ep = April.require("core.entity_props")
+    if not player or ep.is_local(player) then return false end
     refresh()
 
-    local uid = tonumber(player.user_id)
+    local uid = ep.user_id(player)
     if uid and cache.members[uid] then
         return true
     end
@@ -194,18 +198,31 @@ end
 
 function M.same_roblox_team(player)
     if not player then return false end
-    local lp = entity and entity.get_local_player and entity.get_local_player()
+    local ep = April.require("core.entity_props")
+    local lp = ep.get_local_player()
     if not lp then return false end
-    if not lp.has_team or not player.has_team then return false end
-    if not lp.team or not player.team or lp.team == "" or player.team == "" then
+    if not ep.has_team(lp) or not ep.has_team(player) then return false end
+    local lt = ep.team(lp)
+    local pt = ep.team(player)
+    if not lt or not pt or lt == "" or pt == "" then
         return false
     end
-    return lp.team == player.team
+    -- Place dump Teams service only has Attackers/Defenders (combat shuffle).
+    -- Those are match sides / leftovers — NOT Fallen party allies. Treating them
+    -- as teammates blanks Player ESP while aim can still lock (filters differ).
+    local a = tostring(lt)
+    local b = tostring(pt)
+    if a == "Attackers" or a == "Defenders" or b == "Attackers" or b == "Defenders" then
+        return false
+    end
+    return a == b
 end
 
 -- True if target should be skipped by team check (is ally).
+-- Fallen Survival party = TeamNavigationController FetchTeam / TeamHighlight only.
 function M.is_teammate(player)
-    if not player or player.is_local then return true end
+    local ep = April.require("core.entity_props")
+    if not player or ep.is_local(player) then return true end
     if M.is_party_teammate(player) then return true end
     if M.same_roblox_team(player) then return true end
     return false

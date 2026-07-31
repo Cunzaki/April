@@ -22,7 +22,7 @@ const DEFAULT_RBXLX =
   process.env.APRIL_RBXLX ||
   path.join(
     process.env.LOCALAPPDATA || "",
-    "Volt",
+    "Potassium",
     "workspace",
     "place 13800717766 Fallen Survival Large Server(1).rbxlx"
   );

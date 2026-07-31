@@ -387,8 +387,8 @@ local function build_world()
         master = "april_npc_enabled",
         items = {
             kb("april_npc_enabled", "NPC ESP", false),
-            multi("april_ui_npc_types", "NPC Types", { "Soldiers", "Bosses" }, { false, false }, nil, {
-                sync_ids = { "april_npc_soldiers", "april_npc_bosses" },
+            multi("april_ui_npc_types", "NPC Types", { "Soldiers", "Bosses", "Helicopters" }, { false, false, false }, nil, {
+                sync_ids = { "april_npc_soldiers", "april_npc_bosses", "april_npc_heli" },
             }),
             combo("april_npc_box_mode", "NPC Box", { "None", "2D", "Corner" }, 1),
             multi("april_ui_npc_elements", "Displayed Elements", {
@@ -401,6 +401,7 @@ local function build_world()
             }),
             color("april_npc_soldiers", "Soldier Color", { 1, 0.3, 0.3, 1 }),
             color("april_npc_bosses", "Boss Color", { 1, 0.5, 0.1, 1 }),
+            color("april_npc_heli", "Heli Color", { 0.85, 0.2, 0.25, 1 }),
             color("april_npc_skeleton", "Skeleton Color", { 1, 1, 1, 0.85 }),
             color("april_npc_show_name", "Name Color", { 1, 0.3, 0.3, 1 }),
             color("april_npc_show_distance", "Distance Color", { 0.82, 0.84, 0.88, 0.92 }),

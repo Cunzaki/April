@@ -36,10 +36,19 @@ Key rules: draw only in `on_frame`, `menu.get(id)` every frame, one HTTPS URL pe
 
 Verify folder paths, instance names, remotes, and item image fields against the dump.
 
+Regenerate after a place update:
+
+```bash
+npm run dump
+# default: %LOCALAPPDATA%\Potassium\workspace\place 13800717766 Fallen Survival Large Server(1).rbxlx
+```
+
 | File | Use |
 |------|-----|
 | `GAME_REFERENCE.txt` | Workspace / ReplicatedStorage layout |
+| `manifest.json` | PlaceVersion / executor / counts |
 | `scripts/ReplicatedStorage.Modules.Items.ModuleScript.lua` | Item names + image asset IDs |
+| `RE/PLACE_806_UPDATE.md` | Latest redump notes (AttackHeli, visual fix) |
 
 ---
 

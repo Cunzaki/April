@@ -7,6 +7,7 @@
 -- VIP/SafeZone/ClanColor; those only exist on the Player instance.
 
 local env = April.require("core.env")
+local ep = April.require("core.entity_props")
 local team_state = April.require("game.team_state")
 
 local M = {}
@@ -20,14 +21,14 @@ local function tick_ms()
 end
 
 local function cache_key(player)
-    local uid = tonumber(player and player.user_id)
+    local uid = ep.user_id(player)
     if uid and uid ~= 0 then return "u:" .. tostring(uid) end
-    return "n:" .. tostring(player and (player.name or player.display_name) or "?")
+    return "n:" .. tostring(ep.name(player) or ep.display_name(player) or "?")
 end
 
 local function players_service()
-    if game and game.players then
-        return game.players
+    if game and (game.players or game.Players) then
+        return game.players or game.Players
     end
     return env.safe_call(function()
         if game.get_service then return game.get_service("Players") end
@@ -292,7 +293,9 @@ function M.resolve_player_inst(player)
     local found = nil
 
     if players then
-        local names = { player.name, player.display_name }
+        local pname = ep.name(player)
+        local pdisp = ep.display_name(player)
+        local names = { pname, pdisp }
         for i = 1, #names do
             local want = names[i]
             if want and want ~= "" then
@@ -302,7 +305,7 @@ function M.resolve_player_inst(player)
         end
 
         if not found then
-            local uid = tonumber(player.user_id)
+            local uid = ep.user_id(player)
             local kids = env.safe_call(function()
                 if players.get_children then return players:get_children() end
                 if players.GetChildren then return players:GetChildren() end
@@ -319,8 +322,8 @@ function M.resolve_player_inst(player)
                 end
                 local n = env.safe_call(function() return pl.Name or pl.name end)
                 local dn = env.safe_call(function() return pl.DisplayName or pl.display_name end)
-                if (player.name and (n == player.name or dn == player.name))
-                    or (player.display_name and (n == player.display_name or dn == player.display_name)) then
+                if (pname and (n == pname or dn == pname))
+                    or (pdisp and (n == pdisp or dn == pdisp)) then
                     found = pl
                     break
                 end
@@ -627,26 +630,29 @@ end
 
 function M.is_alive_body(player)
     if not player then return false end
-    if player.is_alive == false then return false end
-    local char = player.character
+    if ep.is_alive(player) == false then return false end
+    local char = ep.character(player)
     if not char then return false end
-    if utility and utility.is_valid and not utility.is_valid(char) then return false end
-    if player.health ~= nil and player.health <= 0 then return false end
+    if not env.is_valid(char) then return false end
+    local hp = ep.health(player)
+    if hp ~= nil and hp <= 0 then return false end
     return true
 end
 
 function M.is_combat_target(player)
-    if not player or player.is_local then return false end
-    if player.is_alive ~= false then return true end
+    if not player or ep.is_local(player) then return false end
+    if ep.is_alive(player) ~= false then return true end
     if M.is_downed(player) then return true end
-    if player.health and player.health > 0 then return true end
+    local hp = ep.health(player)
+    if hp and hp > 0 then return true end
     return false
 end
 
 function M.passes_health_check(player)
     if not player then return false end
-    if player.is_alive then
-        if player.health and player.health <= 0 then return false end
+    if ep.is_alive(player) then
+        local hp = ep.health(player)
+        if hp and hp <= 0 then return false end
         return true
     end
     return M.is_downed(player)

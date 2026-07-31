@@ -1,6 +1,6 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 /**
- * Builds april.lua — the single Vector-executable script.
+ * Builds april.lua â€” the single Vector-executable script.
  */
 
 import fs from "fs";
@@ -15,6 +15,8 @@ const SCRIPT1_OUT = path.join(ROOT, "Script 1.lua");
 
 const ORDER = [
   "core/env.lua",
+  "core/api_aliases.lua",
+  "core/entity_props.lua",
   "core/math_util.lua",
   "core/text_util.lua",
   "core/cache.lua",
@@ -51,6 +53,8 @@ const ORDER = [
   "game/module_scan.lua",
   "game/bootstrap.lua",
   "game/folders.lua",
+  "game/esp_maps.lua",
+  "game/esp_scan.lua",
   "game/item_images.lua",
   "game/attachment_images.lua",
   "game/item_catalog.lua",
@@ -68,8 +72,6 @@ const ORDER = [
   "game/player_gear.lua",
   "game/npcs.lua",
   "game/turret_stats.lua",
-  "game/esp_maps.lua",
-  "game/esp_scan.lua",
   "game/toolinfo_weapon_mods.lua",
   "features/combat/silent_whitelist.lua",
   "features/combat/bullet_tp_ray.lua",
@@ -107,7 +109,6 @@ const ORDER = [
   "ui/gs_input.lua",
   "ui/gs_state.lua",
   "ui/gs_anim.lua",
-  "game/esp_maps.lua",
   "ui/tooltips.lua",
   "ui/menu_shim.lua",
   "ui/combat_labels.lua",
@@ -119,13 +120,13 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "3.97.3";
+const VERSION = "3.98.5";
 
 const header = `--[[
-    April Fallen — Fallen Survival for Project Vector
+    April Fallen - Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
     Built: ${new Date().toISOString()}
-    UI: custom Gamesense menu (INSERT) — Vector menu tabs disabled
+    UI: custom Gamesense menu (INSERT) - Vector menu tabs disabled
 ]]
 
 April = {
@@ -163,17 +164,18 @@ local ok, err = pcall(function()
     local app = April.require("app")
 
     if not app.init() then
-        debug.error_once("init", "app.init() returned false — features disabled")
+        debug.error_once("init", "app.init() returned false - features disabled")
         return
     end
 
+    April.require("core.api_aliases").apply()
     April.require("core.movement_ctrl").install()
     April.require("features.movement.fling").install()
     April.require("features.movement.anti_aim").install()
     April.require("features.movement.fake_duck").install()
 
     April._init_ok = true
-    print("[April] v" .. tostring(April.version) .. " — custom UI (INSERT to toggle)")
+    print("[April] v" .. tostring(April.version) .. " - custom UI (INSERT to toggle)")
 
     local c = caps.probe()
     if c.fallen_gc then
@@ -203,25 +205,27 @@ for (const rel of ORDER) {
   }
   const modPath = rel.replace(/\.lua$/, "").replace(/\//g, ".");
   const src = fs.readFileSync(full, "utf8");
-  body += `\n-- ── ${rel} ──\n`;
+  body += `\n-- â”€â”€ ${rel} â”€â”€\n`;
   body += `April._mods["${modPath}"] = (function()\n${src}\nend)()\n`;
 }
 
 fs.writeFileSync(OUT, header + body + footer);
 console.log("Built", path.relative(ROOT, OUT), `(${(fs.statSync(OUT).size / 1024).toFixed(1)} KB)`);
 
-// Ship loader — only LoadUrl to GitHub main (no local/CDN variants).
-const loader = `utility.LoadUrl("https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/april.lua")
+// load.lua = GitHub remote loader (for release installs).
+const loader = `print("[April] load.lua pulls GitHub main - for local builds execute Script 1.lua or april.lua")
+utility.LoadUrl("https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/april.lua")
 `;
-
 fs.writeFileSync(LOAD_OUT, loader);
-fs.writeFileSync(SCRIPT1_OUT, loader);
 console.log("Built", path.relative(ROOT, LOAD_OUT));
-console.log("Built", path.relative(ROOT, SCRIPT1_OUT), "(same as load.lua)");
+
+// Script 1.lua = full local bundle so Vector "Execute Script 1" uses THIS build.
+fs.copyFileSync(OUT, SCRIPT1_OUT);
+console.log("Built", path.relative(ROOT, SCRIPT1_OUT), "(full local april.lua copy)");
 
 // Do not keep a duplicate full-bundle Script 2.lua around.
 const SCRIPT2_OUT = path.join(ROOT, "Script 2.lua");
 if (fs.existsSync(SCRIPT2_OUT)) {
   fs.unlinkSync(SCRIPT2_OUT);
-  console.log("Removed Script 2.lua (use LoadUrl / load.lua only)");
+  console.log("Removed Script 2.lua");
 }

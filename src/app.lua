@@ -8,6 +8,9 @@ local initialized = false
 
 function M.init()
     if initialized then return true end
+    pcall(function()
+        April.require("core.entity_props").ensure_api_aliases()
+    end)
     initialized = tabs.init()
     if initialized then
         pcall(custom_menu.init)
@@ -19,6 +22,9 @@ function M.on_frame()
     if not initialized then return end
     debug.tick_frame()
 
+    pcall(function()
+        April.require("core.api_aliases").apply()
+    end)
     pcall(function()
         April.require("core.feature_bind").tick()
     end)

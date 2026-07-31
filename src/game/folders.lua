@@ -25,7 +25,9 @@ function M.get_folder(...)
             return cur:find_first_child(name)
                 or cur:FindFirstChild(name)
         end)
-        if not env.is_valid(cur) then return nil end
+        -- Only require a non-nil child. Gating on utility.is_valid here used to
+        -- false-negative Folders and kill every workspace ESP scan.
+        if not cur then return nil end
     end
     return cur
 end
