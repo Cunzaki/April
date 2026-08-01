@@ -29,7 +29,7 @@ local MENU_KEYS = {
     "april_ui_style_overlay", "april_ui_window_x", "april_ui_window_y",
     "april_esp_text_size",
     "april_player_enabled", "april_player_enabled_mode",
-    "april_player_box_mode",
+    "april_player_box_mode", "april_player_box_color",
     "april_player_health", "april_player_skeleton",
     "april_player_show_name", "april_player_show_distance",
     "april_player_show_weapon",

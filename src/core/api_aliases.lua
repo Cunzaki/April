@@ -62,6 +62,12 @@ function M.apply()
         alias(utility, "get_mouse_pos", "GetMousePos")
         alias(utility, "get_tick_count", "GetTickCount")
         alias(utility, "get_delta_time", "GetDeltaTime")
+        alias(utility, "get_time", "GetTime")
+        alias(utility, "get_fps", "GetFPS")
+        alias(utility, "on_key", "OnKey")
+        alias(utility, "remove_key", "RemoveKey")
+        alias(utility, "clear_keys", "ClearKeys")
+        alias(utility, "is_key_toggled", "IsKeyToggled")
         alias(utility, "is_valid", "IsValid")
         alias(utility, "load_url", "LoadUrl")
         alias(utility, "http_get", "HttpGet")
@@ -70,6 +76,18 @@ function M.apply()
     if input then
         alias(input, "is_key_down", "IsKeyDown")
         alias(input, "is_mouse_down", "IsMouseDown")
+        -- Vector calls this GetMousePosition; April historically used both
+        -- snake_case spellings, so expose all three names from any one of them.
+        alias(input, "get_mouse_position", "GetMousePosition")
+        alias(input, "get_mouse_pos", "GetMousePosition")
+    end
+
+    if thread then
+        alias(thread, "create", "Create")
+        alias(thread, "stop", "Stop")
+        alias(thread, "stop_all", "StopAll")
+        alias(thread, "is_running", "IsRunning")
+        alias(thread, "set_interval", "SetInterval")
     end
 
     if game then

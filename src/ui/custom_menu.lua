@@ -11,6 +11,7 @@ local anim = April.require("ui.gs_anim")
 local icons = April.require("ui.gs_icons")
 local catalog = April.require("ui.catalog")
 local state = April.require("ui.gs_state")
+local hud_dock = April.require("ui.hud_dock")
 
 local M = {}
 
@@ -29,6 +30,7 @@ local win_x, win_y = 80, 80
 local scroll = { left = 0, right = 0 }
 local scroll_visual = { left = 0, right = 0 }
 local collapsed_groups = {}
+local last_menu_rect = nil
 
 local SCROLL_EDGE = 36
 local SCROLL_SPEED = 5
@@ -44,6 +46,30 @@ local function screen_size()
         return utility.get_screen_size()
     end
     return 1920, 1080
+end
+
+local function text_width(text, size)
+    local fn = draw and (draw.get_text_size or draw.GetTextSize)
+    if fn then
+        local ok, width = pcall(fn, text, size)
+        if ok and type(width) == "number" then return width end
+    end
+    return #tostring(text or "") * math.max(5, (size or 12) * 0.55)
+end
+
+local function draw_brand(x, y)
+    local wordmark = "April.lua"
+    local size = theme.FONT_BRAND or 15
+    local cursor_x = x
+    local phase = anim.now() * 3.4
+    local accent = anim.title_color()
+    for i = 1, #wordmark do
+        local char = wordmark:sub(i, i)
+        local wave = math.sin(phase + (i - 1) * 0.72)
+        local col = anim.mix(accent, theme.TEXT_ACTIVE, 0.10 + (wave + 1) * 0.10)
+        widgets.text(cursor_x, y + wave * 1.5, char, col, size)
+        cursor_x = cursor_x + text_width(char, size)
+    end
 end
 
 local function clamp_window()
@@ -151,39 +177,42 @@ local function group_visible(group)
     return false
 end
 
-local function draw_sidebar(x, y, h)
-    widgets.rect(x, y, theme.SIDEBAR_W, h, theme.SIDEBAR, true)
-    widgets.rect(x + 1, y + 1, theme.SIDEBAR_W - 2, 1, theme.GLASS_HIGHLIGHT, true)
-    widgets.rect(x + theme.SIDEBAR_W - 1, y, 1, h, theme.BORDER_SOFT, true)
-    widgets.rect(x + theme.SIDEBAR_W - 2, y + 8, 1, h - 16, { 0, 0, 0, 0.26 }, true)
-
+local function draw_top_navbar(x, y, w, h)
+    widgets.rect(x, y, w, h, theme.NAV_BG or theme.SIDEBAR, true, 0)
+    widgets.rect(x, y + h - 1, w, 1, theme.BORDER_SOFT, true)
     local tabs = catalog.TABS
-    local count = #tabs
-    local total_h = count * theme.TAB_H
-    local start_y = y + math.max(0, (h - total_h) * 0.5)
+    local gap = theme.NAV_GAP or 5
+    local pad = theme.NAV_PAD_X or 10
+    local available = w - pad * 2 - gap * (#tabs - 1)
+    local tab_w = math.floor(available / #tabs)
+    local cursor_x = x + pad
+    local active_x, active_w = cursor_x + 8, tab_w - 16
 
     for i, tab in ipairs(tabs) do
-        local ty = start_y + (i - 1) * theme.TAB_H
         local active = i == tab_index
-        local hot = gin.hover(x + 4, ty + 2, theme.SIDEBAR_W - 9, theme.TAB_H - 8)
-        local emphasis = anim.transition("tab:" .. tab.id, active or hot, 14)
+        local hot = gin.hover(cursor_x, y + 5, tab_w, h - 10)
+        local emphasis = anim.transition("tab:" .. tab.id, active or hot, anim.motion_rate(16))
+        local tab_y = y + 5
+        local tab_h = h - 10
         if active then
-            anim.draw_tab_indicator(x + 1, ty + 8, 2, theme.TAB_H - 16)
-            widgets.rect(x + 8, ty + 5, theme.SIDEBAR_W - 16, theme.TAB_H - 10,
-                theme.alpha(theme.SIDEBAR_ACTIVE, 0.42 + emphasis * 0.30), true, theme.CORNER)
+            active_x, active_w = cursor_x + 8, tab_w - 16
+            widgets.rect(cursor_x, tab_y, tab_w, tab_h,
+                theme.alpha(theme.NAV_ACTIVE or theme.SIDEBAR_ACTIVE, 0.48 + emphasis * 0.28),
+                true, theme.CORNER_SMALL)
         elseif emphasis > 0.01 then
-            -- Hover is intentionally limited to a small icon halo; active tabs
-            -- use only the icon and left indicator, not a filled selection tile.
-            widgets.rect(x + theme.SIDEBAR_W * 0.5 - 14, ty + theme.TAB_H * 0.5 - 14, 28, 28,
-                theme.alpha(theme.HOVER, emphasis * 0.45), true, theme.CORNER)
+            widgets.rect(cursor_x, tab_y, tab_w, tab_h,
+                theme.alpha(theme.HOVER, emphasis * 0.55), true, theme.CORNER_SMALL)
         end
 
         local col = active and anim.tab_icon_color() or anim.mix(theme.TEXT_DIM, theme.TEXT, emphasis * 0.45)
-        local cx = x + theme.SIDEBAR_W * 0.5
-        local cy = ty + theme.TAB_H * 0.5
-        icons.draw(tab.icon or tab.id, cx, cy, col)
+        local label = tab.label or tab.title or tab.id
+        local icon_x = cursor_x + 16
+        local cy = y + h * 0.5
+        icons.draw(tab.icon or tab.id, icon_x, cy, col, 0.72)
+        widgets.text(cursor_x + 29, cy - math.floor(theme.FONT_CAPTION * 0.5) - 1,
+            label, col, theme.FONT_CAPTION)
 
-        if gin.clicked(x, ty, theme.SIDEBAR_W, theme.TAB_H) then
+        if gin.clicked(cursor_x, tab_y, tab_w, tab_h) and not widgets.block_under then
             tab_index = i
             scroll.left = 0
             scroll.right = 0
@@ -193,6 +222,20 @@ local function draw_sidebar(x, y, h)
             widgets.open_combo = nil
             widgets.open_multi = nil
         end
+        cursor_x = cursor_x + tab_w + gap
+    end
+
+    if anim.navbar_indicator then
+        -- Smooth only the tab-relative position. Smoothing absolute screen
+        -- coordinates makes the underline trail behind a dragged window.
+        local local_x = active_x - x
+        local_x, active_w = anim.navbar_indicator("primary", local_x, active_w, 20)
+        active_x = x + local_x
+    end
+    if anim.draw_nav_indicator then
+        anim.draw_nav_indicator(active_x, y + h - 3, active_w, 2)
+    else
+        anim.draw_section_top(active_x, y + h - 3, active_w)
     end
 end
 
@@ -227,9 +270,6 @@ local function handle_column_scroll(x, y, w, h, scroll_key, content_h)
     if max_scroll <= 0 then return end
 
     local hot = gin.hover(x, y, w + 14, h)
-    if not hot and scroll_key == "left" then
-        hot = gin.hover(gin.ui_x, y, theme.SIDEBAR_W + 8, h)
-    end
     if not hot then return end
 
     -- Prefer real wheel when any probe delivers notches this frame.
@@ -266,12 +306,18 @@ end
 local function draw_group_title(x, box_top, w, title, collapsed, hot)
     local hover = anim.transition("group-header:" .. tostring(title), hot, anim.motion_rate(16))
     if hover > 0.01 then
-        widgets.rect(x + 3, box_top + 3, w - 6, theme.GROUP_HEADER_H - 6,
-            theme.alpha(theme.HOVER, hover * 0.55), true, 0)
+        widgets.rect(x + 5, box_top + 4, w - 10, theme.GROUP_HEADER_H - 8,
+            theme.alpha(theme.HOVER, hover * 0.45), true, theme.CORNER_SMALL)
     end
-    widgets.text(x + 12, box_top + 7, title, theme.TEXT_ACTIVE, theme.FONT_TITLE)
-    widgets.text(x + w - 18, box_top + 7, collapsed and "+" or "-",
-        hot and theme.TEXT_ACTIVE or theme.TEXT_DIM, theme.FONT_TITLE)
+    widgets.text(x + 14, box_top + 8, title, theme.TEXT_ACTIVE, theme.FONT_TITLE)
+    local cx = x + w - 16
+    local cy = box_top + theme.GROUP_HEADER_H * 0.5
+    local line = draw and (draw.line or draw.Line)
+    if line then
+        local col = hot and theme.TEXT_ACTIVE or theme.TEXT_DIM
+        line(cx - 3, cy, cx + 3, cy, col, 1.2)
+        if collapsed then line(cx, cy - 3, cx, cy + 3, col, 1.2) end
+    end
 end
 
 local function draw_group_column(groups, x, y, w, h, scroll_key)
@@ -330,15 +376,11 @@ local function draw_group_column(groups, x, y, w, h, scroll_key)
             local vis_b = math.min(box_bot, y + h)
             local vis_h = vis_b - vis_y
             if vis_h > 1 then
-                -- Vector already shadows primitives. Extra offset panels caused the
-                -- stacked transparent borders visible on the right/bottom edges.
-                widgets.rect(x, vis_y, w, vis_h, theme.PANEL, true, 0)
-                widgets.rect(x, vis_y, w, vis_h, theme.BORDER_SOFT, false, 0)
-                widgets.rect(x + 1, vis_y + 1, w - 2, 1, theme.GLASS_HIGHLIGHT, true)
+                widgets.rect(x, vis_y, w, vis_h, theme.PANEL, true, theme.CORNER)
+                widgets.rect(x, vis_y, w, vis_h, theme.BORDER_SOFT, false, theme.CORNER)
                 if box_top >= y - 2 and box_top < y + h then
                     widgets.rect(x + 1, box_top + 1, w - 2, theme.GROUP_HEADER_H - 2,
-                        theme.PANEL_ALT, true, 0)
-                    anim.draw_section_top(x + 1, box_top, w - 2)
+                        theme.alpha(theme.PANEL_ALT, 0.42), true, theme.CORNER)
                     local header_hot = gin.hover(x, box_top, w, theme.GROUP_HEADER_H)
                     draw_group_title(x, box_top, w, group.title, entry.collapsed, header_hot)
                     if gin.clicked(x, box_top, w, theme.GROUP_HEADER_H)
@@ -442,6 +484,7 @@ function M.init()
     state.define_color("april_ui_col_sidebar", theme.ACCENT)
     state.define_color("april_ui_col_checkbox", theme.ACCENT)
     state.define_color("april_ui_col_overlay", theme.ACCENT)
+    hud_dock.init()
     if state.get_key("april_ui_menu_key") == 0 then
         state.set_key("april_ui_menu_key", TOGGLE_VK_DEFAULT)
     end
@@ -460,12 +503,19 @@ function M.is_open()
     return open
 end
 
+function M.contains_point(px, py)
+    if not open or not last_menu_rect then return false end
+    local r = last_menu_rect
+    return px >= r.x and py >= r.y and px <= r.x + r.w and py <= r.y + r.h
+end
+
 function M.draw()
     if not draw then return end
 
     gin.begin_frame()
     anim.sync_theme()
     widgets.begin_popups()
+    hud_dock.begin_frame()
 
     if gin.key_pressed(menu_toggle_vk()) and not widgets.listening_key
         and not widgets.active_input and not widgets.active_slider_input then
@@ -499,34 +549,36 @@ function M.draw()
     local x = win_x
     local y = win_y + math.floor((1 - open_progress) * 10 * (theme.SCALE or 1))
     local w, h = theme.WINDOW_W, theme.WINDOW_H
+    last_menu_rect = { x = x, y = y, w = w, h = h }
     gin.set_ui_rect(x, y, w, h)
 
-    -- Faux glass: backdrop dim + layered translucent depth (Vector has no blur API).
+    -- Optional backdrop dim; the menu itself stays deliberately flat.
     local sw, sh = screen_size()
     local backdrop = math.max(0, math.min(40, tonumber(state.get("april_ui_bg_dim", 0)) or 0))
     if backdrop > 0 then
         widgets.rect(0, 0, sw, sh, { 0, 0, 0, backdrop * 0.008 * open_progress }, true)
     end
 
-    -- Frame
+    -- Static HUD launcher, independent of the menu window.
+    hud_dock.draw_floating(x + w * 0.5, math.max(8, y - 58 * (theme.SCALE or 1)), sw, sh)
+
+    -- Flat frame: no extra highlights, accent strips, or offset shadows.
     local fade = anim.menu_fade()
     local panel_bg = anim.panel_bg()
-    -- A single glass surface avoids doubled translucent borders. Vector adds its
-    -- own primitive shadow pass, so manual full-window shadows are unnecessary.
-    widgets.rect(x, y, w, h, theme.alpha(panel_bg, (panel_bg[4] or 1) * fade), true, 0)
-    widgets.rect(x, y, w, h, theme.BORDER, false, 0)
-    widgets.rect(x + 1, y + 1, w - 2, 1, theme.GLASS_HIGHLIGHT, true)
-    widgets.rect(x + 1, y + 1, w - 2, 1, theme.BORDER_HOT, true)
-    anim.draw_title_bar(x + 1, y + 1, w - 2, 2)
+    local glass_alpha = math.min(panel_bg[4] or 1, (theme.PANEL_ALPHA or 0.72) + 0.04)
+    widgets.rect(x, y, w, h, theme.alpha(panel_bg, glass_alpha * fade), true, theme.CORNER)
+    widgets.rect(x, y, w, h, theme.BORDER_SOFT, false, theme.CORNER)
 
-    local title_h = math.max(28, math.floor(28 * (theme.SCALE or 1)))
+    local title_h = theme.TITLEBAR_H or math.max(34, math.floor(34 * (theme.SCALE or 1)))
     widgets.rect(x + 1, y + 3, w - 2, title_h, theme.BG_INNER, true, 0)
     widgets.rect(x + 1, y + title_h + 3, w - 2, 1, theme.BORDER_SOFT, true)
     local tab = catalog.TABS[tab_index]
-    widgets.text(x + 12, y + 10, "APRIL", theme.TEXT_ACTIVE, theme.FONT_TITLE)
-    widgets.text(x + 55, y + 10, "/  " .. (tab and tab.title or ""), theme.TEXT_TITLE, theme.FONT_TITLE)
+    draw_brand(x + 14, y + 9)
+    local version_text = "v" .. tostring(April.version or "")
+    widgets.text(x + w - 14 - text_width(version_text, theme.FONT_CAPTION), y + 10,
+        version_text, theme.TEXT_DIM, theme.FONT_CAPTION)
 
-    if gin.lmb_click and gin.hover(x, y, w - theme.SIDEBAR_W, title_h + 5)
+    if gin.lmb_click and gin.hover(x, y, w, title_h + 5)
         and not widgets.active_slider and not widgets.active_slider_input and not widgets.listening_key
         and not widgets.active_input
         and not widgets.block_under
@@ -548,13 +600,14 @@ function M.draw()
         end
     end
 
-    local body_y = y + title_h + 6
-    local body_h = h - title_h - 10
+    local nav_h = theme.NAVBAR_H or math.max(42, math.floor(42 * (theme.SCALE or 1)))
+    local nav_y = y + title_h + 4
+    draw_top_navbar(x + 1, nav_y, w - 2, nav_h)
 
-    draw_sidebar(x + 1, body_y, body_h)
-
-    local content_x = x + theme.SIDEBAR_W + 12
-    local content_w = w - theme.SIDEBAR_W - 30
+    local body_y = nav_y + nav_h + 7
+    local body_h = h - title_h - nav_h - 15
+    local content_x = x + 12
+    local content_w = w - 24
     local col_w = math.floor((content_w - 16) * 0.5)
     local groups = catalog.groups_for(tab and tab.id or "aim")
     local left_groups, right_groups = split_groups(groups, tab and tab.id or "aim")
@@ -565,6 +618,7 @@ function M.draw()
     draw_group_column(right_groups, content_x + col_w + 12 + tab_shift, body_y + 2, col_w, body_h - 4, "right")
 
     widgets.end_tooltip_frame()
+    hud_dock.draw_overlay()
 
     -- Floating popups above all sections
     widgets.draw_color_overlay()

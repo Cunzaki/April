@@ -12,8 +12,8 @@ local M = {}
 local P = "april_keybinds_enabled"
 local X_ID = "april_keybinds_x"
 local Y_ID = "april_keybinds_y"
-local PANEL_W = 260
-local TITLE_H = 24
+local PANEL_W = 282
+local TITLE_H = 30
 
 local function strip_enable_prefix(label)
     if type(label) ~= "string" then return tostring(label or "?") end
@@ -89,10 +89,10 @@ function M.draw()
 
     local sw, sh = draw_util.screen_size()
     local rows = collect_rows()
-    local pad = 10
-    local row_h = 18
+    local pad = 12
+    local row_h = 22
     local count = math.max(#rows, 1)
-    local height = TITLE_H + count * row_h + 10
+    local height = TITLE_H + count * row_h + 12
 
     local x, y = panel_drag.update(
         "keybind_viewer",
@@ -105,7 +105,7 @@ function M.draw()
 
     overlay_theme.draw_panel(x, y, PANEL_W, height, "KEYBINDS")
 
-    local ry = y + TITLE_H
+    local ry = y + TITLE_H + 4
     if #rows == 0 then
         draw_util.text(x + pad, ry, "No binds", theme.TEXT_MUTED, 11)
         return
@@ -120,17 +120,14 @@ function M.draw()
 
         local label = row.label
         if #label > max_label then label = label:sub(1, math.max(1, max_label - 2)) .. ".." end
-        if row.active and draw and draw.rect_filled then
-            draw.rect_filled(x + 3, ry + 2, 2, row_h - 5, theme.alpha(accent, 0.82), 0)
-        end
-        draw_util.text(x + pad, ry, label, name_col, 11)
+        draw_util.text(x + pad, ry + 3, label, name_col, 11)
 
         local right = row.key
         if row.show_mode then
             right = right .. " - " .. row.mode
         end
-        local tw = theme.text_w(right, 11)
-        draw_util.text(x + PANEL_W - pad - tw, ry, right, key_col, 11)
+        local tw = theme.text_w(right, 10)
+        draw_util.text(x + PANEL_W - pad - tw, ry + 3, right, key_col, 10)
 
         ry = ry + row_h
     end

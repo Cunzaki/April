@@ -14,8 +14,12 @@ local function cb(id, label, default, color, gate)
     return { type = "checkbox", id = id, label = label, default = default == true, color = color, gate = gate }
 end
 
-local function kb(id, label, default, gate)
-    return { type = "keybind", id = id, label = label, default = default == true, gate = gate }
+local function kb(id, label, default, gate, extra)
+    local item = { type = "keybind", id = id, label = label, default = default == true, gate = gate }
+    if type(extra) == "table" then
+        for k, v in pairs(extra) do item[k] = v end
+    end
+    return item
 end
 
 local function sl(id, label, minv, maxv, default, float, gate, extra)
@@ -135,13 +139,13 @@ local function mesh_chams_block(prefix, toggle_list, master)
 end
 
 M.TABS = {
-    { id = "aim", icon = "aim", title = "Aimbot" },
-    { id = "visuals", icon = "visuals", title = "Visuals" },
-    { id = "world", icon = "world", title = "World" },
-    { id = "guns", icon = "guns", title = "Gun Mods" },
-    { id = "misc", icon = "misc", title = "Misc" },
-    { id = "radar", icon = "radar", title = "Radar" },
-    { id = "config", icon = "config", title = "Config" },
+    { id = "aim", icon = "aim", title = "Aimbot", label = "Aim" },
+    { id = "visuals", icon = "visuals", title = "Visuals", label = "Visuals" },
+    { id = "world", icon = "world", title = "World", label = "World" },
+    { id = "guns", icon = "guns", title = "Gun Mods", label = "Guns" },
+    { id = "misc", icon = "misc", title = "Misc", label = "Misc" },
+    { id = "radar", icon = "radar", title = "Radar", label = "Radar" },
+    { id = "config", icon = "config", title = "Config", label = "Config" },
 }
 
 local function build_aim()
@@ -252,7 +256,7 @@ local function build_visuals()
         title = "Player ESP",
         master = "april_player_enabled",
         items = {
-            kb("april_player_enabled", "Player ESP", false),
+            kb("april_player_enabled", "Player ESP", false, nil, { hide_color = true }),
             combo("april_player_box_mode", "Player Box", { "None", "2D", "Corner" }, 1),
             multi("april_ui_player_elements", "Displayed Elements", {
                 "Health Bar", "Skeleton", "Name", "Clan Tag", "Distance", "Weapon",
@@ -318,6 +322,7 @@ local function build_visuals()
         title = "Player Colors",
         master = "april_player_enabled",
         items = {
+            color("april_player_box_color", "Box", { 1, 0.35, 0.35, 1 }),
             color("april_player_skeleton", "Skeleton", { 1, 1, 1, 0.92 }),
             color("april_player_show_name", "Name", { 1, 0.35, 0.35, 1 }),
             color("april_player_clan_tag", "Clan Tag", { 0.84, 0.31, 0.80, 1 }),
@@ -386,7 +391,7 @@ local function build_world()
         title = "NPCs",
         master = "april_npc_enabled",
         items = {
-            kb("april_npc_enabled", "NPC ESP", false),
+            kb("april_npc_enabled", "NPC ESP", false, nil, { hide_color = true }),
             multi("april_ui_npc_types", "NPC Types", { "Soldiers", "Bosses", "Helicopters" }, { false, false, false }, nil, {
                 sync_ids = { "april_npc_soldiers", "april_npc_bosses", "april_npc_heli" },
             }),
@@ -399,18 +404,25 @@ local function build_world()
                     "april_npc_show_distance", "april_npc_show_weapon",
                 },
             }),
-            color("april_npc_soldiers", "Soldier Color", { 1, 0.3, 0.3, 1 }),
-            color("april_npc_bosses", "Boss Color", { 1, 0.5, 0.1, 1 }),
-            color("april_npc_heli", "Heli Color", { 0.85, 0.2, 0.25, 1 }),
-            color("april_npc_skeleton", "Skeleton Color", { 1, 1, 1, 0.85 }),
-            color("april_npc_show_name", "Name Color", { 1, 0.3, 0.3, 1 }),
-            color("april_npc_show_distance", "Distance Color", { 0.82, 0.84, 0.88, 0.92 }),
-            color("april_npc_show_weapon", "Weapon Color", { 0.82, 0.84, 0.88, 0.92 }),
             sl("april_npc_range", "NPC Range", 50, 2000, 500),
         },
     }
 
-    return { resources, loot, npcs, bases }
+    local npc_colors = {
+        title = "NPC Colors",
+        master = "april_npc_enabled",
+        items = {
+            color("april_npc_soldiers", "Soldier", { 1, 0.3, 0.3, 1 }),
+            color("april_npc_bosses", "Boss", { 1, 0.5, 0.1, 1 }),
+            color("april_npc_heli", "Helicopter", { 0.85, 0.2, 0.25, 1 }),
+            color("april_npc_skeleton", "Skeleton", { 1, 1, 1, 0.85 }),
+            color("april_npc_show_name", "Name", { 1, 0.3, 0.3, 1 }),
+            color("april_npc_show_distance", "Distance", { 0.82, 0.84, 0.88, 0.92 }),
+            color("april_npc_show_weapon", "Weapon", { 0.82, 0.84, 0.88, 0.92 }),
+        },
+    }
+
+    return { resources, loot, npcs, npc_colors, bases }
 end
 
 local function build_guns()
@@ -499,13 +511,7 @@ local function build_misc()
                 sl("april_farm_smooth", "Camera Smoothness", 1, 30, 8, false, "april_farm_helper"),
                 sep(),
                 cb("april_anti_afk", "Anti AFK", false),
-                cb("april_mod_checker_enabled", "Mod Checker", false),
-                sl("april_mod_checker_interval", "Scan Interval (ms)", 1000, 10000, 2500, false, "april_mod_checker_enabled"),
-                sep(),
-                cb("april_keybinds_enabled", "Keybind Viewer", false),
-                cb("april_keybinds_active_only", "Only Show Active", false, nil, "april_keybinds_enabled"),
-                cb("april_keybinds_show_unbound", "Show Unbound", true, nil, "april_keybinds_enabled"),
-                cb("april_keybinds_show_mode", "Show Bind Mode", true, nil, "april_keybinds_enabled"),
+                label("HUD panels are managed from the top dock."),
             },
         },
     }
@@ -534,7 +540,7 @@ local function build_radar()
                 color("april_map_base_col", "Radar Base Color", { 0.55, 0.55, 1, 1 }),
                 color("april_map_wp_col", "Radar Waypoints Color", { 0.3, 0.9, 1, 1 }),
                 sl("april_map_zoom", "Radar Zoom Level", 0.05, 5, 1, true),
-                sl("april_map_size", "Radar Size", 140, 420, 240),
+                sl("april_map_size", "Radar Size", 140, 420, 250),
                 sl("april_map_icon_scale", "Radar Blip Size", 2, 6, 3),
                 btn("april_map_reset_position", "Reset Radar Position"),
             },
@@ -595,7 +601,7 @@ local function build_config()
             sl("april_ui_anim_speed", "Accent Speed", 1, 100, 40, false, ANM),
             cb("april_ui_menu_fade", "Ambient Fade Pulse", false, nil, ANM),
             multi("april_ui_anim_targets", "Animate", {
-                "Title Bar", "Section Tops", "Sliders", "Scrollbars", "Sidebar", "Checkboxes", "Hover", "Overlay Panels",
+                "Title Bar", "Section Tops", "Sliders", "Scrollbars", "Navbar", "Switches", "Hover", "Overlay Panels",
             }, { true, true, true, true, true, true, true, true }, ANM),
             cb("april_ui_per_element", "Individual Styles", false, nil, ANM),
             sep(ANM),
@@ -603,8 +609,8 @@ local function build_config()
             { type = "combo", id = "april_ui_style_section", label = "Section Tops", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
             { type = "combo", id = "april_ui_style_slider", label = "Sliders", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
             { type = "combo", id = "april_ui_style_scroll", label = "Scrollbars", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
-            { type = "combo", id = "april_ui_style_sidebar", label = "Sidebar", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
-            { type = "combo", id = "april_ui_style_checkbox", label = "Checkboxes", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+            { type = "combo", id = "april_ui_style_sidebar", label = "Navbar", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+            { type = "combo", id = "april_ui_style_checkbox", label = "Switches", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
             { type = "combo", id = "april_ui_style_overlay", label = "Overlay Panels", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
         },
     }
@@ -615,14 +621,14 @@ local function build_config()
             cb("april_ui_custom_colors", "Color Options", false),
             color("april_ui_accent", "Accent", { 0.78, 0.20, 0.92, 1 }, COL),
             multi("april_ui_color_overrides", "Override Colors For", {
-                "Title Bar", "Section Tops", "Sliders", "Scrollbars", "Sidebar", "Checkboxes", "Overlay Panels",
+                "Title Bar", "Section Tops", "Sliders", "Scrollbars", "Navbar", "Switches", "Overlay Panels",
             }, {}, COL),
             color("april_ui_col_title", "Title Bar Color", { 0.78, 0.20, 0.92, 1 }, COL, 1),
             color("april_ui_col_section", "Section Top Color", { 0.78, 0.20, 0.92, 1 }, COL, 2),
             color("april_ui_col_slider", "Slider Color", { 0.78, 0.20, 0.92, 1 }, COL, 3),
             color("april_ui_col_scroll", "Scrollbar Color", { 0.78, 0.20, 0.92, 1 }, COL, 4),
-            color("april_ui_col_sidebar", "Sidebar Color", { 0.78, 0.20, 0.92, 1 }, COL, 5),
-            color("april_ui_col_checkbox", "Checkbox Color", { 0.78, 0.20, 0.92, 1 }, COL, 6),
+            color("april_ui_col_sidebar", "Navbar Color", { 0.78, 0.20, 0.92, 1 }, COL, 5),
+            color("april_ui_col_checkbox", "Switch Color", { 0.78, 0.20, 0.92, 1 }, COL, 6),
             color("april_ui_col_overlay", "Overlay Panel Color", { 0.78, 0.20, 0.92, 1 }, COL, 7),
         },
     }

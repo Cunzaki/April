@@ -22,6 +22,7 @@ local ID_DIST = "april_player_show_distance"
 local ID_WEAPON = "april_player_show_weapon"
 local ID_CLAN = "april_player_clan_tag"
 local ID_BOX = "april_player_box_mode"
+local ID_BOX_COLOR = "april_player_box_color"
 local ID_RANGE = "april_player_range"
 local ID_FLAG_DOWN = "april_player_flag_downed"
 local ID_FLAG_SZ = "april_player_flag_safezone"
@@ -74,7 +75,7 @@ local function held_weapon_name(p)
 end
 
 local function box_color()
-    return settings.color(P, DEFAULT_BOX)
+    return settings.color(ID_BOX_COLOR, DEFAULT_BOX)
 end
 
 local function resolve_color(_p)
@@ -122,11 +123,10 @@ function M.register_menu()
     local T, _ = menu_util.group(G.VISUALS)
 
     menu_util.section(T, G.VISUALS, "Player ESP")
-    menu_util.register_keybind(T, G.VISUALS, P, "Player ESP", false, {
-        colorpicker = DEFAULT_BOX,
-    })
+    menu_util.register_keybind(T, G.VISUALS, P, "Player ESP", false)
 
     menu.add_combo(T, G.VISUALS, ID_BOX, "Player Box", { "None", "2D", "Corner" }, 1, { parent = P })
+    menu.add_colorpicker(T, G.VISUALS, ID_BOX_COLOR, "Player Box Color", DEFAULT_BOX, { parent = P })
 
     menu.add_checkbox(T, G.VISUALS, ID_HEALTH, "Player Health Bar", true, { parent = P })
     menu.add_checkbox(T, G.VISUALS, ID_SKELETON, "Player Skeleton", false,
@@ -159,7 +159,7 @@ function M.register_menu()
     menu_util.gap(T, G.VISUALS)
 
     local children = {
-        ID_BOX, ID_HEALTH, ID_SKELETON,
+        ID_BOX, ID_BOX_COLOR, ID_HEALTH, ID_SKELETON,
         ID_NAME, ID_CLAN, ID_DIST, ID_WEAPON,
         FILTERS, FLAGS,
         ID_FLAG_DOWN, ID_FLAG_SZ, ID_FLAG_STAFF, ID_FLAG_REVIVE,

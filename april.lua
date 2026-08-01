@@ -1,12 +1,12 @@
 --[[
     April Fallen - Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-07-31T23:46:58.618Z
+    Built: 2026-08-01T05:10:11.168Z
     UI: custom Gamesense menu (INSERT) - Vector menu tabs disabled
 ]]
 
 April = {
-    version = "3.98.5",
+    version = "4.0.0",
     debug = false,
     _mods = {},
     bundled = true,
@@ -198,6 +198,12 @@ function M.apply()
         alias(utility, "get_mouse_pos", "GetMousePos")
         alias(utility, "get_tick_count", "GetTickCount")
         alias(utility, "get_delta_time", "GetDeltaTime")
+        alias(utility, "get_time", "GetTime")
+        alias(utility, "get_fps", "GetFPS")
+        alias(utility, "on_key", "OnKey")
+        alias(utility, "remove_key", "RemoveKey")
+        alias(utility, "clear_keys", "ClearKeys")
+        alias(utility, "is_key_toggled", "IsKeyToggled")
         alias(utility, "is_valid", "IsValid")
         alias(utility, "load_url", "LoadUrl")
         alias(utility, "http_get", "HttpGet")
@@ -206,6 +212,18 @@ function M.apply()
     if input then
         alias(input, "is_key_down", "IsKeyDown")
         alias(input, "is_mouse_down", "IsMouseDown")
+        -- Vector calls this GetMousePosition; April historically used both
+        -- snake_case spellings, so expose all three names from any one of them.
+        alias(input, "get_mouse_position", "GetMousePosition")
+        alias(input, "get_mouse_pos", "GetMousePosition")
+    end
+
+    if thread then
+        alias(thread, "create", "Create")
+        alias(thread, "stop", "Stop")
+        alias(thread, "stop_all", "StopAll")
+        alias(thread, "is_running", "IsRunning")
+        alias(thread, "set_interval", "SetInterval")
     end
 
     if game then
@@ -2105,16 +2123,19 @@ local state = {}
 
 local function mouse_pos()
     local mx, my = 0, 0
-    if utility and utility.get_mouse_pos then
-        mx, my = utility.get_mouse_pos()
-    elseif input and input.get_mouse_pos then
-        mx, my = input.get_mouse_pos()
+    local util_mouse = utility and (utility.get_mouse_pos or utility.GetMousePos)
+    local input_mouse = input and (input.get_mouse_pos or input.get_mouse_position or input.GetMousePosition)
+    if util_mouse then
+        mx, my = util_mouse()
+    elseif input_mouse then
+        mx, my = input_mouse()
     end
     return tonumber(mx) or 0, tonumber(my) or 0
 end
 
 local function lmb_down()
-    return input and input.is_key_down and input.is_key_down(0x01)
+    local fn = input and (input.is_key_down or input.IsKeyDown)
+    return fn and fn(0x01)
 end
 
 local function persist_num(id, value)
@@ -2127,7 +2148,15 @@ local function persist_num(id, value)
     end)
 end
 
-local function blocked()
+local function blocked(mx, my)
+    local ok_menu, custom_menu = pcall(function()
+        return April.require("ui.custom_menu")
+    end)
+    if ok_menu and custom_menu and custom_menu.contains_point
+        and custom_menu.contains_point(mx or 0, my or 0)
+    then
+        return true
+    end
     local ok, widgets = pcall(function()
         return April.require("ui.gs_widgets")
     end)
@@ -2165,7 +2194,7 @@ function M.update(id, x_id, y_id, title_w, title_h, sw, sh, default_x, default_y
     local over_title = mx >= x and my >= y
         and mx <= x + title_w and my <= y + title_h
 
-    if lmb and not st.was_lmb and over_title and not blocked() then
+    if lmb and not st.was_lmb and over_title and not blocked(mx, my) then
         st.dragging = true
         st.off_x = mx - x
         st.off_y = my - y
@@ -2556,22 +2585,35 @@ function M.accent()
 end
 
 function M.panel_bg()
+    local gs = gs_theme()
+    if gs and gs.PANEL then return gs.PANEL end
     return ui_theme.PANEL
 end
 
 function M.header_bg()
+    local gs = gs_theme()
+    if gs and gs.PANEL_ALT then return gs.PANEL_ALT end
     return ui_theme.HEADER
 end
 
 function M.border(alpha)
+    local gs = gs_theme()
+    if gs and gs.BORDER_SOFT then
+        return { gs.BORDER_SOFT[1], gs.BORDER_SOFT[2], gs.BORDER_SOFT[3],
+            alpha or gs.BORDER_SOFT[4] or 0.45 }
+    end
     return ui_theme.alpha(ui_theme.BORDER, alpha or (ui_theme.BORDER[4] or 0.45))
 end
 
 function M.text()
+    local gs = gs_theme()
+    if gs and gs.TEXT_ACTIVE then return gs.TEXT_ACTIVE end
     return ui_theme.TEXT
 end
 
 function M.text_muted()
+    local gs = gs_theme()
+    if gs and gs.TEXT_DIM then return gs.TEXT_DIM end
     return ui_theme.TEXT_MUTED
 end
 
@@ -2598,10 +2640,11 @@ function M.draw_accent_bar(x, y, w, h, alpha)
 end
 
 function M.panel_opts()
+    local gs = gs_theme()
     return {
         bg = M.panel_bg(),
         border = M.border(),
-        rounding = 0,
+        rounding = gs and gs.CORNER or 6,
         accent = nil,
         accent_w = 0,
     }
@@ -2609,17 +2652,21 @@ end
 
 function M.draw_panel(x, y, w, h, title, opts)
     opts = opts or {}
-    ui_theme.draw_panel(x, y, w, h, M.panel_opts())
-    if draw and draw.rect_filled then
-        draw.rect_filled(x + 1, y + 3, w - 2, 21, M.header_bg(), 0)
+    local gs = gs_theme()
+    local fill = draw and (draw.rect_filled or draw.RectFilled)
+    local text = draw and (draw.text or draw.Text)
+    local rounding = gs and gs.CORNER or 6
+    if fill then
+        -- One surface only. Vector shadows every primitive, so layered headers
+        -- and borders make these compact modules look embossed.
+        fill(x, y, w, h, M.panel_bg(), rounding)
     end
-    M.draw_accent_bar(x + 1, y, w - 2, 2)
-    if title and draw and draw.text then
+    if title and text then
         if opts.title_center then
             local tw = ui_theme.text_w(title, 11)
-            draw.text(x + (w - tw) * 0.5, y + 6, title, M.text(), 11)
+            text(x + (w - tw) * 0.5, y + 8, title, M.text(), 11)
         else
-            draw.text(x + 9, y + 6, title, M.text(), 11)
+            text(x + 12, y + 8, title, M.text(), 11)
         end
     end
 end
@@ -6663,7 +6710,7 @@ local MENU_KEYS = {
     "april_ui_style_overlay", "april_ui_window_x", "april_ui_window_y",
     "april_esp_text_size",
     "april_player_enabled", "april_player_enabled_mode",
-    "april_player_box_mode",
+    "april_player_box_mode", "april_player_box_color",
     "april_player_health", "april_player_skeleton",
     "april_player_show_name", "april_player_show_distance",
     "april_player_show_weapon",
@@ -16884,9 +16931,9 @@ local M = {}
 local P = "april_mod_checker_enabled"
 local X_ID = "april_mod_checker_x"
 local Y_ID = "april_mod_checker_y"
-local PANEL_W = 260
+local PANEL_W = 282
 local HEAD_OFFSET = 3.5
-local TITLE_H = 24
+local TITLE_H = 30
 local SCAN_MS = 2500
 local META_REFRESH_MS = 1000
 local LOOKUP_BUDGET = 2
@@ -17233,8 +17280,8 @@ local function draw_staff_panel(x, y, width, rows)
     if not draw or not draw.text then return end
 
     overlay_theme.sync()
-    local pad = 10
-    local row_h = 44
+    local pad = 12
+    local row_h = 38
     local count = math.max(#rows, 1)
     local height = TITLE_H + count * row_h + 6
 
@@ -17244,14 +17291,9 @@ local function draw_staff_panel(x, y, width, rows)
     end
     overlay_theme.draw_panel(x, y, width, height, title)
 
-    local div_y = y + TITLE_H
-    if draw.line then
-        draw.line(x + pad, div_y, x + width - pad, div_y, theme.alpha(theme.BORDER, 0.55), 1)
-    end
-
-    local ry = div_y + 6
+    local ry = y + TITLE_H + 5
     if #rows == 0 then
-        draw.text(x + pad + 12, ry, "No staff detected", theme.TEXT_MUTED, 11)
+        draw.text(x + pad, ry + 2, "No staff detected", theme.TEXT_MUTED, 11)
         return height
     end
 
@@ -17261,24 +17303,17 @@ local function draw_staff_panel(x, y, width, rows)
         local row = rows[i]
         local row_accent = row.accent or theme.role_accent(row.role)
 
-        if i > 1 and draw.line then
-            draw.line(x + pad, ry - 4, x + width - pad, ry - 4, theme.alpha(theme.BORDER, 0.22), 1)
-        end
-
-        if draw.circle_filled then
-            draw.circle_filled(x + pad + 3, ry + 7, 3, row_accent, 8)
-        end
-
         local name = row.name or "?"
         if #name > max_name then name = name:sub(1, math.max(1, max_name - 2)) .. ".." end
-        draw.text(x + pad + 12, ry, name, theme.TEXT, 13)
+        draw.text(x + pad, ry + 1, name, theme.TEXT, 12)
 
         local role = row.role or "Staff"
         if #role > max_name then role = role:sub(1, math.max(1, max_name - 2)) .. ".." end
-        draw.text(x + pad + 12, ry + 15, role, row_accent, 11)
+        local role_w = theme.text_w(role, 10)
+        draw.text(x + width - pad - role_w, ry + 2, role, row_accent, 10)
 
         if row.meta and row.meta ~= "" then
-            draw.text(x + pad + 12, ry + 28, row.meta, theme.TEXT_MUTED, 10)
+            draw.text(x + pad, ry + 18, row.meta, theme.TEXT_MUTED, 10)
         end
 
         ry = ry + row_h
@@ -17299,7 +17334,7 @@ function M.draw()
     end
 
     local sw, sh = draw_util.screen_size()
-    local row_h = 44
+    local row_h = 38
     local count = math.max(#panel_rows, 1)
     local height = TITLE_H + count * row_h + 6
 
@@ -17345,6 +17380,7 @@ local ID_DIST = "april_player_show_distance"
 local ID_WEAPON = "april_player_show_weapon"
 local ID_CLAN = "april_player_clan_tag"
 local ID_BOX = "april_player_box_mode"
+local ID_BOX_COLOR = "april_player_box_color"
 local ID_RANGE = "april_player_range"
 local ID_FLAG_DOWN = "april_player_flag_downed"
 local ID_FLAG_SZ = "april_player_flag_safezone"
@@ -17397,7 +17433,7 @@ local function held_weapon_name(p)
 end
 
 local function box_color()
-    return settings.color(P, DEFAULT_BOX)
+    return settings.color(ID_BOX_COLOR, DEFAULT_BOX)
 end
 
 local function resolve_color(_p)
@@ -17445,11 +17481,10 @@ function M.register_menu()
     local T, _ = menu_util.group(G.VISUALS)
 
     menu_util.section(T, G.VISUALS, "Player ESP")
-    menu_util.register_keybind(T, G.VISUALS, P, "Player ESP", false, {
-        colorpicker = DEFAULT_BOX,
-    })
+    menu_util.register_keybind(T, G.VISUALS, P, "Player ESP", false)
 
     menu.add_combo(T, G.VISUALS, ID_BOX, "Player Box", { "None", "2D", "Corner" }, 1, { parent = P })
+    menu.add_colorpicker(T, G.VISUALS, ID_BOX_COLOR, "Player Box Color", DEFAULT_BOX, { parent = P })
 
     menu.add_checkbox(T, G.VISUALS, ID_HEALTH, "Player Health Bar", true, { parent = P })
     menu.add_checkbox(T, G.VISUALS, ID_SKELETON, "Player Skeleton", false,
@@ -17482,7 +17517,7 @@ function M.register_menu()
     menu_util.gap(T, G.VISUALS)
 
     local children = {
-        ID_BOX, ID_HEALTH, ID_SKELETON,
+        ID_BOX, ID_BOX_COLOR, ID_HEALTH, ID_SKELETON,
         ID_NAME, ID_CLAN, ID_DIST, ID_WEAPON,
         FILTERS, FLAGS,
         ID_FLAG_DOWN, ID_FLAG_SZ, ID_FLAG_STAFF, ID_FLAG_REVIVE,
@@ -19711,7 +19746,7 @@ function M.register_menu()
     local root = menu_util.parent(P)
 
     menu_util.section(T, G.WORLD, "NPCs")
-    menu_util.register_keybind(T, G.WORLD, P, "NPC ESP", false, { colorpicker = { 1, 0.3, 0.3, 1 } })
+    menu_util.register_keybind(T, G.WORLD, P, "NPC ESP", false)
     menu.add_checkbox(T, G.WORLD, "april_npc_soldiers", "Soldiers", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, menu_util.parent(P, { colorpicker = { 1, 0.5, 0.1, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_heli", "Helicopters (Attack Heli)", false, menu_util.parent(P, { colorpicker = { 0.85, 0.2, 0.25, 1 } }))
@@ -21727,6 +21762,7 @@ local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
 local cache = April.require("core.cache")
 local env = April.require("core.env")
+local ep = April.require("core.entity_props")
 local player_state = April.require("game.player_state")
 local menu_util = April.require("core.menu_util")
 local esp_scan = April.require("game.esp_scan")
@@ -21739,6 +21775,11 @@ local P = "april_map_enabled"
 local X_ID = "april_map_x"
 local Y_ID = "april_map_y"
 local TITLE_H = 24
+
+local function position_xyz(pos)
+    if not pos then return nil, nil, nil end
+    return pos.x or pos.X, pos.y or pos.Y, pos.z or pos.Z
+end
 
 local function get_camera_yaw()
     if camera and camera.get_angles then
@@ -21777,10 +21818,8 @@ local function get_view_origin()
 
     local lp = env.get_local_player()
     local px, py, pz = nil, nil, nil
-    if lp and lp.position then
-        px = lp.position.x
-        py = lp.position.y
-        pz = lp.position.z
+    if lp then
+        px, py, pz = position_xyz(ep.position(lp))
     end
 
     if not cx then cx, cy, cz = px, py, pz end
@@ -21848,10 +21887,8 @@ local function draw_radar_label(lx, ly, text, col, x, y, w, h, fs)
     if ly < y + 4 then return end
 
     if draw.rect_filled then
-        draw.rect_filled(lx - 3, ly - 2, tw + 6, th + 2, theme.PANEL_DEEP, 0)
-    end
-    if draw.rect then
-        draw.rect(lx - 3, ly - 2, tw + 6, th + 2, theme.BORDER, 0, 1)
+        draw.rect_filled(lx - 4, ly - 2, tw + 8, th + 2,
+            theme.alpha(theme.PANEL_DEEP, 0.70), 4)
     end
     draw_util.text(lx, ly, text, col, fs)
 end
@@ -21860,7 +21897,7 @@ local function draw_blip(mx, my, scale, col, clamped, shape)
     local alpha = clamped and 0.72 or 1
     local c = { col[1], col[2], col[3], (col[4] or 1) * alpha }
     local r = math.max(2, scale - (clamped and 1 or 0))
-    local edge = theme.alpha(theme.PANEL_DEEP, math.min(0.95, c[4]))
+    local edge = theme.alpha(theme.PANEL_DEEP, math.min(0.42, c[4] * 0.42))
     shape = shape or "circle"
 
     if shape == "square" and draw and draw.rect_filled then
@@ -21905,59 +21942,60 @@ local function draw_radar_frame(layout, bg, grid, zoom)
     local x, y, w, h = layout.x, layout.y, layout.w, layout.h
     local cx, cy = layout.cx, layout.cy
 
-    overlay_theme.draw_panel(x, y, w, h, "TACTICAL RADAR")
+    overlay_theme.draw_panel(x, y, w, h, "RADAR")
 
     if draw.rect_filled then
-        draw.rect_filled(x + 7, y + TITLE_H + 5, w - 14, h - TITLE_H - 12, bg, 0)
-    end
-    if draw.rect then
-        draw.rect(x + 7, y + TITLE_H + 5, w - 14, h - TITLE_H - 12, theme.BORDER, 0, 1)
+        draw.rect_filled(x + 7, y + TITLE_H + 3, w - 14, h - TITLE_H - 10,
+            theme.alpha(bg, 0.36), 7)
     end
 
     local zoom_text = string.format("x%.2f", zoom)
     local zoom_w = theme.text_w(zoom_text, 9)
-    draw_util.text(x + w - zoom_w - 8, y + 7, zoom_text, theme.TEXT_DIM, 9)
+    draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, theme.TEXT_DIM, 9)
 
     if draw and draw.circle then
-        draw.circle(cx, cy, layout.radius, theme.alpha(grid, 0.42), 24, 1)
-        draw.circle(cx, cy, layout.radius * 0.66, grid, 24, 1)
-        draw.circle(cx, cy, layout.radius * 0.33, grid, 24, 1)
+        local accent = overlay_theme.accent()
+        draw.circle(cx, cy, layout.radius, theme.alpha(accent, 0.24), 40, 1)
+        draw.circle(cx, cy, layout.radius * 0.66, theme.alpha(grid, 0.11), 32, 1)
+        draw.circle(cx, cy, layout.radius * 0.33, theme.alpha(grid, 0.08), 24, 1)
     end
     if draw and draw.line then
-        draw.line(cx - layout.radius, cy, cx + layout.radius, cy, theme.alpha(grid, 0.72), 1)
-        draw.line(cx, cy - layout.radius, cx, cy + layout.radius, theme.alpha(grid, 0.72), 1)
+        local axis = theme.alpha(grid, 0.10)
+        draw.line(cx - layout.radius, cy, cx - 10, cy, axis, 1)
+        draw.line(cx + 10, cy, cx + layout.radius, cy, axis, 1)
+        draw.line(cx, cy - layout.radius, cx, cy - 10, axis, 1)
+        draw.line(cx, cy + 10, cx, cy + layout.radius, axis, 1)
+
+        local tick = theme.alpha(overlay_theme.accent(), 0.30)
+        draw.line(cx - 3, cy - layout.radius, cx + 3, cy - layout.radius, tick, 1)
+        draw.line(cx + layout.radius, cy - 3, cx + layout.radius, cy + 3, tick, 1)
+        draw.line(cx - 3, cy + layout.radius, cx + 3, cy + layout.radius, tick, 1)
+        draw.line(cx - layout.radius, cy - 3, cx - layout.radius, cy + 3, tick, 1)
     end
 
-    local card = theme.alpha(overlay_theme.accent(), 0.92)
-    draw_util.text(cx - 3, cy - layout.radius + 5, "N", card, 9)
-    draw_util.text(cx + layout.radius - 10, cy - 5, "E", theme.TEXT_DIM, 9)
-    draw_util.text(cx - 3, cy + layout.radius - 14, "S", theme.TEXT_DIM, 9)
-    draw_util.text(cx - layout.radius + 5, cy - 5, "W", theme.TEXT_DIM, 9)
+    -- Camera-relative radar: the top marker means forward, avoiding misleading
+    -- fixed N/E/S/W labels while the map rotates with the view.
+    local forward = theme.alpha(overlay_theme.accent(), 0.78)
+    draw_util.text(cx - 3, cy - layout.radius + 5, "^", forward, 9)
 end
 
-local function draw_local_blip(layout, col, body_x, body_z, view_x, view_z, zoom, yaw)
+local function draw_local_blip(layout, col)
     local cx, cy = layout.cx, layout.cy
-    local mx, my = cx, cy
-    if body_x and body_z then
-        mx, my = world_to_map(body_x, body_z, view_x, view_z, cx, cy, zoom, yaw)
-        mx, my = clamp_to_disc(mx, my, cx, cy, layout.radius)
-    end
-
     local r = layout.scale + 2
     if draw and draw.poly_filled then
         draw.poly_filled({
-            { mx, my - r - 2 },
-            { mx + r, my + r },
-            { mx, my + math.max(1, r - 2) },
-            { mx - r, my + r },
+            { cx, cy - r - 2 },
+            { cx + r, cy + r },
+            { cx, cy + math.max(1, r - 2) },
+            { cx - r, cy + r },
         }, col)
     elseif draw and draw.line then
-        draw.line(mx, my - r, mx - r, my + r, col, 2)
-        draw.line(mx - r, my + r, mx + r, my + r, col, 2)
-        draw.line(mx + r, my + r, mx, my - r, col, 2)
+        draw.line(cx, cy - r, cx - r, cy + r, col, 2)
+        draw.line(cx - r, cy + r, cx + r, cy + r, col, 2)
+        draw.line(cx + r, cy + r, cx, cy - r, col, 2)
     end
     if draw and draw.circle then
-        draw.circle(mx, my, r + 2, theme.alpha(col, 0.32), 16, 1)
+        draw.circle(cx, cy, r + 3, theme.alpha(col, 0.28), 20, 1)
     end
 end
 
@@ -21986,11 +22024,11 @@ function M.register_menu()
 
     menu_util.gap(T, G.RADAR)
     menu.add_slider_int(T, G.RADAR, "april_map_zoom", "Radar Zoom Level", 0.05, 5.0, 1.0, "%.2f", root)
-    menu.add_slider_int(T, G.RADAR, "april_map_size", "Radar Size", 140, 420, 240, root)
+    menu.add_slider_int(T, G.RADAR, "april_map_size", "Radar Size", 140, 420, 250, root)
     menu.add_slider_int(T, G.RADAR, "april_map_icon_scale", "Radar Blip Size", 2, 6, 3, root)
     menu_util.button(T, G.RADAR, "april_map_reset_position", "Reset Radar Position", function()
         local sw = select(1, draw_util.screen_size())
-        local size = settings.num("april_map_size", 240)
+        local size = settings.num("april_map_size", 250)
         local rx, ry = sw - size - 16, 16
         if menu and menu.set then
             pcall(menu.set, X_ID, rx)
@@ -22022,7 +22060,7 @@ function M.draw()
 
     overlay_theme.sync()
     local sw, sh = draw_util.screen_size()
-    local size = settings.num("april_map_size", 240)
+    local size = settings.num("april_map_size", 250)
     local default_x, default_y = sw - size - 16, 16
     local x, y = panel_drag.update(
         "tactical_radar", X_ID, Y_ID, size, TITLE_H, sw, sh, default_x, default_y
@@ -22045,7 +22083,9 @@ function M.draw()
 
     local cam_x, _, cam_z, body_x, _, body_z = get_view_origin()
     local yaw = get_camera_yaw()
-    local view_x, view_z = cam_x, cam_z
+    -- Character-centered coordinates prevent third-person camera offset from
+    -- displacing the player and every surrounding blip.
+    local view_x, view_z = body_x or cam_x, body_z or cam_z
 
     draw_radar_frame(layout, bg, grid, zoom)
 
@@ -22106,18 +22146,19 @@ function M.draw()
         end
     end
 
-    if settings.bool("april_map_show_players", false) and entity and entity.get_players then
+    if settings.bool("april_map_show_players", false) then
         local col = settings.color("april_map_player_col", theme.RED)
-        for _, p in ipairs(entity.get_players()) do
-            if player_state.is_combat_target(p) and p.position then
-                local label = (p.display_name and p.display_name ~= "" and p.display_name) or p.name
-                draw_map_item(p.position.x, p.position.z, col, label, "circle", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
+        for _, p in ipairs(ep.get_players()) do
+            local px, _, pz = position_xyz(ep.position(p))
+            if player_state.is_combat_target(p) and px and pz then
+                local label = ep.display_name(p) or ep.name(p)
+                draw_map_item(px, pz, col, label, "circle", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
             end
         end
     end
 
     local local_col = overlay_theme.accent()
-    draw_local_blip(layout, local_col, body_x, body_z, view_x, view_z, zoom, yaw)
+    draw_local_blip(layout, local_col)
 end
 
 return M
@@ -22140,8 +22181,8 @@ local M = {}
 local P = "april_keybinds_enabled"
 local X_ID = "april_keybinds_x"
 local Y_ID = "april_keybinds_y"
-local PANEL_W = 260
-local TITLE_H = 24
+local PANEL_W = 282
+local TITLE_H = 30
 
 local function strip_enable_prefix(label)
     if type(label) ~= "string" then return tostring(label or "?") end
@@ -22217,10 +22258,10 @@ function M.draw()
 
     local sw, sh = draw_util.screen_size()
     local rows = collect_rows()
-    local pad = 10
-    local row_h = 18
+    local pad = 12
+    local row_h = 22
     local count = math.max(#rows, 1)
-    local height = TITLE_H + count * row_h + 10
+    local height = TITLE_H + count * row_h + 12
 
     local x, y = panel_drag.update(
         "keybind_viewer",
@@ -22233,7 +22274,7 @@ function M.draw()
 
     overlay_theme.draw_panel(x, y, PANEL_W, height, "KEYBINDS")
 
-    local ry = y + TITLE_H
+    local ry = y + TITLE_H + 4
     if #rows == 0 then
         draw_util.text(x + pad, ry, "No binds", theme.TEXT_MUTED, 11)
         return
@@ -22248,17 +22289,14 @@ function M.draw()
 
         local label = row.label
         if #label > max_label then label = label:sub(1, math.max(1, max_label - 2)) .. ".." end
-        if row.active and draw and draw.rect_filled then
-            draw.rect_filled(x + 3, ry + 2, 2, row_h - 5, theme.alpha(accent, 0.82), 0)
-        end
-        draw_util.text(x + pad, ry, label, name_col, 11)
+        draw_util.text(x + pad, ry + 3, label, name_col, 11)
 
         local right = row.key
         if row.show_mode then
             right = right .. " - " .. row.mode
         end
-        local tw = theme.text_w(right, 11)
-        draw_util.text(x + PANEL_W - pad - tw, ry, right, key_col, 11)
+        local tw = theme.text_w(right, 10)
+        draw_util.text(x + PANEL_W - pad - tw, ry + 3, right, key_col, 10)
 
         ry = ry + row_h
     end
@@ -22541,19 +22579,32 @@ function M.sync()
     M.PRESET_ACCENT = rgb(p.accent, 1)
 
     M.BG = rgb(p.bg, window_alpha)
-    M.BG_INNER = mix_rgb(p.bg, p.panel, 0.28, math.min(1, window_alpha + 0.04))
+    M.BG_INNER = mix_rgb(p.bg, p.panel, 0.28, math.min(1, panel_alpha + 0.08))
     M.PANEL = rgb(p.panel, panel_alpha)
     M.PANEL_ALT = mix_rgb(p.panel, p.raised, 0.35, math.min(1, panel_alpha + 0.06))
     M.PANEL_RAISED = rgb(p.raised, math.min(1, panel_alpha + 0.12))
     M.OVERLAY = mix_rgb(p.panel, p.raised, 0.50, math.min(1, panel_alpha + 0.17))
-    M.SHADOW = { 0, 0, 0, 0.32 * window_alpha }
-    M.SHADOW_DEEP = { 0, 0, 0, 0.20 * window_alpha }
-    M.GLASS_HIGHLIGHT = { 1, 1, 1, 0.045 * border_alpha }
-    M.BORDER = { 0.34, 0.35, 0.42, 0.60 * border_alpha }
-    M.BORDER_SOFT = { 0.28, 0.29, 0.36, 0.40 * border_alpha }
+    -- Flat UI: Vector already adds primitive shadows, so manual depth is disabled.
+    M.SHADOW = { 0, 0, 0, 0 }
+    M.SHADOW_DEEP = { 0, 0, 0, 0 }
+    M.GLASS_HIGHLIGHT = { 1, 1, 1, 0 }
+    M.BORDER = { 0.34, 0.35, 0.42, 0.36 * border_alpha }
+    M.BORDER_SOFT = { 0.28, 0.29, 0.36, 0.24 * border_alpha }
     M.BORDER_HOT = mix_rgb(p.raised, p.accent, 0.55, 0.72 * border_alpha)
     M.SIDEBAR = mix_rgb(p.bg, p.panel, 0.18, math.min(1, window_alpha + 0.02))
     M.SIDEBAR_ACTIVE = mix_rgb(p.panel, p.accent, 0.20, math.min(1, panel_alpha + 0.08))
+    -- Two-level top shell: primary section navigation plus compact HUD controls.
+    M.HEADER_BG = mix_rgb(p.bg, p.panel, 0.12, math.min(1, window_alpha + 0.03))
+    M.NAV_BG = mix_rgb(p.bg, p.panel, 0.26, math.min(1, panel_alpha + 0.02))
+    M.NAV_IDLE = mix_rgb(p.bg, p.panel, 0.50, math.min(1, panel_alpha + 0.06))
+    M.NAV_HOVER = mix_rgb(p.panel, p.raised, 0.48, math.min(1, panel_alpha + 0.08))
+    M.NAV_ACTIVE = mix_rgb(p.panel, p.accent, 0.16, math.min(1, panel_alpha + 0.10))
+    M.NAV_INDICATOR = rgb(p.accent, 1)
+    M.DOCK_BG = mix_rgb(p.bg, p.panel, 0.44, math.min(1, panel_alpha + 0.08))
+    M.DOCK_HOVER = mix_rgb(p.panel, p.raised, 0.66, math.min(1, panel_alpha + 0.12))
+    M.DOCK_ACTIVE = mix_rgb(p.panel, p.accent, 0.22, math.min(1, panel_alpha + 0.14))
+    M.DOCK_BORDER = mix_rgb(p.raised, p.accent, 0.18, 0.56 * border_alpha)
+    M.DOCK_BADGE = rgb(p.accent, 1)
 
     M.TEXT = { 0.78, 0.80, 0.87, 1 }
     M.TEXT_DIM = { 0.47, 0.49, 0.57, 1 }
@@ -22573,9 +22624,34 @@ function M.sync()
     M.FONT_SMALL = scaled(12, scale)
     M.FONT_TITLE = scaled(12, scale)
     M.FONT_CAPTION = scaled(11, scale)
+    M.FONT_BRAND = scaled(15, scale)
 
     M.WINDOW_W = scaled(820, scale)
     M.WINDOW_H = scaled(560, scale)
+    M.TITLEBAR_H = scaled(30 * density_mul, scale)
+    M.NAV_H = scaled(42 * density_mul, scale)
+    M.NAVBAR_H = M.NAV_H
+    M.NAV_ITEM_H = scaled(34 * density_mul, scale)
+    M.NAV_ITEM_MIN_W = scaled(78, scale)
+    M.NAV_ITEM_GAP = scaled(4, scale)
+    M.NAV_GAP = M.NAV_ITEM_GAP
+    M.NAV_PAD_X = scaled(12, scale)
+    M.NAV_ICON_GAP = scaled(7, scale)
+    M.NAV_INDICATOR_H = scaled(2, scale)
+    M.DOCK_H = scaled(30 * density_mul, scale)
+    M.DOCK_ITEM_W = scaled(30, scale)
+    M.DOCK_ITEM_H = scaled(26 * density_mul, scale)
+    M.DOCK_ITEM_GAP = scaled(4, scale)
+    M.DOCK_PAD = scaled(4, scale)
+    M.DOCK_ICON_SIZE = scaled(16, scale)
+    M.DOCK_GAP = M.DOCK_ITEM_GAP
+    M.DOCK_CHIP_H = M.DOCK_ITEM_H
+    M.DOCK_PAD_X = scaled(10, scale)
+    M.DOCK_POPUP_W = scaled(270, scale)
+    M.DOCK_POPUP_H = scaled(250 * density_mul, scale)
+    M.HEADER_H = M.TITLEBAR_H + M.NAV_H
+    M.CONTENT_PAD = scaled(12, scale)
+    -- Compatibility constants retained for the previous sidebar renderer.
     M.SIDEBAR_W = scaled(58, scale)
     M.TAB_H = scaled(48 * density_mul, scale)
     M.GROUP_PAD = scaled(12, scale)
@@ -22588,6 +22664,8 @@ function M.sync()
     M.CTRL_H = scaled(20 * density_mul, scale)
     M.CTRL_PAD = scaled(4, scale)
     M.CHECK_SIZE = scaled(13, scale)
+    M.SWITCH_W = scaled(29, scale)
+    M.SWITCH_H = scaled(15, scale)
     M.SLIDER_H = scaled(6, scale)
     M.STACKED_ROW_H = M.LABEL_H + M.LABEL_GAP + M.CTRL_H + M.CTRL_PAD
     M.SLIDER_ROW_H = M.LABEL_H + M.LABEL_GAP + M.SLIDER_H + scaled(10, scale) + M.CTRL_PAD
@@ -22625,7 +22703,9 @@ function M.apply_global_alpha(a)
         "SHADOW", "SHADOW_DEEP", "GLASS_HIGHLIGHT", "BORDER", "BORDER_SOFT",
         "BORDER_HOT", "SIDEBAR", "SIDEBAR_ACTIVE", "TEXT", "TEXT_DIM",
         "TEXT_ACTIVE", "TEXT_TITLE", "ACCENT", "ACCENT_DIM", "CHECK_OFF",
-        "SLIDER_BG", "BUTTON", "BUTTON_HOVER", "HOVER", "FOCUS",
+        "SLIDER_BG", "BUTTON", "BUTTON_HOVER", "HOVER", "FOCUS", "HEADER_BG",
+        "NAV_BG", "NAV_IDLE", "NAV_HOVER", "NAV_ACTIVE", "NAV_INDICATOR", "DOCK_BG",
+        "DOCK_HOVER", "DOCK_ACTIVE", "DOCK_BORDER", "DOCK_BADGE",
     }
     for _, key in ipairs(keys) do
         local c = M[key]
@@ -23212,6 +23292,34 @@ function M.smooth(id, target, rate)
     return entry.value
 end
 
+-- Smooth the position and width of a shared horizontal navbar underline.
+-- Keeping both values under one logical id lets callers move a single
+-- indicator between differently sized icon-and-label tabs.
+function M.navbar_indicator(id, target_x, target_w, rate)
+    local key = tostring(id or "primary")
+    local speed = M.motion_rate(rate or 18)
+    local x = M.smooth("navbar:x:" .. key, target_x, speed)
+    local w = M.smooth("navbar:w:" .. key, target_w, speed)
+    return x, w
+end
+
+-- Return independent active and hover progress values for a HUD dock item.
+-- Active state is deliberately a little firmer than transient hover feedback.
+function M.dock_transition(id, active, hovered)
+    local key = tostring(id)
+    local active_t = M.transition("dock:active:" .. key, active, M.motion_rate(20))
+    local hover_t = M.transition("dock:hover:" .. key, hovered, M.motion_rate(15))
+    return active_t, hover_t
+end
+
+function M.dock_color(id, active, hovered)
+    local active_t, hover_t = M.dock_transition(id, active, hovered)
+    local col = M.mix(theme.DOCK_BG or theme.BUTTON, theme.DOCK_HOVER or theme.BUTTON_HOVER,
+        M.ease_out_cubic(hover_t))
+    col = M.mix(col, theme.DOCK_ACTIVE or theme.SIDEBAR_ACTIVE, M.ease_out_cubic(active_t))
+    return col, active_t, hover_t
+end
+
 function M.mix(a, b, t)
     return theme.lerp_color(a, b, clamp(t or 0, 0, 1))
 end
@@ -23481,12 +23589,35 @@ function M.draw_tab_indicator(x, y, w, h)
     M.draw_bar_v(x, y, w, h, M.phase() * 0.07, M.STYLE_SIDEBAR, M.COL_SIDEBAR, M.TARGET_SIDEBAR)
 end
 
+-- Horizontal counterpart to draw_tab_indicator for the primary top navbar.
+function M.draw_navbar_indicator(x, y, w, h)
+    if not M.anim_target_enabled(M.TARGET_SIDEBAR) then
+        M.draw_flat(x, y, w, h, M.STYLE_SIDEBAR, M.COL_SIDEBAR, M.TARGET_SIDEBAR)
+        return
+    end
+    M.draw_bar_h(x, y, w, h, M.phase() * 0.07, M.STYLE_SIDEBAR, M.COL_SIDEBAR, M.TARGET_SIDEBAR)
+end
+
+-- Short spelling retained for shell implementations that call this a nav.
+M.draw_nav_indicator = M.draw_navbar_indicator
+
 function M.tab_icon_color()
     local base = M.element_color(M.TARGET_SIDEBAR, M.COL_SIDEBAR)
     if not M.anim_target_enabled(M.TARGET_SIDEBAR) then
         return base
     end
     return M.accent_at_mode(M.resolve_mode(M.STYLE_SIDEBAR), base, M.phase() * 0.03,
+        (base[4] or 1) * (theme.GLOBAL_ALPHA or 1))
+end
+
+-- Animated brand color using the title target's configured mode and color.
+-- This keeps the wordmark alive without adding decorative bars or geometry.
+function M.title_color()
+    local base = M.element_color(M.TARGET_TITLE, M.COL_TITLE)
+    if not M.anim_target_enabled(M.TARGET_TITLE) then
+        return base
+    end
+    return M.accent_at_mode(M.resolve_mode(M.STYLE_TITLE), base, M.phase() * 0.08,
         (base[4] or 1) * (theme.GLOBAL_ALPHA or 1))
 end
 
@@ -23995,154 +24126,156 @@ end)()
 
 -- â”€â”€ ui/gs_icons.lua â”€â”€
 April._mods["ui.gs_icons"] = (function()
--- Vector-drawn sidebar icons (sharper Gamesense-style glyphs).
+-- Coherent procedural line icons for the primary navigation and HUD dock.
+-- All glyphs share a compact 20px design grid and require no image assets.
 local theme = April.require("ui.gs_theme")
 
 local M = {}
 
 local function line(x1, y1, x2, y2, col, t)
     if draw and draw.line then
-        draw.line(x1, y1, x2, y2, col, t or 1.6)
+        draw.line(x1, y1, x2, y2, col, t or 1.5)
     end
 end
 
 local function circle(x, y, r, col, filled, segs)
     if not draw then return end
-    segs = segs or 20
+    segs = segs or 24
     if filled and draw.circle_filled then
         draw.circle_filled(x, y, r, col, segs)
     elseif draw.circle then
-        draw.circle(x, y, r, col, segs, 1.6)
+        draw.circle(x, y, r, col, segs, 1.5)
     end
 end
 
-local function rect(x, y, w, h, col, filled)
+local function rect(x, y, w, h, col, filled, rounding)
     if not draw then return end
     if filled then
-        draw.rect_filled(x, y, w, h, col, 0)
+        draw.rect_filled(x, y, w, h, col, rounding or 0)
     else
-        draw.rect(x, y, w, h, col, 0, 1.5)
+        draw.rect(x, y, w, h, col, rounding or 0, 1.5)
     end
 end
 
-local function poly(points, col, t)
-    if draw and draw.poly then
+local function path(points, col, closed, t)
+    if not draw then return end
+    if closed and draw.poly_closed then
+        draw.poly_closed(points, col, t or 1.5)
+        return
+    elseif draw.poly then
         draw.poly(points, col, t or 1.5)
     else
         for i = 1, #points - 1 do
             line(points[i][1], points[i][2], points[i + 1][1], points[i + 1][2], col, t)
         end
     end
+    if closed and #points > 2 then
+        line(points[#points][1], points[#points][2], points[1][1], points[1][2], col, t)
+    end
 end
 
 local function ellipse_arc(cx, cy, rx, ry, a0, a1, col, steps)
-    steps = steps or 10
+    steps = steps or 12
     local pts = {}
     for i = 0, steps do
         local t = a0 + (a1 - a0) * (i / steps)
         pts[#pts + 1] = { cx + math.cos(t) * rx, cy + math.sin(t) * ry }
     end
-    poly(pts, col, 1.5)
+    path(pts, col, false, 1.5)
 end
 
 function M.draw(name, cx, cy, col)
     col = col or theme.TEXT
 
     if name == "aim" then
-        -- Crosshair with outer brackets
-        circle(cx, cy, 5.5, col, false, 22)
-        circle(cx, cy, 1.4, col, true, 10)
-        line(cx - 9, cy, cx - 4, cy, col, 1.7)
-        line(cx + 4, cy, cx + 9, cy, col, 1.7)
-        line(cx, cy - 9, cx, cy - 4, col, 1.7)
-        line(cx, cy + 4, cx, cy + 9, col, 1.7)
-        -- corner ticks
-        line(cx - 8, cy - 8, cx - 5, cy - 8, col, 1.3)
-        line(cx - 8, cy - 8, cx - 8, cy - 5, col, 1.3)
-        line(cx + 8, cy - 8, cx + 5, cy - 8, col, 1.3)
-        line(cx + 8, cy - 8, cx + 8, cy - 5, col, 1.3)
-        line(cx - 8, cy + 8, cx - 5, cy + 8, col, 1.3)
-        line(cx - 8, cy + 8, cx - 8, cy + 5, col, 1.3)
-        line(cx + 8, cy + 8, cx + 5, cy + 8, col, 1.3)
-        line(cx + 8, cy + 8, cx + 8, cy + 5, col, 1.3)
+        circle(cx, cy, 5.5, col, false)
+        circle(cx, cy, 1.3, col, true, 10)
+        line(cx - 9, cy, cx - 5.5, cy, col)
+        line(cx + 5.5, cy, cx + 9, cy, col)
+        line(cx, cy - 9, cx, cy - 5.5, col)
+        line(cx, cy + 5.5, cx, cy + 9, col)
 
     elseif name == "visuals" then
-        -- Eye
-        ellipse_arc(cx, cy, 8, 4.5, math.pi, math.pi * 2, col, 12)
-        ellipse_arc(cx, cy, 8, 4.5, 0, math.pi, col, 12)
-        circle(cx, cy, 2.8, col, false, 14)
-        circle(cx + 0.6, cy - 0.4, 1.1, col, true, 8)
+        ellipse_arc(cx, cy, 8.5, 4.8, math.pi, math.pi * 2, col)
+        ellipse_arc(cx, cy, 8.5, 4.8, 0, math.pi, col)
+        circle(cx, cy, 2.5, col, false, 18)
+        circle(cx, cy, 1.0, col, true, 10)
 
     elseif name == "world" then
-        -- Globe with meridians
-        circle(cx, cy, 7, col, false, 24)
-        -- latitude
-        ellipse_arc(cx, cy, 7, 2.8, 0, math.pi * 2, col, 16)
-        -- longitude
-        ellipse_arc(cx, cy, 2.8, 7, 0, math.pi * 2, col, 16)
-        line(cx, cy - 7, cx, cy + 7, col, 1.2)
+        circle(cx, cy, 7.5, col, false)
+        ellipse_arc(cx, cy, 7.3, 2.7, 0, math.pi * 2, col, 16)
+        ellipse_arc(cx, cy, 3.2, 7.3, 0, math.pi * 2, col, 16)
 
     elseif name == "guns" then
-        -- Side-view rifle silhouette
-        -- barrel
-        rect(cx - 2, cy - 2.5, 10, 2.2, col, true)
-        -- receiver
-        rect(cx - 7, cy - 3.2, 7, 4.2, col, true)
-        -- stock
-        poly({
-            { cx - 7, cy - 2.5 },
-            { cx - 11, cy - 3.5 },
-            { cx - 11, cy + 2.5 },
-            { cx - 7, cy + 1.2 },
-        }, col, 1.6)
-        line(cx - 7, cy - 2.5, cx - 11, cy - 3.5, col, 1.6)
-        line(cx - 11, cy - 3.5, cx - 11, cy + 2.5, col, 1.6)
-        line(cx - 11, cy + 2.5, cx - 7, cy + 1.2, col, 1.6)
-        -- mag
-        rect(cx - 4.5, cy + 1, 2.4, 4, col, true)
-        -- front sight
-        line(cx + 6, cy - 2.5, cx + 6, cy - 5, col, 1.4)
+        -- Single cartridge stays crisp on the navbar's small design grid.
+        path({
+            { cx - 8, cy - 3 }, { cx + 3, cy - 3 },
+            { cx + 8, cy }, { cx + 3, cy + 3 },
+            { cx - 8, cy + 3 },
+        }, col, true, 1.5)
+        line(cx - 5, cy - 3, cx - 5, cy + 3, col, 1.3)
+        line(cx - 8, cy - 1.5, cx - 8, cy + 1.5, col, 1.5)
 
     elseif name == "misc" then
-        -- Three control sliders
-        for i = 0, 2 do
-            local yy = cy - 6 + i * 6
-            line(cx - 7, yy, cx + 7, yy, col, 1.4)
-            local knob = ({ -3, 3, 0 })[i + 1]
-            circle(cx + knob, yy, 2.2, col, true, 10)
-            circle(cx + knob, yy, 2.2, col, false, 10)
-        end
+        line(cx - 8, cy - 5, cx + 8, cy - 5, col)
+        line(cx - 8, cy, cx + 8, cy, col)
+        line(cx - 8, cy + 5, cx + 8, cy + 5, col)
+        circle(cx - 3, cy - 5, 2, col, false, 14)
+        circle(cx + 4, cy, 2, col, false, 14)
+        circle(cx - 1, cy + 5, 2, col, false, 14)
 
     elseif name == "radar" then
-        -- Radar dish + sweep
-        circle(cx, cy, 7.5, col, false, 24)
-        circle(cx, cy, 4.5, col, false, 18)
-        circle(cx, cy, 1.5, col, true, 10)
-        line(cx, cy, cx + 6.5, cy - 3.5, col, 1.8)
-        -- blip
-        circle(cx + 3.5, cy + 2.5, 1.3, col, true, 8)
-        -- north tick
-        line(cx, cy - 7.5, cx, cy - 9.5, col, 1.5)
+        circle(cx, cy, 7.5, col, false)
+        ellipse_arc(cx, cy, 4.5, 4.5, -math.pi * 0.45, math.pi * 0.22, col, 8)
+        line(cx, cy, cx + 6.2, cy - 4.2, col)
+        circle(cx + 3.7, cy + 2.6, 1.1, col, true, 8)
+        circle(cx, cy, 1.1, col, true, 8)
 
     elseif name == "config" then
-        -- Gear
-        local teeth = 8
-        for i = 0, teeth - 1 do
-            local a = (i / teeth) * math.pi * 2
-            local c, s = math.cos(a), math.sin(a)
-            local x1, y1 = cx + c * 3.2, cy + s * 3.2
-            local x2, y2 = cx + c * 7.2, cy + s * 7.2
-            local px, py = -s * 1.5, c * 1.5
-            poly({
-                { x1 + px, y1 + py },
-                { x2 + px * 0.7, y2 + py * 0.7 },
-                { x2 - px * 0.7, y2 - py * 0.7 },
-                { x1 - px, y1 - py },
-                { x1 + px, y1 + py },
-            }, col, 1.35)
+        circle(cx, cy, 5.7, col, false)
+        circle(cx, cy, 2.2, col, false, 16)
+        for i = 0, 7 do
+            local a = i * math.pi * 0.25
+            line(
+                cx + math.cos(a) * 6.1, cy + math.sin(a) * 6.1,
+                cx + math.cos(a) * 8.2, cy + math.sin(a) * 8.2,
+                col, 1.8
+            )
         end
-        circle(cx, cy, 3.8, col, false, 16)
-        circle(cx, cy, 1.8, col, true, 10)
+
+    elseif name == "keybinds" then
+        rect(cx - 8, cy - 6, 16, 12, col, false, 2)
+        for row = 0, 1 do
+            for column = 0, 3 do
+                circle(cx - 5.5 + column * 3.6, cy - 3 + row * 3.4, 0.65, col, true, 6)
+            end
+        end
+        line(cx - 4, cy + 4, cx + 4, cy + 4, col, 1.2)
+
+    elseif name == "staff" then
+        circle(cx, cy - 4.5, 3, col, false, 18)
+        ellipse_arc(cx, cy + 6, 6.5, 5.5, math.pi, math.pi * 2, col, 12)
+        line(cx - 6.5, cy + 6, cx - 6.5, cy + 3.5, col)
+        line(cx + 6.5, cy + 6, cx + 6.5, cy + 3.5, col)
+        line(cx + 5.2, cy - 6.8, cx + 7.8, cy - 4.2, col, 1.3)
+        line(cx + 7.8, cy - 4.2, cx + 5.2, cy - 1.6, col, 1.3)
+
+    elseif name == "map" then
+        path({
+            { cx - 8, cy - 6 }, { cx - 3, cy - 8 }, { cx + 3, cy - 6 },
+            { cx + 8, cy - 8 }, { cx + 8, cy + 6 }, { cx + 3, cy + 8 },
+            { cx - 3, cy + 6 }, { cx - 8, cy + 8 },
+        }, col, true)
+        line(cx - 3, cy - 8, cx - 3, cy + 6, col, 1.2)
+        line(cx + 3, cy - 6, cx + 3, cy + 8, col, 1.2)
+
+    elseif name == "settings" then
+        line(cx - 8, cy - 5, cx + 8, cy - 5, col)
+        line(cx - 8, cy, cx + 8, cy, col)
+        line(cx - 8, cy + 5, cx + 8, cy + 5, col)
+        circle(cx + 3, cy - 5, 2, col, false, 14)
+        circle(cx - 3, cy, 2, col, false, 14)
+        circle(cx + 1, cy + 5, 2, col, false, 14)
 
     else
         circle(cx, cy, 4, col, false)
@@ -24219,8 +24352,9 @@ local function clamp(v, a, b)
 end
 
 local function text_w(str, size)
-    if draw and draw.get_text_size then
-        local w = draw.get_text_size(str, size or theme.FONT)
+    local fn = draw and (draw.get_text_size or draw.GetTextSize)
+    if fn then
+        local w = fn(str, size or theme.FONT)
         if type(w) == "number" then return w end
     end
     return #(tostring(str or "")) * 7
@@ -24561,9 +24695,6 @@ function M.draw_color_overlay()
 
     M._color_hit = { x = px, y = py, w = pw, h = ph }
 
-    -- Soft shadow / backdrop
-    M.rect(px + 6, py + 8, pw, ph, theme.SHADOW_DEEP, true, theme.CORNER)
-    M.rect(px + 3, py + 4, pw, ph, theme.SHADOW, true, theme.CORNER)
     M.draw_color_picker(px, py, pw, ph, id, col)
 
     if input.hover(px, py, pw, ph) then
@@ -24617,10 +24748,8 @@ function M.draw_bind_mode_overlay()
 
     M._bind_mode_hit = { x = px, y = py, w = pw, h = ph }
 
-    M.rect(px + 4, py + 5, pw, ph, theme.SHADOW, true, theme.CORNER_SMALL)
     M.rect(px, py, pw, ph, theme.OVERLAY, true, theme.CORNER_SMALL)
-    M.rect(px, py, pw, ph, theme.BORDER_HOT, false, theme.CORNER_SMALL)
-    anim.draw_title_bar(px + 1, py, pw - 2, 2)
+    M.rect(px, py, pw, ph, theme.BORDER_SOFT, false, theme.CORNER_SMALL)
 
     M.text(px + 9, py + 6, "KEYBIND SETTINGS", theme.TEXT_TITLE, theme.FONT_CAPTION)
     M.rect(px + 8, py + header_h - 1, pw - 16, 1, theme.BORDER_SOFT, true)
@@ -24710,16 +24839,19 @@ function M.rect(x, y, w, h, col, filled, rounding)
         if y + h > cy2 then h = cy2 - y end
         if w <= 0 or h <= 0 then return end
     end
-    if filled then
-        draw.rect_filled(x, y, w, h, col, rounding or 0)
-    else
-        draw.rect(x, y, w, h, col, rounding or 0, 1)
+    local fill = draw.rect_filled or draw.RectFilled
+    local outline = draw.rect or draw.Rect
+    if filled and fill then
+        fill(x, y, w, h, col, rounding or 0)
+    elseif not filled and outline then
+        outline(x, y, w, h, col, rounding or 0, 1)
     end
 end
 
 function M.text(x, y, str, col, size)
-    if draw and draw.text then
-        draw.text(x, y, tostring(str), col, size or theme.FONT)
+    local fn = draw and (draw.text or draw.Text)
+    if fn then
+        fn(x, y, tostring(str), col, size or theme.FONT)
     end
 end
 
@@ -25020,33 +25152,33 @@ function M.checkbox(x, y, w, id, label, opts)
         M.rect(x, y + 1, w, h - 2, theme.alpha(theme.HOVER, hover_fill), true, theme.CORNER_SMALL)
     end
 
+    local switch_w = theme.SWITCH_W or 28
+    local switch_h = theme.SWITCH_H or 14
     local bx = x + 4
-    local by = y + (h - theme.CHECK_SIZE) * 0.5
+    local by = y + (h - switch_h) * 0.5
     local active_t = anim.transition("check-state:" .. tostring(id), active, anim.motion_rate(22))
-    M.rect(bx + 1, by + 2, theme.CHECK_SIZE, theme.CHECK_SIZE, theme.SHADOW, true, theme.CORNER_SMALL)
-    M.rect(bx, by, theme.CHECK_SIZE, theme.CHECK_SIZE, theme.CHECK_OFF, true, theme.CORNER_SMALL)
-    M.rect(bx, by, theme.CHECK_SIZE, theme.CHECK_SIZE,
-        active and theme.FOCUS or theme.BORDER_SOFT, false, theme.CORNER_SMALL)
-    if active_t > 0.01 then
-        local inset = 2 + (1 - active_t) * (theme.CHECK_SIZE * 0.35)
-        local inner = theme.CHECK_SIZE - inset * 2
-        if inner > 1 then
-            M.rect(bx + inset, by + inset, inner, inner, theme.alpha(anim.checkbox_fill(), active_t), true, theme.CORNER_SMALL)
-        end
-    end
+    local track = anim.mix(theme.CHECK_OFF, anim.checkbox_fill(), active_t * 0.72)
+    M.rect(bx, by, switch_w, switch_h, track, true, switch_h * 0.5)
+    M.rect(bx, by, switch_w, switch_h,
+        active and theme.alpha(theme.FOCUS, 0.88) or theme.BORDER_SOFT, false, switch_h * 0.5)
+    local knob = math.max(8, switch_h - 4)
+    local knob_x = bx + 2 + (switch_w - knob - 4) * active_t
+    M.rect(knob_x, by + 2, knob, knob,
+        anim.mix(theme.TEXT_DIM, theme.TEXT_ACTIVE, active_t), true, knob * 0.5)
 
-    local label_w = w - theme.CHECK_SIZE - 38
-    M.text(bx + theme.CHECK_SIZE + 8, y + 4, fit_text(label, label_w, theme.FONT),
+    local label_w = w - switch_w - 38
+    M.text(bx + switch_w + 8, y + 4, fit_text(label, label_w, theme.FONT),
         on and theme.TEXT_ACTIVE or theme.TEXT, theme.FONT)
 
-    local has_color = opts.color or state.colors[id]
+    local has_color = not opts.hide_color and (opts.color or state.colors[id])
     local swatch_clicked = false
     if has_color then
         local col = state.get_color(id, opts.color or { 1, 1, 1, 1 })
         local cx = x + w - 18
-        M.rect(cx, by, 12, 12, col, true, 2)
-        M.rect(cx, by, 12, 12, theme.BORDER, false, 2)
-        if ui_clicked(cx - 2, by - 2, 16, 16) then
+        local swatch_y = y + (h - 12) * 0.5
+        M.rect(cx, swatch_y, 12, 12, col, true, 4)
+        M.rect(cx, swatch_y, 12, 12, theme.BORDER, false, 4)
+        if ui_clicked(cx - 2, swatch_y - 2, 16, 16) then
             swatch_clicked = true
             mark_interacted()
             local hh = rgb_to_hsv(col[1] or 1, col[2] or 1, col[3] or 1)
@@ -25125,8 +25257,6 @@ function M.slider(x, y, w, id, label, minv, maxv, default, opts)
     local thumb_x = sx + sw * t
     local drag_t = anim.transition("slider-active:" .. tostring(id), M.active_slider == id, anim.motion_rate(24))
     local thumb_w = 6 + drag_t * 2
-    M.rect(thumb_x - thumb_w * 0.5 + 1, sy - 1, thumb_w, theme.SLIDER_H + 4,
-        theme.SHADOW, true, thumb_w * 0.5)
     M.rect(thumb_x - thumb_w * 0.5, sy - 2, thumb_w, theme.SLIDER_H + 4,
         anim.mix(anim.checkbox_fill(), theme.TEXT_ACTIVE, drag_t), true, thumb_w * 0.5)
 
@@ -25165,7 +25295,19 @@ function M.combo(x, y, w, id, label, options, default_idx)
     local cur = options[idx + 1] or options[1] or "-"
     M.text(bx + 6, by + math.floor((bh - 12) * 0.5),
         fit_text(cur, bw - 28, theme.FONT_SMALL), theme.TEXT_ACTIVE, theme.FONT_SMALL)
-    M.text(bx + bw - 13, by + math.floor((bh - 12) * 0.5), open and "^" or "v", open and theme.TEXT_ACTIVE or theme.TEXT_DIM, theme.FONT_SMALL)
+    local arrow_col = open and theme.TEXT_ACTIVE or theme.TEXT_DIM
+    local line = draw and (draw.line or draw.Line)
+    if line then
+        local ax = bx + bw - 12
+        local ay = by + bh * 0.5
+        if open then
+            line(ax - 3, ay + 2, ax, ay - 1, arrow_col, 1.3)
+            line(ax, ay - 1, ax + 3, ay + 2, arrow_col, 1.3)
+        else
+            line(ax - 3, ay - 1, ax, ay + 2, arrow_col, 1.3)
+            line(ax, ay + 2, ax + 3, ay - 1, arrow_col, 1.3)
+        end
+    end
 
     -- Header toggles open/closed (do not require clip hover - fixes "can't close")
     if ui_clicked(bx, by, bw, bh) then
@@ -25190,9 +25332,8 @@ function M.combo(x, y, w, id, label, options, default_idx)
         apply_list_edge_scroll(id, n, M.LIST_MAX_VISIBLE, bx, list_y, bw, list_h)
         off = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
 
-        M.rect(bx + 2, by + bh + 2, bw, list_h, theme.SHADOW, true, theme.CORNER_SMALL)
         M.rect(bx, by + bh, bw, list_h, theme.OVERLAY, true, theme.CORNER_SMALL)
-        M.rect(bx, by + bh, bw, list_h, theme.BORDER_HOT, false, theme.CORNER_SMALL)
+        M.rect(bx, by + bh, bw, list_h, theme.BORDER_SOFT, false, theme.CORNER_SMALL)
         for row = 0, vis - 1 do
             local i = off + row + 1
             local opt = options[i]
@@ -25290,9 +25431,8 @@ function M.multi(x, y, w, id, label, options, defaults, opts)
         apply_list_edge_scroll(id, n, M.LIST_MAX_VISIBLE, bx, list_y, bw, list_h)
         off = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
 
-        M.rect(bx + 2, by + bh + 2, bw, list_h, theme.SHADOW, true, theme.CORNER_SMALL)
         M.rect(bx, by + bh, bw, list_h, theme.OVERLAY, true, theme.CORNER_SMALL)
-        M.rect(bx, by + bh, bw, list_h, theme.BORDER_HOT, false, theme.CORNER_SMALL)
+        M.rect(bx, by + bh, bw, list_h, theme.BORDER_SOFT, false, theme.CORNER_SMALL)
         for row = 0, vis - 1 do
             local i = off + row + 1
             local opt = options[i]
@@ -25338,16 +25478,13 @@ function M.button(x, y, w, id, label)
     if not in_clip(y, h) then return h end
     local hovered = input.hover(x, y, w, h)
     local pressed = hovered and input.lmb
-    local press_t = anim.transition("button-press:" .. tostring(id), pressed, anim.motion_rate(28))
-    local oy = press_t * 1.5
-    M.rect(x + 2, y + 3, w, h, theme.SHADOW, true, theme.CORNER_SMALL)
-    M.rect(x, y + oy, w, h,
+    M.rect(x, y, w, h,
         anim.interactive_fill("button:" .. tostring(id), theme.BUTTON, hovered, pressed),
-        true, theme.CORNER_SMALL)
-    M.rect(x, y + oy, w, h, hovered and theme.BORDER_HOT or theme.BORDER_SOFT, false, theme.CORNER_SMALL)
+        true, theme.CORNER)
+    M.rect(x, y, w, h, hovered and theme.FOCUS or theme.BORDER_SOFT, false, theme.CORNER)
     local shown = fit_text(label, w - 16, theme.FONT_SMALL)
     local tw = text_w(shown, theme.FONT_SMALL)
-    M.text(x + (w - tw) * 0.5, y + 6 + oy, shown, theme.TEXT_ACTIVE, theme.FONT_SMALL)
+    M.text(x + (w - tw) * 0.5, y + 6, shown, theme.TEXT_ACTIVE, theme.FONT_SMALL)
     if interactive(x, y, w, h) and ui_clicked(x, y, w, h) then
         mark_interacted()
         state.fire_button(id)
@@ -25365,11 +25502,14 @@ end
 function M.separator(x, y, w)
     local h = 18
     if not in_clip(y, h) then return h end
-    M.rect(x + 5, y + 9, w - 10, 1, theme.BORDER_SOFT, true)
+    -- A single neutral hairline keeps groups readable without the previous
+    -- bright accent segment or a simulated fade.
+    M.rect(x + 8, y + 9, w - 16, 1, { 0.82, 0.84, 0.90, 0.07 }, true)
     return h
 end
 
-function M.keybind(x, y, w, id, label, default_on)
+function M.keybind(x, y, w, id, label, default_on, opts)
+    opts = opts or {}
     if id and not state.is_visible(id) then return 0 end
     state.define(id, default_on == true)
     local mode_id = id .. "_mode"
@@ -25383,7 +25523,10 @@ function M.keybind(x, y, w, id, label, default_on)
     -- checkbox portion (leave room for key chip; mode is RMB popup)
     local chip_w = 56
     local cw = w - chip_w - 6
-    local used = M.checkbox(x, y, cw, id, label, { default = default_on })
+    local used = M.checkbox(x, y, cw, id, label, {
+        default = default_on,
+        hide_color = opts.hide_color,
+    })
 
     -- key chip: LMB bind, RMB mode (Always / Hold / Toggle)
     local kx = x + w - chip_w
@@ -25667,7 +25810,7 @@ function M.draw_item(item, x, y, w)
     if t == "checkbox" then
         h = M.checkbox(x, y, w, item.id, item.label, item)
     elseif t == "keybind" then
-        h = M.keybind(x, y, w, item.id, item.label, item.default)
+        h = M.keybind(x, y, w, item.id, item.label, item.default, item)
     elseif t == "aim_key" then
         h = M.aim_key_row(x, y, w, item.id, item.mode_id, item.label)
     elseif t == "hotkey" then
@@ -25719,8 +25862,12 @@ local function cb(id, label, default, color, gate)
     return { type = "checkbox", id = id, label = label, default = default == true, color = color, gate = gate }
 end
 
-local function kb(id, label, default, gate)
-    return { type = "keybind", id = id, label = label, default = default == true, gate = gate }
+local function kb(id, label, default, gate, extra)
+    local item = { type = "keybind", id = id, label = label, default = default == true, gate = gate }
+    if type(extra) == "table" then
+        for k, v in pairs(extra) do item[k] = v end
+    end
+    return item
 end
 
 local function sl(id, label, minv, maxv, default, float, gate, extra)
@@ -25840,13 +25987,13 @@ local function mesh_chams_block(prefix, toggle_list, master)
 end
 
 M.TABS = {
-    { id = "aim", icon = "aim", title = "Aimbot" },
-    { id = "visuals", icon = "visuals", title = "Visuals" },
-    { id = "world", icon = "world", title = "World" },
-    { id = "guns", icon = "guns", title = "Gun Mods" },
-    { id = "misc", icon = "misc", title = "Misc" },
-    { id = "radar", icon = "radar", title = "Radar" },
-    { id = "config", icon = "config", title = "Config" },
+    { id = "aim", icon = "aim", title = "Aimbot", label = "Aim" },
+    { id = "visuals", icon = "visuals", title = "Visuals", label = "Visuals" },
+    { id = "world", icon = "world", title = "World", label = "World" },
+    { id = "guns", icon = "guns", title = "Gun Mods", label = "Guns" },
+    { id = "misc", icon = "misc", title = "Misc", label = "Misc" },
+    { id = "radar", icon = "radar", title = "Radar", label = "Radar" },
+    { id = "config", icon = "config", title = "Config", label = "Config" },
 }
 
 local function build_aim()
@@ -25957,7 +26104,7 @@ local function build_visuals()
         title = "Player ESP",
         master = "april_player_enabled",
         items = {
-            kb("april_player_enabled", "Player ESP", false),
+            kb("april_player_enabled", "Player ESP", false, nil, { hide_color = true }),
             combo("april_player_box_mode", "Player Box", { "None", "2D", "Corner" }, 1),
             multi("april_ui_player_elements", "Displayed Elements", {
                 "Health Bar", "Skeleton", "Name", "Clan Tag", "Distance", "Weapon",
@@ -26023,6 +26170,7 @@ local function build_visuals()
         title = "Player Colors",
         master = "april_player_enabled",
         items = {
+            color("april_player_box_color", "Box", { 1, 0.35, 0.35, 1 }),
             color("april_player_skeleton", "Skeleton", { 1, 1, 1, 0.92 }),
             color("april_player_show_name", "Name", { 1, 0.35, 0.35, 1 }),
             color("april_player_clan_tag", "Clan Tag", { 0.84, 0.31, 0.80, 1 }),
@@ -26091,7 +26239,7 @@ local function build_world()
         title = "NPCs",
         master = "april_npc_enabled",
         items = {
-            kb("april_npc_enabled", "NPC ESP", false),
+            kb("april_npc_enabled", "NPC ESP", false, nil, { hide_color = true }),
             multi("april_ui_npc_types", "NPC Types", { "Soldiers", "Bosses", "Helicopters" }, { false, false, false }, nil, {
                 sync_ids = { "april_npc_soldiers", "april_npc_bosses", "april_npc_heli" },
             }),
@@ -26104,18 +26252,25 @@ local function build_world()
                     "april_npc_show_distance", "april_npc_show_weapon",
                 },
             }),
-            color("april_npc_soldiers", "Soldier Color", { 1, 0.3, 0.3, 1 }),
-            color("april_npc_bosses", "Boss Color", { 1, 0.5, 0.1, 1 }),
-            color("april_npc_heli", "Heli Color", { 0.85, 0.2, 0.25, 1 }),
-            color("april_npc_skeleton", "Skeleton Color", { 1, 1, 1, 0.85 }),
-            color("april_npc_show_name", "Name Color", { 1, 0.3, 0.3, 1 }),
-            color("april_npc_show_distance", "Distance Color", { 0.82, 0.84, 0.88, 0.92 }),
-            color("april_npc_show_weapon", "Weapon Color", { 0.82, 0.84, 0.88, 0.92 }),
             sl("april_npc_range", "NPC Range", 50, 2000, 500),
         },
     }
 
-    return { resources, loot, npcs, bases }
+    local npc_colors = {
+        title = "NPC Colors",
+        master = "april_npc_enabled",
+        items = {
+            color("april_npc_soldiers", "Soldier", { 1, 0.3, 0.3, 1 }),
+            color("april_npc_bosses", "Boss", { 1, 0.5, 0.1, 1 }),
+            color("april_npc_heli", "Helicopter", { 0.85, 0.2, 0.25, 1 }),
+            color("april_npc_skeleton", "Skeleton", { 1, 1, 1, 0.85 }),
+            color("april_npc_show_name", "Name", { 1, 0.3, 0.3, 1 }),
+            color("april_npc_show_distance", "Distance", { 0.82, 0.84, 0.88, 0.92 }),
+            color("april_npc_show_weapon", "Weapon", { 0.82, 0.84, 0.88, 0.92 }),
+        },
+    }
+
+    return { resources, loot, npcs, npc_colors, bases }
 end
 
 local function build_guns()
@@ -26204,13 +26359,7 @@ local function build_misc()
                 sl("april_farm_smooth", "Camera Smoothness", 1, 30, 8, false, "april_farm_helper"),
                 sep(),
                 cb("april_anti_afk", "Anti AFK", false),
-                cb("april_mod_checker_enabled", "Mod Checker", false),
-                sl("april_mod_checker_interval", "Scan Interval (ms)", 1000, 10000, 2500, false, "april_mod_checker_enabled"),
-                sep(),
-                cb("april_keybinds_enabled", "Keybind Viewer", false),
-                cb("april_keybinds_active_only", "Only Show Active", false, nil, "april_keybinds_enabled"),
-                cb("april_keybinds_show_unbound", "Show Unbound", true, nil, "april_keybinds_enabled"),
-                cb("april_keybinds_show_mode", "Show Bind Mode", true, nil, "april_keybinds_enabled"),
+                label("HUD panels are managed from the top dock."),
             },
         },
     }
@@ -26239,7 +26388,7 @@ local function build_radar()
                 color("april_map_base_col", "Radar Base Color", { 0.55, 0.55, 1, 1 }),
                 color("april_map_wp_col", "Radar Waypoints Color", { 0.3, 0.9, 1, 1 }),
                 sl("april_map_zoom", "Radar Zoom Level", 0.05, 5, 1, true),
-                sl("april_map_size", "Radar Size", 140, 420, 240),
+                sl("april_map_size", "Radar Size", 140, 420, 250),
                 sl("april_map_icon_scale", "Radar Blip Size", 2, 6, 3),
                 btn("april_map_reset_position", "Reset Radar Position"),
             },
@@ -26300,7 +26449,7 @@ local function build_config()
             sl("april_ui_anim_speed", "Accent Speed", 1, 100, 40, false, ANM),
             cb("april_ui_menu_fade", "Ambient Fade Pulse", false, nil, ANM),
             multi("april_ui_anim_targets", "Animate", {
-                "Title Bar", "Section Tops", "Sliders", "Scrollbars", "Sidebar", "Checkboxes", "Hover", "Overlay Panels",
+                "Title Bar", "Section Tops", "Sliders", "Scrollbars", "Navbar", "Switches", "Hover", "Overlay Panels",
             }, { true, true, true, true, true, true, true, true }, ANM),
             cb("april_ui_per_element", "Individual Styles", false, nil, ANM),
             sep(ANM),
@@ -26308,8 +26457,8 @@ local function build_config()
             { type = "combo", id = "april_ui_style_section", label = "Section Tops", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
             { type = "combo", id = "april_ui_style_slider", label = "Sliders", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
             { type = "combo", id = "april_ui_style_scroll", label = "Scrollbars", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
-            { type = "combo", id = "april_ui_style_sidebar", label = "Sidebar", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
-            { type = "combo", id = "april_ui_style_checkbox", label = "Checkboxes", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+            { type = "combo", id = "april_ui_style_sidebar", label = "Navbar", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
+            { type = "combo", id = "april_ui_style_checkbox", label = "Switches", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
             { type = "combo", id = "april_ui_style_overlay", label = "Overlay Panels", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
         },
     }
@@ -26320,14 +26469,14 @@ local function build_config()
             cb("april_ui_custom_colors", "Color Options", false),
             color("april_ui_accent", "Accent", { 0.78, 0.20, 0.92, 1 }, COL),
             multi("april_ui_color_overrides", "Override Colors For", {
-                "Title Bar", "Section Tops", "Sliders", "Scrollbars", "Sidebar", "Checkboxes", "Overlay Panels",
+                "Title Bar", "Section Tops", "Sliders", "Scrollbars", "Navbar", "Switches", "Overlay Panels",
             }, {}, COL),
             color("april_ui_col_title", "Title Bar Color", { 0.78, 0.20, 0.92, 1 }, COL, 1),
             color("april_ui_col_section", "Section Top Color", { 0.78, 0.20, 0.92, 1 }, COL, 2),
             color("april_ui_col_slider", "Slider Color", { 0.78, 0.20, 0.92, 1 }, COL, 3),
             color("april_ui_col_scroll", "Scrollbar Color", { 0.78, 0.20, 0.92, 1 }, COL, 4),
-            color("april_ui_col_sidebar", "Sidebar Color", { 0.78, 0.20, 0.92, 1 }, COL, 5),
-            color("april_ui_col_checkbox", "Checkbox Color", { 0.78, 0.20, 0.92, 1 }, COL, 6),
+            color("april_ui_col_sidebar", "Navbar Color", { 0.78, 0.20, 0.92, 1 }, COL, 5),
+            color("april_ui_col_checkbox", "Switch Color", { 0.78, 0.20, 0.92, 1 }, COL, 6),
             color("april_ui_col_overlay", "Overlay Panel Color", { 0.78, 0.20, 0.92, 1 }, COL, 7),
         },
     }
@@ -26368,6 +26517,304 @@ return M
 
 end)()
 
+-- â”€â”€ ui/hud_dock.lua â”€â”€
+April._mods["ui.hud_dock"] = (function()
+-- Top-shell HUD controls. These are first-class panel toggles rather than
+-- gameplay settings buried in Misc.
+local theme = April.require("ui.gs_theme")
+local input = April.require("ui.gs_input")
+local widgets = April.require("ui.gs_widgets")
+local anim = April.require("ui.gs_anim")
+local icons = April.require("ui.gs_icons")
+local state = April.require("ui.gs_state")
+
+local M = {}
+
+local open_settings = false
+local popup_rect = nil
+local dock_rect = nil
+local settings_opened_this_frame = false
+local visible_settings = {}
+
+local PANELS = {
+    { id = "april_keybinds_enabled", icon = "keybinds", label = "Binds" },
+    { id = "april_mod_checker_enabled", icon = "staff", label = "Staff" },
+    { id = "april_map_enabled", icon = "map", label = "Map" },
+}
+
+local BIND_SETTINGS = {
+    { type = "label", label = "KEYBINDS", dim = true },
+    { type = "checkbox", id = "april_keybinds_active_only", label = "Only active binds", default = false },
+    { type = "checkbox", id = "april_keybinds_show_unbound", label = "Show unbound", default = true },
+    { type = "checkbox", id = "april_keybinds_show_mode", label = "Show bind mode", default = true },
+}
+
+local STAFF_SETTINGS = {
+    { type = "label", label = "STAFF", dim = true },
+    {
+        type = "slider", id = "april_mod_checker_interval", label = "Scan interval",
+        min = 1000, max = 10000, default = 2500,
+    },
+}
+
+local MAP_SETTINGS = {
+    { type = "label", label = "MAP", dim = true },
+    { type = "button", id = "april_map_reset_position", label = "Reset map position" },
+}
+
+local function build_visible_settings()
+    local out = {}
+    local function append_group(group)
+        if #out > 0 then out[#out + 1] = { type = "separator" } end
+        for _, item in ipairs(group) do out[#out + 1] = item end
+    end
+
+    local binds = state.get("april_keybinds_enabled", false) == true
+    local staff = state.get("april_mod_checker_enabled", false) == true
+    local map = state.get("april_map_enabled", false) == true
+
+    state.set_visible("april_keybinds_active_only", binds)
+    state.set_visible("april_keybinds_show_unbound", binds)
+    state.set_visible("april_keybinds_show_mode", binds)
+    state.set_visible("april_mod_checker_interval", staff)
+    state.set_visible("april_map_reset_position", map)
+
+    if binds then append_group(BIND_SETTINGS) end
+    if staff then append_group(STAFF_SETTINGS) end
+    if map then append_group(MAP_SETTINGS) end
+    if #out == 0 then
+        out[1] = {
+            type = "label",
+            label = "Enable Binds, Staff, or Map above.",
+            dim = true,
+        }
+    end
+    return out
+end
+
+local function settings_height(items)
+    local h = 44
+    for i, item in ipairs(items) do
+        h = h + widgets.estimate_height(item)
+        if i < #items then h = h + theme.ITEM_GAP end
+    end
+    return h + 8
+end
+
+local function text_width(text, size)
+    local fn = draw and (draw.get_text_size or draw.GetTextSize)
+    if fn then
+        local ok, w = pcall(fn, text, size)
+        if ok and type(w) == "number" then return w end
+    end
+    return #tostring(text or "") * 7
+end
+
+function M.init()
+    state.define("april_keybinds_enabled", false)
+    state.define("april_mod_checker_enabled", false)
+    state.define("april_map_enabled", false)
+end
+
+function M.begin_frame()
+    if open_settings and popup_rect
+        and input.hover(popup_rect.x, popup_rect.y, popup_rect.w, popup_rect.h)
+    then
+        widgets.block_under = true
+    end
+end
+
+-- Static top-center launcher, independent of the menu window position.
+function M.draw_floating(_default_x, _default_y, sw, _sh)
+    settings_opened_this_frame = false
+    local scale = theme.SCALE or 1
+    local bar_h = math.max(42, math.floor(46 * scale))
+    local item = math.max(32, math.floor(36 * scale))
+    local gap = math.max(4, math.floor(5 * scale))
+    local pad = math.max(6, math.floor(7 * scale))
+    local count = #PANELS + 1
+    local bar_w = pad * 2 + count * item + (count - 1) * gap
+    local x = math.floor((sw - bar_w) * 0.5)
+    local y = math.max(8, math.floor(10 * scale))
+
+    dock_rect = { x = x, y = y, w = bar_w, h = bar_h }
+    widgets.rect(x, y, bar_w, bar_h, theme.alpha(theme.NAV_BG, 0.97), true, theme.CORNER)
+    widgets.rect(x, y, bar_w, bar_h, theme.BORDER, false, theme.CORNER)
+
+    local cursor_x = x + pad
+    local iy = y + math.floor((bar_h - item) * 0.5)
+    for _, panel in ipairs(PANELS) do
+        local active = state.get(panel.id, false) == true
+        local hot = input.hover(cursor_x, iy, item, item)
+        local active_t, hover_t = anim.dock_transition(panel.id, active, hot)
+        local fill = anim.mix(theme.DOCK_BG, theme.DOCK_HOVER, hover_t)
+        fill = anim.mix(fill, theme.DOCK_ACTIVE, active_t)
+        if active or hot then
+            widgets.rect(cursor_x, iy, item, item, fill, true, theme.CORNER_SMALL)
+        end
+        if active then
+            widgets.rect(cursor_x + 7, iy + item - 3, item - 14, 2,
+                theme.alpha(theme.ACCENT, 0.92), true, 1)
+        end
+        local col = active and theme.TEXT_ACTIVE or anim.mix(theme.TEXT_DIM, theme.TEXT, hover_t)
+        icons.draw(panel.icon, cursor_x + item * 0.5, iy + item * 0.5, col)
+        if input.clicked(cursor_x, iy, item, item) and not widgets.block_under then
+            state.set(panel.id, not active)
+            widgets.interacted = true
+        end
+        if hot then
+            local label_w = text_width(panel.label, theme.FONT_CAPTION)
+            local tx = cursor_x + (item - label_w) * 0.5
+            widgets.rect(tx - 5, y + bar_h + 5, label_w + 10, 18,
+                theme.OVERLAY, true, theme.CORNER_SMALL)
+            widgets.text(tx, y + bar_h + 7, panel.label, theme.TEXT_ACTIVE, theme.FONT_CAPTION)
+        end
+        cursor_x = cursor_x + item + gap
+    end
+
+    local hot = input.hover(cursor_x, iy, item, item)
+    local active_t, hover_t = anim.dock_transition("settings", open_settings, hot)
+    local fill = anim.mix(theme.DOCK_BG, theme.DOCK_HOVER, hover_t)
+    fill = anim.mix(fill, theme.DOCK_ACTIVE, active_t)
+    if open_settings or hot then
+        widgets.rect(cursor_x, iy, item, item, fill, true, theme.CORNER_SMALL)
+    end
+    icons.draw("settings", cursor_x + item * 0.5, iy + item * 0.5,
+        open_settings and theme.TEXT_ACTIVE or anim.mix(theme.TEXT_DIM, theme.TEXT, hover_t))
+    if input.clicked(cursor_x, iy, item, item) and not widgets.block_under then
+        settings_opened_this_frame = not open_settings
+        open_settings = not open_settings
+        widgets.open_combo = nil
+        widgets.open_multi = nil
+        widgets.open_color = nil
+        widgets.open_bind_mode = nil
+        widgets.interacted = true
+    end
+
+    visible_settings = build_visible_settings()
+    popup_rect = {
+        x = math.min(x + bar_w - (theme.DOCK_POPUP_W or 270), sw - (theme.DOCK_POPUP_W or 270) - 6),
+        y = y + bar_h + 9,
+        w = theme.DOCK_POPUP_W or 270,
+        h = settings_height(visible_settings),
+    }
+    return dock_rect
+end
+
+function M.rect()
+    return dock_rect
+end
+
+-- Draws right-aligned compact chips. Returns the left edge occupied by the dock.
+function M.draw(x, y, w, h)
+    local gap = theme.DOCK_GAP or 6
+    local chip_h = theme.DOCK_CHIP_H or math.max(22, h - 8)
+    local icon_w = chip_h
+    local settings_w = chip_h
+    local widths = {}
+    local total = settings_w
+
+    for i, panel in ipairs(PANELS) do
+        local label_w = text_width(panel.label, theme.FONT_CAPTION)
+        widths[i] = icon_w + label_w + (theme.DOCK_PAD_X or 10)
+        total = total + widths[i] + gap
+    end
+
+    local cursor_x = x + w - total
+    local chip_y = y + math.floor((h - chip_h) * 0.5)
+    local dock_left = cursor_x
+
+    for i, panel in ipairs(PANELS) do
+        local chip_w = widths[i]
+        local active = state.get(panel.id, false) == true
+        local hot = input.hover(cursor_x, chip_y, chip_w, chip_h)
+        local t = anim.transition("hud-dock:" .. panel.id, active or hot, anim.motion_rate(18))
+        local bg = active
+            and theme.alpha(theme.NAV_ACTIVE or theme.SIDEBAR_ACTIVE, 0.70 + t * 0.18)
+            or theme.alpha(theme.NAV_IDLE or theme.BUTTON, 0.44 + t * 0.28)
+        widgets.rect(cursor_x, chip_y, chip_w, chip_h, bg, true, theme.CORNER_SMALL)
+        widgets.rect(cursor_x, chip_y, chip_w, chip_h,
+            active and theme.alpha(theme.ACCENT, 0.62) or theme.BORDER_SOFT, false, theme.CORNER_SMALL)
+
+        local icon_col = active and theme.TEXT_ACTIVE
+            or anim.mix(theme.TEXT_DIM, theme.TEXT_ACTIVE, t)
+        icons.draw(panel.icon, cursor_x + icon_w * 0.5, chip_y + chip_h * 0.5, icon_col, 0.76)
+        widgets.text(cursor_x + icon_w - 1, chip_y + math.floor((chip_h - theme.FONT_CAPTION) * 0.5) - 1,
+            panel.label, icon_col, theme.FONT_CAPTION)
+
+        if input.clicked(cursor_x, chip_y, chip_w, chip_h) and not widgets.block_under then
+            state.set(panel.id, not active)
+            widgets.interacted = true
+        end
+        cursor_x = cursor_x + chip_w + gap
+    end
+
+    local hot = input.hover(cursor_x, chip_y, settings_w, chip_h)
+    local t = anim.transition("hud-dock:settings", open_settings or hot, anim.motion_rate(18))
+    widgets.rect(cursor_x, chip_y, settings_w, chip_h,
+        theme.alpha(theme.NAV_IDLE or theme.BUTTON, 0.48 + t * 0.30), true, theme.CORNER_SMALL)
+    widgets.rect(cursor_x, chip_y, settings_w, chip_h,
+        open_settings and theme.alpha(theme.ACCENT, 0.72) or theme.BORDER_SOFT, false, theme.CORNER_SMALL)
+    icons.draw("settings", cursor_x + settings_w * 0.5, chip_y + chip_h * 0.5,
+        anim.mix(theme.TEXT_DIM, theme.TEXT_ACTIVE, t), 0.76)
+    if input.clicked(cursor_x, chip_y, settings_w, chip_h) and not widgets.block_under then
+        open_settings = not open_settings
+        widgets.open_combo = nil
+        widgets.open_multi = nil
+        widgets.open_color = nil
+        widgets.open_bind_mode = nil
+        widgets.interacted = true
+    end
+
+    popup_rect = {
+        x = x + w - (theme.DOCK_POPUP_W or 270),
+        y = y + h + 7,
+        w = theme.DOCK_POPUP_W or 270,
+        h = theme.DOCK_POPUP_H or 250,
+    }
+    return dock_left
+end
+
+function M.draw_overlay()
+    if not open_settings or not popup_rect then return end
+    local r = popup_rect
+    -- begin_frame blocks controls underneath this popup. Temporarily release
+    -- that guard while drawing the popup's own controls.
+    local underlay_blocked = widgets.block_under
+    widgets.block_under = false
+    widgets.rect(r.x, r.y, r.w, r.h, theme.OVERLAY, true, theme.CORNER)
+    widgets.rect(r.x, r.y, r.w, r.h, theme.BORDER_SOFT, false, theme.CORNER)
+    widgets.text(r.x + 12, r.y + 10, "HUD SETTINGS", theme.TEXT_ACTIVE, theme.FONT_TITLE)
+    widgets.text(r.x + r.w - 22, r.y + 9, "x", theme.TEXT_DIM, theme.FONT_TITLE)
+
+    if input.clicked(r.x + r.w - 30, r.y + 3, 28, 25) then
+        open_settings = false
+        widgets.interacted = true
+        widgets.block_under = underlay_blocked
+        return
+    end
+
+    local iy = r.y + 38
+    local ix = r.x + 10
+    local iw = r.w - 20
+    for _, item in ipairs(visible_settings) do
+        local used = widgets.draw_item(item, ix, iy, iw)
+        iy = iy + math.max(used or 0, widgets.estimate_height(item)) + theme.ITEM_GAP
+    end
+
+    if input.lmb_click and not settings_opened_this_frame
+        and not input.hover(r.x, r.y, r.w, r.h)
+        and not (dock_rect and input.hover(dock_rect.x, dock_rect.y, dock_rect.w, dock_rect.h))
+    then
+        open_settings = false
+    end
+    widgets.block_under = underlay_blocked
+end
+
+return M
+
+end)()
+
 -- â”€â”€ ui/custom_menu.lua â”€â”€
 April._mods["ui.custom_menu"] = (function()
 --[[
@@ -26383,6 +26830,7 @@ local anim = April.require("ui.gs_anim")
 local icons = April.require("ui.gs_icons")
 local catalog = April.require("ui.catalog")
 local state = April.require("ui.gs_state")
+local hud_dock = April.require("ui.hud_dock")
 
 local M = {}
 
@@ -26401,6 +26849,7 @@ local win_x, win_y = 80, 80
 local scroll = { left = 0, right = 0 }
 local scroll_visual = { left = 0, right = 0 }
 local collapsed_groups = {}
+local last_menu_rect = nil
 
 local SCROLL_EDGE = 36
 local SCROLL_SPEED = 5
@@ -26416,6 +26865,30 @@ local function screen_size()
         return utility.get_screen_size()
     end
     return 1920, 1080
+end
+
+local function text_width(text, size)
+    local fn = draw and (draw.get_text_size or draw.GetTextSize)
+    if fn then
+        local ok, width = pcall(fn, text, size)
+        if ok and type(width) == "number" then return width end
+    end
+    return #tostring(text or "") * math.max(5, (size or 12) * 0.55)
+end
+
+local function draw_brand(x, y)
+    local wordmark = "April.lua"
+    local size = theme.FONT_BRAND or 15
+    local cursor_x = x
+    local phase = anim.now() * 3.4
+    local accent = anim.title_color()
+    for i = 1, #wordmark do
+        local char = wordmark:sub(i, i)
+        local wave = math.sin(phase + (i - 1) * 0.72)
+        local col = anim.mix(accent, theme.TEXT_ACTIVE, 0.10 + (wave + 1) * 0.10)
+        widgets.text(cursor_x, y + wave * 1.5, char, col, size)
+        cursor_x = cursor_x + text_width(char, size)
+    end
 end
 
 local function clamp_window()
@@ -26523,39 +26996,42 @@ local function group_visible(group)
     return false
 end
 
-local function draw_sidebar(x, y, h)
-    widgets.rect(x, y, theme.SIDEBAR_W, h, theme.SIDEBAR, true)
-    widgets.rect(x + 1, y + 1, theme.SIDEBAR_W - 2, 1, theme.GLASS_HIGHLIGHT, true)
-    widgets.rect(x + theme.SIDEBAR_W - 1, y, 1, h, theme.BORDER_SOFT, true)
-    widgets.rect(x + theme.SIDEBAR_W - 2, y + 8, 1, h - 16, { 0, 0, 0, 0.26 }, true)
-
+local function draw_top_navbar(x, y, w, h)
+    widgets.rect(x, y, w, h, theme.NAV_BG or theme.SIDEBAR, true, 0)
+    widgets.rect(x, y + h - 1, w, 1, theme.BORDER_SOFT, true)
     local tabs = catalog.TABS
-    local count = #tabs
-    local total_h = count * theme.TAB_H
-    local start_y = y + math.max(0, (h - total_h) * 0.5)
+    local gap = theme.NAV_GAP or 5
+    local pad = theme.NAV_PAD_X or 10
+    local available = w - pad * 2 - gap * (#tabs - 1)
+    local tab_w = math.floor(available / #tabs)
+    local cursor_x = x + pad
+    local active_x, active_w = cursor_x + 8, tab_w - 16
 
     for i, tab in ipairs(tabs) do
-        local ty = start_y + (i - 1) * theme.TAB_H
         local active = i == tab_index
-        local hot = gin.hover(x + 4, ty + 2, theme.SIDEBAR_W - 9, theme.TAB_H - 8)
-        local emphasis = anim.transition("tab:" .. tab.id, active or hot, 14)
+        local hot = gin.hover(cursor_x, y + 5, tab_w, h - 10)
+        local emphasis = anim.transition("tab:" .. tab.id, active or hot, anim.motion_rate(16))
+        local tab_y = y + 5
+        local tab_h = h - 10
         if active then
-            anim.draw_tab_indicator(x + 1, ty + 8, 2, theme.TAB_H - 16)
-            widgets.rect(x + 8, ty + 5, theme.SIDEBAR_W - 16, theme.TAB_H - 10,
-                theme.alpha(theme.SIDEBAR_ACTIVE, 0.42 + emphasis * 0.30), true, theme.CORNER)
+            active_x, active_w = cursor_x + 8, tab_w - 16
+            widgets.rect(cursor_x, tab_y, tab_w, tab_h,
+                theme.alpha(theme.NAV_ACTIVE or theme.SIDEBAR_ACTIVE, 0.48 + emphasis * 0.28),
+                true, theme.CORNER_SMALL)
         elseif emphasis > 0.01 then
-            -- Hover is intentionally limited to a small icon halo; active tabs
-            -- use only the icon and left indicator, not a filled selection tile.
-            widgets.rect(x + theme.SIDEBAR_W * 0.5 - 14, ty + theme.TAB_H * 0.5 - 14, 28, 28,
-                theme.alpha(theme.HOVER, emphasis * 0.45), true, theme.CORNER)
+            widgets.rect(cursor_x, tab_y, tab_w, tab_h,
+                theme.alpha(theme.HOVER, emphasis * 0.55), true, theme.CORNER_SMALL)
         end
 
         local col = active and anim.tab_icon_color() or anim.mix(theme.TEXT_DIM, theme.TEXT, emphasis * 0.45)
-        local cx = x + theme.SIDEBAR_W * 0.5
-        local cy = ty + theme.TAB_H * 0.5
-        icons.draw(tab.icon or tab.id, cx, cy, col)
+        local label = tab.label or tab.title or tab.id
+        local icon_x = cursor_x + 16
+        local cy = y + h * 0.5
+        icons.draw(tab.icon or tab.id, icon_x, cy, col, 0.72)
+        widgets.text(cursor_x + 29, cy - math.floor(theme.FONT_CAPTION * 0.5) - 1,
+            label, col, theme.FONT_CAPTION)
 
-        if gin.clicked(x, ty, theme.SIDEBAR_W, theme.TAB_H) then
+        if gin.clicked(cursor_x, tab_y, tab_w, tab_h) and not widgets.block_under then
             tab_index = i
             scroll.left = 0
             scroll.right = 0
@@ -26565,6 +27041,20 @@ local function draw_sidebar(x, y, h)
             widgets.open_combo = nil
             widgets.open_multi = nil
         end
+        cursor_x = cursor_x + tab_w + gap
+    end
+
+    if anim.navbar_indicator then
+        -- Smooth only the tab-relative position. Smoothing absolute screen
+        -- coordinates makes the underline trail behind a dragged window.
+        local local_x = active_x - x
+        local_x, active_w = anim.navbar_indicator("primary", local_x, active_w, 20)
+        active_x = x + local_x
+    end
+    if anim.draw_nav_indicator then
+        anim.draw_nav_indicator(active_x, y + h - 3, active_w, 2)
+    else
+        anim.draw_section_top(active_x, y + h - 3, active_w)
     end
 end
 
@@ -26599,9 +27089,6 @@ local function handle_column_scroll(x, y, w, h, scroll_key, content_h)
     if max_scroll <= 0 then return end
 
     local hot = gin.hover(x, y, w + 14, h)
-    if not hot and scroll_key == "left" then
-        hot = gin.hover(gin.ui_x, y, theme.SIDEBAR_W + 8, h)
-    end
     if not hot then return end
 
     -- Prefer real wheel when any probe delivers notches this frame.
@@ -26638,12 +27125,18 @@ end
 local function draw_group_title(x, box_top, w, title, collapsed, hot)
     local hover = anim.transition("group-header:" .. tostring(title), hot, anim.motion_rate(16))
     if hover > 0.01 then
-        widgets.rect(x + 3, box_top + 3, w - 6, theme.GROUP_HEADER_H - 6,
-            theme.alpha(theme.HOVER, hover * 0.55), true, 0)
+        widgets.rect(x + 5, box_top + 4, w - 10, theme.GROUP_HEADER_H - 8,
+            theme.alpha(theme.HOVER, hover * 0.45), true, theme.CORNER_SMALL)
     end
-    widgets.text(x + 12, box_top + 7, title, theme.TEXT_ACTIVE, theme.FONT_TITLE)
-    widgets.text(x + w - 18, box_top + 7, collapsed and "+" or "-",
-        hot and theme.TEXT_ACTIVE or theme.TEXT_DIM, theme.FONT_TITLE)
+    widgets.text(x + 14, box_top + 8, title, theme.TEXT_ACTIVE, theme.FONT_TITLE)
+    local cx = x + w - 16
+    local cy = box_top + theme.GROUP_HEADER_H * 0.5
+    local line = draw and (draw.line or draw.Line)
+    if line then
+        local col = hot and theme.TEXT_ACTIVE or theme.TEXT_DIM
+        line(cx - 3, cy, cx + 3, cy, col, 1.2)
+        if collapsed then line(cx, cy - 3, cx, cy + 3, col, 1.2) end
+    end
 end
 
 local function draw_group_column(groups, x, y, w, h, scroll_key)
@@ -26702,15 +27195,11 @@ local function draw_group_column(groups, x, y, w, h, scroll_key)
             local vis_b = math.min(box_bot, y + h)
             local vis_h = vis_b - vis_y
             if vis_h > 1 then
-                -- Vector already shadows primitives. Extra offset panels caused the
-                -- stacked transparent borders visible on the right/bottom edges.
-                widgets.rect(x, vis_y, w, vis_h, theme.PANEL, true, 0)
-                widgets.rect(x, vis_y, w, vis_h, theme.BORDER_SOFT, false, 0)
-                widgets.rect(x + 1, vis_y + 1, w - 2, 1, theme.GLASS_HIGHLIGHT, true)
+                widgets.rect(x, vis_y, w, vis_h, theme.PANEL, true, theme.CORNER)
+                widgets.rect(x, vis_y, w, vis_h, theme.BORDER_SOFT, false, theme.CORNER)
                 if box_top >= y - 2 and box_top < y + h then
                     widgets.rect(x + 1, box_top + 1, w - 2, theme.GROUP_HEADER_H - 2,
-                        theme.PANEL_ALT, true, 0)
-                    anim.draw_section_top(x + 1, box_top, w - 2)
+                        theme.alpha(theme.PANEL_ALT, 0.42), true, theme.CORNER)
                     local header_hot = gin.hover(x, box_top, w, theme.GROUP_HEADER_H)
                     draw_group_title(x, box_top, w, group.title, entry.collapsed, header_hot)
                     if gin.clicked(x, box_top, w, theme.GROUP_HEADER_H)
@@ -26814,6 +27303,7 @@ function M.init()
     state.define_color("april_ui_col_sidebar", theme.ACCENT)
     state.define_color("april_ui_col_checkbox", theme.ACCENT)
     state.define_color("april_ui_col_overlay", theme.ACCENT)
+    hud_dock.init()
     if state.get_key("april_ui_menu_key") == 0 then
         state.set_key("april_ui_menu_key", TOGGLE_VK_DEFAULT)
     end
@@ -26832,12 +27322,19 @@ function M.is_open()
     return open
 end
 
+function M.contains_point(px, py)
+    if not open or not last_menu_rect then return false end
+    local r = last_menu_rect
+    return px >= r.x and py >= r.y and px <= r.x + r.w and py <= r.y + r.h
+end
+
 function M.draw()
     if not draw then return end
 
     gin.begin_frame()
     anim.sync_theme()
     widgets.begin_popups()
+    hud_dock.begin_frame()
 
     if gin.key_pressed(menu_toggle_vk()) and not widgets.listening_key
         and not widgets.active_input and not widgets.active_slider_input then
@@ -26871,34 +27368,36 @@ function M.draw()
     local x = win_x
     local y = win_y + math.floor((1 - open_progress) * 10 * (theme.SCALE or 1))
     local w, h = theme.WINDOW_W, theme.WINDOW_H
+    last_menu_rect = { x = x, y = y, w = w, h = h }
     gin.set_ui_rect(x, y, w, h)
 
-    -- Faux glass: backdrop dim + layered translucent depth (Vector has no blur API).
+    -- Optional backdrop dim; the menu itself stays deliberately flat.
     local sw, sh = screen_size()
     local backdrop = math.max(0, math.min(40, tonumber(state.get("april_ui_bg_dim", 0)) or 0))
     if backdrop > 0 then
         widgets.rect(0, 0, sw, sh, { 0, 0, 0, backdrop * 0.008 * open_progress }, true)
     end
 
-    -- Frame
+    -- Static HUD launcher, independent of the menu window.
+    hud_dock.draw_floating(x + w * 0.5, math.max(8, y - 58 * (theme.SCALE or 1)), sw, sh)
+
+    -- Flat frame: no extra highlights, accent strips, or offset shadows.
     local fade = anim.menu_fade()
     local panel_bg = anim.panel_bg()
-    -- A single glass surface avoids doubled translucent borders. Vector adds its
-    -- own primitive shadow pass, so manual full-window shadows are unnecessary.
-    widgets.rect(x, y, w, h, theme.alpha(panel_bg, (panel_bg[4] or 1) * fade), true, 0)
-    widgets.rect(x, y, w, h, theme.BORDER, false, 0)
-    widgets.rect(x + 1, y + 1, w - 2, 1, theme.GLASS_HIGHLIGHT, true)
-    widgets.rect(x + 1, y + 1, w - 2, 1, theme.BORDER_HOT, true)
-    anim.draw_title_bar(x + 1, y + 1, w - 2, 2)
+    local glass_alpha = math.min(panel_bg[4] or 1, (theme.PANEL_ALPHA or 0.72) + 0.04)
+    widgets.rect(x, y, w, h, theme.alpha(panel_bg, glass_alpha * fade), true, theme.CORNER)
+    widgets.rect(x, y, w, h, theme.BORDER_SOFT, false, theme.CORNER)
 
-    local title_h = math.max(28, math.floor(28 * (theme.SCALE or 1)))
+    local title_h = theme.TITLEBAR_H or math.max(34, math.floor(34 * (theme.SCALE or 1)))
     widgets.rect(x + 1, y + 3, w - 2, title_h, theme.BG_INNER, true, 0)
     widgets.rect(x + 1, y + title_h + 3, w - 2, 1, theme.BORDER_SOFT, true)
     local tab = catalog.TABS[tab_index]
-    widgets.text(x + 12, y + 10, "APRIL", theme.TEXT_ACTIVE, theme.FONT_TITLE)
-    widgets.text(x + 55, y + 10, "/  " .. (tab and tab.title or ""), theme.TEXT_TITLE, theme.FONT_TITLE)
+    draw_brand(x + 14, y + 9)
+    local version_text = "v" .. tostring(April.version or "")
+    widgets.text(x + w - 14 - text_width(version_text, theme.FONT_CAPTION), y + 10,
+        version_text, theme.TEXT_DIM, theme.FONT_CAPTION)
 
-    if gin.lmb_click and gin.hover(x, y, w - theme.SIDEBAR_W, title_h + 5)
+    if gin.lmb_click and gin.hover(x, y, w, title_h + 5)
         and not widgets.active_slider and not widgets.active_slider_input and not widgets.listening_key
         and not widgets.active_input
         and not widgets.block_under
@@ -26920,13 +27419,14 @@ function M.draw()
         end
     end
 
-    local body_y = y + title_h + 6
-    local body_h = h - title_h - 10
+    local nav_h = theme.NAVBAR_H or math.max(42, math.floor(42 * (theme.SCALE or 1)))
+    local nav_y = y + title_h + 4
+    draw_top_navbar(x + 1, nav_y, w - 2, nav_h)
 
-    draw_sidebar(x + 1, body_y, body_h)
-
-    local content_x = x + theme.SIDEBAR_W + 12
-    local content_w = w - theme.SIDEBAR_W - 30
+    local body_y = nav_y + nav_h + 7
+    local body_h = h - title_h - nav_h - 15
+    local content_x = x + 12
+    local content_w = w - 24
     local col_w = math.floor((content_w - 16) * 0.5)
     local groups = catalog.groups_for(tab and tab.id or "aim")
     local left_groups, right_groups = split_groups(groups, tab and tab.id or "aim")
@@ -26937,6 +27437,7 @@ function M.draw()
     draw_group_column(right_groups, content_x + col_w + 12 + tab_shift, body_y + 2, col_w, body_h - 4, "right")
 
     widgets.end_tooltip_frame()
+    hud_dock.draw_overlay()
 
     -- Floating popups above all sections
     widgets.draw_color_overlay()

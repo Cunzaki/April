@@ -92,6 +92,34 @@ function M.smooth(id, target, rate)
     return entry.value
 end
 
+-- Smooth the position and width of a shared horizontal navbar underline.
+-- Keeping both values under one logical id lets callers move a single
+-- indicator between differently sized icon-and-label tabs.
+function M.navbar_indicator(id, target_x, target_w, rate)
+    local key = tostring(id or "primary")
+    local speed = M.motion_rate(rate or 18)
+    local x = M.smooth("navbar:x:" .. key, target_x, speed)
+    local w = M.smooth("navbar:w:" .. key, target_w, speed)
+    return x, w
+end
+
+-- Return independent active and hover progress values for a HUD dock item.
+-- Active state is deliberately a little firmer than transient hover feedback.
+function M.dock_transition(id, active, hovered)
+    local key = tostring(id)
+    local active_t = M.transition("dock:active:" .. key, active, M.motion_rate(20))
+    local hover_t = M.transition("dock:hover:" .. key, hovered, M.motion_rate(15))
+    return active_t, hover_t
+end
+
+function M.dock_color(id, active, hovered)
+    local active_t, hover_t = M.dock_transition(id, active, hovered)
+    local col = M.mix(theme.DOCK_BG or theme.BUTTON, theme.DOCK_HOVER or theme.BUTTON_HOVER,
+        M.ease_out_cubic(hover_t))
+    col = M.mix(col, theme.DOCK_ACTIVE or theme.SIDEBAR_ACTIVE, M.ease_out_cubic(active_t))
+    return col, active_t, hover_t
+end
+
 function M.mix(a, b, t)
     return theme.lerp_color(a, b, clamp(t or 0, 0, 1))
 end
@@ -361,12 +389,35 @@ function M.draw_tab_indicator(x, y, w, h)
     M.draw_bar_v(x, y, w, h, M.phase() * 0.07, M.STYLE_SIDEBAR, M.COL_SIDEBAR, M.TARGET_SIDEBAR)
 end
 
+-- Horizontal counterpart to draw_tab_indicator for the primary top navbar.
+function M.draw_navbar_indicator(x, y, w, h)
+    if not M.anim_target_enabled(M.TARGET_SIDEBAR) then
+        M.draw_flat(x, y, w, h, M.STYLE_SIDEBAR, M.COL_SIDEBAR, M.TARGET_SIDEBAR)
+        return
+    end
+    M.draw_bar_h(x, y, w, h, M.phase() * 0.07, M.STYLE_SIDEBAR, M.COL_SIDEBAR, M.TARGET_SIDEBAR)
+end
+
+-- Short spelling retained for shell implementations that call this a nav.
+M.draw_nav_indicator = M.draw_navbar_indicator
+
 function M.tab_icon_color()
     local base = M.element_color(M.TARGET_SIDEBAR, M.COL_SIDEBAR)
     if not M.anim_target_enabled(M.TARGET_SIDEBAR) then
         return base
     end
     return M.accent_at_mode(M.resolve_mode(M.STYLE_SIDEBAR), base, M.phase() * 0.03,
+        (base[4] or 1) * (theme.GLOBAL_ALPHA or 1))
+end
+
+-- Animated brand color using the title target's configured mode and color.
+-- This keeps the wordmark alive without adding decorative bars or geometry.
+function M.title_color()
+    local base = M.element_color(M.TARGET_TITLE, M.COL_TITLE)
+    if not M.anim_target_enabled(M.TARGET_TITLE) then
+        return base
+    end
+    return M.accent_at_mode(M.resolve_mode(M.STYLE_TITLE), base, M.phase() * 0.08,
         (base[4] or 1) * (theme.GLOBAL_ALPHA or 1))
 end
 

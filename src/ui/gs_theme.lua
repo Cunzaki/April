@@ -85,19 +85,32 @@ function M.sync()
     M.PRESET_ACCENT = rgb(p.accent, 1)
 
     M.BG = rgb(p.bg, window_alpha)
-    M.BG_INNER = mix_rgb(p.bg, p.panel, 0.28, math.min(1, window_alpha + 0.04))
+    M.BG_INNER = mix_rgb(p.bg, p.panel, 0.28, math.min(1, panel_alpha + 0.08))
     M.PANEL = rgb(p.panel, panel_alpha)
     M.PANEL_ALT = mix_rgb(p.panel, p.raised, 0.35, math.min(1, panel_alpha + 0.06))
     M.PANEL_RAISED = rgb(p.raised, math.min(1, panel_alpha + 0.12))
     M.OVERLAY = mix_rgb(p.panel, p.raised, 0.50, math.min(1, panel_alpha + 0.17))
-    M.SHADOW = { 0, 0, 0, 0.32 * window_alpha }
-    M.SHADOW_DEEP = { 0, 0, 0, 0.20 * window_alpha }
-    M.GLASS_HIGHLIGHT = { 1, 1, 1, 0.045 * border_alpha }
-    M.BORDER = { 0.34, 0.35, 0.42, 0.60 * border_alpha }
-    M.BORDER_SOFT = { 0.28, 0.29, 0.36, 0.40 * border_alpha }
+    -- Flat UI: Vector already adds primitive shadows, so manual depth is disabled.
+    M.SHADOW = { 0, 0, 0, 0 }
+    M.SHADOW_DEEP = { 0, 0, 0, 0 }
+    M.GLASS_HIGHLIGHT = { 1, 1, 1, 0 }
+    M.BORDER = { 0.34, 0.35, 0.42, 0.36 * border_alpha }
+    M.BORDER_SOFT = { 0.28, 0.29, 0.36, 0.24 * border_alpha }
     M.BORDER_HOT = mix_rgb(p.raised, p.accent, 0.55, 0.72 * border_alpha)
     M.SIDEBAR = mix_rgb(p.bg, p.panel, 0.18, math.min(1, window_alpha + 0.02))
     M.SIDEBAR_ACTIVE = mix_rgb(p.panel, p.accent, 0.20, math.min(1, panel_alpha + 0.08))
+    -- Two-level top shell: primary section navigation plus compact HUD controls.
+    M.HEADER_BG = mix_rgb(p.bg, p.panel, 0.12, math.min(1, window_alpha + 0.03))
+    M.NAV_BG = mix_rgb(p.bg, p.panel, 0.26, math.min(1, panel_alpha + 0.02))
+    M.NAV_IDLE = mix_rgb(p.bg, p.panel, 0.50, math.min(1, panel_alpha + 0.06))
+    M.NAV_HOVER = mix_rgb(p.panel, p.raised, 0.48, math.min(1, panel_alpha + 0.08))
+    M.NAV_ACTIVE = mix_rgb(p.panel, p.accent, 0.16, math.min(1, panel_alpha + 0.10))
+    M.NAV_INDICATOR = rgb(p.accent, 1)
+    M.DOCK_BG = mix_rgb(p.bg, p.panel, 0.44, math.min(1, panel_alpha + 0.08))
+    M.DOCK_HOVER = mix_rgb(p.panel, p.raised, 0.66, math.min(1, panel_alpha + 0.12))
+    M.DOCK_ACTIVE = mix_rgb(p.panel, p.accent, 0.22, math.min(1, panel_alpha + 0.14))
+    M.DOCK_BORDER = mix_rgb(p.raised, p.accent, 0.18, 0.56 * border_alpha)
+    M.DOCK_BADGE = rgb(p.accent, 1)
 
     M.TEXT = { 0.78, 0.80, 0.87, 1 }
     M.TEXT_DIM = { 0.47, 0.49, 0.57, 1 }
@@ -117,9 +130,34 @@ function M.sync()
     M.FONT_SMALL = scaled(12, scale)
     M.FONT_TITLE = scaled(12, scale)
     M.FONT_CAPTION = scaled(11, scale)
+    M.FONT_BRAND = scaled(15, scale)
 
     M.WINDOW_W = scaled(820, scale)
     M.WINDOW_H = scaled(560, scale)
+    M.TITLEBAR_H = scaled(30 * density_mul, scale)
+    M.NAV_H = scaled(42 * density_mul, scale)
+    M.NAVBAR_H = M.NAV_H
+    M.NAV_ITEM_H = scaled(34 * density_mul, scale)
+    M.NAV_ITEM_MIN_W = scaled(78, scale)
+    M.NAV_ITEM_GAP = scaled(4, scale)
+    M.NAV_GAP = M.NAV_ITEM_GAP
+    M.NAV_PAD_X = scaled(12, scale)
+    M.NAV_ICON_GAP = scaled(7, scale)
+    M.NAV_INDICATOR_H = scaled(2, scale)
+    M.DOCK_H = scaled(30 * density_mul, scale)
+    M.DOCK_ITEM_W = scaled(30, scale)
+    M.DOCK_ITEM_H = scaled(26 * density_mul, scale)
+    M.DOCK_ITEM_GAP = scaled(4, scale)
+    M.DOCK_PAD = scaled(4, scale)
+    M.DOCK_ICON_SIZE = scaled(16, scale)
+    M.DOCK_GAP = M.DOCK_ITEM_GAP
+    M.DOCK_CHIP_H = M.DOCK_ITEM_H
+    M.DOCK_PAD_X = scaled(10, scale)
+    M.DOCK_POPUP_W = scaled(270, scale)
+    M.DOCK_POPUP_H = scaled(250 * density_mul, scale)
+    M.HEADER_H = M.TITLEBAR_H + M.NAV_H
+    M.CONTENT_PAD = scaled(12, scale)
+    -- Compatibility constants retained for the previous sidebar renderer.
     M.SIDEBAR_W = scaled(58, scale)
     M.TAB_H = scaled(48 * density_mul, scale)
     M.GROUP_PAD = scaled(12, scale)
@@ -132,6 +170,8 @@ function M.sync()
     M.CTRL_H = scaled(20 * density_mul, scale)
     M.CTRL_PAD = scaled(4, scale)
     M.CHECK_SIZE = scaled(13, scale)
+    M.SWITCH_W = scaled(29, scale)
+    M.SWITCH_H = scaled(15, scale)
     M.SLIDER_H = scaled(6, scale)
     M.STACKED_ROW_H = M.LABEL_H + M.LABEL_GAP + M.CTRL_H + M.CTRL_PAD
     M.SLIDER_ROW_H = M.LABEL_H + M.LABEL_GAP + M.SLIDER_H + scaled(10, scale) + M.CTRL_PAD
@@ -169,7 +209,9 @@ function M.apply_global_alpha(a)
         "SHADOW", "SHADOW_DEEP", "GLASS_HIGHLIGHT", "BORDER", "BORDER_SOFT",
         "BORDER_HOT", "SIDEBAR", "SIDEBAR_ACTIVE", "TEXT", "TEXT_DIM",
         "TEXT_ACTIVE", "TEXT_TITLE", "ACCENT", "ACCENT_DIM", "CHECK_OFF",
-        "SLIDER_BG", "BUTTON", "BUTTON_HOVER", "HOVER", "FOCUS",
+        "SLIDER_BG", "BUTTON", "BUTTON_HOVER", "HOVER", "FOCUS", "HEADER_BG",
+        "NAV_BG", "NAV_IDLE", "NAV_HOVER", "NAV_ACTIVE", "NAV_INDICATOR", "DOCK_BG",
+        "DOCK_HOVER", "DOCK_ACTIVE", "DOCK_BORDER", "DOCK_BADGE",
     }
     for _, key in ipairs(keys) do
         local c = M[key]

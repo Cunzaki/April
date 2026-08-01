@@ -13,9 +13,9 @@ local M = {}
 local P = "april_mod_checker_enabled"
 local X_ID = "april_mod_checker_x"
 local Y_ID = "april_mod_checker_y"
-local PANEL_W = 260
+local PANEL_W = 282
 local HEAD_OFFSET = 3.5
-local TITLE_H = 24
+local TITLE_H = 30
 local SCAN_MS = 2500
 local META_REFRESH_MS = 1000
 local LOOKUP_BUDGET = 2
@@ -362,8 +362,8 @@ local function draw_staff_panel(x, y, width, rows)
     if not draw or not draw.text then return end
 
     overlay_theme.sync()
-    local pad = 10
-    local row_h = 44
+    local pad = 12
+    local row_h = 38
     local count = math.max(#rows, 1)
     local height = TITLE_H + count * row_h + 6
 
@@ -373,14 +373,9 @@ local function draw_staff_panel(x, y, width, rows)
     end
     overlay_theme.draw_panel(x, y, width, height, title)
 
-    local div_y = y + TITLE_H
-    if draw.line then
-        draw.line(x + pad, div_y, x + width - pad, div_y, theme.alpha(theme.BORDER, 0.55), 1)
-    end
-
-    local ry = div_y + 6
+    local ry = y + TITLE_H + 5
     if #rows == 0 then
-        draw.text(x + pad + 12, ry, "No staff detected", theme.TEXT_MUTED, 11)
+        draw.text(x + pad, ry + 2, "No staff detected", theme.TEXT_MUTED, 11)
         return height
     end
 
@@ -390,24 +385,17 @@ local function draw_staff_panel(x, y, width, rows)
         local row = rows[i]
         local row_accent = row.accent or theme.role_accent(row.role)
 
-        if i > 1 and draw.line then
-            draw.line(x + pad, ry - 4, x + width - pad, ry - 4, theme.alpha(theme.BORDER, 0.22), 1)
-        end
-
-        if draw.circle_filled then
-            draw.circle_filled(x + pad + 3, ry + 7, 3, row_accent, 8)
-        end
-
         local name = row.name or "?"
         if #name > max_name then name = name:sub(1, math.max(1, max_name - 2)) .. ".." end
-        draw.text(x + pad + 12, ry, name, theme.TEXT, 13)
+        draw.text(x + pad, ry + 1, name, theme.TEXT, 12)
 
         local role = row.role or "Staff"
         if #role > max_name then role = role:sub(1, math.max(1, max_name - 2)) .. ".." end
-        draw.text(x + pad + 12, ry + 15, role, row_accent, 11)
+        local role_w = theme.text_w(role, 10)
+        draw.text(x + width - pad - role_w, ry + 2, role, row_accent, 10)
 
         if row.meta and row.meta ~= "" then
-            draw.text(x + pad + 12, ry + 28, row.meta, theme.TEXT_MUTED, 10)
+            draw.text(x + pad, ry + 18, row.meta, theme.TEXT_MUTED, 10)
         end
 
         ry = ry + row_h
@@ -428,7 +416,7 @@ function M.draw()
     end
 
     local sw, sh = draw_util.screen_size()
-    local row_h = 44
+    local row_h = 38
     local count = math.max(#panel_rows, 1)
     local height = TITLE_H + count * row_h + 6
 

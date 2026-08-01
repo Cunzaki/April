@@ -7,16 +7,19 @@ local state = {}
 
 local function mouse_pos()
     local mx, my = 0, 0
-    if utility and utility.get_mouse_pos then
-        mx, my = utility.get_mouse_pos()
-    elseif input and input.get_mouse_pos then
-        mx, my = input.get_mouse_pos()
+    local util_mouse = utility and (utility.get_mouse_pos or utility.GetMousePos)
+    local input_mouse = input and (input.get_mouse_pos or input.get_mouse_position or input.GetMousePosition)
+    if util_mouse then
+        mx, my = util_mouse()
+    elseif input_mouse then
+        mx, my = input_mouse()
     end
     return tonumber(mx) or 0, tonumber(my) or 0
 end
 
 local function lmb_down()
-    return input and input.is_key_down and input.is_key_down(0x01)
+    local fn = input and (input.is_key_down or input.IsKeyDown)
+    return fn and fn(0x01)
 end
 
 local function persist_num(id, value)
@@ -29,7 +32,15 @@ local function persist_num(id, value)
     end)
 end
 
-local function blocked()
+local function blocked(mx, my)
+    local ok_menu, custom_menu = pcall(function()
+        return April.require("ui.custom_menu")
+    end)
+    if ok_menu and custom_menu and custom_menu.contains_point
+        and custom_menu.contains_point(mx or 0, my or 0)
+    then
+        return true
+    end
     local ok, widgets = pcall(function()
         return April.require("ui.gs_widgets")
     end)
@@ -67,7 +78,7 @@ function M.update(id, x_id, y_id, title_w, title_h, sw, sh, default_x, default_y
     local over_title = mx >= x and my >= y
         and mx <= x + title_w and my <= y + title_h
 
-    if lmb and not st.was_lmb and over_title and not blocked() then
+    if lmb and not st.was_lmb and over_title and not blocked(mx, my) then
         st.dragging = true
         st.off_x = mx - x
         st.off_y = my - y

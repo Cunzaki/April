@@ -39,7 +39,7 @@ function M.register_menu()
     local root = menu_util.parent(P)
 
     menu_util.section(T, G.WORLD, "NPCs")
-    menu_util.register_keybind(T, G.WORLD, P, "NPC ESP", false, { colorpicker = { 1, 0.3, 0.3, 1 } })
+    menu_util.register_keybind(T, G.WORLD, P, "NPC ESP", false)
     menu.add_checkbox(T, G.WORLD, "april_npc_soldiers", "Soldiers", false, menu_util.parent(P, { colorpicker = { 1, 0.3, 0.3, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_bosses", "Bosses (Bruno / Boris / Brutus)", false, menu_util.parent(P, { colorpicker = { 1, 0.5, 0.1, 1 } }))
     menu.add_checkbox(T, G.WORLD, "april_npc_heli", "Helicopters (Attack Heli)", false, menu_util.parent(P, { colorpicker = { 0.85, 0.2, 0.25, 1 } }))

@@ -2,6 +2,7 @@ local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
 local cache = April.require("core.cache")
 local env = April.require("core.env")
+local ep = April.require("core.entity_props")
 local player_state = April.require("game.player_state")
 local menu_util = April.require("core.menu_util")
 local esp_scan = April.require("game.esp_scan")
@@ -14,6 +15,11 @@ local P = "april_map_enabled"
 local X_ID = "april_map_x"
 local Y_ID = "april_map_y"
 local TITLE_H = 24
+
+local function position_xyz(pos)
+    if not pos then return nil, nil, nil end
+    return pos.x or pos.X, pos.y or pos.Y, pos.z or pos.Z
+end
 
 local function get_camera_yaw()
     if camera and camera.get_angles then
@@ -52,10 +58,8 @@ local function get_view_origin()
 
     local lp = env.get_local_player()
     local px, py, pz = nil, nil, nil
-    if lp and lp.position then
-        px = lp.position.x
-        py = lp.position.y
-        pz = lp.position.z
+    if lp then
+        px, py, pz = position_xyz(ep.position(lp))
     end
 
     if not cx then cx, cy, cz = px, py, pz end
@@ -123,10 +127,8 @@ local function draw_radar_label(lx, ly, text, col, x, y, w, h, fs)
     if ly < y + 4 then return end
 
     if draw.rect_filled then
-        draw.rect_filled(lx - 3, ly - 2, tw + 6, th + 2, theme.PANEL_DEEP, 0)
-    end
-    if draw.rect then
-        draw.rect(lx - 3, ly - 2, tw + 6, th + 2, theme.BORDER, 0, 1)
+        draw.rect_filled(lx - 4, ly - 2, tw + 8, th + 2,
+            theme.alpha(theme.PANEL_DEEP, 0.70), 4)
     end
     draw_util.text(lx, ly, text, col, fs)
 end
@@ -135,7 +137,7 @@ local function draw_blip(mx, my, scale, col, clamped, shape)
     local alpha = clamped and 0.72 or 1
     local c = { col[1], col[2], col[3], (col[4] or 1) * alpha }
     local r = math.max(2, scale - (clamped and 1 or 0))
-    local edge = theme.alpha(theme.PANEL_DEEP, math.min(0.95, c[4]))
+    local edge = theme.alpha(theme.PANEL_DEEP, math.min(0.42, c[4] * 0.42))
     shape = shape or "circle"
 
     if shape == "square" and draw and draw.rect_filled then
@@ -180,59 +182,60 @@ local function draw_radar_frame(layout, bg, grid, zoom)
     local x, y, w, h = layout.x, layout.y, layout.w, layout.h
     local cx, cy = layout.cx, layout.cy
 
-    overlay_theme.draw_panel(x, y, w, h, "TACTICAL RADAR")
+    overlay_theme.draw_panel(x, y, w, h, "RADAR")
 
     if draw.rect_filled then
-        draw.rect_filled(x + 7, y + TITLE_H + 5, w - 14, h - TITLE_H - 12, bg, 0)
-    end
-    if draw.rect then
-        draw.rect(x + 7, y + TITLE_H + 5, w - 14, h - TITLE_H - 12, theme.BORDER, 0, 1)
+        draw.rect_filled(x + 7, y + TITLE_H + 3, w - 14, h - TITLE_H - 10,
+            theme.alpha(bg, 0.36), 7)
     end
 
     local zoom_text = string.format("x%.2f", zoom)
     local zoom_w = theme.text_w(zoom_text, 9)
-    draw_util.text(x + w - zoom_w - 8, y + 7, zoom_text, theme.TEXT_DIM, 9)
+    draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, theme.TEXT_DIM, 9)
 
     if draw and draw.circle then
-        draw.circle(cx, cy, layout.radius, theme.alpha(grid, 0.42), 24, 1)
-        draw.circle(cx, cy, layout.radius * 0.66, grid, 24, 1)
-        draw.circle(cx, cy, layout.radius * 0.33, grid, 24, 1)
+        local accent = overlay_theme.accent()
+        draw.circle(cx, cy, layout.radius, theme.alpha(accent, 0.24), 40, 1)
+        draw.circle(cx, cy, layout.radius * 0.66, theme.alpha(grid, 0.11), 32, 1)
+        draw.circle(cx, cy, layout.radius * 0.33, theme.alpha(grid, 0.08), 24, 1)
     end
     if draw and draw.line then
-        draw.line(cx - layout.radius, cy, cx + layout.radius, cy, theme.alpha(grid, 0.72), 1)
-        draw.line(cx, cy - layout.radius, cx, cy + layout.radius, theme.alpha(grid, 0.72), 1)
+        local axis = theme.alpha(grid, 0.10)
+        draw.line(cx - layout.radius, cy, cx - 10, cy, axis, 1)
+        draw.line(cx + 10, cy, cx + layout.radius, cy, axis, 1)
+        draw.line(cx, cy - layout.radius, cx, cy - 10, axis, 1)
+        draw.line(cx, cy + 10, cx, cy + layout.radius, axis, 1)
+
+        local tick = theme.alpha(overlay_theme.accent(), 0.30)
+        draw.line(cx - 3, cy - layout.radius, cx + 3, cy - layout.radius, tick, 1)
+        draw.line(cx + layout.radius, cy - 3, cx + layout.radius, cy + 3, tick, 1)
+        draw.line(cx - 3, cy + layout.radius, cx + 3, cy + layout.radius, tick, 1)
+        draw.line(cx - layout.radius, cy - 3, cx - layout.radius, cy + 3, tick, 1)
     end
 
-    local card = theme.alpha(overlay_theme.accent(), 0.92)
-    draw_util.text(cx - 3, cy - layout.radius + 5, "N", card, 9)
-    draw_util.text(cx + layout.radius - 10, cy - 5, "E", theme.TEXT_DIM, 9)
-    draw_util.text(cx - 3, cy + layout.radius - 14, "S", theme.TEXT_DIM, 9)
-    draw_util.text(cx - layout.radius + 5, cy - 5, "W", theme.TEXT_DIM, 9)
+    -- Camera-relative radar: the top marker means forward, avoiding misleading
+    -- fixed N/E/S/W labels while the map rotates with the view.
+    local forward = theme.alpha(overlay_theme.accent(), 0.78)
+    draw_util.text(cx - 3, cy - layout.radius + 5, "^", forward, 9)
 end
 
-local function draw_local_blip(layout, col, body_x, body_z, view_x, view_z, zoom, yaw)
+local function draw_local_blip(layout, col)
     local cx, cy = layout.cx, layout.cy
-    local mx, my = cx, cy
-    if body_x and body_z then
-        mx, my = world_to_map(body_x, body_z, view_x, view_z, cx, cy, zoom, yaw)
-        mx, my = clamp_to_disc(mx, my, cx, cy, layout.radius)
-    end
-
     local r = layout.scale + 2
     if draw and draw.poly_filled then
         draw.poly_filled({
-            { mx, my - r - 2 },
-            { mx + r, my + r },
-            { mx, my + math.max(1, r - 2) },
-            { mx - r, my + r },
+            { cx, cy - r - 2 },
+            { cx + r, cy + r },
+            { cx, cy + math.max(1, r - 2) },
+            { cx - r, cy + r },
         }, col)
     elseif draw and draw.line then
-        draw.line(mx, my - r, mx - r, my + r, col, 2)
-        draw.line(mx - r, my + r, mx + r, my + r, col, 2)
-        draw.line(mx + r, my + r, mx, my - r, col, 2)
+        draw.line(cx, cy - r, cx - r, cy + r, col, 2)
+        draw.line(cx - r, cy + r, cx + r, cy + r, col, 2)
+        draw.line(cx + r, cy + r, cx, cy - r, col, 2)
     end
     if draw and draw.circle then
-        draw.circle(mx, my, r + 2, theme.alpha(col, 0.32), 16, 1)
+        draw.circle(cx, cy, r + 3, theme.alpha(col, 0.28), 20, 1)
     end
 end
 
@@ -261,11 +264,11 @@ function M.register_menu()
 
     menu_util.gap(T, G.RADAR)
     menu.add_slider_int(T, G.RADAR, "april_map_zoom", "Radar Zoom Level", 0.05, 5.0, 1.0, "%.2f", root)
-    menu.add_slider_int(T, G.RADAR, "april_map_size", "Radar Size", 140, 420, 240, root)
+    menu.add_slider_int(T, G.RADAR, "april_map_size", "Radar Size", 140, 420, 250, root)
     menu.add_slider_int(T, G.RADAR, "april_map_icon_scale", "Radar Blip Size", 2, 6, 3, root)
     menu_util.button(T, G.RADAR, "april_map_reset_position", "Reset Radar Position", function()
         local sw = select(1, draw_util.screen_size())
-        local size = settings.num("april_map_size", 240)
+        local size = settings.num("april_map_size", 250)
         local rx, ry = sw - size - 16, 16
         if menu and menu.set then
             pcall(menu.set, X_ID, rx)
@@ -297,7 +300,7 @@ function M.draw()
 
     overlay_theme.sync()
     local sw, sh = draw_util.screen_size()
-    local size = settings.num("april_map_size", 240)
+    local size = settings.num("april_map_size", 250)
     local default_x, default_y = sw - size - 16, 16
     local x, y = panel_drag.update(
         "tactical_radar", X_ID, Y_ID, size, TITLE_H, sw, sh, default_x, default_y
@@ -320,7 +323,9 @@ function M.draw()
 
     local cam_x, _, cam_z, body_x, _, body_z = get_view_origin()
     local yaw = get_camera_yaw()
-    local view_x, view_z = cam_x, cam_z
+    -- Character-centered coordinates prevent third-person camera offset from
+    -- displacing the player and every surrounding blip.
+    local view_x, view_z = body_x or cam_x, body_z or cam_z
 
     draw_radar_frame(layout, bg, grid, zoom)
 
@@ -381,18 +386,19 @@ function M.draw()
         end
     end
 
-    if settings.bool("april_map_show_players", false) and entity and entity.get_players then
+    if settings.bool("april_map_show_players", false) then
         local col = settings.color("april_map_player_col", theme.RED)
-        for _, p in ipairs(entity.get_players()) do
-            if player_state.is_combat_target(p) and p.position then
-                local label = (p.display_name and p.display_name ~= "" and p.display_name) or p.name
-                draw_map_item(p.position.x, p.position.z, col, label, "circle", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
+        for _, p in ipairs(ep.get_players()) do
+            local px, _, pz = position_xyz(ep.position(p))
+            if player_state.is_combat_target(p) and px and pz then
+                local label = ep.display_name(p) or ep.name(p)
+                draw_map_item(px, pz, col, label, "circle", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
             end
         end
     end
 
     local local_col = overlay_theme.accent()
-    draw_local_blip(layout, local_col, body_x, body_z, view_x, view_z, zoom, yaw)
+    draw_local_blip(layout, local_col)
 end
 
 return M

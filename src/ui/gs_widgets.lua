@@ -62,8 +62,9 @@ local function clamp(v, a, b)
 end
 
 local function text_w(str, size)
-    if draw and draw.get_text_size then
-        local w = draw.get_text_size(str, size or theme.FONT)
+    local fn = draw and (draw.get_text_size or draw.GetTextSize)
+    if fn then
+        local w = fn(str, size or theme.FONT)
         if type(w) == "number" then return w end
     end
     return #(tostring(str or "")) * 7
@@ -404,9 +405,6 @@ function M.draw_color_overlay()
 
     M._color_hit = { x = px, y = py, w = pw, h = ph }
 
-    -- Soft shadow / backdrop
-    M.rect(px + 6, py + 8, pw, ph, theme.SHADOW_DEEP, true, theme.CORNER)
-    M.rect(px + 3, py + 4, pw, ph, theme.SHADOW, true, theme.CORNER)
     M.draw_color_picker(px, py, pw, ph, id, col)
 
     if input.hover(px, py, pw, ph) then
@@ -460,10 +458,8 @@ function M.draw_bind_mode_overlay()
 
     M._bind_mode_hit = { x = px, y = py, w = pw, h = ph }
 
-    M.rect(px + 4, py + 5, pw, ph, theme.SHADOW, true, theme.CORNER_SMALL)
     M.rect(px, py, pw, ph, theme.OVERLAY, true, theme.CORNER_SMALL)
-    M.rect(px, py, pw, ph, theme.BORDER_HOT, false, theme.CORNER_SMALL)
-    anim.draw_title_bar(px + 1, py, pw - 2, 2)
+    M.rect(px, py, pw, ph, theme.BORDER_SOFT, false, theme.CORNER_SMALL)
 
     M.text(px + 9, py + 6, "KEYBIND SETTINGS", theme.TEXT_TITLE, theme.FONT_CAPTION)
     M.rect(px + 8, py + header_h - 1, pw - 16, 1, theme.BORDER_SOFT, true)
@@ -553,16 +549,19 @@ function M.rect(x, y, w, h, col, filled, rounding)
         if y + h > cy2 then h = cy2 - y end
         if w <= 0 or h <= 0 then return end
     end
-    if filled then
-        draw.rect_filled(x, y, w, h, col, rounding or 0)
-    else
-        draw.rect(x, y, w, h, col, rounding or 0, 1)
+    local fill = draw.rect_filled or draw.RectFilled
+    local outline = draw.rect or draw.Rect
+    if filled and fill then
+        fill(x, y, w, h, col, rounding or 0)
+    elseif not filled and outline then
+        outline(x, y, w, h, col, rounding or 0, 1)
     end
 end
 
 function M.text(x, y, str, col, size)
-    if draw and draw.text then
-        draw.text(x, y, tostring(str), col, size or theme.FONT)
+    local fn = draw and (draw.text or draw.Text)
+    if fn then
+        fn(x, y, tostring(str), col, size or theme.FONT)
     end
 end
 
@@ -863,33 +862,33 @@ function M.checkbox(x, y, w, id, label, opts)
         M.rect(x, y + 1, w, h - 2, theme.alpha(theme.HOVER, hover_fill), true, theme.CORNER_SMALL)
     end
 
+    local switch_w = theme.SWITCH_W or 28
+    local switch_h = theme.SWITCH_H or 14
     local bx = x + 4
-    local by = y + (h - theme.CHECK_SIZE) * 0.5
+    local by = y + (h - switch_h) * 0.5
     local active_t = anim.transition("check-state:" .. tostring(id), active, anim.motion_rate(22))
-    M.rect(bx + 1, by + 2, theme.CHECK_SIZE, theme.CHECK_SIZE, theme.SHADOW, true, theme.CORNER_SMALL)
-    M.rect(bx, by, theme.CHECK_SIZE, theme.CHECK_SIZE, theme.CHECK_OFF, true, theme.CORNER_SMALL)
-    M.rect(bx, by, theme.CHECK_SIZE, theme.CHECK_SIZE,
-        active and theme.FOCUS or theme.BORDER_SOFT, false, theme.CORNER_SMALL)
-    if active_t > 0.01 then
-        local inset = 2 + (1 - active_t) * (theme.CHECK_SIZE * 0.35)
-        local inner = theme.CHECK_SIZE - inset * 2
-        if inner > 1 then
-            M.rect(bx + inset, by + inset, inner, inner, theme.alpha(anim.checkbox_fill(), active_t), true, theme.CORNER_SMALL)
-        end
-    end
+    local track = anim.mix(theme.CHECK_OFF, anim.checkbox_fill(), active_t * 0.72)
+    M.rect(bx, by, switch_w, switch_h, track, true, switch_h * 0.5)
+    M.rect(bx, by, switch_w, switch_h,
+        active and theme.alpha(theme.FOCUS, 0.88) or theme.BORDER_SOFT, false, switch_h * 0.5)
+    local knob = math.max(8, switch_h - 4)
+    local knob_x = bx + 2 + (switch_w - knob - 4) * active_t
+    M.rect(knob_x, by + 2, knob, knob,
+        anim.mix(theme.TEXT_DIM, theme.TEXT_ACTIVE, active_t), true, knob * 0.5)
 
-    local label_w = w - theme.CHECK_SIZE - 38
-    M.text(bx + theme.CHECK_SIZE + 8, y + 4, fit_text(label, label_w, theme.FONT),
+    local label_w = w - switch_w - 38
+    M.text(bx + switch_w + 8, y + 4, fit_text(label, label_w, theme.FONT),
         on and theme.TEXT_ACTIVE or theme.TEXT, theme.FONT)
 
-    local has_color = opts.color or state.colors[id]
+    local has_color = not opts.hide_color and (opts.color or state.colors[id])
     local swatch_clicked = false
     if has_color then
         local col = state.get_color(id, opts.color or { 1, 1, 1, 1 })
         local cx = x + w - 18
-        M.rect(cx, by, 12, 12, col, true, 2)
-        M.rect(cx, by, 12, 12, theme.BORDER, false, 2)
-        if ui_clicked(cx - 2, by - 2, 16, 16) then
+        local swatch_y = y + (h - 12) * 0.5
+        M.rect(cx, swatch_y, 12, 12, col, true, 4)
+        M.rect(cx, swatch_y, 12, 12, theme.BORDER, false, 4)
+        if ui_clicked(cx - 2, swatch_y - 2, 16, 16) then
             swatch_clicked = true
             mark_interacted()
             local hh = rgb_to_hsv(col[1] or 1, col[2] or 1, col[3] or 1)
@@ -968,8 +967,6 @@ function M.slider(x, y, w, id, label, minv, maxv, default, opts)
     local thumb_x = sx + sw * t
     local drag_t = anim.transition("slider-active:" .. tostring(id), M.active_slider == id, anim.motion_rate(24))
     local thumb_w = 6 + drag_t * 2
-    M.rect(thumb_x - thumb_w * 0.5 + 1, sy - 1, thumb_w, theme.SLIDER_H + 4,
-        theme.SHADOW, true, thumb_w * 0.5)
     M.rect(thumb_x - thumb_w * 0.5, sy - 2, thumb_w, theme.SLIDER_H + 4,
         anim.mix(anim.checkbox_fill(), theme.TEXT_ACTIVE, drag_t), true, thumb_w * 0.5)
 
@@ -1008,7 +1005,19 @@ function M.combo(x, y, w, id, label, options, default_idx)
     local cur = options[idx + 1] or options[1] or "-"
     M.text(bx + 6, by + math.floor((bh - 12) * 0.5),
         fit_text(cur, bw - 28, theme.FONT_SMALL), theme.TEXT_ACTIVE, theme.FONT_SMALL)
-    M.text(bx + bw - 13, by + math.floor((bh - 12) * 0.5), open and "^" or "v", open and theme.TEXT_ACTIVE or theme.TEXT_DIM, theme.FONT_SMALL)
+    local arrow_col = open and theme.TEXT_ACTIVE or theme.TEXT_DIM
+    local line = draw and (draw.line or draw.Line)
+    if line then
+        local ax = bx + bw - 12
+        local ay = by + bh * 0.5
+        if open then
+            line(ax - 3, ay + 2, ax, ay - 1, arrow_col, 1.3)
+            line(ax, ay - 1, ax + 3, ay + 2, arrow_col, 1.3)
+        else
+            line(ax - 3, ay - 1, ax, ay + 2, arrow_col, 1.3)
+            line(ax, ay + 2, ax + 3, ay - 1, arrow_col, 1.3)
+        end
+    end
 
     -- Header toggles open/closed (do not require clip hover - fixes "can't close")
     if ui_clicked(bx, by, bw, bh) then
@@ -1033,9 +1042,8 @@ function M.combo(x, y, w, id, label, options, default_idx)
         apply_list_edge_scroll(id, n, M.LIST_MAX_VISIBLE, bx, list_y, bw, list_h)
         off = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
 
-        M.rect(bx + 2, by + bh + 2, bw, list_h, theme.SHADOW, true, theme.CORNER_SMALL)
         M.rect(bx, by + bh, bw, list_h, theme.OVERLAY, true, theme.CORNER_SMALL)
-        M.rect(bx, by + bh, bw, list_h, theme.BORDER_HOT, false, theme.CORNER_SMALL)
+        M.rect(bx, by + bh, bw, list_h, theme.BORDER_SOFT, false, theme.CORNER_SMALL)
         for row = 0, vis - 1 do
             local i = off + row + 1
             local opt = options[i]
@@ -1133,9 +1141,8 @@ function M.multi(x, y, w, id, label, options, defaults, opts)
         apply_list_edge_scroll(id, n, M.LIST_MAX_VISIBLE, bx, list_y, bw, list_h)
         off = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
 
-        M.rect(bx + 2, by + bh + 2, bw, list_h, theme.SHADOW, true, theme.CORNER_SMALL)
         M.rect(bx, by + bh, bw, list_h, theme.OVERLAY, true, theme.CORNER_SMALL)
-        M.rect(bx, by + bh, bw, list_h, theme.BORDER_HOT, false, theme.CORNER_SMALL)
+        M.rect(bx, by + bh, bw, list_h, theme.BORDER_SOFT, false, theme.CORNER_SMALL)
         for row = 0, vis - 1 do
             local i = off + row + 1
             local opt = options[i]
@@ -1181,16 +1188,13 @@ function M.button(x, y, w, id, label)
     if not in_clip(y, h) then return h end
     local hovered = input.hover(x, y, w, h)
     local pressed = hovered and input.lmb
-    local press_t = anim.transition("button-press:" .. tostring(id), pressed, anim.motion_rate(28))
-    local oy = press_t * 1.5
-    M.rect(x + 2, y + 3, w, h, theme.SHADOW, true, theme.CORNER_SMALL)
-    M.rect(x, y + oy, w, h,
+    M.rect(x, y, w, h,
         anim.interactive_fill("button:" .. tostring(id), theme.BUTTON, hovered, pressed),
-        true, theme.CORNER_SMALL)
-    M.rect(x, y + oy, w, h, hovered and theme.BORDER_HOT or theme.BORDER_SOFT, false, theme.CORNER_SMALL)
+        true, theme.CORNER)
+    M.rect(x, y, w, h, hovered and theme.FOCUS or theme.BORDER_SOFT, false, theme.CORNER)
     local shown = fit_text(label, w - 16, theme.FONT_SMALL)
     local tw = text_w(shown, theme.FONT_SMALL)
-    M.text(x + (w - tw) * 0.5, y + 6 + oy, shown, theme.TEXT_ACTIVE, theme.FONT_SMALL)
+    M.text(x + (w - tw) * 0.5, y + 6, shown, theme.TEXT_ACTIVE, theme.FONT_SMALL)
     if interactive(x, y, w, h) and ui_clicked(x, y, w, h) then
         mark_interacted()
         state.fire_button(id)
@@ -1208,11 +1212,14 @@ end
 function M.separator(x, y, w)
     local h = 18
     if not in_clip(y, h) then return h end
-    M.rect(x + 5, y + 9, w - 10, 1, theme.BORDER_SOFT, true)
+    -- A single neutral hairline keeps groups readable without the previous
+    -- bright accent segment or a simulated fade.
+    M.rect(x + 8, y + 9, w - 16, 1, { 0.82, 0.84, 0.90, 0.07 }, true)
     return h
 end
 
-function M.keybind(x, y, w, id, label, default_on)
+function M.keybind(x, y, w, id, label, default_on, opts)
+    opts = opts or {}
     if id and not state.is_visible(id) then return 0 end
     state.define(id, default_on == true)
     local mode_id = id .. "_mode"
@@ -1226,7 +1233,10 @@ function M.keybind(x, y, w, id, label, default_on)
     -- checkbox portion (leave room for key chip; mode is RMB popup)
     local chip_w = 56
     local cw = w - chip_w - 6
-    local used = M.checkbox(x, y, cw, id, label, { default = default_on })
+    local used = M.checkbox(x, y, cw, id, label, {
+        default = default_on,
+        hide_color = opts.hide_color,
+    })
 
     -- key chip: LMB bind, RMB mode (Always / Hold / Toggle)
     local kx = x + w - chip_w
@@ -1510,7 +1520,7 @@ function M.draw_item(item, x, y, w)
     if t == "checkbox" then
         h = M.checkbox(x, y, w, item.id, item.label, item)
     elseif t == "keybind" then
-        h = M.keybind(x, y, w, item.id, item.label, item.default)
+        h = M.keybind(x, y, w, item.id, item.label, item.default, item)
     elseif t == "aim_key" then
         h = M.aim_key_row(x, y, w, item.id, item.mode_id, item.label)
     elseif t == "hotkey" then
