@@ -185,23 +185,6 @@ function M.complete_dynamic_scan(state)
     rebuild_cache()
 end
 
-function M.scan_static()
-    local state = M.begin_static_scan()
-    while not M.step_static_scan(state, 9999) do end
-    M.complete_static_scan(state)
-end
-
-function M.scan_dynamic()
-    local state = M.begin_dynamic_scan()
-    while not M.step_dynamic_scan(state, 9999) do end
-    M.complete_dynamic_scan(state)
-end
-
-function M.scan()
-    M.scan_static()
-    M.scan_dynamic()
-end
-
 function M.update(_dt)
     local world_on = settings.enabled(P)
 

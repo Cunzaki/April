@@ -151,13 +151,11 @@ local function world_dist_to_player(p, from)
 end
 
 local function find_target(fov_px)
-    if not entity or not entity.get_players then return nil, nil end
-
     local cx, cy = screen_center()
     local cam = camera and camera.get_position and camera.get_position()
     local best, best_dist = nil, fov_px
 
-    for _, p in ipairs(entity.get_players()) do
+    for _, p in ipairs(April.require("core.cache").players) do
         if not player_state.is_combat_target(p) then goto continue end
         if cam and world_dist_to_player(p, cam) > MAX_DIST then goto continue end
 

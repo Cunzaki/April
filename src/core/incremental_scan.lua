@@ -63,28 +63,28 @@ function M.tick()
         end
 
         if job.active and job.state then
-            while budget_left > 0 do
-                local t0 = tick_ms()
-                local ok, done = pcall(job.step, job.state, ITEMS_PER_STEP)
-                if not ok then
-                    debug.error_once("iscan:" .. id, done)
-                    job.active = false
-                    job.state = nil
-                    job.last_done = now
-                    break
+            -- One batch per active job per frame. Charge at least 1 ms because
+            -- the timer rounds short scans to zero and previously allowed an
+            -- unbounded number of batches in one frame.
+            local t0 = tick_ms()
+            local ok, done = pcall(job.step, job.state, ITEMS_PER_STEP)
+            budget_left = budget_left - math.max(1, tick_ms() - t0)
+
+            if not ok then
+                debug.error_once("iscan:" .. id, done)
+                job.active = false
+                job.state = nil
+                job.last_done = now
+            elseif done then
+                if job.complete then
+                    local complete_ok, complete_err = pcall(job.complete, job.state)
+                    if not complete_ok then
+                        debug.error_once("iscan_complete:" .. id, complete_err)
+                    end
                 end
-
-                budget_left = budget_left - (tick_ms() - t0)
-
-                if done then
-                    pcall(job.complete, job.state)
-                    job.active = false
-                    job.state = nil
-                    job.last_done = now
-                    break
-                end
-
-                if budget_left <= 0 then break end
+                job.active = false
+                job.state = nil
+                job.last_done = now
             end
         elseif now - job.last_done >= job.interval and starts_this_tick < MAX_STARTS_PER_TICK then
             job.state = job.create_state and job.create_state() or {}

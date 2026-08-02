@@ -18,6 +18,7 @@ local visible_settings = {}
 local PANELS = {
     { id = "april_keybinds_enabled", icon = "keybinds", label = "Binds" },
     { id = "april_mod_checker_enabled", icon = "staff", label = "Staff" },
+    { id = "april_event_status_enabled", icon = "events", label = "Events" },
     { id = "april_map_enabled", icon = "map", label = "Map" },
 }
 
@@ -41,6 +42,11 @@ local MAP_SETTINGS = {
     { type = "button", id = "april_map_reset_position", label = "Reset map position" },
 }
 
+local EVENT_SETTINGS = {
+    { type = "label", label = "EVENTS", dim = true },
+    { type = "checkbox", id = "april_event_status_active_only", label = "Only active events", default = false },
+}
+
 local function build_visible_settings()
     local out = {}
     local function append_group(group)
@@ -50,21 +56,24 @@ local function build_visible_settings()
 
     local binds = state.get("april_keybinds_enabled", false) == true
     local staff = state.get("april_mod_checker_enabled", false) == true
+    local events = state.get("april_event_status_enabled", false) == true
     local map = state.get("april_map_enabled", false) == true
 
     state.set_visible("april_keybinds_active_only", binds)
     state.set_visible("april_keybinds_show_unbound", binds)
     state.set_visible("april_keybinds_show_mode", binds)
     state.set_visible("april_mod_checker_interval", staff)
+    state.set_visible("april_event_status_active_only", events)
     state.set_visible("april_map_reset_position", map)
 
     if binds then append_group(BIND_SETTINGS) end
     if staff then append_group(STAFF_SETTINGS) end
+    if events then append_group(EVENT_SETTINGS) end
     if map then append_group(MAP_SETTINGS) end
     if #out == 0 then
         out[1] = {
             type = "label",
-            label = "Enable Binds, Staff, or Map above.",
+            label = "Enable Binds, Staff, Events, or Map above.",
             dim = true,
         }
     end
@@ -92,6 +101,8 @@ end
 function M.init()
     state.define("april_keybinds_enabled", false)
     state.define("april_mod_checker_enabled", false)
+    state.define("april_event_status_enabled", false)
+    state.define("april_event_status_active_only", false)
     state.define("april_map_enabled", false)
 end
 

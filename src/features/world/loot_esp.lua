@@ -340,23 +340,6 @@ function M.register_menu()
     menu_util.bind_children(P, child_ids)
 end
 
-function M.scan_drops()
-    local state = M.begin_drops_scan()
-    while not M.step_drops_scan(state, 9999) do end
-    M.complete_drops_scan(state)
-end
-
-function M.scan_static()
-    local state = M.begin_static_scan()
-    while not M.step_static_scan(state, 9999) do end
-    M.complete_static_scan(state)
-end
-
-function M.scan()
-    M.scan_static()
-    M.scan_drops()
-end
-
 function M.update(_dt)
     local map_loot = settings.enabled("april_map_enabled") and settings.enabled("april_map_show_loot")
     local loot_on = settings.enabled(P)

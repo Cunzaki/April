@@ -57,19 +57,24 @@ local function text_width(text, size)
     return #tostring(text or "") * math.max(5, (size or 12) * 0.55)
 end
 
-local function draw_brand(x, y)
-    local wordmark = "April.lua"
-    local size = theme.FONT_BRAND or 15
+local function draw_wave_text(wordmark, x, y, size, phase_offset, alpha)
     local cursor_x = x
-    local phase = anim.now() * 3.4
+    local phase = anim.now() * 3.4 + (phase_offset or 0)
     local accent = anim.title_color()
+    alpha = alpha or 1
     for i = 1, #wordmark do
         local char = wordmark:sub(i, i)
         local wave = math.sin(phase + (i - 1) * 0.72)
         local col = anim.mix(accent, theme.TEXT_ACTIVE, 0.10 + (wave + 1) * 0.10)
+        col = { col[1], col[2], col[3], (col[4] or 1) * alpha }
         widgets.text(cursor_x, y + wave * 1.5, char, col, size)
         cursor_x = cursor_x + text_width(char, size)
     end
+    return cursor_x
+end
+
+local function draw_brand(x, y)
+    draw_wave_text("April.lua", x, y, theme.FONT_BRAND or 15)
 end
 
 local function clamp_window()
@@ -575,8 +580,18 @@ function M.draw()
     local tab = catalog.TABS[tab_index]
     draw_brand(x + 14, y + 9)
     local version_text = "v" .. tostring(April.version or "")
-    widgets.text(x + w - 14 - text_width(version_text, theme.FONT_CAPTION), y + 10,
+    widgets.text(x + w - 14 - text_width(version_text, theme.FONT_CAPTION), y + 5,
         version_text, theme.TEXT_DIM, theme.FONT_CAPTION)
+    local author_text = "Made by Cunzaki"
+    local author_size = math.max(8, (theme.FONT_CAPTION or 11) - 2)
+    draw_wave_text(
+        author_text,
+        x + w - 14 - text_width(author_text, author_size),
+        y + 18,
+        author_size,
+        1.8,
+        0.88
+    )
 
     if gin.lmb_click and gin.hover(x, y, w, title_h + 5)
         and not widgets.active_slider and not widgets.active_slider_input and not widgets.listening_key

@@ -263,9 +263,8 @@ end
 
 function M.scan_all()
     if not settings.enabled(P) then return end
-    if not entity or not entity.get_players then return end
 
-    local players = entity.get_players()
+    local players = April.require("core.cache").players
     local lookup_budget = LOOKUP_BUDGET
 
     M.reconcile_active(players)

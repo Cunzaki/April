@@ -87,6 +87,7 @@ const ORDER = [
   "features/combat/perfect_farm.lua",
   "features/combat/gun_mods.lua",
   "features/utility/mod_checker.lua",
+  "features/utility/event_status.lua",
   "features/visuals/player_esp.lua",
   "features/visuals/target_overlay.lua",
   "features/visuals/target_visuals.lua",
@@ -95,6 +96,7 @@ const ORDER = [
   "features/world/loot_esp.lua",
   "features/world/base_esp.lua",
   "features/world/npc_esp.lua",
+  "features/world/raid_esp.lua",
   "features/movement/exploits.lua",
   "features/movement/fling.lua",
   "features/movement/desync.lua",
@@ -116,12 +118,13 @@ const ORDER = [
   "ui/gs_widgets.lua",
   "ui/catalog.lua",
   "ui/hud_dock.lua",
+  "ui/startup_intro.lua",
   "ui/custom_menu.lua",
   "menu/tabs.lua",
   "app.lua",
 ];
 
-const VERSION = "4.0.0";
+const VERSION = "4.0.9";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector

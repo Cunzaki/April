@@ -7,6 +7,7 @@ local math_util = April.require("core.math_util")
 local esp_util = April.require("core.esp_util")
 local ep = April.require("core.entity_props")
 local player_state = April.require("game.player_state")
+local npcs = April.require("game.npcs")
 local silent_whitelist = April.require("features.combat.silent_whitelist")
 local cache = April.require("core.cache")
 local env = April.require("core.env")
@@ -36,31 +37,16 @@ local function same_npc_inst(a, b)
     return aa ~= nil and aa == ba
 end
 
-local function read_npc_health(model)
-    if not model or not env.is_valid(model) then
-        return nil
-    end
-    local hum = env.safe_call(function()
-        if model.find_first_child_of_class then
-            return model:find_first_child_of_class("Humanoid")
-        end
-        return model:FindFirstChild("Humanoid")
-    end)
-    if not hum then
-        return nil
-    end
-    local hp = hum.Health or hum.health
-    if not hp or hp <= 0 then
-        return nil
-    end
-    return hum
-end
-
 function M.is_npc_alive(entry)
-    if not entry or not entry.inst or not env.is_valid(entry.inst) then
-        return false
+    if not entry then return false end
+    if entry.entity then
+        if entry.entity.IsAlive == false or entry.entity.is_alive == false then return false end
+        local hp = tonumber(entry.entity.Health or entry.entity.health)
+        return hp == nil or hp > 0
     end
-    return read_npc_health(entry.inst) ~= nil
+    if not entry.inst or not env.is_valid(entry.inst) then return false end
+    local health = April.require("game.npcs").read_health(entry.inst, entry.humanoid)
+    return health ~= nil
 end
 
 function M.is_aim_target(target)
@@ -74,6 +60,16 @@ end
 local function npc_head_world(entry)
     if not entry then
         return nil
+    end
+    if entry.entity then
+        local x, y, z = esp_util.vec3_pos(
+            entry.entity.HeadPosition or entry.entity.head_position
+                or entry.entity.Position or entry.entity.position
+        )
+        if x then
+            entry.lx, entry.ly, entry.lz = x, y, z
+            return { x = x, y = y, z = z }
+        end
     end
     local head = entry.head
     if (not head or not env.is_valid(head)) and entry.inst and env.is_valid(entry.inst) then
@@ -99,17 +95,18 @@ end
 
 -- Rebind a sticky NPC lock to the current cache entry + live head (or nil if gone).
 function M.refresh_npc_target(target)
-    if not M.is_npc_target(target) or not target.inst then
+    if not M.is_npc_target(target) or (not target.entity and not target.inst) then
         return nil
     end
-    if not env.is_valid(target.inst) then
+    if not target.entity and not env.is_valid(target.inst) then
         return nil
     end
 
     local found = nil
     if cache.npcs then
         for _, entry in ipairs(cache.npcs) do
-            if same_npc_inst(entry.inst, target.inst) then
+            if (target.entity and entry.entity == target.entity)
+                or (entry.inst and target.inst and same_npc_inst(entry.inst, target.inst)) then
                 found = entry
                 break
             end
@@ -117,6 +114,7 @@ function M.refresh_npc_target(target)
     end
 
     if found then
+        target.entity = found.entity
         target.inst = found.inst
         target.head = found.head
         target.name = found.name or target.name
@@ -352,6 +350,17 @@ function M.closest_bone_world(target, cx, cy)
 end
 
 local function target_velocity(target)
+    if M.is_npc_target(target) and target.entity then
+        local vel = target.entity.Velocity or target.entity.velocity
+        local vx, vy, vz = esp_util.vec3_pos(vel)
+        if vx then
+            return {
+                x = vx,
+                y = math.max(-100, math.min(100, vy or 0)),
+                z = vz,
+            }
+        end
+    end
     if M.is_npc_target(target) and target.inst and env.is_valid(target.inst) then
         local root = env.safe_call(function()
             return target.inst:find_first_child("HumanoidRootPart")
@@ -536,7 +545,7 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
     local target_npcs = not opts.players_only and settings.multi(prefix .. "targets", 2, false)
 
     if target_players then
-        for _, p in ipairs(ep.get_players()) do
+        for _, p in ipairs(cache.players) do
             if player_state.is_combat_target(p) then
                 best, best_score = consider_target(
                     p, prefix, screen_bone, use_fov, fov_px, origin, filter_visible, cx, cy, best, best_score, opts
@@ -547,9 +556,12 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
 
     if target_npcs and cache.npcs then
         for _, entry in ipairs(cache.npcs) do
-            if npc_enabled(entry, prefix) and M.is_npc_alive(entry) then
+            if npcs.is_hostile_kind(entry.kind)
+                and npc_enabled(entry, prefix) and M.is_npc_alive(entry)
+            then
                 local npc_target = {
                     is_npc = true,
+                    entity = entry.entity,
                     inst = entry.inst,
                     head = entry.head,
                     name = entry.name,

@@ -7,6 +7,8 @@
 local M = {}
 
 local prev_keys = {}
+local frame_keys = {}
+local frame_pressed = {}
 local prev_lmb = false
 local prev_rmb = false
 local prev_mmb = false
@@ -254,17 +256,31 @@ function M.mouse()
 end
 
 function M.key_down(vk)
-    return input and input.is_key_down and input.is_key_down(vk) or false
+    vk = tonumber(vk) or 0
+    if frame_keys[vk] ~= nil then return frame_keys[vk] end
+    local down = false
+    if input and input.is_key_down then
+        local ok, value = pcall(input.is_key_down, vk)
+        down = ok and value == true
+    end
+    frame_keys[vk] = down
+    return down
 end
 
 function M.key_pressed(vk)
+    vk = tonumber(vk) or 0
+    if frame_pressed[vk] ~= nil then return frame_pressed[vk] end
     local down = M.key_down(vk)
     local was = prev_keys[vk] == true
     prev_keys[vk] = down
-    return down and not was
+    local pressed = down and not was
+    frame_pressed[vk] = pressed
+    return pressed
 end
 
 function M.begin_frame()
+    frame_keys = {}
+    frame_pressed = {}
     ensure_scroll_hooks()
 
     local amx, amy = 0, 0

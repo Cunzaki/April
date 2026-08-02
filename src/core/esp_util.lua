@@ -118,6 +118,26 @@ function M.w2s(x, y, z)
     return sx or 0, sy or 0, false
 end
 
+-- Strict on-screen check. Behind-camera W2S often returns "visible" with coords
+-- glued to screen edges — reject those so ESP cannot stick to borders.
+function M.screen_point_ok(sx, sy, margin)
+    sx, sy = tonumber(sx), tonumber(sy)
+    if not sx or not sy then return false end
+    local sw, sh = draw_util.screen_size()
+    if not sw or sw < 1 or not sh or sh < 1 then return true end
+    margin = margin or 64
+    return sx >= -margin and sy >= -margin and sx <= (sw + margin) and sy <= (sh + margin)
+end
+
+function M.w2s_visible(x, y, z, margin)
+    local sx, sy, vis = M.w2s(x, y, z)
+    if not vis then return sx, sy, false end
+    if not M.screen_point_ok(sx, sy, margin) then
+        return sx, sy, false
+    end
+    return sx, sy, true
+end
+
 function M.draw_skeleton_bones(bones, col, thick)
     if not bones then return end
     thick = thick or 1.5
@@ -138,376 +158,57 @@ function M.draw_skeleton_bones(bones, col, thick)
     end
 end
 
-function M.draw_player_skeleton(player, col, thick)
-    if not player then return end
-    local ep = April.require("core.entity_props")
-    local bones = ep.get_bones_screen(player)
-    if not bones then return end
-    M.draw_skeleton_bones(bones, col, thick)
-end
+-- Perspective-correct box from a head world point + body height in studs.
+-- This is the cheap OG-style path: two W2S calls, natural distance scaling.
+function M.head_body_screen_bounds(hx, hy, hz, opts)
+    opts = opts or {}
+    hx, hy, hz = tonumber(hx), tonumber(hy), tonumber(hz)
+    if not hx then return nil end
 
-function M.model_screen_bounds(model)
-    if not model then return nil end
-    local env = April.require("core.env")
-    if not env.is_valid(model) then return nil end
+    local body_h = opts.body_h or 5.0
+    local top_pad = opts.top_pad or 0.35
+    local bot_pad = opts.bot_pad or 0.15
+    local width_mul = opts.width_mul or 0.55
 
-    local part_names = {
-        "Head", "HumanoidRootPart", "UpperTorso", "LowerTorso", "Torso",
-        "LeftFoot", "RightFoot", "LeftHand", "RightHand",
-        "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg",
-    }
+    local sx, sy, vis = M.w2s_visible(hx, hy + top_pad, hz)
+    if not vis then return nil end
 
-    local min_x, min_y, max_x, max_y
-    local any = false
-
-    for i = 1, #part_names do
-        local name = part_names[i]
-        local part = env.safe_call(function()
-            return model:find_first_child(name) or model:FindFirstChild(name)
-        end)
-        if part and env.is_valid(part) then
-            local pos = part.Position or part.position
-            if pos then
-                local px, py, pz = M.vec3_pos(pos)
-                if px then
-                    local sx, sy, vis = M.w2s(px, py, pz)
-                    if vis then
-                        any = true
-                        min_x = min_x and math.min(min_x, sx) or sx
-                        min_y = min_y and math.min(min_y, sy) or sy
-                        max_x = max_x and math.max(max_x, sx) or sx
-                        max_y = max_y and math.max(max_y, sy) or sy
-                    end
-                end
-            end
-        end
+    local fx, fy, fz = hx, hy - body_h - bot_pad, hz
+    if opts.fx then
+        fx, fy, fz = opts.fx, opts.fy, opts.fz
+    end
+    local bx, by, bvis = M.w2s(fx, fy, fz)
+    -- Feet may leave the screen while the head is still visible — still draw.
+    if (not bvis) or (not M.screen_point_ok(bx, by, 200)) then
+        local dist = tonumber(opts.dist) or 80
+        local approx = math.max(2, math.min(120, 520 / (dist + 8)))
+        local w = approx * width_mul
+        return {
+            x = sx - w * 0.5,
+            y = sy,
+            w = w,
+            h = approx,
+            valid = true,
+        }
     end
 
-    if not any then return nil end
-
-    local w = math.max(4, max_x - min_x)
-    local h = math.max(6, max_y - min_y)
-    -- Same pad as bones_screen_bounds so player/NPC boxes match.
-    local pad_x = math.max(2, w * 0.14)
-    local pad_y = math.max(2, h * 0.06)
+    local top = math.min(sy, by)
+    local bot = math.max(sy, by)
+    local h = math.max(2, bot - top)
+    local w = math.max(2, h * width_mul)
+    local cx = (sx + bx) * 0.5
     return {
-        x = min_x - pad_x,
-        y = min_y - pad_y,
-        w = w + pad_x * 2,
-        h = h + pad_y * 2,
+        x = cx - w * 0.5,
+        y = top,
+        w = w,
+        h = h,
         valid = true,
     }
-end
-
-local function aabb_from_screen_points(min_x, min_y, max_x, max_y)
-    local w = math.max(4, max_x - min_x)
-    local h = math.max(6, max_y - min_y)
-    local pad_x = math.max(2, w * 0.14)
-    local pad_y = math.max(2, h * 0.06)
-    return {
-        x = min_x - pad_x,
-        y = min_y - pad_y,
-        w = w + pad_x * 2,
-        h = h + pad_y * 2,
-        valid = true,
-    }
-end
-
--- Build screen AABB from entity bone projections (same source as skeleton = stable).
-function M.bones_screen_bounds(player)
-    if not player then return nil end
-    local ep = April.require("core.entity_props")
-    local bones = ep.get_bones_screen(player)
-    if not bones then return nil end
-
-    local min_x, min_y, max_x, max_y
-    local any = false
-    for _, pt in pairs(bones) do
-        if pt then
-            local x = tonumber(pt.x or pt.X or pt[1])
-            local y = tonumber(pt.y or pt.Y or pt[2])
-            if x and y then
-                any = true
-                min_x = min_x and math.min(min_x, x) or x
-                min_y = min_y and math.min(min_y, y) or y
-                max_x = max_x and math.max(max_x, x) or x
-                max_y = max_y and math.max(max_y, y) or y
-            end
-        end
-    end
-    if not any then return nil end
-    return aabb_from_screen_points(min_x, min_y, max_x, max_y)
-end
-
--- Keep far targets readable: only expand collapsed specks, never inflate real bounds.
-function M.ensure_min_bounds(b, min_w, min_h)
-    if not b or not b.valid then return b end
-    min_w = min_w or 22
-    min_h = min_h or 40
-    local cx = b.x + b.w * 0.5
-    local cy = b.y + b.h * 0.5
-    if b.w < min_w then
-        b.w = min_w
-        b.x = cx - min_w * 0.5
-    end
-    if b.h < min_h then
-        b.h = min_h
-        b.y = cy - min_h * 0.5
-    end
-    return b
-end
-
-function M.dist_min_bounds(dist)
-    dist = math.max(1, tonumber(dist) or 80)
-    local h = math.max(8, math.min(40, 2400 / (dist + 35)))
-    local w = math.max(5, math.min(24, h * 0.55))
-    return w, h
-end
-
-function M.dist_point_size(dist)
-    dist = math.max(1, tonumber(dist) or 80)
-    return math.max(8, math.min(36, 2200 / (dist + 30)))
-end
-
-function M.guard_tiny_bounds(b, dist)
-    if not b or not b.valid then return b end
-    local min_w, min_h = M.dist_min_bounds(dist)
-    -- Expand only when smaller than the distance floor (keeps close boxes natural).
-    if b.w >= min_w and b.h >= min_h then return b end
-    return M.ensure_min_bounds(b, min_w, min_h)
 end
 
 function M.bounds_usable(b)
-    return b and b.valid and (b.w or 0) >= 3 and (b.h or 0) >= 5
-end
-
--- Hold last good box across flaky get_bounds / w2s frames (anti-flicker).
-function M.hold_bounds(store, key, fresh, now, ttl_ms)
-    if not store or not key then return fresh end
-    ttl_ms = ttl_ms or 1000
-    now = now or 0
-    local ent = store[key]
-
-    if M.bounds_usable(fresh) then
-        store[key] = { bounds = fresh, t = now }
-        return fresh
-    end
-
-    if ent and M.bounds_usable(ent.bounds) and (now - (ent.t or 0)) < ttl_ms then
-        return ent.bounds
-    end
-
-    return nil
-end
-
-local function head_feet_from_model(model, opts)
-    if not model then return nil end
-    opts = opts or {}
-    local env = April.require("core.env")
-    if not env.is_valid(model) then return nil end
-
-    local head = env.safe_call(function()
-        return model:find_first_child("Head") or model:FindFirstChild("Head")
-    end)
-    local hx, hy, hz = head and env.is_valid(head) and M.vec3_pos(head.Position or head.position) or nil
-    if not hx then return nil end
-
-    local sx, sy, vis = M.w2s(hx, hy, hz)
-    if not vis then return nil end
-
-    local fx, fy, fz
-    for _, name in ipairs({ "LeftFoot", "RightFoot", "LeftLowerLeg", "RightLowerLeg", "HumanoidRootPart" }) do
-        local foot = env.safe_call(function()
-            return model:find_first_child(name) or model:FindFirstChild(name)
-        end)
-        if foot and env.is_valid(foot) then
-            fx, fy, fz = M.vec3_pos(foot.Position or foot.position)
-            if fx then
-                if name == "HumanoidRootPart" then
-                    fy = fy - 2.5
-                end
-                break
-            end
-        end
-    end
-    if not fx then
-        fx, fy, fz = hx, hy - 3, hz
-    end
-
-    local bx, by, bvis = M.w2s(fx, fy, fz)
-    if not bvis then
-        local size = opts.point_size or M.dist_point_size(opts.dist)
-        return M.point_screen_bounds(hx, hy, hz, size)
-    end
-
-    return aabb_from_screen_points(
-        math.min(sx, bx), math.min(sy, by),
-        math.max(sx, bx), math.max(sy, by)
-    )
-end
-
--- Head + feet projection when bone AABB APIs fail for a frame.
-function M.head_feet_screen_bounds(player, opts)
-    if not player then return nil end
-    opts = opts or {}
-    local env = April.require("core.env")
-    local ep = April.require("core.entity_props")
-
-    local hx, hy, hz = M.vec3_pos(ep.head_position(player))
-    if not hx then
-        local char = ep.character(player)
-        if char and env.is_valid(char) then
-            local head = env.safe_call(function()
-                return char:find_first_child("Head") or char:FindFirstChild("Head")
-            end)
-            if head and env.is_valid(head) then
-                hx, hy, hz = M.vec3_pos(head.Position or head.position)
-            end
-        end
-    end
-    if not hx then
-        local char = ep.character(player)
-        if char then
-            return head_feet_from_model(char, opts)
-        end
-        return nil
-    end
-
-    local sx, sy, vis = M.w2s(hx, hy, hz)
-    if not vis then return nil end
-
-    local fx, fy, fz
-    local char = ep.character(player)
-    if char and env.is_valid(char) then
-        for _, name in ipairs({ "LeftFoot", "RightFoot", "LeftLowerLeg", "RightLowerLeg" }) do
-            local foot = env.safe_call(function()
-                return char:find_first_child(name) or char:FindFirstChild(name)
-            end)
-            if foot and env.is_valid(foot) then
-                fx, fy, fz = M.vec3_pos(foot.Position or foot.position)
-                if fx then break end
-            end
-        end
-    end
-    if not fx then
-        fx, fy, fz = M.vec3_pos(ep.position(player))
-        if fx then fy = fy - 2.8 end
-    end
-    if not fx then
-        fx, fy, fz = hx, hy - 3, hz
-    end
-
-    local bx, by, bvis = M.w2s(fx, fy, fz)
-    if not bvis then
-        local size = opts.point_size or M.dist_point_size(opts.dist)
-        return M.point_screen_bounds(hx, hy, hz, size)
-    end
-
-    return aabb_from_screen_points(
-        math.min(sx, bx), math.min(sy, by),
-        math.max(sx, bx), math.max(sy, by)
-    )
-end
-
--- Stable character box: get_bounds -> bones -> model -> head/feet -> point.
-function M.player_screen_bounds(player, opts)
-    if not player then return nil end
-    opts = opts or {}
-    local dist = opts.dist
-    local ep = April.require("core.entity_props")
-
-    local gb = ep.get_bounds(player)
-    if M.bounds_usable(gb) then
-        return M.guard_tiny_bounds(gb, dist)
-    end
-
-    local b = M.bones_screen_bounds(player)
-    if M.bounds_usable(b) then
-        return M.guard_tiny_bounds(b, dist)
-    end
-
-    local model = ep.character(player)
-    if model then
-        b = M.model_screen_bounds(model)
-        if M.bounds_usable(b) then
-            return M.guard_tiny_bounds(b, dist)
-        end
-    end
-
-    b = M.head_feet_screen_bounds(player, opts)
-    if M.bounds_usable(b) then
-        return M.guard_tiny_bounds(b, dist)
-    end
-
-    local hx, hy, hz = M.vec3_pos(ep.head_position(player))
-    if hx then
-        local size = opts.point_size or M.dist_point_size(dist)
-        b = M.point_screen_bounds(hx, hy, hz, size)
-        if M.bounds_usable(b) then
-            return M.guard_tiny_bounds(b, dist)
-        end
-    end
-
-    return nil
-end
-
--- Same scaling path for NPCs (entity players or scanned models).
-function M.npc_screen_bounds(entry, opts)
-    if not entry then return nil end
-    opts = opts or {}
-    local dist = opts.dist
-
-    if entry.entity then
-        return M.player_screen_bounds(entry.entity, opts)
-    end
-
-    local model = entry.inst
-    if not model then return nil end
-
-    local b = M.model_screen_bounds(model)
-    if M.bounds_usable(b) then
-        return M.guard_tiny_bounds(b, dist)
-    end
-
-    b = head_feet_from_model(model, opts)
-    if M.bounds_usable(b) then
-        return M.guard_tiny_bounds(b, dist)
-    end
-
-    if entry.lx then
-        local size = opts.point_size or M.dist_point_size(dist)
-        b = M.point_screen_bounds(entry.lx, entry.ly, entry.lz, size)
-        if M.bounds_usable(b) then
-            return M.guard_tiny_bounds(b, dist)
-        end
-    end
-
-    return nil
-end
-
-function M.draw_model_skeleton(model, col, thick)
-    if not model then return end
-    local env = April.require("core.env")
-    if not env.is_valid(model) then return end
-
-    local screen = {}
-    local function part_pos(name)
-        local part = env.safe_call(function()
-            return model:find_first_child(name) or model:FindFirstChild(name)
-        end)
-        if not part or not env.is_valid(part) then return end
-        local pos = part.Position or part.position
-        local px, py, pz = M.vec3_pos(pos)
-        if not px then return end
-        local sx, sy, vis = M.w2s(px, py, pz)
-        if vis then screen[name] = { x = sx, y = sy } end
-    end
-
-    for _, pair in ipairs(M.SKELETON_PAIRS) do
-        part_pos(pair[1])
-        part_pos(pair[2])
-    end
-    M.draw_skeleton_bones(screen, col, thick)
+    -- Far targets are often only a few pixels; do not reject tiny valid boxes.
+    return b and b.valid and (b.w or 0) >= 1 and (b.h or 0) >= 1
 end
 
 function M.draw_vertical_beacon(wx, wy, wz, col, opts)
@@ -788,82 +489,6 @@ function M.draw_entry_boxes(entry, col, thick)
         entry.box = box
         M.draw_oriented_box(box, col, thick)
     end
-end
-
-function M.oriented_box_screen_bounds(box)
-    if not box then return nil end
-
-    local min_x, min_y, max_x, max_y
-    local any = false
-
-    for i = 1, 8 do
-        local sx, sy, sz = BOX_SIGNS[i][1], BOX_SIGNS[i][2], BOX_SIGNS[i][3]
-        local lx, ly, lz = sx * box.hx, sy * box.hy, sz * box.hz
-        local wx = box.x + box.rx * lx + box.ux * ly - box.lx * lz
-        local wy = box.y + box.ry * lx + box.uy * ly - box.ly * lz
-        local wz = box.z + box.rz * lx + box.uz * ly - box.lz * lz
-        local px, py, vis = M.w2s(wx, wy, wz)
-        if vis then
-            any = true
-            min_x = min_x and math.min(min_x, px) or px
-            min_y = min_y and math.min(min_y, py) or py
-            max_x = max_x and math.max(max_x, px) or px
-            max_y = max_y and math.max(max_y, py) or py
-        end
-    end
-
-    if not any then return nil end
-
-    return {
-        x = min_x,
-        y = min_y,
-        w = math.max(12, max_x - min_x),
-        h = math.max(12, max_y - min_y),
-        valid = true,
-    }
-end
-
-function M.point_screen_bounds(wx, wy, wz, size)
-    local sx, sy, vis = M.w2s(wx, wy, wz)
-    if not vis then return nil end
-    size = size or 48
-    return {
-        x = sx - size * 0.5,
-        y = sy - size * 0.5,
-        w = size,
-        h = size,
-        valid = true,
-    }
-end
-
-function M.entry_screen_bounds(entry)
-    if not entry then return nil end
-
-    if entry.box then
-        local bounds = M.oriented_box_screen_bounds(entry.box)
-        if bounds then return bounds end
-    end
-
-    if entry.inst then
-        local scan = April.require("game.esp_scan")
-        local main = entry.main_part or scan.find_main_part(entry.inst)
-        if main then
-            local box = scan.read_part_box(main)
-            if box then
-                entry.box = box
-                local bounds = M.oriented_box_screen_bounds(box)
-                if bounds then return bounds end
-            end
-        end
-    end
-
-    local esp_scan = April.require("game.esp_scan")
-    local lx, ly, lz = esp_scan.entry_coords(entry)
-    if lx then
-        return M.point_screen_bounds(lx, ly, lz, 52)
-    end
-
-    return nil
 end
 
 return M

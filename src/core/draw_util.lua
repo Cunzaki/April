@@ -2,6 +2,15 @@ local math_util = April.require("core.math_util")
 local text_util = April.require("core.text_util")
 
 local M = {}
+local _aliases_ready = false
+
+local function ensure_draw_aliases()
+    if _aliases_ready then return end
+    pcall(function()
+        April.require("core.api_aliases").apply()
+    end)
+    _aliases_ready = true
+end
 
 function M.white(r, g, b, a)
     return { r or 1, g or 1, b or 1, a or 1 }
@@ -9,9 +18,7 @@ end
 
 function M.text_centered(x, y, text, col, size)
     if not draw then return end
-    pcall(function()
-        April.require("core.api_aliases").apply()
-    end)
+    ensure_draw_aliases()
     local text_fn = draw.text or draw.Text
     local size_fn = draw.get_text_size or draw.GetTextSize
     if not text_fn then return end
@@ -39,9 +46,7 @@ end
 
 function M.text_outlined(x, y, text, col, size)
     if not draw then return end
-    pcall(function()
-        April.require("core.api_aliases").apply()
-    end)
+    ensure_draw_aliases()
     local text_fn = draw.text or draw.Text
     if not text_fn then return end
     text_fn(x, y, text_util.sanitize(text), col, size or 14)
@@ -53,9 +58,7 @@ end
 
 function M.box_esp(x, y, w, h, col, style)
     if not draw then return end
-    pcall(function()
-        April.require("core.api_aliases").apply()
-    end)
+    ensure_draw_aliases()
     local corner = draw.corner_box or draw.CornerBox
     local box = draw.box or draw.Box
     local rect = draw.rect or draw.Rect
@@ -98,9 +101,7 @@ end
 -- always leaves a gap next to our box — do not use it for ESP.
 function M.health_bar_nice(x, y, h, hp, max_hp, bar_w)
     if not draw then return end
-    pcall(function()
-        April.require("core.api_aliases").apply()
-    end)
+    ensure_draw_aliases()
     local fill = draw.rect_filled or draw.RectFilled
     if not fill then return end
     if not hp or not max_hp or max_hp <= 0 then return end

@@ -75,7 +75,7 @@ M.BY_ID = {
     april_player_enabled = "Shows boxes and info on other players.",
     april_ui_player_elements = "Choose which info to show on player ESP.",
     april_player_esp_filters = "Filter which players appear on ESP.",
-    april_player_esp_flags = "Show status flags on player ESP.",
+    april_player_esp_flags = "Show status flags (downed, SZ, staff, revive, movement state, VIP).",
     april_target_overlay = "Shows your target's held weapon and gear loadout.",
     april_crosshair_enabled = "Draws a custom crosshair on screen.",
     april_crosshair_follow = "Moves the crosshair toward your active combat target.",
@@ -86,9 +86,12 @@ M.BY_ID = {
     april_world_enabled = "Highlights harvestable resources and animals in the world.",
     april_loot_enabled = "Highlights crates, bags, and other loot in the world.",
     april_base_enabled = "Highlights base parts like doors, turrets, and storage.",
-    april_npc_enabled = "Highlights NPC soldiers and bosses.",
+    april_npc_enabled = "Highlights NPC soldiers, bosses, helis, and BTR.",
     april_ui_npc_types = "Choose which NPC types appear on ESP.",
     april_ui_npc_elements = "Choose which info to show on NPC ESP.",
+    april_npc_btr = "Shows the BTR event vehicle on NPC ESP.",
+    april_raid_enabled = "Marks explosion clusters as potential raids.",
+    april_raid_notifications = "Toast when a raid explosion is detected.",
 
     april_world_boxes = "Draws 3D boxes around visible resources.",
     april_world_show_name = "Shows names on resource ESP.",
@@ -99,8 +102,14 @@ M.BY_ID = {
     april_base_boxes = "Draws 3D boxes around visible base parts.",
     april_base_show_name = "Shows names on base ESP.",
     april_base_show_distance = "Shows distance on base ESP.",
-    april_npc_soldiers = "Shows soldier NPCs on ESP.",
-    april_npc_bosses = "Shows boss NPCs on ESP.",
+    april_npc_soldier = "Shows military Soldier NPCs on ESP.",
+    april_npc_bruno = "Shows Bruno boss NPCs on ESP.",
+    april_npc_boris = "Shows Boris boss NPCs on ESP.",
+    april_npc_brutus = "Shows Brutus boss NPCs on ESP.",
+    april_npc_attack_heli = "Shows the Attack Heli event NPC on ESP.",
+    april_npc_btr = "Shows the BTR event vehicle on ESP.",
+    april_npc_diver_dave = "Shows the Diver Dave vendor NPC on ESP.",
+    april_npc_pilot_pete = "Shows the Pilot Pete vendor NPC on ESP.",
 
     -- Gun mods
     april_gunmods_enabled = "Applies weapon stat changes globally to your held gun.",
@@ -126,6 +135,8 @@ M.BY_ID = {
     april_anti_afk = "Prevents idle kick by simulating activity.",
     april_mod_checker_enabled = "Alerts you when staff or mods join the server.",
     april_keybinds_enabled = "Shows an on-screen list of your keybinds.",
+    april_event_status_enabled = "Shows live timed crates, event NPCs, bosses, and raid activity.",
+    april_event_status_active_only = "Hides inactive event rows from the event status panel.",
 
     -- Radar
     april_map_enabled = "Shows a draggable tactical minimap overlay.",
@@ -144,6 +155,7 @@ M.BY_ID = {
     april_base_chams_color = "Glow preset color (Fill Glow / Wireframe Glow only).",
 
     -- Config / actions
+    april_ui_startup_intro = "Plays the April.lua intro whenever the script executes. Save it in your autoload profile.",
     april_ui_menu_key = "Key used to open and close this menu.",
     april_cfg_autoload = "Loads your saved profile automatically on inject.",
     april_aim_whitelist_clear = "Clears the aim whitelist player list.",

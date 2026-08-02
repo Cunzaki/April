@@ -56,7 +56,7 @@ local function get_view_origin()
         end
     end
 
-    local lp = env.get_local_player()
+    local lp = cache.local_player or env.get_local_player()
     local px, py, pz = nil, nil, nil
     if lp then
         px, py, pz = position_xyz(ep.position(lp))
@@ -253,6 +253,7 @@ function M.register_menu()
     menu.add_checkbox(T, G.RADAR, "april_map_show_world", "Radar Show Resources", true, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_base", "Radar Show Base Parts", false, root)
     menu.add_checkbox(T, G.RADAR, "april_map_show_waypoints", "Radar Show Waypoints", true, root)
+    menu.add_checkbox(T, G.RADAR, "april_map_show_raids", "Radar Show Raids", false, root)
     menu.add_checkbox(T, G.RADAR, "april_map_labels", "Radar Show Labels", false, root)
 
     menu.add_colorpicker(T, G.RADAR, "april_map_player_col", "Radar Players Color", theme.RED, root)
@@ -261,6 +262,7 @@ function M.register_menu()
     menu.add_colorpicker(T, G.RADAR, "april_map_world_col", "Radar Resources Color", theme.GREEN, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_base_col", "Radar Base Color", { 0.55, 0.55, 1, 1 }, root)
     menu.add_colorpicker(T, G.RADAR, "april_map_wp_col", "Radar Waypoints Color", theme.CYAN, root)
+    menu.add_colorpicker(T, G.RADAR, "april_map_raid_col", "Radar Raids Color", { 1, 0.5, 0, 1 }, root)
 
     menu_util.gap(T, G.RADAR)
     menu.add_slider_int(T, G.RADAR, "april_map_zoom", "Radar Zoom Level", 0.05, 5.0, 1.0, "%.2f", root)
@@ -284,15 +286,13 @@ function M.register_menu()
     menu_util.bind_children(P, {
         "april_map_show_players", "april_map_show_npcs", "april_map_show_loot",
         "april_map_show_world", "april_map_show_base", "april_map_show_waypoints",
-        "april_map_labels",
+        "april_map_show_raids", "april_map_labels",
         "april_map_player_col", "april_map_npc_col",
         "april_map_loot_col", "april_map_world_col", "april_map_base_col",
-        "april_map_wp_col",
+        "april_map_wp_col", "april_map_raid_col",
         "april_map_zoom", "april_map_size", "april_map_icon_scale", "april_map_reset_position",
     })
 end
-
-function M.update(_dt) end
 
 function M.draw()
     if not settings.enabled(P) then return end
@@ -386,9 +386,22 @@ function M.draw()
         end
     end
 
+    if settings.bool("april_map_show_raids", false) then
+        local col = settings.color("april_map_raid_col", { 1, 0.5, 0, 1 })
+        for _, raid in ipairs(cache.raids or {}) do
+            if raid and raid.x and raid.z then
+                local label = "Raid"
+                if raid.count and raid.count > 1 then
+                    label = string.format("Raid (%d)", raid.count)
+                end
+                draw_map_item(raid.x, raid.z, col, label, "diamond", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
+            end
+        end
+    end
+
     if settings.bool("april_map_show_players", false) then
         local col = settings.color("april_map_player_col", theme.RED)
-        for _, p in ipairs(ep.get_players()) do
+        for _, p in ipairs(cache.players) do
             local px, _, pz = position_xyz(ep.position(p))
             if player_state.is_combat_target(p) and px and pz then
                 local label = ep.display_name(p) or ep.name(p)

@@ -1,12 +1,9 @@
 local settings = April.require("core.settings")
-local env = April.require("core.env")
-local ep = April.require("core.entity_props")
+local cache = April.require("core.cache")
 local draw_util = April.require("core.draw_util")
 local esp_util = April.require("core.esp_util")
 local menu_util = April.require("core.menu_util")
 local player_state = April.require("game.player_state")
-local player_gear = April.require("game.player_gear")
-local npcs = April.require("game.npcs")
 local mod_checker = April.require("features.utility.mod_checker")
 local mod_ids = April.require("game.mod_ids")
 
@@ -19,7 +16,6 @@ local ID_HEALTH = "april_player_health"
 local ID_SKELETON = "april_player_skeleton"
 local ID_NAME = "april_player_show_name"
 local ID_DIST = "april_player_show_distance"
-local ID_WEAPON = "april_player_show_weapon"
 local ID_CLAN = "april_player_clan_tag"
 local ID_BOX = "april_player_box_mode"
 local ID_BOX_COLOR = "april_player_box_color"
@@ -28,9 +24,12 @@ local ID_FLAG_DOWN = "april_player_flag_downed"
 local ID_FLAG_SZ = "april_player_flag_safezone"
 local ID_FLAG_STAFF = "april_player_flag_staff"
 local ID_FLAG_REVIVE = "april_player_flag_reviving"
+local ID_FLAG_MOVE = "april_player_flag_movement"
+local ID_FLAG_VIP = "april_player_flag_vip"
 
 local F_TEAM, F_SAFEZONE, F_SKIP_DOWNED = 1, 2, 3
 local FL_DOWNED, FL_SAFEZONE, FL_STAFF, FL_REVIVING = 1, 2, 3, 4
+local FL_MOVEMENT, FL_VIP = 5, 6
 
 local DEFAULT_BOX = { 1, 0.35, 0.35, 1 }
 local DEFAULT_TEXT = { 1, 0.35, 0.35, 1 }
@@ -41,80 +40,42 @@ local DEFAULT_FLAG = {
     SZ = { 0.35, 0.85, 1, 1 },
     STAFF = { 1, 0.33, 0.33, 1 },
     REVIVE = { 0.45, 1, 0.55, 1 },
+    MOVE = { 0.75, 0.85, 1, 1 },
+    VIP = { 1, 0.82, 0.2, 1 },
 }
-
-local _wpn_cache = {}
-local _bounds_cache = {}
-local WPN_TTL_MS = 220
-local BOUNDS_TTL_MS = 1200
-
-local function tick_ms()
-    return utility and utility.get_tick_count and utility.get_tick_count() or 0
-end
-
-local function cache_key(p)
-    return tostring(ep.user_id(p) or 0) .. ":" .. tostring(ep.name(p) or "")
-end
-
-local function held_weapon_name(p)
-    local key = cache_key(p)
-    local now = tick_ms()
-    local ent = _wpn_cache[key]
-    if ent and (now - ent.t) < WPN_TTL_MS then
-        return ent.name
-    end
-    local name = nil
-    pcall(function()
-        name = player_gear.held_name(p)
-    end)
-    if name and player_gear.is_empty_held_name and player_gear.is_empty_held_name(name) then
-        name = nil
-    end
-    _wpn_cache[key] = { t = now, name = name }
-    return name
-end
-
-local function box_color()
-    return settings.color(ID_BOX_COLOR, DEFAULT_BOX)
-end
-
-local function resolve_color(_p)
-    return box_color()
-end
-
-local function filter_opts()
-    local downed = 1
-    if settings.multi(FILTERS, F_SKIP_DOWNED, false) then
-        downed = 0
-    end
-    return {
-        team = settings.multi(FILTERS, F_TEAM, true),
-        skip_sz = settings.multi(FILTERS, F_SAFEZONE, false),
-        downed = downed,
-    }
-end
-
-local function passes_player_filters(p, opts)
-    if not p or ep.is_local(p) then return false end
-    -- Workspace NPCs only. Do NOT use UserId==0: Vector's entity cache currently
-    -- reports UserId=0 for every real player (API regression; w2s/bounds still work).
-    if ep.is_workspace_entity(p) then return false end
-    local pname = ep.name(p)
-    if npcs.kind(pname) then return false end
-    if not player_state.is_combat_target(p) then return false end
-    if opts.team and not player_state.passes_team_check(p) then return false end
-    if opts.downed ~= 1 and not player_state.passes_downed_check(p, opts.downed) then
-        return false
-    end
-    if opts.skip_sz and not player_state.passes_safezone_check(p, true) then
-        return false
-    end
-    return true
-end
 
 local function set_multi_defaults(id, values)
     if menu and menu.set then
         pcall(menu.set, id, values)
+    end
+end
+
+local function migrate_flags_table()
+    if not menu or not menu.get or not menu.set then return end
+    local ok, cur = pcall(menu.get, FLAGS)
+    if not ok or type(cur) ~= "table" then return end
+    local n = 0
+    for i = 1, 16 do
+        if cur[i] ~= nil then n = i end
+    end
+    if n <= 4 then
+        -- Old 4-flag configs: keep first four, Movement/VIP off until chosen.
+        pcall(menu.set, FLAGS, {
+            cur[1] == true, cur[2] == true, cur[3] == true, cur[4] == true,
+            false, false,
+        })
+    elseif n >= 8 then
+        -- Old Idle/Walk/Sprint/VIP layout → single Movement + VIP.
+        local move = cur[5] == true or cur[6] == true or cur[7] == true
+        pcall(menu.set, FLAGS, {
+            cur[1] == true, cur[2] == true, cur[3] == true, cur[4] == true,
+            move, cur[8] == true,
+        })
+    elseif n ~= 6 then
+        pcall(menu.set, FLAGS, {
+            cur[1] == true, cur[2] == true, cur[3] == true, cur[4] == true,
+            cur[5] == true, cur[6] == true,
+        })
     end
 end
 
@@ -137,8 +98,6 @@ function M.register_menu()
         menu_util.parent(P, { colorpicker = DEFAULT_CLAN }))
     menu.add_checkbox(T, G.VISUALS, ID_DIST, "Player Distance", true,
         menu_util.parent(P, { colorpicker = DEFAULT_MUTED }))
-    menu.add_checkbox(T, G.VISUALS, ID_WEAPON, "Player Weapon", false,
-        menu_util.parent(P, { colorpicker = DEFAULT_MUTED }))
 
     menu.add_multicombo(T, G.VISUALS, FILTERS, "ESP Filters", {
         "Team Check", "Skip Safezone", "Skip Downed",
@@ -146,309 +105,234 @@ function M.register_menu()
     set_multi_defaults(FILTERS, { true, false, false })
 
     menu.add_multicombo(T, G.VISUALS, FLAGS, "ESP Flags", {
-        "Downed", "Safezone", "Staff", "Reviving",
-    }, { false, false, false, false }, { parent = P })
-    set_multi_defaults(FLAGS, { true, true, true, true })
+        "Downed", "Safezone", "Staff", "Reviving", "Movement", "VIP",
+    }, { false, false, false, false, false, false }, { parent = P })
+    set_multi_defaults(FLAGS, { true, true, true, true, false, true })
 
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_DOWN, "Flag Downed Color", DEFAULT_FLAG.DOWN, { parent = P })
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_SZ, "Flag Safezone Color", DEFAULT_FLAG.SZ, { parent = P })
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_STAFF, "Flag Staff Color", DEFAULT_FLAG.STAFF, { parent = P })
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_REVIVE, "Flag Reviving Color", DEFAULT_FLAG.REVIVE, { parent = P })
+    menu.add_colorpicker(T, G.VISUALS, ID_FLAG_MOVE, "Flag Movement Color", DEFAULT_FLAG.MOVE, { parent = P })
+    menu.add_colorpicker(T, G.VISUALS, ID_FLAG_VIP, "Flag VIP Color", DEFAULT_FLAG.VIP, { parent = P })
 
     menu.add_slider_int(T, G.VISUALS, ID_RANGE, "Player Range", 50, 2000, 500, { parent = P })
     menu_util.gap(T, G.VISUALS)
 
-    local children = {
+    menu_util.bind_children(P, {
         ID_BOX, ID_BOX_COLOR, ID_HEALTH, ID_SKELETON,
-        ID_NAME, ID_CLAN, ID_DIST, ID_WEAPON,
+        ID_NAME, ID_CLAN, ID_DIST,
         FILTERS, FLAGS,
         ID_FLAG_DOWN, ID_FLAG_SZ, ID_FLAG_STAFF, ID_FLAG_REVIVE,
+        ID_FLAG_MOVE, ID_FLAG_VIP,
         ID_RANGE,
-    }
-    menu_util.bind_children(P, children)
+    })
 end
 
-local function clan_tag_color(snap, menu_col)
-    local cc = snap and snap.clan_color
-    if cc and cc[1] then return cc end
-    return menu_col
+local function horizontal_speed(p)
+    local vel = p.Velocity or p.velocity
+    if not vel then return 0 end
+    local x = tonumber(vel.X or vel.x)
+    local z = tonumber(vel.Z or vel.z)
+    if not x or not z then return 0 end
+    return math.sqrt(x * x + z * z)
 end
 
-local function flag_on(index)
-    return settings.multi(FLAGS, index, true)
+local function movement_label(p)
+    local speed = horizontal_speed(p)
+    if speed < 1.0 then return "IDLE" end
+    if speed > 15.0 then return "SPRINTING" end
+    return "WALKING"
 end
 
-local function collect_side_tags(p, snap, show_clan, clan_menu_col, flag_cols)
-    local out = {}
-    snap = snap or player_state.esp_state(p)
-    if not snap then return out end
+local function native_bounds(player)
+    local fn = player and (player.GetBounds or player.get_bounds)
+    if not fn then return nil end
+    return fn(player)
+end
 
-    if show_clan and snap.clan_tag then
-        out[#out + 1] = {
-            text = "[" .. snap.clan_tag .. "]",
-            col = clan_tag_color(snap, clan_menu_col),
-        }
+local function native_bones(player)
+    local fn = player and (player.GetBonesScreen or player.get_bones_screen)
+    if not fn then return nil end
+    return fn(player)
+end
+
+local function emit_side_tag(x, y, ts, row, text, col)
+    draw_util.text(x, y + row * (ts + 1), text, col, ts)
+    return row + 1
+end
+
+local function draw_side_tags(p, snap, show_clan, clan_menu_col, flag_cols, flags, x, y, ts)
+    local row = 0
+
+    if show_clan and snap and snap.clan_tag then
+        local cc = snap.clan_color
+        row = emit_side_tag(x, y, ts, row, "[" .. snap.clan_tag .. "]", (cc and cc[1]) and cc or clan_menu_col)
     end
 
-    if flag_on(FL_SAFEZONE) and snap.safezone then
-        out[#out + 1] = { text = "[SZ]", col = flag_cols.sz }
+    if flags[FL_SAFEZONE] and snap and snap.safezone then
+        row = emit_side_tag(x, y, ts, row, "[SZ]", flag_cols.sz)
     end
-    if flag_on(FL_DOWNED) and snap.downed then
-        out[#out + 1] = { text = "[DOWN]", col = flag_cols.down }
+    if flags[FL_DOWNED] and snap and snap.downed then
+        row = emit_side_tag(x, y, ts, row, "[DOWN]", flag_cols.down)
     end
-    if flag_on(FL_STAFF) then
-        if snap.staff then
-            out[#out + 1] = { text = "[" .. snap.staff .. "]", col = flag_cols.staff }
+    if flags[FL_STAFF] then
+        if snap and snap.staff then
+            row = emit_side_tag(x, y, ts, row, "[" .. snap.staff .. "]", flag_cols.staff)
         else
             local role = mod_checker.staff_role(p)
             if role then
-                out[#out + 1] = {
-                    text = "[" .. mod_ids.short_label(role) .. "]",
-                    col = flag_cols.staff,
-                }
+                row = emit_side_tag(x, y, ts, row, "[" .. mod_ids.short_label(role) .. "]", flag_cols.staff)
             end
         end
     end
-    if flag_on(FL_REVIVING) and snap.reviving then
-        out[#out + 1] = { text = "[REVIVE]", col = flag_cols.revive }
+    if flags[FL_REVIVING] and snap and snap.reviving then
+        row = emit_side_tag(x, y, ts, row, "[REVIVE]", flag_cols.revive)
     end
-
-    return out
-end
-
-local function prune_bounds_cache(now)
-    for key, ent in pairs(_bounds_cache) do
-        if not ent or (now - (ent.t or 0)) > BOUNDS_TTL_MS * 3 then
-            _bounds_cache[key] = nil
-        end
+    if flags[FL_VIP] and snap and snap.vip then
+        row = emit_side_tag(x, y, ts, row, "[VIP]", flag_cols.vip)
     end
-end
-
-local function prune_wpn_cache(now)
-    for key, ent in pairs(_wpn_cache) do
-        if not ent or (now - (ent.t or 0)) > WPN_TTL_MS * 8 then
-            _wpn_cache[key] = nil
-        end
+    if flags[FL_MOVEMENT] then
+        emit_side_tag(x, y, ts, row, "[" .. movement_label(p) .. "]", flag_cols.move)
     end
-end
-
-local function resolve_bounds(p, pos, dist)
-    local key = cache_key(p)
-    local now = tick_ms()
-
-    local fresh = esp_util.player_screen_bounds(p, {
-        dist = dist,
-        point_size = esp_util.dist_point_size(dist),
-    })
-
-    if not esp_util.bounds_usable(fresh) and pos then
-        local size = esp_util.dist_point_size(dist)
-        fresh = esp_util.point_screen_bounds(pos.x, pos.y, pos.z, size)
-        if fresh then
-            fresh = esp_util.guard_tiny_bounds(fresh, dist)
-        end
-    end
-
-    return esp_util.hold_bounds(_bounds_cache, key, fresh, now, BOUNDS_TTL_MS)
-end
-
-local function is_on_screen(bounds, pos)
-    if pos then
-        local _, _, on = esp_util.w2s(pos.x, pos.y, pos.z)
-        if on then return true end
-    end
-    if bounds and bounds.valid then
-        local sw, sh = draw_util.screen_size()
-        local cx = bounds.x + bounds.w * 0.5
-        local cy = bounds.y + bounds.h * 0.5
-        local margin = 120
-        return cx > -margin and cy > -margin and cx < sw + margin and cy < sh + margin
-    end
-    return false
-end
-
-function M.update(_dt)
-end
-
-local function player_world_pos(p)
-    local x, y, z = esp_util.vec3_pos(ep.head_position(p))
-    if x then return x, y, z end
-    return esp_util.vec3_pos(ep.position(p))
-end
-
-local function me_world_pos(me)
-    if not me then return nil end
-    local x, y, z = esp_util.vec3_pos(ep.position(me) or ep.head_position(me))
-    if x then return { x = x, y = y, z = z } end
-    return nil
 end
 
 function M.draw()
-    if not settings.enabled(P) then return end
-    ep.ensure_api_aliases()
-    local players = ep.get_players()
-    if #players == 0 and not (entity and (entity.get_players or entity.GetPlayers)) then
-        return
+    if not M._flags_migrated then
+        M._flags_migrated = true
+        migrate_flags_table()
     end
 
-    local now = tick_ms()
-    prune_bounds_cache(now)
-    prune_wpn_cache(now)
+    if not settings.enabled(P) then return end
+
+    local players = cache.players
+    if type(players) ~= "table" or #players == 0 then return end
 
     local range = settings.num(ID_RANGE, 500)
     local range_sq = range * range
     local box_mode = settings.num(ID_BOX, 1)
-    local me_pos = me_world_pos(env.get_local_player())
-    local opts = filter_opts()
-
     local show_health = settings.bool(ID_HEALTH, true)
     local show_skel = settings.bool(ID_SKELETON, false)
     local show_name = settings.bool(ID_NAME, true)
     local show_clan = settings.bool(ID_CLAN, true)
     local show_dist = settings.bool(ID_DIST, true)
-    local show_wpn = settings.bool(ID_WEAPON, false)
+
+    local filter_team = settings.multi(FILTERS, F_TEAM, true)
+    local filter_sz = settings.multi(FILTERS, F_SAFEZONE, false)
+    local skip_downed = settings.multi(FILTERS, F_SKIP_DOWNED, false)
+
+    -- Defaults must be false for optional flags so missing multi slots stay off.
+    local flags = {
+        [FL_DOWNED] = settings.multi(FLAGS, FL_DOWNED, false),
+        [FL_SAFEZONE] = settings.multi(FLAGS, FL_SAFEZONE, false),
+        [FL_STAFF] = settings.multi(FLAGS, FL_STAFF, false),
+        [FL_REVIVING] = settings.multi(FLAGS, FL_REVIVING, false),
+        [FL_MOVEMENT] = settings.multi(FLAGS, FL_MOVEMENT, false),
+        [FL_VIP] = settings.multi(FLAGS, FL_VIP, false),
+    }
+
+    local need_snap = show_clan or filter_sz or skip_downed
+        or flags[FL_DOWNED] or flags[FL_SAFEZONE]
+        or flags[FL_STAFF] or flags[FL_REVIVING] or flags[FL_VIP]
+    local need_side = need_snap or flags[FL_MOVEMENT]
 
     local skel_col = settings.color(ID_SKELETON, { 1, 1, 1, 0.92 })
     local name_col = settings.color(ID_NAME, DEFAULT_TEXT)
     local clan_menu_col = settings.color(ID_CLAN, DEFAULT_CLAN)
     local dist_col = settings.color(ID_DIST, DEFAULT_MUTED)
-    local wpn_col = settings.color(ID_WEAPON, DEFAULT_MUTED)
+    local box_col = settings.color(ID_BOX_COLOR, DEFAULT_BOX)
     local flag_cols = {
         down = settings.color(ID_FLAG_DOWN, DEFAULT_FLAG.DOWN),
         sz = settings.color(ID_FLAG_SZ, DEFAULT_FLAG.SZ),
         staff = settings.color(ID_FLAG_STAFF, DEFAULT_FLAG.STAFF),
         revive = settings.color(ID_FLAG_REVIVE, DEFAULT_FLAG.REVIVE),
+        move = settings.color(ID_FLAG_MOVE, DEFAULT_FLAG.MOVE),
+        vip = settings.color(ID_FLAG_VIP, DEFAULT_FLAG.VIP),
     }
+    local base_ts = esp_util.text_size()
 
-    for _, p in ipairs(players) do
-        -- Isolate per-player errors so one bad snapshot cannot blank all ESP.
-        local ok, err = pcall(function()
-            if not passes_player_filters(p, opts) then return end
+    local me = cache.local_player
+    local mx, my, mz = nil, nil, nil
+    if me then
+        mx, my, mz = esp_util.vec3_pos(me.Position or me.position or me.HeadPosition or me.head_position)
+    end
 
-            local px, py, pz = player_world_pos(p)
-            if not px then return end
-            local pos = { x = px, y = py, z = pz }
+    for i = 1, #players do
+        local p = players[i]
+        if not p then goto continue end
+        if p.IsAlive == false or p.is_alive == false then goto continue end
 
-            local dist = 0
-            if me_pos then
-                local dx = px - me_pos.x
-                local dy = py - me_pos.y
-                local dz = pz - me_pos.z
-                local dist_sq = dx * dx + dy * dy + dz * dz
-                if dist_sq > range_sq then return end
-                dist = math.sqrt(dist_sq)
-            end
+        local pname = p.Name or p.name or p.DisplayName or p.display_name
+        local hx, hy, hz = esp_util.vec3_pos(
+            p.HeadPosition or p.head_position or p.Position or p.position
+        )
+        if not hx then goto continue end
 
-            local snap = nil
-            pcall(function()
-                snap = player_state.esp_state(p)
-            end)
-            local col = resolve_color(p)
-
-            if show_skel then
-                local bones = ep.get_bones_screen(p)
-                if bones then
-                    esp_util.draw_player_skeleton(p, skel_col, 1)
-                else
-                    local char = ep.character(p)
-                    if char then
-                        esp_util.draw_model_skeleton(char, skel_col, 1)
-                    end
-                end
-            end
-
-            -- Prefer native GetBounds (PascalCase API) before our projection fallbacks.
-            local bounds = ep.get_bounds(p)
-            if not esp_util.bounds_usable(bounds) then
-                bounds = resolve_bounds(p, pos, dist)
-            end
-            if not is_on_screen(bounds, pos) then
-                local bx, by, bvis = ep.get_bone_screen(p, "Head")
-                if bvis then
-                    local size = esp_util.dist_point_size(dist)
-                    bounds = {
-                        x = bx - size * 0.5,
-                        y = by - size,
-                        w = size,
-                        h = size * 2,
-                        valid = true,
-                    }
-                else
-                    return
-                end
-            end
-            if not esp_util.bounds_usable(bounds) then
-                local size = esp_util.dist_point_size(dist)
-                bounds = esp_util.guard_tiny_bounds(
-                    esp_util.point_screen_bounds(px, py, pz, size),
-                    dist
-                )
-            end
-            if not esp_util.bounds_usable(bounds) then return end
-
-            local ts = esp_util.text_size()
-            if dist > 250 then
-                ts = math.max(11, ts - 1)
-            end
-
-            local cx = bounds.x + bounds.w * 0.5
-
-            local top = {}
-            if show_name then
-                top[#top + 1] = { text = ep.name(p) or "?", col = name_col }
-            end
-            if show_wpn then
-                local wpn = held_weapon_name(p) or ep.tool_name(p)
-                if wpn and wpn ~= "" then
-                    top[#top + 1] = { text = tostring(wpn), col = wpn_col }
-                end
-            end
-
-            if #top > 0 then
-                local ty = bounds.y - 4 - (#top * (ts + 1))
-                for i = 1, #top do
-                    draw_util.text_centered(cx, ty + (i - 1) * (ts + 1), top[i].text, top[i].col, ts)
-                end
-            end
-
-            local side = collect_side_tags(p, snap, show_clan, clan_menu_col, flag_cols)
-            if #side > 0 then
-                local rx = bounds.x + bounds.w + 4
-                local ry = bounds.y
-                for i = 1, #side do
-                    draw_util.text(
-                        rx,
-                        ry + (i - 1) * (ts + 1),
-                        side[i].text,
-                        side[i].col,
-                        ts
-                    )
-                end
-            end
-
-            if box_mode == 1 then
-                draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 0)
-            elseif box_mode == 2 then
-                draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, col, 1)
-            end
-
-            if show_health then
-                draw_util.health_bar_on_box(bounds, ep.health(p), ep.max_health(p))
-            end
-
-            if show_dist then
-                draw_util.text_centered(
-                    cx,
-                    bounds.y + bounds.h + 3,
-                    string.format("%dm", math.floor(dist + 0.5)),
-                    dist_col,
-                    ts
-                )
-            end
-        end)
-        if not ok then
-            April.require("core.debug").error_once("player_esp:" .. tostring(p and ep.name(p)), err)
+        local dist = 0
+        if mx then
+            local dx, dy, dz = hx - mx, hy - my, hz - mz
+            local dist_sq = dx * dx + dy * dy + dz * dz
+            if dist_sq > range_sq then goto continue end
+            dist = math.sqrt(dist_sq)
         end
+
+        if filter_team and not player_state.passes_team_check(p) then goto continue end
+
+        local snap = nil
+        if need_snap then
+            snap = player_state.esp_state(p)
+            if skip_downed and snap and snap.downed then goto continue end
+            if filter_sz and snap and snap.safezone then goto continue end
+        end
+
+        -- Vector documents GetBounds.valid as the strict on-screen result.
+        local bounds = native_bounds(p)
+        if not esp_util.bounds_usable(bounds) then goto continue end
+
+        if show_skel then
+            local bones = native_bones(p)
+            if bones then
+                esp_util.draw_skeleton_bones(bones, skel_col, 1)
+            end
+        end
+
+        local ts = base_ts
+        if dist > 200 then ts = math.max(9, ts - 1) end
+        if dist > 400 then ts = math.max(8, ts - 1) end
+
+        local cx = bounds.x + bounds.w * 0.5
+        if show_name then
+            draw_util.text_centered(cx, bounds.y - ts - 5, pname or "?", name_col, ts)
+        end
+
+        if need_side then
+            draw_side_tags(
+                p, snap, show_clan, clan_menu_col, flag_cols, flags,
+                bounds.x + bounds.w + 4, bounds.y, ts
+            )
+        end
+
+        if box_mode == 1 then
+            draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, box_col, 0)
+        elseif box_mode == 2 then
+            draw_util.box_esp(bounds.x, bounds.y, bounds.w, bounds.h, box_col, 1)
+        end
+
+        if show_health then
+            draw_util.health_bar_on_box(bounds, p.Health or p.health, p.MaxHealth or p.max_health)
+        end
+
+        if show_dist then
+            draw_util.text_centered(
+                cx,
+                bounds.y + bounds.h + 3,
+                string.format("%dm", math.floor(dist + 0.5)),
+                dist_col,
+                ts
+            )
+        end
+
+        ::continue::
     end
 end
 

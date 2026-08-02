@@ -132,6 +132,12 @@ function M.draw(name, cx, cy, col)
         line(cx + 5.2, cy - 6.8, cx + 7.8, cy - 4.2, col, 1.3)
         line(cx + 7.8, cy - 4.2, cx + 5.2, cy - 1.6, col, 1.3)
 
+    elseif name == "events" then
+        circle(cx, cy, 7.5, col, false, 22)
+        line(cx, cy, cx, cy - 4.5, col, 1.5)
+        line(cx, cy, cx + 4, cy + 2.5, col, 1.5)
+        circle(cx, cy, 1.1, col, true, 8)
+
     elseif name == "map" then
         path({
             { cx - 8, cy - 6 }, { cx - 3, cy - 8 }, { cx + 3, cy - 6 },

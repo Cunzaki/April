@@ -312,17 +312,6 @@ function M.complete_static_scan(state)
     cache.stats.last_base_scan = utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
--- Aliases so older call sites / map code keep working.
-M.begin_scan = M.begin_static_scan
-M.step_scan = M.step_static_scan
-M.complete_scan = M.complete_static_scan
-
-function M.scan()
-    local state = M.begin_static_scan()
-    while not M.step_static_scan(state, 9999) do end
-    M.complete_static_scan(state)
-end
-
 function M.update(_dt)
     local map_base = settings.enabled("april_map_enabled") and settings.enabled("april_map_show_base")
     local base_on = settings.enabled(P)

@@ -12,9 +12,12 @@ local team_state = April.require("game.team_state")
 
 local M = {}
 
-local SNAP_TTL_MS = 200
+local DYNAMIC_TTL_MS = 350
+local STATIC_TTL_MS = 3000
+local REFRESH_PER_FRAME = 2
 local snaps = {}
 local pl_cache = {}
+local refresh_index = 0
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -512,13 +515,38 @@ local function resolve_clan_color(pl, char, entity_player)
     return nametag_clan_color(char)
 end
 
-local function build_snap(player)
+local function ensure_snap(player)
+    local key = cache_key(player)
+    local snap = snaps[key]
+    if snap then return snap end
+    snap = {
+        dynamic_t = -DYNAMIC_TTL_MS,
+        static_t = -STATIC_TTL_MS,
+        vip = false,
+        safezone = false,
+        downed = false,
+        reviving = false,
+    }
+    snaps[key] = snap
+    return snap
+end
+
+local function refresh_dynamic(player, snap, now)
     local pl = M.resolve_player_inst(player)
     local char = M.resolve_character(player)
     local hum = M.resolve_humanoid(player)
     if not hum and char then hum = find_humanoid(char) end
     local ic = char and find_child(char, "InteractController") or nil
 
+    snap.safezone = as_bool(read_attr(pl, "SafeZone")) or as_bool(read_attr(pl, "InSafeZone"))
+    snap.downed = as_bool(read_attr(hum, "Downed"))
+    snap.reviving = as_bool(read_attr(ic, "Reviving"))
+    snap.dynamic_t = now
+end
+
+local function refresh_static(player, snap, now)
+    local pl = M.resolve_player_inst(player)
+    local char = M.resolve_character(player)
     local pa = read_player_attrs(pl)
 
     -- NameTag only fills missing ClanTag string - never invents VIP/color.
@@ -539,31 +567,43 @@ local function build_snap(player)
         end
     end
 
-    return {
-        t = tick_ms(),
-        vip = pa.vip,
-        safezone = pa.safezone,
-        downed = as_bool(read_attr(hum, "Downed")),
-        reviving = as_bool(read_attr(ic, "Reviving")),
-        staff = staff,
-        clan_tag = pa.clan_tag,
-        clan_color = pa.clan_color,
-        resolved = pl ~= nil,
-        from_player = pa.from_player,
-    }
+    snap.vip = pa.vip
+    snap.staff = staff
+    snap.clan_tag = pa.clan_tag
+    snap.clan_color = pa.clan_color
+    snap.resolved = pl ~= nil
+    snap.from_player = pa.from_player
+    snap.static_t = now
 end
 
 local function get_snap(player)
     if not player then return nil end
-    local key = cache_key(player)
-    local now = tick_ms()
-    local s = snaps[key]
-    if s and (now - s.t) < SNAP_TTL_MS then
-        return s
+    return ensure_snap(player)
+end
+
+-- Amortize Roblox tree/attribute reads across frames. ESP still reads live
+-- Vector geometry every frame; only metadata is throttled here.
+function M.tick(players)
+    local n = #(players or {})
+    if n == 0 then
+        refresh_index = 0
+        return
     end
-    s = build_snap(player)
-    snaps[key] = s
-    return s
+
+    local now = tick_ms()
+    for _ = 1, math.min(REFRESH_PER_FRAME, n) do
+        refresh_index = (refresh_index % n) + 1
+        local player = players[refresh_index]
+        if player then
+            local snap = ensure_snap(player)
+            if now - (snap.dynamic_t or 0) >= DYNAMIC_TTL_MS then
+                refresh_dynamic(player, snap, now)
+            end
+            if now - (snap.static_t or 0) >= STATIC_TTL_MS then
+                refresh_static(player, snap, now)
+            end
+        end
+    end
 end
 
 function M.invalidate(player)

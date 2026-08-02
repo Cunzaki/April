@@ -15,7 +15,8 @@ M._defer_ms = 2500
 
 local function in_game_ready()
     if env.get_local_player() then return true end
-    if entity and entity.get_players and #entity.get_players() > 0 then return true end
+    local cache = April.require("core.cache")
+    if cache.local_player or #cache.all_entities > 0 then return true end
     return false
 end
 

@@ -110,7 +110,7 @@ local function members_from_teamlist()
 
     local set, list = {}, {}
     local ep = April.require("core.entity_props")
-    local players = ep.get_players()
+    local players = April.require("core.cache").players
     if #players == 0 then return set, list end
     for _, p in ipairs(players) do
         local name = ep.name(p)

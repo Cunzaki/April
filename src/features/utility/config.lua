@@ -61,6 +61,7 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.CONFIG)
 
+    menu.add_checkbox(T, G.CONFIG, "april_ui_startup_intro", "Startup Animation", true)
     menu_util.input(T, G.CONFIG, "april_cfg_profile_name", "Profile Name", "Default")
 
     menu.add_slider_int(T, G.CONFIG, "april_cfg_slot", "Active Slot (1-5)", store.SLOT_MIN, store.SLOT_MAX, 1)

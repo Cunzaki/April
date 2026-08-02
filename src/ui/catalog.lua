@@ -259,19 +259,19 @@ local function build_visuals()
             kb("april_player_enabled", "Player ESP", false, nil, { hide_color = true }),
             combo("april_player_box_mode", "Player Box", { "None", "2D", "Corner" }, 1),
             multi("april_ui_player_elements", "Displayed Elements", {
-                "Health Bar", "Skeleton", "Name", "Clan Tag", "Distance", "Weapon",
-            }, { true, false, true, true, true, false }, nil, {
+                "Health Bar", "Skeleton", "Name", "Clan Tag", "Distance",
+            }, { true, false, true, true, true }, nil, {
                 sync_ids = {
                     "april_player_health", "april_player_skeleton", "april_player_show_name",
-                    "april_player_clan_tag", "april_player_show_distance", "april_player_show_weapon",
+                    "april_player_clan_tag", "april_player_show_distance",
                 },
             }),
             multi("april_player_esp_filters", "ESP Filters", {
                 "Team Check", "Skip Safezone", "Skip Downed",
             }, { true, false, false }),
             multi("april_player_esp_flags", "ESP Flags", {
-                "Downed", "Safezone", "Staff", "Reviving",
-            }, { true, true, true, true }),
+                "Downed", "Safezone", "Staff", "Reviving", "Movement", "VIP",
+            }, { true, true, true, true, false, true }),
             sl("april_player_range", "Player Range", 50, 2000, 500),
         },
     }
@@ -327,12 +327,13 @@ local function build_visuals()
             color("april_player_show_name", "Name", { 1, 0.35, 0.35, 1 }),
             color("april_player_clan_tag", "Clan Tag", { 0.84, 0.31, 0.80, 1 }),
             color("april_player_show_distance", "Distance", { 0.82, 0.84, 0.88, 0.92 }),
-            color("april_player_show_weapon", "Weapon", { 0.82, 0.84, 0.88, 0.92 }),
             sep(),
             color("april_player_flag_downed", "Downed", { 1, 0.35, 0.35, 1 }),
             color("april_player_flag_safezone", "Safezone", { 0.35, 0.85, 1, 1 }),
             color("april_player_flag_staff", "Staff", { 1, 0.33, 0.33, 1 }),
             color("april_player_flag_reviving", "Reviving", { 0.45, 1, 0.55, 1 }),
+            color("april_player_flag_movement", "Movement", { 0.75, 0.85, 1, 1 }),
+            color("april_player_flag_vip", "VIP", { 1, 0.82, 0.2, 1 }),
         },
     }
     return { left, gear, target_vis, colors }
@@ -392,16 +393,20 @@ local function build_world()
         master = "april_npc_enabled",
         items = {
             kb("april_npc_enabled", "NPC ESP", false, nil, { hide_color = true }),
-            multi("april_ui_npc_types", "NPC Types", { "Soldiers", "Bosses", "Helicopters" }, { false, false, false }, nil, {
-                sync_ids = { "april_npc_soldiers", "april_npc_bosses", "april_npc_heli" },
+            multi("april_ui_npc_types", "NPC Types", {
+                "Soldier", "Bruno", "Boris", "Brutus", "Attack Heli", "BTR", "Diver Dave", "Pilot Pete",
+            }, { false, false, false, false, false, false, false, false }, nil, {
+                sync_ids = {
+                    "april_npc_soldier", "april_npc_bruno", "april_npc_boris", "april_npc_brutus",
+                    "april_npc_attack_heli", "april_npc_btr", "april_npc_diver_dave", "april_npc_pilot_pete",
+                },
             }),
             combo("april_npc_box_mode", "NPC Box", { "None", "2D", "Corner" }, 1),
             multi("april_ui_npc_elements", "Displayed Elements", {
-                "Health Bar", "Skeleton", "Name", "Distance", "Weapon",
-            }, { true, false, true, true, false }, nil, {
+                "Health Bar", "Name", "Distance",
+            }, { true, true, true }, nil, {
                 sync_ids = {
-                    "april_npc_health", "april_npc_skeleton", "april_npc_show_name",
-                    "april_npc_show_distance", "april_npc_show_weapon",
+                    "april_npc_health", "april_npc_show_name", "april_npc_show_distance",
                 },
             }),
             sl("april_npc_range", "NPC Range", 50, 2000, 500),
@@ -412,17 +417,30 @@ local function build_world()
         title = "NPC Colors",
         master = "april_npc_enabled",
         items = {
-            color("april_npc_soldiers", "Soldier", { 1, 0.3, 0.3, 1 }),
-            color("april_npc_bosses", "Boss", { 1, 0.5, 0.1, 1 }),
-            color("april_npc_heli", "Helicopter", { 0.85, 0.2, 0.25, 1 }),
-            color("april_npc_skeleton", "Skeleton", { 1, 1, 1, 0.85 }),
+            color("april_npc_soldier", "Soldier", { 1, 0.3, 0.3, 1 }),
+            color("april_npc_bruno", "Bruno", { 1, 0.65, 0.2, 1 }),
+            color("april_npc_boris", "Boris", { 0.78, 0.42, 1, 1 }),
+            color("april_npc_brutus", "Brutus", { 1, 0.3, 0.48, 1 }),
+            color("april_npc_attack_heli", "Attack Heli", { 0.85, 0.2, 0.25, 1 }),
+            color("april_npc_btr", "BTR", { 0.95, 0.25, 0.15, 1 }),
+            color("april_npc_diver_dave", "Diver Dave", { 0.2, 0.75, 1, 1 }),
+            color("april_npc_pilot_pete", "Pilot Pete", { 0.35, 1, 0.65, 1 }),
             color("april_npc_show_name", "Name", { 1, 0.3, 0.3, 1 }),
             color("april_npc_show_distance", "Distance", { 0.82, 0.84, 0.88, 0.92 }),
-            color("april_npc_show_weapon", "Weapon", { 0.82, 0.84, 0.88, 0.92 }),
         },
     }
 
-    return { resources, loot, npcs, npc_colors, bases }
+    local raids = {
+        title = "Raids",
+        master = "april_raid_enabled",
+        items = {
+            kb("april_raid_enabled", "Raid ESP", false, nil, { color = { 1, 0.5, 0, 1 } }),
+            cb("april_raid_notifications", "Raid Notifications", true),
+            sl("april_raid_range", "Raid ESP Range", 50, 5000, 1000),
+        },
+    }
+
+    return { resources, loot, npcs, npc_colors, raids, bases }
 end
 
 local function build_guns()
@@ -525,12 +543,12 @@ local function build_radar()
             items = {
                 kb("april_map_enabled", "Tactical Map", false),
                 multi("april_ui_radar_layers", "Visible Layers", {
-                    "Players", "NPCs", "Loot", "Resources", "Base Parts", "Waypoints", "Labels",
-                }, { true, false, true, true, false, true, false }, nil, {
+                    "Players", "NPCs", "Loot", "Resources", "Base Parts", "Waypoints", "Raids", "Labels",
+                }, { true, false, true, true, false, true, false, false }, nil, {
                     sync_ids = {
                         "april_map_show_players", "april_map_show_npcs", "april_map_show_loot",
                         "april_map_show_world", "april_map_show_base", "april_map_show_waypoints",
-                        "april_map_labels",
+                        "april_map_show_raids", "april_map_labels",
                     },
                 }),
                 color("april_map_player_col", "Radar Players Color", { 1, 0.25, 0.25, 1 }),
@@ -539,6 +557,7 @@ local function build_radar()
                 color("april_map_world_col", "Radar Resources Color", { 0.35, 0.9, 0.35, 1 }),
                 color("april_map_base_col", "Radar Base Color", { 0.55, 0.55, 1, 1 }),
                 color("april_map_wp_col", "Radar Waypoints Color", { 0.3, 0.9, 1, 1 }),
+                color("april_map_raid_col", "Radar Raids Color", { 1, 0.5, 0, 1 }),
                 sl("april_map_zoom", "Radar Zoom Level", 0.05, 5, 1, true),
                 sl("april_map_size", "Radar Size", 140, 420, 250),
                 sl("april_map_icon_scale", "Radar Blip Size", 2, 6, 3),
@@ -592,6 +611,8 @@ local function build_config()
     local motion = {
         title = "Motion",
         items = {
+            cb("april_ui_startup_intro", "Startup Animation", true),
+            sep(),
             combo("april_ui_motion_profile", "Motion Profile", {
                 "Subtle", "Balanced", "Expressive",
             }, 1),

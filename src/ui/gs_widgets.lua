@@ -49,10 +49,7 @@ local LISTEN_SKIP = {
 }
 
 local function listen_skip_vk(vk)
-    if LISTEN_SKIP[vk] then return true end
-    local menu_vk = state.get_key("april_ui_menu_key")
-    if not menu_vk or menu_vk == 0 then menu_vk = 0x2D end
-    return vk == menu_vk
+    return LISTEN_SKIP[vk] == true
 end
 
 local function clamp(v, a, b)
@@ -588,22 +585,16 @@ function M.group_box(x, y, w, h, title)
     M.text(x + 12, y + 5, title, theme.TEXT_ACTIVE, theme.FONT_TITLE)
 end
 
-local LISTEN_VKS = {
-    0x02, 0x04, 0x05, 0x06, 0x08, 0x09, 0x0D, 0x10, 0x11, 0x12, 0x14, 0x1B, 0x20,
-    0x25, 0x26, 0x27, 0x28, 0x2E,
-    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39,
-    0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D,
-    0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A,
-    0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B,
-    0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC0,
-}
+-- Project Vector accepts Windows virtual-key integers directly. Poll the full
+-- valid byte range while listening so navigation, numpad, media, OEM,
+-- left/right modifiers, F13-F24, Insert, and mouse side buttons all bind.
+local LISTEN_VKS = {}
+for vk = 0x01, 0xFE do
+    LISTEN_VKS[#LISTEN_VKS + 1] = vk
+end
 
 function M.tick_key_listen()
     if not M.listening_key then return end
-    if input.key_pressed(0x1B) then
-        M.listening_key = nil
-        return
-    end
     for i = 1, #LISTEN_VKS do
         local vk = LISTEN_VKS[i]
         if not listen_skip_vk(vk) and input.key_pressed(vk) then

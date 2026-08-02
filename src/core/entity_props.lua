@@ -12,16 +12,6 @@ function M.ensure_api_aliases()
     end
 end
 
-function M.get_players()
-    M.ensure_api_aliases()
-    if not entity then return {} end
-    local fn = entity.get_players or entity.GetPlayers
-    if not fn then return {} end
-    local ok, list = pcall(fn)
-    if ok and type(list) == "table" then return list end
-    return {}
-end
-
 function M.get_local_player()
     M.ensure_api_aliases()
     if not entity then return nil end

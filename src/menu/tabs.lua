@@ -19,6 +19,7 @@ M.FEATURE_ORDER = {
     "features.world.world_esp",
     "features.world.loot_esp",
     "features.world.npc_esp",
+    "features.world.raid_esp",
     "features.world.base_esp",
     "features.radar.tactical_map",
     "features.radar.waypoints",
@@ -29,6 +30,7 @@ M.FEATURE_ORDER = {
     "features.movement.fling",
     "features.combat.perfect_farm",
     "features.utility.mod_checker",
+    "features.utility.event_status",
     "features.utility.anti_afk",
     "features.utility.keybind_viewer",
     "features.utility.config",
@@ -73,7 +75,6 @@ function M.setup_scans()
     local world_esp = April.require("features.world.world_esp")
     local loot_esp = April.require("features.world.loot_esp")
     local base_esp = April.require("features.world.base_esp")
-    local npc_esp = April.require("features.world.npc_esp")
 
     -- Shared budget for world / loot / base / npc — one incremental thread.
     iscan.configure({ budget_ms = 6, items_per_step = 18 })
@@ -114,13 +115,14 @@ function M.setup_scans()
         return settings.enabled("april_base_enabled") or map_on("base")()
     end, base_esp.begin_static_scan, base_esp.step_static_scan, base_esp.complete_static_scan, 480)
 
-    iscan.register("npcs", SCAN_MS, function()
-        if settings.enabled("april_npc_enabled") then return true end
-        return map_on("npcs")()
-    end, npc_esp.begin_scan, npc_esp.step_scan, npc_esp.complete_scan, 600)
 end
 
 function M.update(dt)
+    local cache = April.require("core.cache")
+    cache.refresh_entities()
+    April.require("game.npcs").refresh_cache(cache.workspace_entities)
+    April.require("game.player_state").tick(cache.players)
+
     bootstrap.tick()
 
     local weapons = April.require("game.weapons")

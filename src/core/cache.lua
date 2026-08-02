@@ -1,10 +1,14 @@
 local M = {}
 
+M.all_entities = {}
 M.players = {}
+M.workspace_entities = {}
+M.local_player = nil
 M.world = {}
 M.loot = {}
 M.base = {}
 M.npcs = {}
+M.raids = {}
 M.waypoints = {}
 M.stats = {
     last_player_scan = 0,
@@ -20,6 +24,57 @@ M.POS_CACHE_MS = 1000
 M.PRUNE_MS = 2000
 M._last_pos_cache = 0
 M._last_prune = 0
+M._entity_frame = 0
+
+local function clear_array(list)
+    for i = #list, 1, -1 do
+        list[i] = nil
+    end
+end
+
+-- Capture Vector's entity cache once per April frame. Consumers reuse these
+-- stable arrays instead of each calling entity.GetPlayers independently.
+function M.refresh_entities()
+    M._entity_frame = M._entity_frame + 1
+
+    local get_players = entity and (entity.GetPlayers or entity.get_players)
+    local list = nil
+    if get_players then
+        local ok, result = pcall(get_players)
+        if ok and type(result) == "table" then
+            list = result
+        end
+    end
+    list = list or {}
+
+    M.all_entities = list
+    clear_array(M.players)
+    clear_array(M.workspace_entities)
+
+    local local_player = nil
+    for i = 1, #list do
+        local player = list[i]
+        if player then
+            if player.IsLocal == true or player.is_local == true then
+                local_player = player
+            elseif player.IsWorkspaceEntity == true or player.is_workspace_entity == true then
+                M.workspace_entities[#M.workspace_entities + 1] = player
+            else
+                M.players[#M.players + 1] = player
+            end
+        end
+    end
+
+    if not local_player then
+        local get_local = entity and (entity.GetLocalPlayer or entity.get_local_player)
+        if get_local then
+            local ok, result = pcall(get_local)
+            if ok then local_player = result end
+        end
+    end
+    M.local_player = local_player
+    return list
+end
 
 function M.should_refresh_positions()
     local now = utility and utility.get_tick_count and utility.get_tick_count() or 0
