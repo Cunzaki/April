@@ -118,9 +118,6 @@ function M.register_menu()
         "Skip Downed",
     }, { true, false, true, true, false, true }, { parent = P_MASTER })
     menu.add_input(T, G.SILENT_AIM, PREFIX .. "whitelist_ids", "Whitelist IDs", "")
-    if menu and menu.set_visible then
-        pcall(menu.set_visible, PREFIX .. "whitelist_ids", false)
-    end
     menu.add_button(T, G.SILENT_AIM, PREFIX .. "whitelist_clear", "Clear Whitelist", function()
         if silent_whitelist and silent_whitelist.clear then
             silent_whitelist.clear(PREFIX)

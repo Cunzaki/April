@@ -71,6 +71,7 @@ const ORDER = [
   "game/inventory.lua",
   "game/player_gear.lua",
   "game/npcs.lua",
+  "game/map_image.lua",
   "game/turret_stats.lua",
   "game/toolinfo_weapon_mods.lua",
   "features/combat/silent_whitelist.lua",
@@ -124,7 +125,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.0.9";
+const VERSION = "4.0.17";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector
@@ -233,3 +234,34 @@ if (fs.existsSync(SCRIPT2_OUT)) {
   fs.unlinkSync(SCRIPT2_OUT);
   console.log("Removed Script 2.lua");
 }
+
+// Copy map tile atlas into Vector Scripts so radar can LoadImage local tiles.
+function copyMapTilesToVector() {
+  const assetId = "121836456123484";
+  const srcTiles = path.join(ROOT, "assets", "maps", assetId, "tiles");
+  if (!fs.existsSync(srcTiles)) {
+    console.warn("No map tiles at", srcTiles);
+    return;
+  }
+  const localApp = process.env.LOCALAPPDATA;
+  if (!localApp) {
+    console.warn("LOCALAPPDATA unset; skipped map tile install");
+    return;
+  }
+  const dest = path.join(localApp, "Project Vector", "Scripts", "April_maps", "tiles", assetId);
+  fs.mkdirSync(dest, { recursive: true });
+  let n = 0;
+  for (const name of fs.readdirSync(srcTiles)) {
+    if (!name.endsWith(".png")) continue;
+    fs.copyFileSync(path.join(srcTiles, name), path.join(dest, name));
+    n++;
+  }
+  const fullSrc = path.join(ROOT, "assets", "maps", assetId + ".png");
+  if (fs.existsSync(fullSrc)) {
+    const mapsDir = path.join(localApp, "Project Vector", "Scripts", "April_maps");
+    fs.mkdirSync(mapsDir, { recursive: true });
+    fs.copyFileSync(fullSrc, path.join(mapsDir, assetId + ".png"));
+  }
+  console.log(`Installed ${n} map tiles -> ${dest}`);
+}
+copyMapTilesToVector();

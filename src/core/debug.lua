@@ -22,7 +22,10 @@ function M.warn(msg)
 end
 
 function M.warn_once(key, msg)
-    M.error_once("warn:" .. key, msg)
+    key = "warn:" .. tostring(key)
+    if seen_errors[key] and not M.verbose() then return end
+    seen_errors[key] = (seen_errors[key] or 0) + 1
+    print("[April WARN][" .. key .. "] " .. tostring(msg))
 end
 
 function M.error_once(key, err)

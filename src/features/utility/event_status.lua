@@ -32,9 +32,37 @@ local DEFINITIONS = {
 local rows = {}
 local first_seen = {}
 local last_refresh = -REFRESH_MS
+local session_token = nil
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function session_id()
+    if not game then return "none" end
+    local pid = game.place_id or game.PlaceId or 0
+    local ws = game.workspace
+    local ws_addr = (ws and (ws.Address or ws.address)) or 0
+    local job = (game.job_id or game.JobId or "")
+    return tostring(pid) .. ":" .. tostring(ws_addr) .. ":" .. tostring(job)
+end
+
+local function reset_session_state()
+    rows = {}
+    first_seen = {}
+    last_refresh = -REFRESH_MS
+end
+
+local function tick_session()
+    local sid = session_id()
+    if session_token == nil then
+        session_token = sid
+        return
+    end
+    if sid ~= session_token then
+        session_token = sid
+        reset_session_state()
+    end
 end
 
 local function find_child(parent, name)
@@ -186,6 +214,7 @@ function M.register_menu()
 end
 
 function M.update(_dt)
+    tick_session()
     if not settings.enabled(P) then return end
     local now = tick_ms()
     if now - last_refresh < REFRESH_MS then return end
@@ -194,6 +223,7 @@ function M.update(_dt)
 end
 
 function M.draw()
+    tick_session()
     if not settings.enabled(P) then return end
     if not draw or not draw.text then return end
 

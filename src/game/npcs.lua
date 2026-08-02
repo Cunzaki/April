@@ -74,6 +74,15 @@ function M.is_hostile_kind(kind)
         or kind == "brutus" or kind == "heli" or kind == "btr"
 end
 
+function M.is_boss_kind(kind)
+    return kind == "bruno" or kind == "boris" or kind == "brutus"
+        or kind == "heli" or kind == "btr"
+end
+
+function M.is_boss_name(name)
+    return M.is_boss_kind(M.kind(name))
+end
+
 function M.kind(name)
     name = tostring(name or ""):lower():gsub("[%s_%-]", "")
     if name == "soldier" or name:find("soldier", 1, true) == 1 then return "soldier" end

@@ -2,6 +2,7 @@
 
 local settings = April.require("core.settings")
 local notify = April.require("core.notify")
+local ep = April.require("core.entity_props")
 
 local M = {}
 
@@ -93,14 +94,14 @@ end
 
 function M.is_whitelisted(player, prefix)
     if not player then return false end
-    local uid = tonumber(player.user_id)
+    local uid = ep.user_id(player)
     if not uid or uid == 0 then return false end
     return read_set(prefix)[uid] == true
 end
 
 function M.toggle_player(player, prefix)
     if not player or player.is_local then return false, nil end
-    local uid = tonumber(player.user_id)
+    local uid = ep.user_id(player)
     if not uid or uid == 0 then return false, nil end
 
     local set = read_set(prefix)

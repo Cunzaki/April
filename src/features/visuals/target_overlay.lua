@@ -9,6 +9,7 @@ local active_target = April.require("features.combat.active_target")
 local text_util = April.require("core.text_util")
 local theme = April.require("core.ui_theme")
 local overlay_theme = April.require("core.overlay_theme")
+local ep = April.require("core.entity_props")
 
 local M = {}
 
@@ -67,9 +68,16 @@ local function find_overlay_target()
     return nil
 end
 
+local function player_key(player)
+    if not player then return "?" end
+    local uid = ep.user_id(player)
+    if uid and uid ~= 0 then return uid end
+    return player.name or player.display_name or "?"
+end
+
 local function get_gear(player)
     if not player then return nil end
-    local uid = player.user_id or player.name or "?"
+    local uid = player_key(player)
     local now = tick_ms()
     local cached = gear_cache[uid]
     if cached and (now - cached.t) < GEAR_TTL then
@@ -341,8 +349,8 @@ end
 local function same_target(a, b)
     if a == b then return true end
     if not a or not b then return false end
-    local aid = a.user_id or a.name
-    local bid = b.user_id or b.name
+    local aid = player_key(a)
+    local bid = player_key(b)
     return aid and bid and aid == bid
 end
 
@@ -382,7 +390,7 @@ function M.refresh_target()
     end
 
     local target_changed = not same_target(M._target, target)
-    local uid = target.user_id or target.name or "?"
+    local uid = player_key(target)
     local cached = gear_cache[uid]
     local gear_stale = not cached or (tick_ms() - cached.t) >= GEAR_TTL
 

@@ -1,6 +1,7 @@
 -- Shared yaw / flat-direction helpers for movement features.
 
 local env = April.require("core.env")
+local math_util = April.require("core.math_util")
 
 local M = {}
 
@@ -18,7 +19,7 @@ function M.yaw_from_vector(lx, lz)
     if not lx and not lz then return 0 end
     lx, lz = lx or 0, lz or 0
     if math.abs(lx) < 1e-5 and math.abs(lz) < 1e-5 then return 0 end
-    return math.atan2(lx, lz)
+    return math_util.atan2(lx, lz)
 end
 
 function M.flat_forward(yaw)

@@ -304,8 +304,13 @@ function M.invalidate_uid(user_id)
     end
 end
 
+local function player_uid(player)
+    local ep = April.require("core.entity_props")
+    return normalize_uid(ep.user_id(player))
+end
+
 local function cache_key(player)
-    local uid = normalize_uid(player.user_id)
+    local uid = player_uid(player)
     if uid then return uid end
     return player.name or player.display_name
 end
@@ -359,7 +364,7 @@ function M.role_for_player(player, opts)
 
     local tag_role = role_from_game_tag(player)
     if tag_role then
-        local uid = normalize_uid(player.user_id)
+        local uid = player_uid(player)
         if uid then
             local precise = M.role_for(uid)
             if precise then
@@ -371,7 +376,7 @@ function M.role_for_player(player, opts)
         return tag_role
     end
 
-    local uid = normalize_uid(player.user_id)
+    local uid = player_uid(player)
     if not uid then
         write_cached_role(key, false)
         return nil

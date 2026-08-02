@@ -1,5 +1,7 @@
 local M = {}
 
+local math_util = April.require("core.math_util")
+
 local EYE_OFFSET_Y = 2.5
 local DEFAULT_STEPS = 24
 local MIN_RADIUS = 0.1
@@ -98,7 +100,7 @@ local function yaw_to_target(origin, target_pos)
     if math.abs(dx) < 1e-6 and math.abs(dz) < 1e-6 then
         return 0
     end
-    return math.atan2(dz, dx)
+    return math_util.atan2(dz, dx)
 end
 
 local function try_peek_at(cx, oy, cz, origin, target_pos)

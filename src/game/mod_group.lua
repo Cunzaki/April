@@ -9,9 +9,12 @@ M._cache = {}
 M._cache_ready = false
 M._cache_at = 0
 M._refresh_ms = 30 * 60 * 1000
+M._retry_ms = 60 * 1000
+M._next_attempt_at = 0
 M._refreshing = false
 M._started = false
 M._thread_id = nil
+M._loaded_notified = false
 
 M._lookup_queue = {}
 M._lookup_seen = {}
@@ -39,6 +42,23 @@ local function normalize_uid(user_id)
     return uid
 end
 
+local function cache_count()
+    local n = 0
+    for _ in pairs(M._cache) do
+        n = n + 1
+    end
+    return n
+end
+
+local function notify_loaded(count)
+    if M._loaded_notified then return end
+    M._loaded_notified = true
+    pcall(function()
+        local notify = April.require("core.notify")
+        notify.success(string.format("Staff detector loaded (%d people)", count or 0), 5000)
+    end)
+end
+
 function M.available()
     return http_ready()
 end
@@ -58,6 +78,8 @@ function M.reset_session()
     M._lookup_pending = {}
     M._lookup_seen = {}
     M._cache_at = 0
+    M._next_attempt_at = 0
+    -- Keep _loaded_notified so reconnects don't spam; clear only on full invalidate.
 end
 
 local function parse_next_cursor(body)
@@ -111,10 +133,17 @@ end
 
 local function fetch_all_role_users(role_id, role_name, out)
     local cursor = nil
+    local guard = 0
     repeat
-        local ok
-        ok, out, cursor = fetch_role_page(role_id, role_name, cursor, out)
+        local ok, next_cursor = false, nil
+        for _ = 1, 3 do
+            ok, out, next_cursor = fetch_role_page(role_id, role_name, cursor, out)
+            if ok then break end
+        end
         if not ok then return false end
+        cursor = next_cursor
+        guard = guard + 1
+        if guard > 50 then return false end
     until not cursor
     return true
 end
@@ -136,33 +165,43 @@ function M.refresh_all()
         local staff_roles = parse_staff_roles(body)
         local merged = {}
         local role_count = 0
+        local failed_roles = {}
 
         for role_id, role_name in pairs(staff_roles) do
             role_count = role_count + 1
             if not fetch_all_role_users(role_id, role_name, merged) then
-                error("role users request failed for " .. tostring(role_name))
+                failed_roles[#failed_roles + 1] = tostring(role_name)
             end
         end
 
+        -- Keep whatever we collected so staff already found still resolve.
         M._cache = merged
-        M._cache_ready = true
-        M._cache_at = tick_ms()
+        local n = cache_count()
 
         pcall(function()
             local ids = April.require("game.mod_ids")
             if ids.clear_role_cache then ids.clear_role_cache() end
         end)
 
+        if #failed_roles > 0 then
+            M._cache_ready = false
+            error("role users request failed for " .. table.concat(failed_roles, ", ")
+                .. string.format(" (%d loaded so far)", n))
+        end
+
+        M._cache_ready = true
+        M._cache_at = tick_ms()
+
         if April and April.debug then
-            local n = 0
-            for _ in pairs(merged) do n = n + 1 end
             debug.log(string.format("Mod group cache refreshed (%d staff, %d roles)", n, role_count))
         end
+        notify_loaded(n)
     end)
 
     M._refreshing = false
 
     if not ok then
+        -- Allow the same error to reprint after a successful clear; still rate-limit spam.
         debug.error_once("mod_group:refresh", err)
         return false
     end
@@ -255,6 +294,26 @@ local function process_lookup_queue()
     end
 end
 
+local function refresh_tick()
+    local now = tick_ms()
+    if M._cache_ready then
+        if (now - M._cache_at) >= M._refresh_ms then
+            M.refresh_all()
+        end
+        return
+    end
+
+    -- Not ready yet: retry about once a minute until staff list is fully loaded.
+    if now < (M._next_attempt_at or 0) then
+        return
+    end
+    if M.refresh_all() then
+        M._next_attempt_at = 0
+    else
+        M._next_attempt_at = now + M._retry_ms
+    end
+end
+
 function M.ensure_started()
     if M._started then return end
     M._started = true
@@ -263,10 +322,7 @@ function M.ensure_started()
 
     if thread and thread.create then
         M._thread_id = thread.create(function()
-            local now = tick_ms()
-            if not M._cache_ready or (now - M._cache_at) >= M._refresh_ms then
-                M.refresh_all()
-            end
+            refresh_tick()
         end, 5000)
 
         M._lookup_thread_id = thread.create(function()
@@ -283,6 +339,9 @@ end
 
 function M.force_refresh()
     M._cache_at = 0
+    M._cache_ready = false
+    M._next_attempt_at = 0
+    M._loaded_notified = false
     return M.refresh_all()
 end
 

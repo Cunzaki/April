@@ -1,5 +1,30 @@
 local M = {}
 
+-- Vector Lua is 5.3+: math.atan2 was removed. Prefer atan(y,x), keep atan2 fallback.
+function M.atan2(y, x)
+    y = y or 0
+    x = x or 0
+    if math.atan2 then
+        return math.atan2(y, x)
+    end
+    local ok, result = pcall(math.atan, y, x)
+    if ok and type(result) == "number" then
+        return result
+    end
+    if x > 0 then
+        return math.atan(y / x)
+    elseif x < 0 and y >= 0 then
+        return math.atan(y / x) + math.pi
+    elseif x < 0 and y < 0 then
+        return math.atan(y / x) - math.pi
+    elseif x == 0 and y > 0 then
+        return math.pi * 0.5
+    elseif x == 0 and y < 0 then
+        return -math.pi * 0.5
+    end
+    return 0
+end
+
 function M.clamp(v, lo, hi)
     return math.max(lo, math.min(hi, v))
 end

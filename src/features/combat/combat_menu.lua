@@ -88,9 +88,6 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
         pcall(menu.set, p .. "filters", { true, false, true, true, false, true })
     end
     menu.add_input(T, G, p .. "whitelist_ids", "Whitelist IDs", "")
-    if menu and menu.set_visible then
-        pcall(menu.set_visible, p .. "whitelist_ids", false)
-    end
     menu.add_button(T, G, p .. "whitelist_clear", "Clear Whitelist", function()
         local wl = April.require("features.combat.silent_whitelist")
         if wl and wl.clear then wl.clear(p) end
@@ -160,9 +157,6 @@ function M.register_aimbot(T, G, prefix, parent_id, opts)
         pcall(menu.set, p .. "filters", { true, false, true, true, false, true })
     end
     menu.add_input(T, G, p .. "whitelist_ids", "Whitelist IDs", "")
-    if menu and menu.set_visible then
-        pcall(menu.set_visible, p .. "whitelist_ids", false)
-    end
     menu.add_button(T, G, p .. "whitelist_clear", "Clear Whitelist", function()
         local wl = April.require("features.combat.silent_whitelist")
         if wl and wl.clear then wl.clear(p) end

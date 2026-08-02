@@ -25,8 +25,10 @@ end
 
 function M.accent()
     local anim = anim_mod()
-    if anim and anim.colors_enabled and anim.colors_enabled() then
-        return anim.element_color(7, anim.COL_OVERLAY)
+    if anim and type(anim.colors_enabled) == "function" and anim.colors_enabled()
+        and type(anim.element_color) == "function" then
+        local ok, col = pcall(anim.element_color, 7, anim.COL_OVERLAY)
+        if ok and col then return col end
     end
     local gs = gs_theme()
     if gs and gs.ACCENT then

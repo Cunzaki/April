@@ -8,6 +8,7 @@ local esp_util = April.require("core.esp_util")
 local theme = April.require("core.ui_theme")
 local panel_drag = April.require("core.panel_drag")
 local overlay_theme = April.require("core.overlay_theme")
+local ep = April.require("core.entity_props")
 
 local M = {}
 local P = "april_mod_checker_enabled"
@@ -43,7 +44,7 @@ local function session_id()
 end
 
 local function player_uid(p)
-    local uid = tonumber(p.user_id)
+    local uid = ep.user_id(p)
     if uid and uid ~= 0 then return uid end
     return p.name or p.display_name
 end
@@ -161,7 +162,7 @@ function M.check_player(p, lookup_budget)
         mark_unknown = not queue,
     })
     if queue and role == nil then
-        local uid = tonumber(p.user_id)
+        local uid = ep.user_id(p)
         if uid and uid ~= 0 then
             lookup_budget = lookup_budget - 1
         end

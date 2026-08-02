@@ -1,12 +1,12 @@
 --[[
     April Fallen - Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-08-02T05:19:51.513Z
+    Built: 2026-08-02T16:12:29.063Z
     UI: custom Gamesense menu (INSERT) - Vector menu tabs disabled
 ]]
 
 April = {
-    version = "4.0.9",
+    version = "4.0.17",
     debug = false,
     _mods = {},
     bundled = true,
@@ -428,6 +428,31 @@ end)()
 April._mods["core.math_util"] = (function()
 local M = {}
 
+-- Vector Lua is 5.3+: math.atan2 was removed. Prefer atan(y,x), keep atan2 fallback.
+function M.atan2(y, x)
+    y = y or 0
+    x = x or 0
+    if math.atan2 then
+        return math.atan2(y, x)
+    end
+    local ok, result = pcall(math.atan, y, x)
+    if ok and type(result) == "number" then
+        return result
+    end
+    if x > 0 then
+        return math.atan(y / x)
+    elseif x < 0 and y >= 0 then
+        return math.atan(y / x) + math.pi
+    elseif x < 0 and y < 0 then
+        return math.atan(y / x) - math.pi
+    elseif x == 0 and y > 0 then
+        return math.pi * 0.5
+    elseif x == 0 and y < 0 then
+        return -math.pi * 0.5
+    end
+    return 0
+end
+
 function M.clamp(v, lo, hi)
     return math.max(lo, math.min(hi, v))
 end
@@ -722,7 +747,10 @@ function M.warn(msg)
 end
 
 function M.warn_once(key, msg)
-    M.error_once("warn:" .. key, msg)
+    key = "warn:" .. tostring(key)
+    if seen_errors[key] and not M.verbose() then return end
+    seen_errors[key] = (seen_errors[key] or 0) + 1
+    print("[April WARN][" .. key .. "] " .. tostring(msg))
 end
 
 function M.error_once(key, err)
@@ -1103,8 +1131,13 @@ function M.invalidate_uid(user_id)
     end
 end
 
+local function player_uid(player)
+    local ep = April.require("core.entity_props")
+    return normalize_uid(ep.user_id(player))
+end
+
 local function cache_key(player)
-    local uid = normalize_uid(player.user_id)
+    local uid = player_uid(player)
     if uid then return uid end
     return player.name or player.display_name
 end
@@ -1158,7 +1191,7 @@ function M.role_for_player(player, opts)
 
     local tag_role = role_from_game_tag(player)
     if tag_role then
-        local uid = normalize_uid(player.user_id)
+        local uid = player_uid(player)
         if uid then
             local precise = M.role_for(uid)
             if precise then
@@ -1170,7 +1203,7 @@ function M.role_for_player(player, opts)
         return tag_role
     end
 
-    local uid = normalize_uid(player.user_id)
+    local uid = player_uid(player)
     if not uid then
         write_cached_role(key, false)
         return nil
@@ -1246,9 +1279,12 @@ M._cache = {}
 M._cache_ready = false
 M._cache_at = 0
 M._refresh_ms = 30 * 60 * 1000
+M._retry_ms = 60 * 1000
+M._next_attempt_at = 0
 M._refreshing = false
 M._started = false
 M._thread_id = nil
+M._loaded_notified = false
 
 M._lookup_queue = {}
 M._lookup_seen = {}
@@ -1276,6 +1312,23 @@ local function normalize_uid(user_id)
     return uid
 end
 
+local function cache_count()
+    local n = 0
+    for _ in pairs(M._cache) do
+        n = n + 1
+    end
+    return n
+end
+
+local function notify_loaded(count)
+    if M._loaded_notified then return end
+    M._loaded_notified = true
+    pcall(function()
+        local notify = April.require("core.notify")
+        notify.success(string.format("Staff detector loaded (%d people)", count or 0), 5000)
+    end)
+end
+
 function M.available()
     return http_ready()
 end
@@ -1295,6 +1348,8 @@ function M.reset_session()
     M._lookup_pending = {}
     M._lookup_seen = {}
     M._cache_at = 0
+    M._next_attempt_at = 0
+    -- Keep _loaded_notified so reconnects don't spam; clear only on full invalidate.
 end
 
 local function parse_next_cursor(body)
@@ -1348,10 +1403,17 @@ end
 
 local function fetch_all_role_users(role_id, role_name, out)
     local cursor = nil
+    local guard = 0
     repeat
-        local ok
-        ok, out, cursor = fetch_role_page(role_id, role_name, cursor, out)
+        local ok, next_cursor = false, nil
+        for _ = 1, 3 do
+            ok, out, next_cursor = fetch_role_page(role_id, role_name, cursor, out)
+            if ok then break end
+        end
         if not ok then return false end
+        cursor = next_cursor
+        guard = guard + 1
+        if guard > 50 then return false end
     until not cursor
     return true
 end
@@ -1373,33 +1435,43 @@ function M.refresh_all()
         local staff_roles = parse_staff_roles(body)
         local merged = {}
         local role_count = 0
+        local failed_roles = {}
 
         for role_id, role_name in pairs(staff_roles) do
             role_count = role_count + 1
             if not fetch_all_role_users(role_id, role_name, merged) then
-                error("role users request failed for " .. tostring(role_name))
+                failed_roles[#failed_roles + 1] = tostring(role_name)
             end
         end
 
+        -- Keep whatever we collected so staff already found still resolve.
         M._cache = merged
-        M._cache_ready = true
-        M._cache_at = tick_ms()
+        local n = cache_count()
 
         pcall(function()
             local ids = April.require("game.mod_ids")
             if ids.clear_role_cache then ids.clear_role_cache() end
         end)
 
+        if #failed_roles > 0 then
+            M._cache_ready = false
+            error("role users request failed for " .. table.concat(failed_roles, ", ")
+                .. string.format(" (%d loaded so far)", n))
+        end
+
+        M._cache_ready = true
+        M._cache_at = tick_ms()
+
         if April and April.debug then
-            local n = 0
-            for _ in pairs(merged) do n = n + 1 end
             debug.log(string.format("Mod group cache refreshed (%d staff, %d roles)", n, role_count))
         end
+        notify_loaded(n)
     end)
 
     M._refreshing = false
 
     if not ok then
+        -- Allow the same error to reprint after a successful clear; still rate-limit spam.
         debug.error_once("mod_group:refresh", err)
         return false
     end
@@ -1492,6 +1564,26 @@ local function process_lookup_queue()
     end
 end
 
+local function refresh_tick()
+    local now = tick_ms()
+    if M._cache_ready then
+        if (now - M._cache_at) >= M._refresh_ms then
+            M.refresh_all()
+        end
+        return
+    end
+
+    -- Not ready yet: retry about once a minute until staff list is fully loaded.
+    if now < (M._next_attempt_at or 0) then
+        return
+    end
+    if M.refresh_all() then
+        M._next_attempt_at = 0
+    else
+        M._next_attempt_at = now + M._retry_ms
+    end
+end
+
 function M.ensure_started()
     if M._started then return end
     M._started = true
@@ -1500,10 +1592,7 @@ function M.ensure_started()
 
     if thread and thread.create then
         M._thread_id = thread.create(function()
-            local now = tick_ms()
-            if not M._cache_ready or (now - M._cache_at) >= M._refresh_ms then
-                M.refresh_all()
-            end
+            refresh_tick()
         end, 5000)
 
         M._lookup_thread_id = thread.create(function()
@@ -1520,6 +1609,9 @@ end
 
 function M.force_refresh()
     M._cache_at = 0
+    M._cache_ready = false
+    M._next_attempt_at = 0
+    M._loaded_notified = false
     return M.refresh_all()
 end
 
@@ -2647,8 +2739,10 @@ end
 
 function M.accent()
     local anim = anim_mod()
-    if anim and anim.colors_enabled and anim.colors_enabled() then
-        return anim.element_color(7, anim.COL_OVERLAY)
+    if anim and type(anim.colors_enabled) == "function" and anim.colors_enabled()
+        and type(anim.element_color) == "function" then
+        local ok, col = pcall(anim.element_color, 7, anim.COL_OVERLAY)
+        if ok and col then return col end
     end
     local gs = gs_theme()
     if gs and gs.ACCENT then
@@ -2911,6 +3005,27 @@ function M.roblox_thumb(asset_id)
     )
 end
 
+-- Direct PNG thumbnail (Vector LoadImage can decode this; assetdelivery cannot).
+function M.roblox_thumb_hq(asset_id)
+    asset_id = digits(asset_id)
+    if not asset_id then return nil end
+    return string.format(
+        "https://www.roblox.com/Thumbs/Asset.ashx?width=700&height=700&assetId=%s",
+        asset_id
+    )
+end
+
+function M.roblox_thumbnails_api(asset_id, size)
+    asset_id = digits(asset_id)
+    if not asset_id then return nil end
+    size = size or "700x700"
+    return string.format(
+        "https://thumbnails.roblox.com/v1/assets?assetIds=%s&size=%s&format=Png&isCircular=false",
+        asset_id,
+        size
+    )
+end
+
 function M.asset_delivery(asset_id)
     asset_id = digits(asset_id)
     if not asset_id then return nil end
@@ -2921,6 +3036,18 @@ function M.item_png(asset_id)
     asset_id = digits(asset_id)
     if not asset_id then return nil end
     return M.CDN_BASE .. "/items/" .. asset_id .. ".png"
+end
+
+function M.map_png(asset_id)
+    asset_id = digits(asset_id)
+    if not asset_id then return nil end
+    return M.CDN_BASE .. "/maps/" .. asset_id .. ".png"
+end
+
+function M.map_tile(asset_id, tx, ty)
+    asset_id = digits(asset_id)
+    if not asset_id then return nil end
+    return string.format("%s/maps/%s/tiles/%d_%d.png", M.CDN_BASE, asset_id, tx, ty)
 end
 
 function M.mod_warning_png()
@@ -5059,6 +5186,8 @@ end)()
 April._mods["core.manip_math"] = (function()
 local M = {}
 
+local math_util = April.require("core.math_util")
+
 local EYE_OFFSET_Y = 2.5
 local DEFAULT_STEPS = 24
 local MIN_RADIUS = 0.1
@@ -5157,7 +5286,7 @@ local function yaw_to_target(origin, target_pos)
     if math.abs(dx) < 1e-6 and math.abs(dz) < 1e-6 then
         return 0
     end
-    return math.atan2(dz, dx)
+    return math_util.atan2(dz, dx)
 end
 
 local function try_peek_at(cx, oy, cz, origin, target_pos)
@@ -5466,6 +5595,7 @@ April._mods["core.angle_util"] = (function()
 -- Shared yaw / flat-direction helpers for movement features.
 
 local env = April.require("core.env")
+local math_util = April.require("core.math_util")
 
 local M = {}
 
@@ -5483,7 +5613,7 @@ function M.yaw_from_vector(lx, lz)
     if not lx and not lz then return 0 end
     lx, lz = lx or 0, lz or 0
     if math.abs(lx) < 1e-5 and math.abs(lz) < 1e-5 then return 0 end
-    return math.atan2(lx, lz)
+    return math_util.atan2(lx, lz)
 end
 
 function M.flat_forward(yaw)
@@ -12415,6 +12545,15 @@ function M.is_hostile_kind(kind)
         or kind == "brutus" or kind == "heli" or kind == "btr"
 end
 
+function M.is_boss_kind(kind)
+    return kind == "bruno" or kind == "boris" or kind == "brutus"
+        or kind == "heli" or kind == "btr"
+end
+
+function M.is_boss_name(name)
+    return M.is_boss_kind(M.kind(name))
+end
+
 function M.kind(name)
     name = tostring(name or ""):lower():gsub("[%s_%-]", "")
     if name == "soldier" or name:find("soldier", 1, true) == 1 then return "soldier" end
@@ -12634,6 +12773,597 @@ return M
 
 end)()
 
+-- â”€â”€ game/map_image.lua â”€â”€
+April._mods["game.map_image"] = (function()
+-- Fallen G-map texture: resolve live Image, cache PNG, draw via tile atlas
+-- (Vector has no Image UV crop / clip API — tiles keep the map inside the radar).
+local env = April.require("core.env")
+local asset_urls = April.require("game.asset_urls")
+local config_store = April.require("core.config_store")
+local debug = April.require("core.debug")
+
+local M = {}
+
+-- Dump: TeamNavigationController uses Vector2 origin (0,0) and 12800 stud world.
+M.WORLD_SIZE = 12800
+M.ORIGIN_X = 0
+M.ORIGIN_Z = 0
+M.DEFAULT_ASSET = "121836456123484"
+M.TILE_GRID = 16
+-- Soft ocean fill behind tiles (matches Fallen map water-ish tone).
+M.OCEAN = { 0.55, 0.78, 0.90, 0.55 }
+
+local state = {
+    place_id = nil,
+    asset_id = nil,
+    path = nil,
+    png_url = nil,
+    handle = nil,
+    load_url = nil,
+    load_idx = 0,
+    load_chain = nil,
+    ready = false,
+    failed = false,
+    fetch_started = false,
+    fetch_done = false,
+    last_resolve_ms = 0,
+    next_retry_ms = 0,
+    tiles = {}, -- ["i_j"] = { handle=, url=, failed= }
+    tiles_tried = {},
+}
+
+local RETRY_MS = 30000
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function place_id()
+    if not game then return "0" end
+    return tostring(game.place_id or game.PlaceId or 0)
+end
+
+local function find_child(parent, name)
+    if not parent or not name then return nil end
+    return env.safe_call(function()
+        if parent.FindFirstChild then return parent:FindFirstChild(name) end
+        if parent.find_first_child then return parent:find_first_child(name) end
+        return parent[name]
+    end)
+end
+
+local function player_inst()
+    local lp = env.get_local_player()
+    if not lp then return nil end
+    local ep = April.require("core.entity_props")
+    return ep.player_inst(lp) or lp
+end
+
+local function read_image_prop(inst)
+    if not inst then return nil end
+    return env.safe_call(function()
+        return inst.Image or inst.image
+    end)
+end
+
+local function asset_digits(value)
+    if value == nil then return nil end
+    return tostring(value):match("(%d+)")
+end
+
+local function resolve_map_image_inst()
+    local pl = player_inst()
+    local pgui = find_child(pl, "PlayerGui")
+    local main = find_child(pgui, "Main")
+    local map = find_child(main, "Map")
+    local frame = find_child(map, "Frame")
+    local map_img = find_child(frame, "Map")
+    if map_img then return map_img end
+
+    local rs = env.get_replicated_storage()
+    if not rs then
+        rs = env.safe_call(function()
+            if game.GetService then return game:GetService("ReplicatedStorage") end
+            if game.get_service then return game.get_service("ReplicatedStorage") end
+            return nil
+        end)
+    end
+    local uis = find_child(rs, "UIs")
+    main = find_child(uis, "Main")
+    map = find_child(main, "Map")
+    frame = find_child(map, "Frame")
+    return find_child(frame, "Map")
+end
+
+function M.resolve_asset_id()
+    local now = tick_ms()
+    if state.asset_id and (now - (state.last_resolve_ms or 0)) < 2000 then
+        return state.asset_id
+    end
+    state.last_resolve_ms = now
+
+    local inst = resolve_map_image_inst()
+    local raw = read_image_prop(inst)
+    local id = asset_digits(raw) or M.DEFAULT_ASSET
+    state.asset_id = id
+    return id
+end
+
+local function maps_dir()
+    return config_store.get_config_path("April_maps")
+end
+
+local function ensure_dir(dir)
+    if not dir or dir == "" then return false end
+    local probe = io and io.open and io.open(dir .. "\\.april_dir", "w")
+    if probe then
+        probe:close()
+        pcall(os.remove, dir .. "\\.april_dir")
+        return true
+    end
+    pcall(function()
+        os.execute('mkdir "' .. dir .. '" >nul 2>&1')
+    end)
+    probe = io.open(dir .. "\\.april_dir", "w")
+    if probe then
+        probe:close()
+        pcall(os.remove, dir .. "\\.april_dir")
+        return true
+    end
+    return false
+end
+
+function M.cache_path(pid, asset_id)
+    pid = tostring(pid or place_id())
+    asset_id = tostring(asset_id or M.resolve_asset_id() or M.DEFAULT_ASSET)
+    local dir = maps_dir()
+    ensure_dir(dir)
+    return dir .. "\\" .. pid .. "_" .. asset_id .. ".png"
+end
+
+local function tiles_dir(asset_id)
+    asset_id = tostring(asset_id or M.resolve_asset_id() or M.DEFAULT_ASSET)
+    local dir = maps_dir() .. "\\tiles\\" .. asset_id
+    ensure_dir(maps_dir())
+    ensure_dir(maps_dir() .. "\\tiles")
+    ensure_dir(dir)
+    return dir
+end
+
+local function http_get(url)
+    if not utility or not url then return nil end
+    local fn = utility.HttpGet or utility.http_get
+    if not fn then return nil end
+    local ok, body = pcall(fn, url)
+    if not ok then return nil end
+    if type(body) == "string" and #body > 64 then
+        return body
+    end
+    return nil
+end
+
+local function is_png(body)
+    return type(body) == "string"
+        and #body >= 8
+        and body:byte(1) == 0x89
+        and body:byte(2) == 0x50
+        and body:byte(3) == 0x4E
+        and body:byte(4) == 0x47
+end
+
+local function is_jpeg(body)
+    return type(body) == "string"
+        and #body >= 3
+        and body:byte(1) == 0xFF
+        and body:byte(2) == 0xD8
+        and body:byte(3) == 0xFF
+end
+
+local function is_image_bytes(body)
+    return is_png(body) or is_jpeg(body)
+end
+
+local function file_is_image(path)
+    local f = io and io.open and io.open(path, "rb")
+    if not f then return false end
+    local head = f:read(16) or ""
+    f:close()
+    return is_image_bytes(head)
+end
+
+local function file_exists(path)
+    return path and file_is_image(path)
+end
+
+local function write_bytes(path, body)
+    if not path or not is_image_bytes(body) then return false end
+    local f = io.open(path, "wb")
+    if not f then return false end
+    f:write(body)
+    f:close()
+    return file_is_image(path)
+end
+
+local function parse_thumbnail_image_url(json)
+    if type(json) ~= "string" then return nil end
+    local completed = json:match('"state"%s*:%s*"Completed".-"imageUrl"%s*:%s*"(https://[^"]+)"')
+    if completed then return completed end
+    return json:match('"imageUrl"%s*:%s*"(https://[^"]+)"')
+end
+
+local function is_https(url)
+    return type(url) == "string" and url:find("^https://") ~= nil
+end
+
+local function is_usable_load_url(url)
+    if not is_https(url) then return false end
+    -- Vector LoadImage cannot decode ashx / assetdelivery / local paths.
+    if url:find("Thumbs/Asset.ashx", 1, true) then return false end
+    if url:find("assetdelivery", 1, true) then return false end
+    if url:find("roblox.com/asset", 1, true) then return false end
+    return true
+end
+
+local function resolve_png_url(asset_id)
+    local sizes = { "700x700", "512x512", "420x420" }
+    for i = 1, #sizes do
+        local api = asset_urls.roblox_thumbnails_api(asset_id, sizes[i])
+        local body = http_get(api)
+        local url = parse_thumbnail_image_url(body)
+        if is_usable_load_url(url) then
+            return url
+        end
+    end
+    -- map_png CDN only if pushed; ashx is NOT usable for LoadImage.
+    return asset_urls.map_png(asset_id)
+end
+
+local function download_to(path, asset_id)
+    local png_url = resolve_png_url(asset_id)
+    state.png_url = png_url
+
+    -- Prefer the resolved CDN PNG first (HttpGet follows redirects; LoadImage needs the real CDN URL).
+    local candidates = {
+        png_url,
+        asset_urls.map_png(asset_id),
+        asset_urls.roblox_thumb_hq(asset_id),
+        asset_urls.roblox_thumb(asset_id),
+    }
+
+    for i = 1, #candidates do
+        local url = candidates[i]
+        if url then
+            local body = http_get(url)
+            if body and is_image_bytes(body) and write_bytes(path, body) then
+                -- Keep the resolved CDN URL for LoadImage even if ashx was used to fetch bytes.
+                if is_usable_load_url(url) then
+                    state.png_url = url
+                elseif is_usable_load_url(png_url) then
+                    state.png_url = png_url
+                else
+                    state.png_url = url
+                end
+                return true, state.png_url
+            end
+        end
+    end
+    return false, png_url
+end
+
+local function to_file_url(path)
+    if not path then return nil end
+    local normalized = path:gsub("\\", "/")
+    if normalized:match("^[A-Za-z]:") then
+        return "file:///" .. normalized
+    end
+    return "file://" .. normalized
+end
+
+local function build_load_chain(path, asset_id, png_url)
+    local chain = {}
+    local seen = {}
+
+    local function add(url)
+        if not is_usable_load_url(url) or seen[url] then return end
+        seen[url] = true
+        chain[#chain + 1] = url
+    end
+
+    -- Prefer live Roblox CDN PNG (proven to work with Vector LoadImage).
+    add(png_url)
+    add(resolve_png_url(asset_id))
+    add(asset_urls.map_png(asset_id))
+    return chain
+end
+
+local function invalidate_handle()
+    if state.handle and draw and draw.free_image then
+        pcall(draw.free_image, state.handle)
+    end
+    state.handle = nil
+    state.ready = false
+    state.failed = false
+    state.load_idx = 0
+    state.load_chain = nil
+    state.load_url = nil
+end
+
+local function invalidate_tiles()
+    if draw and draw.free_image then
+        for _, tile in pairs(state.tiles) do
+            if tile and tile.handle then
+                pcall(draw.free_image, tile.handle)
+            end
+        end
+    end
+    state.tiles = {}
+    state.tiles_tried = {}
+end
+
+function M.invalidate()
+    invalidate_handle()
+    invalidate_tiles()
+    state.fetch_started = false
+    state.fetch_done = false
+    state.next_retry_ms = 0
+    state.path = nil
+    state.png_url = nil
+    state.asset_id = nil
+    state.place_id = nil
+end
+
+local function begin_load(path, asset_id, png_url)
+    invalidate_handle()
+    state.path = path
+    state.asset_id = asset_id
+    state.png_url = png_url or state.png_url
+    state.load_chain = build_load_chain(path, asset_id, state.png_url)
+    state.load_idx = 1
+    state.failed = false
+    state.ready = false
+end
+
+local function advance_load()
+    if not draw or not draw.load_image then
+        state.failed = true
+        state.next_retry_ms = tick_ms() + RETRY_MS
+        return nil
+    end
+    local chain = state.load_chain
+    if not chain or state.load_idx > #chain then
+        state.failed = true
+        state.handle = nil
+        state.next_retry_ms = tick_ms() + RETRY_MS
+        return nil
+    end
+
+    local url = chain[state.load_idx]
+    state.load_url = url
+    local ok, handle = pcall(draw.load_image, url)
+    if not ok or not handle then
+        state.load_idx = state.load_idx + 1
+        return advance_load()
+    end
+    state.handle = handle
+    return handle
+end
+
+local function tick_load()
+    if state.failed then return nil end
+    if not state.load_chain then return nil end
+
+    if not state.handle then
+        return advance_load()
+    end
+
+    if draw.image_failed and draw.image_failed(state.handle) then
+        debug.warn_once("map_img:" .. tostring(state.load_url), "map load failed - " .. tostring(state.load_url))
+        state.load_idx = state.load_idx + 1
+        state.handle = nil
+        return advance_load()
+    end
+
+    state.ready = true
+    return state.handle
+end
+
+function M.ensure()
+    local pid = place_id()
+    local asset_id = M.resolve_asset_id()
+    if state.place_id and state.place_id ~= pid then
+        M.invalidate()
+    end
+    if state.asset_id and state.asset_id ~= asset_id and state.fetch_done then
+        M.invalidate()
+    end
+
+    state.place_id = pid
+    state.asset_id = asset_id
+    local path = M.cache_path(pid, asset_id)
+    state.path = path
+
+    if path and not file_is_image(path) then
+        pcall(os.remove, path)
+    end
+
+    -- After a hard failure, retry the whole fetch/load every 30s.
+    if state.failed then
+        local now = tick_ms()
+        if now < (state.next_retry_ms or 0) then
+            return nil
+        end
+        state.next_retry_ms = now + RETRY_MS
+        invalidate_handle()
+        state.fetch_started = false
+        state.fetch_done = false
+        state.failed = false
+        state.load_chain = nil
+        debug.warn_once("map_img:retry", "retrying world map load")
+    end
+
+    if not state.fetch_started then
+        state.fetch_started = true
+        if file_exists(path) then
+            state.fetch_done = true
+            state.png_url = resolve_png_url(asset_id)
+            begin_load(path, asset_id, state.png_url)
+        else
+            local ok, png_url = download_to(path, asset_id)
+            state.fetch_done = true
+            state.png_url = png_url
+            if ok then
+                begin_load(path, asset_id, png_url)
+            else
+                begin_load(nil, asset_id, png_url)
+            end
+        end
+    elseif state.fetch_done and not state.load_chain and not state.failed then
+        begin_load(file_exists(path) and path or nil, asset_id, state.png_url or resolve_png_url(asset_id))
+    end
+
+    local handle = tick_load()
+    if state.ready then
+        state.next_retry_ms = 0
+    end
+    return handle
+end
+
+function M.handle()
+    return M.ensure()
+end
+
+function M.ready()
+    M.ensure()
+    return state.ready == true and state.handle ~= nil and not state.failed
+end
+
+function M.failed()
+    M.ensure()
+    return state.failed == true
+end
+
+function M.world_size()
+    return M.WORLD_SIZE
+end
+
+function M.origin()
+    return M.ORIGIN_X, M.ORIGIN_Z
+end
+
+function M.world_to_uv(wx, wz)
+    local ox, oz = M.origin()
+    local size = M.world_size()
+    local u = 0.5 + ((wx or 0) - ox) / size
+    local v = 0.5 + ((wz or 0) - oz) / size
+    return u, v
+end
+
+function M.uv_to_viewport(u, v, vp)
+    if not vp then return nil, nil end
+    local du = (vp.u1 - vp.u0)
+    local dv = (vp.v1 - vp.v0)
+    if du < 1e-6 or dv < 1e-6 then return nil, nil end
+    return (u - vp.u0) / du, (v - vp.v0) / dv
+end
+
+function M.world_to_viewport(wx, wz, vp)
+    local u, v = M.world_to_uv(wx, wz)
+    return M.uv_to_viewport(u, v, vp)
+end
+
+local function tile_key(i, j)
+    return tostring(i) .. "_" .. tostring(j)
+end
+
+local function tile_candidates(asset_id, i, j)
+    local list = {}
+    -- Vector LoadImage only accepts HTTPS — skip local/file tile paths.
+    local cdn = asset_urls.map_tile(asset_id, i, j)
+    if is_usable_load_url(cdn) then
+        list[#list + 1] = cdn
+    end
+    return list
+end
+
+local function ensure_tile(i, j)
+    local asset_id = state.asset_id or M.DEFAULT_ASSET
+    local key = tile_key(i, j)
+    local tile = state.tiles[key]
+    if tile and tile.handle then
+        if draw.image_failed and draw.image_failed(tile.handle) then
+            tile.failed = true
+            tile.handle = nil
+        else
+            return tile.handle
+        end
+    end
+    if tile and tile.failed then return nil end
+    if not draw or not draw.load_image then return nil end
+
+    tile = tile or { idx = 1, urls = tile_candidates(asset_id, i, j) }
+    state.tiles[key] = tile
+    tile.urls = tile.urls or tile_candidates(asset_id, i, j)
+    tile.idx = tile.idx or 1
+
+    while tile.idx <= #tile.urls do
+        local url = tile.urls[tile.idx]
+        tile.idx = tile.idx + 1
+        local ok, handle = pcall(draw.load_image, url)
+        if ok and handle then
+            tile.handle = handle
+            tile.url = url
+            return handle
+        end
+    end
+
+    tile.failed = true
+    return nil
+end
+
+local function image_draw(handle, x, y, w, h, alpha)
+    if not handle or not draw then return false end
+    local image_fn = draw.image or draw.Image
+    if not image_fn then return false end
+    local a = math.floor(math.max(0, math.min(1, alpha or 1)) * 255)
+    return pcall(image_fn, handle, x, y, w, h, 255, 255, 255, a)
+end
+
+-- Draw the world map inside map_rect using the full HTTPS texture (fit).
+-- Vector LoadImage only accepts certain HTTPS URLs (tr.rbxcdn.com), not local files.
+-- Player/blip UVs use fit mode so geography stays correct inside the radar.
+function M.draw_centered(view, map_rect, alpha)
+    if not view or not map_rect then
+        return nil
+    end
+    M.ensure()
+    alpha = alpha or 0.92
+
+    if draw and draw.rect_filled then
+        pcall(draw.rect_filled, map_rect.x, map_rect.y, map_rect.w, map_rect.h, M.OCEAN, 0)
+    end
+
+    if M.ready() and state.handle then
+        if draw.image_failed and draw.image_failed(state.handle) then
+            return nil
+        end
+        if image_draw(state.handle, map_rect.x, map_rect.y, map_rect.w, map_rect.h, alpha) then
+            return "fit"
+        end
+    end
+
+    return nil
+end
+
+function M.draw(x, y, w, h, alpha)
+    local handle = M.handle()
+    if not handle then return false end
+    return image_draw(handle, x, y, w, h, alpha)
+end
+
+return M
+
+end)()
+
 -- â”€â”€ game/turret_stats.lua â”€â”€
 April._mods["game.turret_stats"] = (function()
 local M = {}
@@ -12841,6 +13571,7 @@ April._mods["features.combat.silent_whitelist"] = (function()
 
 local settings = April.require("core.settings")
 local notify = April.require("core.notify")
+local ep = April.require("core.entity_props")
 
 local M = {}
 
@@ -12932,14 +13663,14 @@ end
 
 function M.is_whitelisted(player, prefix)
     if not player then return false end
-    local uid = tonumber(player.user_id)
+    local uid = ep.user_id(player)
     if not uid or uid == 0 then return false end
     return read_set(prefix)[uid] == true
 end
 
 function M.toggle_player(player, prefix)
     if not player or player.is_local then return false, nil end
-    local uid = tonumber(player.user_id)
+    local uid = ep.user_id(player)
     if not uid or uid == 0 then return false, nil end
 
     local set = read_set(prefix)
@@ -13647,9 +14378,6 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
         pcall(menu.set, p .. "filters", { true, false, true, true, false, true })
     end
     menu.add_input(T, G, p .. "whitelist_ids", "Whitelist IDs", "")
-    if menu and menu.set_visible then
-        pcall(menu.set_visible, p .. "whitelist_ids", false)
-    end
     menu.add_button(T, G, p .. "whitelist_clear", "Clear Whitelist", function()
         local wl = April.require("features.combat.silent_whitelist")
         if wl and wl.clear then wl.clear(p) end
@@ -13719,9 +14447,6 @@ function M.register_aimbot(T, G, prefix, parent_id, opts)
         pcall(menu.set, p .. "filters", { true, false, true, true, false, true })
     end
     menu.add_input(T, G, p .. "whitelist_ids", "Whitelist IDs", "")
-    if menu and menu.set_visible then
-        pcall(menu.set_visible, p .. "whitelist_ids", false)
-    end
     menu.add_button(T, G, p .. "whitelist_clear", "Clear Whitelist", function()
         local wl = April.require("features.combat.silent_whitelist")
         if wl and wl.clear then wl.clear(p) end
@@ -15833,9 +16558,6 @@ function M.register_menu()
         "Skip Downed",
     }, { true, false, true, true, false, true }, { parent = P_MASTER })
     menu.add_input(T, G.SILENT_AIM, PREFIX .. "whitelist_ids", "Whitelist IDs", "")
-    if menu and menu.set_visible then
-        pcall(menu.set_visible, PREFIX .. "whitelist_ids", false)
-    end
     menu.add_button(T, G.SILENT_AIM, PREFIX .. "whitelist_clear", "Clear Whitelist", function()
         if silent_whitelist and silent_whitelist.clear then
             silent_whitelist.clear(PREFIX)
@@ -16665,6 +17387,7 @@ local esp_util = April.require("core.esp_util")
 local theme = April.require("core.ui_theme")
 local panel_drag = April.require("core.panel_drag")
 local overlay_theme = April.require("core.overlay_theme")
+local ep = April.require("core.entity_props")
 
 local M = {}
 local P = "april_mod_checker_enabled"
@@ -16700,7 +17423,7 @@ local function session_id()
 end
 
 local function player_uid(p)
-    local uid = tonumber(p.user_id)
+    local uid = ep.user_id(p)
     if uid and uid ~= 0 then return uid end
     return p.name or p.display_name
 end
@@ -16818,7 +17541,7 @@ function M.check_player(p, lookup_budget)
         mark_unknown = not queue,
     })
     if queue and role == nil then
-        local uid = tonumber(p.user_id)
+        local uid = ep.user_id(p)
         if uid and uid ~= 0 then
             lookup_budget = lookup_budget - 1
         end
@@ -17128,9 +17851,37 @@ local DEFINITIONS = {
 local rows = {}
 local first_seen = {}
 local last_refresh = -REFRESH_MS
+local session_token = nil
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function session_id()
+    if not game then return "none" end
+    local pid = game.place_id or game.PlaceId or 0
+    local ws = game.workspace
+    local ws_addr = (ws and (ws.Address or ws.address)) or 0
+    local job = (game.job_id or game.JobId or "")
+    return tostring(pid) .. ":" .. tostring(ws_addr) .. ":" .. tostring(job)
+end
+
+local function reset_session_state()
+    rows = {}
+    first_seen = {}
+    last_refresh = -REFRESH_MS
+end
+
+local function tick_session()
+    local sid = session_id()
+    if session_token == nil then
+        session_token = sid
+        return
+    end
+    if sid ~= session_token then
+        session_token = sid
+        reset_session_state()
+    end
 end
 
 local function find_child(parent, name)
@@ -17282,6 +18033,7 @@ function M.register_menu()
 end
 
 function M.update(_dt)
+    tick_session()
     if not settings.enabled(P) then return end
     local now = tick_ms()
     if now - last_refresh < REFRESH_MS then return end
@@ -17290,6 +18042,7 @@ function M.update(_dt)
 end
 
 function M.draw()
+    tick_session()
     if not settings.enabled(P) then return end
     if not draw or not draw.text then return end
 
@@ -17688,6 +18441,7 @@ local active_target = April.require("features.combat.active_target")
 local text_util = April.require("core.text_util")
 local theme = April.require("core.ui_theme")
 local overlay_theme = April.require("core.overlay_theme")
+local ep = April.require("core.entity_props")
 
 local M = {}
 
@@ -17746,9 +18500,16 @@ local function find_overlay_target()
     return nil
 end
 
+local function player_key(player)
+    if not player then return "?" end
+    local uid = ep.user_id(player)
+    if uid and uid ~= 0 then return uid end
+    return player.name or player.display_name or "?"
+end
+
 local function get_gear(player)
     if not player then return nil end
-    local uid = player.user_id or player.name or "?"
+    local uid = player_key(player)
     local now = tick_ms()
     local cached = gear_cache[uid]
     if cached and (now - cached.t) < GEAR_TTL then
@@ -18020,8 +18781,8 @@ end
 local function same_target(a, b)
     if a == b then return true end
     if not a or not b then return false end
-    local aid = a.user_id or a.name
-    local bid = b.user_id or b.name
+    local aid = player_key(a)
+    local bid = player_key(b)
     return aid and bid and aid == bid
 end
 
@@ -18061,7 +18822,7 @@ function M.refresh_target()
     end
 
     local target_changed = not same_target(M._target, target)
-    local uid = target.user_id or target.name or "?"
+    local uid = player_key(target)
     local cached = gear_cache[uid]
     local gear_stale = not cached or (tick_ms() - cached.t) >= GEAR_TTL
 
@@ -21722,16 +22483,62 @@ local esp_scan = April.require("game.esp_scan")
 local theme = April.require("core.ui_theme")
 local overlay_theme = April.require("core.overlay_theme")
 local panel_drag = April.require("core.panel_drag")
+local map_image = April.require("game.map_image")
+local math_util = April.require("core.math_util")
+local npcs = April.require("game.npcs")
 
 local M = {}
 local P = "april_map_enabled"
 local X_ID = "april_map_x"
 local Y_ID = "april_map_y"
 local TITLE_H = 24
+-- Studs visible across the radar diameter at zoom = 1 (north-up texture mode).
+local BASE_VISIBLE_STUDS = 3200
+
+-- Relative blip sizes vs april_map_icon_scale. Players/bosses read larger.
+local SIZE_MULT = {
+    player = 1.65,
+    boss = 1.55,
+    raid = 1.35,
+    waypoint = 1.2,
+    npc = 1.1,
+    loot = 0.95,
+    world = 0.85,
+    base = 0.9,
+    self = 1.7,
+}
 
 local function position_xyz(pos)
     if not pos then return nil, nil, nil end
     return pos.x or pos.X, pos.y or pos.Y, pos.z or pos.Z
+end
+
+local function ensure_draw_api()
+    pcall(function()
+        April.require("core.api_aliases").apply()
+    end)
+end
+
+-- North-up facing: screen up = world -Z. atan2(look.X, -look.Z).
+local function get_facing_angle()
+    if camera and camera.get_look_vector then
+        local ok, lv = pcall(camera.get_look_vector)
+        if ok and lv then
+            local lx = lv.x or lv.X or 0
+            local lz = lv.z or lv.Z or 0
+            if math.abs(lx) > 0.001 or math.abs(lz) > 0.001 then
+                return math_util.atan2(lx, -lz)
+            end
+        end
+    end
+    if camera and camera.get_angles then
+        local ok, a = pcall(camera.get_angles)
+        if ok and a then
+            local deg = a.Y or a.y
+            if deg then return math.rad(deg) end
+        end
+    end
+    return 0
 end
 
 local function get_camera_yaw()
@@ -21751,7 +22558,7 @@ local function get_camera_yaw()
         if ok and lv then
             local lx, lz = lv.x or lv.X or 0, lv.z or lv.Z or 0
             if math.abs(lx) > 0.001 or math.abs(lz) > 0.001 then
-                return math.atan2(lx, lz)
+                return math_util.atan2(lx, lz)
             end
         end
     end
@@ -21785,13 +22592,25 @@ local function map_basis(yaw)
     return fx, fz, rx, rz
 end
 
-local function world_to_map(wx, wz, view_x, view_z, map_cx, map_cy, zoom, yaw)
+local function world_to_map_yaw(wx, wz, view_x, view_z, map_cx, map_cy, zoom, yaw)
     local wdx = wx - view_x
     local wdz = wz - view_z
     local fx, fz, rx, rz = map_basis(yaw)
     local local_fwd = wdx * fx + wdz * fz
     local local_right = wdx * rx + wdz * rz
     return map_cx + local_right * zoom, map_cy - local_fwd * zoom
+end
+
+-- Project world XZ onto the radar using the active north-up viewport crop.
+local function world_to_map_north(wx, wz, view)
+    if view.vp and view.map_rect then
+        local su, sv = map_image.world_to_viewport(wx, wz, view.vp)
+        if not su or not sv then return nil, nil end
+        local r = view.map_rect
+        return r.x + su * r.w, r.y + sv * r.h
+    end
+    local u, v = map_image.world_to_uv(wx, wz)
+    return view.img_x + u * view.img_size, view.img_y + v * view.img_size
 end
 
 local function clamp_to_disc(mx, my, cx, cy, radius)
@@ -21802,6 +22621,14 @@ local function clamp_to_disc(mx, my, cx, cy, radius)
     end
     local s = radius / dist
     return cx + dx * s, cy + dy * s, true
+end
+
+local function in_map_rect(mx, my, view, margin)
+    local r = view.map_rect
+    if not r then return true end
+    margin = margin or 2
+    return mx >= r.x - margin and my >= r.y - margin
+        and mx <= r.x + r.w + margin and my <= r.y + r.h + margin
 end
 
 local function entry_world_xz(entry)
@@ -21827,22 +22654,26 @@ local function short_label(text)
     return text
 end
 
+local function blip_scale(base, kind)
+    local mult = SIZE_MULT[kind or "npc"] or 1
+    return math.max(2, (base or 3) * mult)
+end
+
+local function label_font_for_scale(scale)
+    return math.max(8, math.min(16, math.floor((scale or 3) * 2.1 + 1.5)))
+end
+
 local function draw_radar_label(lx, ly, text, col, x, y, w, h, fs)
-    if not text or text == "" or not draw or not draw.get_text_size then return end
+    if not text or text == "" or not draw then return end
     fs = fs or 9
-    local tw = select(1, draw.get_text_size(text, fs))
+    local tw = theme.text_w(text, fs)
     local th = fs + 2
     lx = lx - tw * 0.5
-    ly = ly + 5
+    ly = ly + math.max(4, fs * 0.45)
     if lx < x + 4 then lx = x + 4 end
     if lx + tw > x + w - 4 then lx = x + w - 4 - tw end
     if ly + th > y + h - 4 then ly = ly - th - 8 end
     if ly < y + 4 then return end
-
-    if draw.rect_filled then
-        draw.rect_filled(lx - 4, ly - 2, tw + 8, th + 2,
-            theme.alpha(theme.PANEL_DEEP, 0.70), 4)
-    end
     draw_util.text(lx, ly, text, col, fs)
 end
 
@@ -21856,12 +22687,13 @@ local function draw_blip(mx, my, scale, col, clamped, shape)
     if shape == "square" and draw and draw.rect_filled then
         draw.rect_filled(mx - r - 1, my - r - 1, (r + 1) * 2, (r + 1) * 2, edge, 0)
         draw.rect_filled(mx - r, my - r, r * 2, r * 2, c, 0)
-    elseif shape == "diamond" and draw and draw.poly_filled then
-        draw.poly_filled({
+    elseif shape == "diamond" and draw and (draw.poly_filled or draw.PolyFilled) then
+        local poly = draw.poly_filled or draw.PolyFilled
+        pcall(poly, {
             { mx, my - r - 1 }, { mx + r + 1, my },
             { mx, my + r + 1 }, { mx - r - 1, my },
         }, edge)
-        draw.poly_filled({
+        pcall(poly, {
             { mx, my - r }, { mx + r, my },
             { mx, my + r }, { mx - r, my },
         }, c)
@@ -21877,21 +22709,44 @@ local function draw_blip(mx, my, scale, col, clamped, shape)
     end
 end
 
-local function draw_map_item(wx, wz, col, label, shape, view_x, view_z, map_cx, map_cy, zoom, yaw, scale, layout)
+local function project_blip(wx, wz, view)
+    if view.mode == "north" then
+        return world_to_map_north(wx, wz, view)
+    end
+    return world_to_map_yaw(wx, wz, view.view_x, view.view_z, view.cx, view.cy, view.zoom, view.yaw)
+end
+
+local function draw_map_item(wx, wz, col, label, shape, view, scale, layout, size_kind)
     if not wx or not wz then return end
 
-    local mx, my = world_to_map(wx, wz, view_x, view_z, map_cx, map_cy, zoom, yaw)
-    local clamped
-    mx, my, clamped = clamp_to_disc(mx, my, map_cx, map_cy, layout.radius)
+    local mx, my = project_blip(wx, wz, view)
+    if not mx or not my then return end
 
-    draw_blip(mx, my, scale, col, clamped, shape)
+    local clamped = false
+    if view.mode == "north" and view.map_rect then
+        if not in_map_rect(mx, my, view, 0) then
+            mx, my, clamped = clamp_to_disc(mx, my, layout.cx, layout.cy, layout.radius)
+            if not in_map_rect(mx, my, view, 4) then
+                return
+            end
+        end
+    else
+        mx, my, clamped = clamp_to_disc(mx, my, layout.cx, layout.cy, layout.radius)
+    end
+
+    local size = blip_scale(scale, size_kind)
+    draw_blip(mx, my, size, col, clamped, shape)
 
     if settings.bool("april_map_labels", false) and not clamped then
-        draw_radar_label(mx, my, short_label(label), col, layout.x, layout.y, layout.w, layout.h, 9)
+        draw_radar_label(
+            mx, my, short_label(label), col,
+            layout.x, layout.y, layout.w, layout.h,
+            label_font_for_scale(size)
+        )
     end
 end
 
-local function draw_radar_frame(layout, bg, grid, zoom)
+local function draw_radar_frame(layout, bg, grid, zoom, north_up)
     local x, y, w, h = layout.x, layout.y, layout.w, layout.h
     local cx, cy = layout.cx, layout.cy
 
@@ -21899,7 +22754,7 @@ local function draw_radar_frame(layout, bg, grid, zoom)
 
     if draw.rect_filled then
         draw.rect_filled(x + 7, y + TITLE_H + 3, w - 14, h - TITLE_H - 10,
-            theme.alpha(bg, 0.36), 7)
+            theme.alpha(bg or theme.PANEL_DEEP, 0.36), 7)
     end
 
     local zoom_text = string.format("x%.2f", zoom)
@@ -21909,11 +22764,11 @@ local function draw_radar_frame(layout, bg, grid, zoom)
     if draw and draw.circle then
         local accent = overlay_theme.accent()
         draw.circle(cx, cy, layout.radius, theme.alpha(accent, 0.24), 40, 1)
-        draw.circle(cx, cy, layout.radius * 0.66, theme.alpha(grid, 0.11), 32, 1)
-        draw.circle(cx, cy, layout.radius * 0.33, theme.alpha(grid, 0.08), 24, 1)
+        draw.circle(cx, cy, layout.radius * 0.66, theme.alpha(grid or theme.BORDER, 0.11), 32, 1)
+        draw.circle(cx, cy, layout.radius * 0.33, theme.alpha(grid or theme.BORDER, 0.08), 24, 1)
     end
     if draw and draw.line then
-        local axis = theme.alpha(grid, 0.10)
+        local axis = theme.alpha(grid or theme.BORDER, 0.10)
         draw.line(cx - layout.radius, cy, cx - 10, cy, axis, 1)
         draw.line(cx + 10, cy, cx + layout.radius, cy, axis, 1)
         draw.line(cx, cy - layout.radius, cx, cy - 10, axis, 1)
@@ -21926,30 +22781,99 @@ local function draw_radar_frame(layout, bg, grid, zoom)
         draw.line(cx - layout.radius, cy - 3, cx - layout.radius, cy + 3, tick, 1)
     end
 
-    -- Camera-relative radar: the top marker means forward, avoiding misleading
-    -- fixed N/E/S/W labels while the map rotates with the view.
     local forward = theme.alpha(overlay_theme.accent(), 0.78)
-    draw_util.text(cx - 3, cy - layout.radius + 5, "^", forward, 9)
+    if north_up then
+        draw_util.text(cx - 3, cy - layout.radius + 4, "N", forward, 9)
+    else
+        draw_util.text(cx - 3, cy - layout.radius + 5, "^", forward, 9)
+    end
 end
 
-local function draw_local_blip(layout, col)
-    local cx, cy = layout.cx, layout.cy
-    local r = layout.scale + 2
-    if draw and draw.poly_filled then
-        draw.poly_filled({
-            { cx, cy - r - 2 },
-            { cx + r, cy + r },
-            { cx, cy + math.max(1, r - 2) },
-            { cx - r, cy + r },
+-- Facing arrow. tip points along `ang` (0 = screen up / north).
+local function draw_facing_arrow(mx, my, col, scale, ang)
+    local r = (scale or 3) + 2
+    ang = ang or 0
+    local function pt(dist, offset)
+        local a = ang + (offset or 0)
+        return mx + math.sin(a) * dist, my - math.cos(a) * dist
+    end
+    local tx, ty = pt(r + 2, 0)
+    local lx, ly = pt(r * 0.85, 2.4)
+    local rx, ry = pt(r * 0.85, -2.4)
+    local bx, by = pt(r * 0.25, math.pi)
+
+    local poly = draw and (draw.poly_filled or draw.PolyFilled)
+    if poly then
+        local ok = pcall(poly, {
+            { tx, ty }, { lx, ly }, { bx, by }, { rx, ry },
         }, col)
-    elseif draw and draw.line then
-        draw.line(cx, cy - r, cx - r, cy + r, col, 2)
-        draw.line(cx - r, cy + r, cx + r, cy + r, col, 2)
-        draw.line(cx + r, cy + r, cx, cy - r, col, 2)
+        if ok then
+            if draw.circle then
+                draw.circle(mx, my, r + 3, theme.alpha(col, 0.28), 20, 1)
+            end
+            return
+        end
     end
-    if draw and draw.circle then
-        draw.circle(cx, cy, r + 3, theme.alpha(col, 0.28), 20, 1)
+    if draw and draw.line then
+        draw.line(tx, ty, lx, ly, col, 2)
+        draw.line(lx, ly, bx, by, col, 2)
+        draw.line(bx, by, rx, ry, col, 2)
+        draw.line(rx, ry, tx, ty, col, 2)
+    elseif draw and draw.circle_filled then
+        draw.circle_filled(mx, my, r, col, 12)
     end
+end
+
+-- Player-centered north-up view. Map pans under the local player.
+local function build_north_view(cx, cy, radius, zoom, body_x, body_z, map_rect)
+    local visible = BASE_VISIBLE_STUDS / math.max(zoom, 0.05)
+    local pixels_per_stud = (radius * 2) / visible
+    local world = map_image.world_size()
+    local img_size = world * pixels_per_stud
+    local pu, pv = map_image.world_to_uv(body_x or 0, body_z or 0)
+    return {
+        mode = "north",
+        centered = true,
+        cx = cx,
+        cy = cy,
+        zoom = zoom,
+        img_size = img_size,
+        img_x = cx - pu * img_size,
+        img_y = cy - pv * img_size,
+        view_x = body_x or 0,
+        view_z = body_z or 0,
+        yaw = 0,
+        map_rect = map_rect,
+        vp = nil,
+    }
+end
+
+local function build_yaw_view(cx, cy, zoom, yaw, view_x, view_z)
+    return {
+        mode = "yaw",
+        cx = cx,
+        cy = cy,
+        zoom = zoom,
+        yaw = yaw,
+        view_x = view_x,
+        view_z = view_z,
+    }
+end
+
+local function attach_map_texture(view)
+    if not view or not view.map_rect then
+        return false
+    end
+    local ok, mode = pcall(map_image.draw_centered, view, view.map_rect, 0.92)
+    if not ok or not mode then
+        return false
+    end
+    -- Fit (and future tile modes): project with UVs across the radar square.
+    view.vp = { u0 = 0, v0 = 0, u1 = 1, v1 = 1, ready = true }
+    if mode == "tiles" then
+        view.vp = nil
+    end
+    return true
 end
 
 function M.register_menu()
@@ -22010,6 +22934,15 @@ end
 function M.draw()
     if not settings.enabled(P) then return end
     if not draw then return end
+    local ok, err = pcall(M.draw_inner)
+    if not ok then
+        local debug = April.require("core.debug")
+        debug.error_once("radar:draw", err)
+    end
+end
+
+function M.draw_inner()
+    ensure_draw_api()
 
     overlay_theme.sync()
     local sw, sh = draw_util.screen_size()
@@ -22020,9 +22953,22 @@ function M.draw()
     )
     x, y = panel_drag.clamp(x, y, size, size, sw, sh, X_ID, Y_ID)
     local w, h = size, size
-    local body_y, body_h = y + TITLE_H, h - TITLE_H
-    local cx, cy = x + w * 0.5, body_y + body_h * 0.5
-    local radius = math.min(w, body_h) * 0.5 - 12
+    local body = {
+        x = x + 7,
+        y = y + TITLE_H + 3,
+        w = w - 14,
+        h = h - TITLE_H - 10,
+    }
+    -- Fill the radar body so the map has no side letterbox bars.
+    local map_rect = {
+        x = body.x,
+        y = body.y,
+        w = math.max(32, body.w),
+        h = math.max(32, body.h),
+    }
+    local cx = map_rect.x + map_rect.w * 0.5
+    local cy = map_rect.y + map_rect.h * 0.5
+    local radius = math.min(map_rect.w, map_rect.h) * 0.5 - 4
     local zoom = settings.num("april_map_zoom", 1.0)
     local scale = settings.num("april_map_icon_scale", 3)
 
@@ -22031,24 +22977,44 @@ function M.draw()
         radius = radius, label_radius = math.max(24, radius - 28), scale = scale,
     }
 
-    local bg = theme.MAP_BG
-    local grid = theme.MAP_GRID
+    local bg = theme.MAP_BG or theme.PANEL_DEEP
+    local grid = theme.MAP_GRID or theme.BORDER
 
     local cam_x, _, cam_z, body_x, _, body_z = get_view_origin()
     local yaw = get_camera_yaw()
-    -- Character-centered coordinates prevent third-person camera offset from
-    -- displacing the player and every surrounding blip.
+    local facing = get_facing_angle()
     local view_x, view_z = body_x or cam_x, body_z or cam_z
 
-    draw_radar_frame(layout, bg, grid, zoom)
+    -- World map is the default. Classic rotating radar only if the texture fails
+    -- (map_image retries the download every 30s on its own).
+    local north_up = false
+    local view
+    map_image.ensure()
+    if map_image.ready() then
+        north_up = true
+        view = build_north_view(cx, cy, radius, zoom, view_x, view_z, map_rect)
+    end
+    if not view then
+        view = build_yaw_view(cx, cy, zoom, yaw, view_x, view_z)
+    end
+
+    draw_radar_frame(layout, bg, grid, zoom, north_up)
+
+    if north_up then
+        attach_map_texture(view)
+        if draw.rect_filled then
+            draw.rect_filled(body.x, body.y, body.w, body.h,
+                theme.alpha(theme.PANEL_DEEP, 0.10), 7)
+        end
+    end
 
     if settings.bool("april_map_show_world", false) then
         local col = settings.color("april_map_world_col", theme.GREEN)
-        for _, item in ipairs(cache.world) do
+        for _, item in ipairs(cache.world or {}) do
             if env.is_valid(item.inst) then
                 local wx, wz = entry_world_xz(item)
                 if wx then
-                    draw_map_item(wx, wz, col, item.name, "diamond", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
+                    draw_map_item(wx, wz, col, item.name, "diamond", view, scale, layout, "world")
                 end
             end
         end
@@ -22056,11 +23022,11 @@ function M.draw()
 
     if settings.bool("april_map_show_loot", false) then
         local col = settings.color("april_map_loot_col", { 1, 0.85, 0.35, 1 })
-        for _, item in ipairs(cache.loot) do
+        for _, item in ipairs(cache.loot or {}) do
             if env.is_valid(item.inst) then
                 local wx, wz = entry_world_xz(item)
                 if wx then
-                    draw_map_item(wx, wz, col, item.name, "square", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
+                    draw_map_item(wx, wz, col, item.name, "square", view, scale, layout, "loot")
                 end
             end
         end
@@ -22068,11 +23034,11 @@ function M.draw()
 
     if settings.bool("april_map_show_base", false) then
         local col = settings.color("april_map_base_col", { 0.55, 0.55, 1, 1 })
-        for _, item in ipairs(cache.base) do
+        for _, item in ipairs(cache.base or {}) do
             if env.is_valid(item.inst) then
                 local wx, wz = entry_world_xz(item)
                 if wx then
-                    draw_map_item(wx, wz, col, item.name, "diamond", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
+                    draw_map_item(wx, wz, col, item.name, "diamond", view, scale, layout, "base")
                 end
             end
         end
@@ -22080,11 +23046,13 @@ function M.draw()
 
     if settings.bool("april_map_show_npcs", false) then
         local col = settings.color("april_map_npc_col", theme.ORANGE)
-        for _, entry in ipairs(cache.npcs) do
+        for _, entry in ipairs(cache.npcs or {}) do
             if env.is_valid(entry.inst) then
                 local wx, wz = entry_world_xz(entry)
                 if wx then
-                    draw_map_item(wx, wz, col, entry.name, "circle", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
+                    local kind = entry.kind or npcs.kind(entry.name)
+                    local size_kind = npcs.is_boss_kind(kind) and "boss" or "npc"
+                    draw_map_item(wx, wz, col, entry.name, "circle", view, scale, layout, size_kind)
                 end
             end
         end
@@ -22092,9 +23060,9 @@ function M.draw()
 
     if settings.bool("april_map_show_waypoints", false) then
         local col = settings.color("april_map_wp_col", theme.CYAN)
-        for i, wp in pairs(cache.waypoints) do
+        for i, wp in pairs(cache.waypoints or {}) do
             if wp and wp.pos then
-                draw_map_item(wp.pos.x, wp.pos.z, col, wp.name or ("WP" .. i), "waypoint", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
+                draw_map_item(wp.pos.x, wp.pos.z, col, wp.name or ("WP" .. i), "waypoint", view, scale, layout, "waypoint")
             end
         end
     end
@@ -22107,24 +23075,32 @@ function M.draw()
                 if raid.count and raid.count > 1 then
                     label = string.format("Raid (%d)", raid.count)
                 end
-                draw_map_item(raid.x, raid.z, col, label, "diamond", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
+                draw_map_item(raid.x, raid.z, col, label, "diamond", view, scale, layout, "raid")
             end
         end
     end
 
     if settings.bool("april_map_show_players", false) then
         local col = settings.color("april_map_player_col", theme.RED)
-        for _, p in ipairs(cache.players) do
+        for _, p in ipairs(cache.players or {}) do
             local px, _, pz = position_xyz(ep.position(p))
             if player_state.is_combat_target(p) and px and pz then
                 local label = ep.display_name(p) or ep.name(p)
-                draw_map_item(px, pz, col, label, "circle", view_x, view_z, cx, cy, zoom, yaw, scale, layout)
+                draw_map_item(px, pz, col, label, "circle", view, scale, layout, "player")
             end
         end
     end
 
-    local local_col = overlay_theme.accent()
-    draw_local_blip(layout, local_col)
+    -- Local player on the north-up map; arrow rotates with facing.
+    local arrow_x, arrow_y = cx, cy
+    if north_up and view_x and view_z then
+        local ax, ay = world_to_map_north(view_x, view_z, view)
+        if ax and ay then
+            arrow_x, arrow_y = ax, ay
+        end
+    end
+    local arrow_ang = north_up and facing or 0
+    draw_facing_arrow(arrow_x, arrow_y, overlay_theme.accent(), blip_scale(scale, "self"), arrow_ang)
 end
 
 return M
