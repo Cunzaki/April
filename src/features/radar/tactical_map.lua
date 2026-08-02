@@ -45,47 +45,70 @@ local function ensure_draw_api()
     end)
 end
 
+-- Local atan2 so a missing math_util.atan2 never kills the radar frame.
+local function atan2(y, x)
+    if math_util and type(math_util.atan2) == "function" then
+        return math_util.atan2(y, x)
+    end
+    y, x = y or 0, x or 0
+    if type(math.atan2) == "function" then
+        return math.atan2(y, x)
+    end
+    local ok, result = pcall(math.atan, y, x)
+    if ok and type(result) == "number" then
+        return result
+    end
+    return 0
+end
+
+local function call_api(fn, ...)
+    if type(fn) ~= "function" then return nil end
+    local ok, a, b, c = pcall(fn, ...)
+    if ok then return a, b, c end
+    return nil
+end
+
+local function camera_fn(snake, pascal)
+    if not camera then return nil end
+    local fn = camera[snake] or camera[pascal]
+    if type(fn) == "function" then return fn end
+    return nil
+end
+
 -- North-up facing: screen up = world -Z. atan2(look.X, -look.Z).
 local function get_facing_angle()
-    if camera and camera.get_look_vector then
-        local ok, lv = pcall(camera.get_look_vector)
-        if ok and lv then
-            local lx = lv.x or lv.X or 0
-            local lz = lv.z or lv.Z or 0
-            if math.abs(lx) > 0.001 or math.abs(lz) > 0.001 then
-                return math_util.atan2(lx, -lz)
-            end
+    local lv = call_api(camera_fn("get_look_vector", "GetLookVector"))
+    if lv then
+        local lx = lv.x or lv.X or 0
+        local lz = lv.z or lv.Z or 0
+        if math.abs(lx) > 0.001 or math.abs(lz) > 0.001 then
+            return atan2(lx, -lz)
         end
     end
-    if camera and camera.get_angles then
-        local ok, a = pcall(camera.get_angles)
-        if ok and a then
-            local deg = a.Y or a.y
-            if deg then return math.rad(deg) end
-        end
+    local a = call_api(camera_fn("get_angles", "GetAngles"))
+    if a then
+        local deg = a.Y or a.y
+        if deg then return math.rad(deg) end
     end
     return 0
 end
 
 local function get_camera_yaw()
-    if camera and camera.get_angles then
-        local ok, a = pcall(camera.get_angles)
-        if ok and a then
-            local deg = a.Y or a.y
-            if deg then return math.rad(deg) end
-        end
+    local a = call_api(camera_fn("get_angles", "GetAngles"))
+    if a then
+        local deg = a.Y or a.y
+        if deg then return math.rad(deg) end
     end
-    if utility and utility.get_camera_angles then
-        local ok, _, yaw = pcall(utility.get_camera_angles)
+    local util_angles = utility and (utility.get_camera_angles or utility.GetCameraAngles)
+    if type(util_angles) == "function" then
+        local ok, _, yaw = pcall(util_angles)
         if ok and yaw then return math.rad(yaw) end
     end
-    if camera and camera.get_look_vector then
-        local ok, lv = pcall(camera.get_look_vector)
-        if ok and lv then
-            local lx, lz = lv.x or lv.X or 0, lv.z or lv.Z or 0
-            if math.abs(lx) > 0.001 or math.abs(lz) > 0.001 then
-                return math_util.atan2(lx, lz)
-            end
+    local lv = call_api(camera_fn("get_look_vector", "GetLookVector"))
+    if lv then
+        local lx, lz = lv.x or lv.X or 0, lv.z or lv.Z or 0
+        if math.abs(lx) > 0.001 or math.abs(lz) > 0.001 then
+            return atan2(lx, lz)
         end
     end
     return 0
@@ -93,13 +116,11 @@ end
 
 local function get_view_origin()
     local cx, cy, cz = nil, nil, nil
-    if camera and camera.get_position then
-        local ok, pos = pcall(camera.get_position)
-        if ok and pos and (pos.x or pos.X) then
-            cx = pos.x or pos.X
-            cy = pos.y or pos.Y
-            cz = pos.z or pos.Z
-        end
+    local pos = call_api(camera_fn("get_position", "GetPosition"))
+    if pos and (pos.x or pos.X) then
+        cx = pos.x or pos.X
+        cy = pos.y or pos.Y
+        cz = pos.z or pos.Z
     end
 
     local lp = cache.local_player or env.get_local_player()
@@ -172,7 +193,9 @@ local function entry_world_xz(entry)
 end
 
 local function short_label(text)
-    if not text or text == "" then return "" end
+    if text == nil then return "" end
+    text = tostring(text)
+    if text == "" then return "" end
     text = text:gsub("%s*%(Sleeper%)", "")
     if #text > 10 then
         return text:sub(1, 9) .. ".."
@@ -203,18 +226,29 @@ local function draw_radar_label(lx, ly, text, col, x, y, w, h, fs)
     draw_util.text(lx, ly, text, col, fs)
 end
 
+local function draw_fn(snake, pascal)
+    if not draw then return nil end
+    local fn = draw[snake] or draw[pascal]
+    if type(fn) == "function" then return fn end
+    return nil
+end
+
 local function draw_blip(mx, my, scale, col, clamped, shape)
+    if type(col) ~= "table" then col = theme.CYAN end
     local alpha = clamped and 0.72 or 1
-    local c = { col[1], col[2], col[3], (col[4] or 1) * alpha }
+    local c = { col[1] or 1, col[2] or 1, col[3] or 1, (col[4] or 1) * alpha }
     local r = math.max(2, scale - (clamped and 1 or 0))
     local edge = theme.alpha(theme.PANEL_DEEP, math.min(0.42, c[4] * 0.42))
     shape = shape or "circle"
 
-    if shape == "square" and draw and draw.rect_filled then
-        draw.rect_filled(mx - r - 1, my - r - 1, (r + 1) * 2, (r + 1) * 2, edge, 0)
-        draw.rect_filled(mx - r, my - r, r * 2, r * 2, c, 0)
-    elseif shape == "diamond" and draw and (draw.poly_filled or draw.PolyFilled) then
-        local poly = draw.poly_filled or draw.PolyFilled
+    local rect_f = draw_fn("rect_filled", "RectFilled")
+    local poly = draw_fn("poly_filled", "PolyFilled")
+    local circ_f = draw_fn("circle_filled", "CircleFilled")
+
+    if shape == "square" and rect_f then
+        pcall(rect_f, mx - r - 1, my - r - 1, (r + 1) * 2, (r + 1) * 2, edge, 0)
+        pcall(rect_f, mx - r, my - r, r * 2, r * 2, c, 0)
+    elseif shape == "diamond" and poly then
         pcall(poly, {
             { mx, my - r - 1 }, { mx + r + 1, my },
             { mx, my + r + 1 }, { mx - r - 1, my },
@@ -223,13 +257,13 @@ local function draw_blip(mx, my, scale, col, clamped, shape)
             { mx, my - r }, { mx + r, my },
             { mx, my + r }, { mx - r, my },
         }, c)
-    elseif shape == "waypoint" and draw and draw.circle_filled then
-        draw.circle_filled(mx, my, r + 2, edge, 12)
-        draw.circle_filled(mx, my, r + 1, c, 12)
-        draw.circle_filled(mx, my, math.max(1, r - 1), theme.PANEL_DEEP, 10)
-    elseif draw and draw.circle_filled then
-        draw.circle_filled(mx, my, r + 1, edge, 10)
-        draw.circle_filled(mx, my, r, c, 10)
+    elseif shape == "waypoint" and circ_f then
+        pcall(circ_f, mx, my, r + 2, edge, 12)
+        pcall(circ_f, mx, my, r + 1, c, 12)
+        pcall(circ_f, mx, my, math.max(1, r - 1), theme.PANEL_DEEP, 10)
+    elseif circ_f then
+        pcall(circ_f, mx, my, r + 1, edge, 10)
+        pcall(circ_f, mx, my, r, c, 10)
     else
         draw_util.circle(mx, my, r, c, true)
     end
@@ -278,36 +312,39 @@ local function draw_radar_frame(layout, bg, grid, zoom, north_up)
 
     overlay_theme.draw_panel(x, y, w, h, "RADAR")
 
-    if draw.rect_filled then
-        draw.rect_filled(x + 7, y + TITLE_H + 3, w - 14, h - TITLE_H - 10,
+    local rect_f = draw_fn("rect_filled", "RectFilled")
+    if rect_f then
+        pcall(rect_f, x + 7, y + TITLE_H + 3, w - 14, h - TITLE_H - 10,
             theme.alpha(bg or theme.PANEL_DEEP, 0.36), 7)
     end
 
-    local zoom_text = string.format("x%.2f", zoom)
+    local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
     local zoom_w = theme.text_w(zoom_text, 9)
     draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, theme.TEXT_DIM, 9)
 
-    if draw and draw.circle then
-        local accent = overlay_theme.accent()
-        draw.circle(cx, cy, layout.radius, theme.alpha(accent, 0.24), 40, 1)
-        draw.circle(cx, cy, layout.radius * 0.66, theme.alpha(grid or theme.BORDER, 0.11), 32, 1)
-        draw.circle(cx, cy, layout.radius * 0.33, theme.alpha(grid or theme.BORDER, 0.08), 24, 1)
+    local circle = draw_fn("circle", "Circle")
+    local accent = overlay_theme.accent()
+    if circle then
+        pcall(circle, cx, cy, layout.radius, theme.alpha(accent, 0.24), 40, 1)
+        pcall(circle, cx, cy, layout.radius * 0.66, theme.alpha(grid or theme.BORDER, 0.11), 32, 1)
+        pcall(circle, cx, cy, layout.radius * 0.33, theme.alpha(grid or theme.BORDER, 0.08), 24, 1)
     end
-    if draw and draw.line then
+    local line = draw_fn("line", "Line")
+    if line then
         local axis = theme.alpha(grid or theme.BORDER, 0.10)
-        draw.line(cx - layout.radius, cy, cx - 10, cy, axis, 1)
-        draw.line(cx + 10, cy, cx + layout.radius, cy, axis, 1)
-        draw.line(cx, cy - layout.radius, cx, cy - 10, axis, 1)
-        draw.line(cx, cy + 10, cx, cy + layout.radius, axis, 1)
+        pcall(line, cx - layout.radius, cy, cx - 10, cy, axis, 1)
+        pcall(line, cx + 10, cy, cx + layout.radius, cy, axis, 1)
+        pcall(line, cx, cy - layout.radius, cx, cy - 10, axis, 1)
+        pcall(line, cx, cy + 10, cx, cy + layout.radius, axis, 1)
 
-        local tick = theme.alpha(overlay_theme.accent(), 0.30)
-        draw.line(cx - 3, cy - layout.radius, cx + 3, cy - layout.radius, tick, 1)
-        draw.line(cx + layout.radius, cy - 3, cx + layout.radius, cy + 3, tick, 1)
-        draw.line(cx - 3, cy + layout.radius, cx + 3, cy + layout.radius, tick, 1)
-        draw.line(cx - layout.radius, cy - 3, cx - layout.radius, cy + 3, tick, 1)
+        local tick = theme.alpha(accent, 0.30)
+        pcall(line, cx - 3, cy - layout.radius, cx + 3, cy - layout.radius, tick, 1)
+        pcall(line, cx + layout.radius, cy - 3, cx + layout.radius, cy + 3, tick, 1)
+        pcall(line, cx - 3, cy + layout.radius, cx + 3, cy + layout.radius, tick, 1)
+        pcall(line, cx - layout.radius, cy - 3, cx - layout.radius, cy + 3, tick, 1)
     end
 
-    local forward = theme.alpha(overlay_theme.accent(), 0.78)
+    local forward = theme.alpha(accent, 0.78)
     if north_up then
         draw_util.text(cx - 3, cy - layout.radius + 4, "N", forward, 9)
     else
@@ -317,6 +354,7 @@ end
 
 -- Facing arrow. tip points along `ang` (0 = screen up / north).
 local function draw_facing_arrow(mx, my, col, scale, ang)
+    if type(col) ~= "table" then col = theme.CYAN end
     local r = (scale or 3) + 2
     ang = ang or 0
     local function pt(dist, offset)
@@ -328,25 +366,30 @@ local function draw_facing_arrow(mx, my, col, scale, ang)
     local rx, ry = pt(r * 0.85, -2.4)
     local bx, by = pt(r * 0.25, math.pi)
 
-    local poly = draw and (draw.poly_filled or draw.PolyFilled)
+    local poly = draw_fn("poly_filled", "PolyFilled")
     if poly then
         local ok = pcall(poly, {
             { tx, ty }, { lx, ly }, { bx, by }, { rx, ry },
         }, col)
         if ok then
-            if draw.circle then
-                draw.circle(mx, my, r + 3, theme.alpha(col, 0.28), 20, 1)
+            local circle = draw_fn("circle", "Circle")
+            if circle then
+                pcall(circle, mx, my, r + 3, theme.alpha(col, 0.28), 20, 1)
             end
             return
         end
     end
-    if draw and draw.line then
-        draw.line(tx, ty, lx, ly, col, 2)
-        draw.line(lx, ly, bx, by, col, 2)
-        draw.line(bx, by, rx, ry, col, 2)
-        draw.line(rx, ry, tx, ty, col, 2)
-    elseif draw and draw.circle_filled then
-        draw.circle_filled(mx, my, r, col, 12)
+    local line = draw_fn("line", "Line")
+    if line then
+        pcall(line, tx, ty, lx, ly, col, 2)
+        pcall(line, lx, ly, bx, by, col, 2)
+        pcall(line, bx, by, rx, ry, col, 2)
+        pcall(line, rx, ry, tx, ty, col, 2)
+    else
+        local circ_f = draw_fn("circle_filled", "CircleFilled")
+        if circ_f then
+            pcall(circ_f, mx, my, r, col, 12)
+        end
     end
 end
 
@@ -460,11 +503,8 @@ end
 function M.draw()
     if not settings.enabled(P) then return end
     if not draw then return end
-    local ok, err = pcall(M.draw_inner)
-    if not ok then
-        local debug = April.require("core.debug")
-        debug.error_once("radar:draw", err)
-    end
+    local debug = April.require("core.debug")
+    debug.guard("radar:draw", M.draw_inner)
 end
 
 function M.draw_inner()
@@ -528,8 +568,9 @@ function M.draw_inner()
 
     if north_up then
         attach_map_texture(view)
-        if draw.rect_filled then
-            draw.rect_filled(body.x, body.y, body.w, body.h,
+        local rect_f = draw_fn("rect_filled", "RectFilled")
+        if rect_f then
+            pcall(rect_f, body.x, body.y, body.w, body.h,
                 theme.alpha(theme.PANEL_DEEP, 0.10), 7)
         end
     end

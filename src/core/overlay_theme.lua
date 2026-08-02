@@ -25,13 +25,16 @@ end
 
 function M.accent()
     local anim = anim_mod()
-    if anim and type(anim.colors_enabled) == "function" and anim.colors_enabled()
-        and type(anim.element_color) == "function" then
-        local ok, col = pcall(anim.element_color, 7, anim.COL_OVERLAY)
-        if ok and col then return col end
+    if anim and type(anim.colors_enabled) == "function" and type(anim.element_color) == "function" then
+        local ok_on, on = pcall(anim.colors_enabled)
+        if ok_on and on then
+            local target = anim.TARGET_OVERLAY or 8
+            local ok, col = pcall(anim.element_color, target, anim.COL_OVERLAY)
+            if ok and type(col) == "table" then return col end
+        end
     end
     local gs = gs_theme()
-    if gs and gs.ACCENT then
+    if gs and type(gs.ACCENT) == "table" then
         return gs.ACCENT
     end
     return ui_theme.CYAN
@@ -80,15 +83,25 @@ function M.draw_accent_bar(x, y, w, h, alpha)
     h = h or 2
     alpha = alpha == nil and 1 or alpha
     local anim = anim_mod()
-    if alpha >= 0.99 and anim and anim.anim_enabled and anim.anim_enabled()
-        and anim.anim_target_enabled and anim.anim_target_enabled(anim.TARGET_OVERLAY) then
-        anim.draw_bar_h(x, y, w, h, anim.phase and (anim.phase() * 0.1) or 0,
-            anim.STYLE_OVERLAY, anim.COL_OVERLAY, anim.TARGET_OVERLAY)
-        return
+    if alpha >= 0.99 and anim
+        and type(anim.anim_enabled) == "function" and type(anim.anim_target_enabled) == "function"
+        and type(anim.draw_bar_h) == "function" then
+        local ok_on, on = pcall(anim.anim_enabled)
+        local ok_tgt, tgt = pcall(anim.anim_target_enabled, anim.TARGET_OVERLAY)
+        if ok_on and on and ok_tgt and tgt then
+            local phase = 0
+            if type(anim.phase) == "function" then
+                local ok_p, p = pcall(anim.phase)
+                if ok_p and type(p) == "number" then phase = p * 0.1 end
+            end
+            pcall(anim.draw_bar_h, x, y, w, h, phase,
+                anim.STYLE_OVERLAY, anim.COL_OVERLAY, anim.TARGET_OVERLAY)
+            return
+        end
     end
-    if draw and draw.line then
-        local col = ui_theme.alpha(M.accent(), alpha)
-        draw.line(x, y, x + w, y, col, h)
+    local line = draw and (draw.line or draw.Line)
+    if type(line) == "function" then
+        pcall(line, x, y, x + w, y, ui_theme.alpha(M.accent(), alpha), h)
     end
 end
 
@@ -109,17 +122,17 @@ function M.draw_panel(x, y, w, h, title, opts)
     local fill = draw and (draw.rect_filled or draw.RectFilled)
     local text = draw and (draw.text or draw.Text)
     local rounding = gs and gs.CORNER or 6
-    if fill then
+    if type(fill) == "function" then
         -- One surface only. Vector shadows every primitive, so layered headers
         -- and borders make these compact modules look embossed.
-        fill(x, y, w, h, M.panel_bg(), rounding)
+        pcall(fill, x, y, w, h, M.panel_bg(), rounding)
     end
-    if title and text then
+    if title and type(text) == "function" then
         if opts.title_center then
             local tw = ui_theme.text_w(title, 11)
-            text(x + (w - tw) * 0.5, y + 8, title, M.text(), 11)
+            pcall(text, x + (w - tw) * 0.5, y + 8, title, M.text(), 11)
         else
-            text(x + 12, y + 8, title, M.text(), 11)
+            pcall(text, x + 12, y + 8, title, M.text(), 11)
         end
     end
 end

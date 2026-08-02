@@ -10,8 +10,12 @@ local gpu_chams = April.require("core.gpu_chams")
 
 local M = {}
 
-local function cb(id, label, default, color, gate)
-    return { type = "checkbox", id = id, label = label, default = default == true, color = color, gate = gate }
+local function cb(id, label, default, color, gate, extra)
+    local item = { type = "checkbox", id = id, label = label, default = default == true, color = color, gate = gate }
+    if type(extra) == "table" then
+        for k, v in pairs(extra) do item[k] = v end
+    end
+    return item
 end
 
 local function kb(id, label, default, gate, extra)
@@ -153,7 +157,7 @@ local function build_aim()
         title = "Aimbot",
         master = "april_aimbot",
         items = {
-            cb("april_aimbot", "Enable Aimbot", false),
+            cb("april_aimbot", "Enable Aimbot", false, nil, nil, { hide_color = true }),
             ak("april_aim_key", "Aim Key"),
             sep(),
             combo("april_aim_target_type", "Target Type", { "Crosshair", "Distance" }, 0),
@@ -204,7 +208,7 @@ local function build_aim()
         title = "Silent Aim",
         master = "april_silent_aim",
         items = {
-            kb("april_silent_aim", "Enable Silent Aim", false),
+            kb("april_silent_aim", "Enable Silent Aim", false, nil, { hide_color = true }),
             sep(),
             combo("april_silent_target_type", "Target Type", { "Crosshair", "Distance" }, 0),
             combo("april_silent_bone", "Hitbox", combat_menu.SILENT_BONES, 0),

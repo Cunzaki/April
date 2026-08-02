@@ -118,19 +118,21 @@ end
 
 local function ensure_dir(dir)
     if not dir or dir == "" then return false end
-    local probe = io and io.open and io.open(dir .. "\\.april_dir", "w")
+    local open = io and io.open
+    if type(open) ~= "function" then return false end
+    local probe = open(dir .. "\\.april_dir", "w")
     if probe then
         probe:close()
-        pcall(os.remove, dir .. "\\.april_dir")
+        if os and os.remove then pcall(os.remove, dir .. "\\.april_dir") end
         return true
     end
-    pcall(function()
-        os.execute('mkdir "' .. dir .. '" >nul 2>&1')
-    end)
-    probe = io.open(dir .. "\\.april_dir", "w")
+    if os and os.execute then
+        pcall(os.execute, 'mkdir "' .. dir .. '" >nul 2>&1')
+    end
+    probe = open(dir .. "\\.april_dir", "w")
     if probe then
         probe:close()
-        pcall(os.remove, dir .. "\\.april_dir")
+        if os and os.remove then pcall(os.remove, dir .. "\\.april_dir") end
         return true
     end
     return false

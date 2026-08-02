@@ -91,14 +91,21 @@ function M.sync()
 end
 
 function M.alpha(col, a)
-    return { col[1], col[2], col[3], a }
+    if type(col) ~= "table" then
+        col = M.CYAN or { 0, 0.76, 0.89, 1 }
+    end
+    return { col[1] or 1, col[2] or 1, col[3] or 1, a }
 end
 
 function M.text_w(text, size)
-    if draw and draw.get_text_size then
-        return draw.get_text_size(text, size or 13)
+    text = tostring(text or "")
+    size = size or 13
+    local size_fn = draw and (draw.get_text_size or draw.GetTextSize)
+    if type(size_fn) == "function" then
+        local ok, w = pcall(size_fn, text, size)
+        if ok and w then return w end
     end
-    return (#text * (size or 13) * 0.55), size or 13
+    return (#text * size * 0.55), size
 end
 
 function M.draw_panel(x, y, w, h, opts)

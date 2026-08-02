@@ -28,6 +28,18 @@ function M.warn_once(key, msg)
     print("[April WARN][" .. key .. "] " .. tostring(msg))
 end
 
+local function traceback_msg(err)
+    err = tostring(err)
+    local dbg = rawget(_G, "debug")
+    if dbg and type(dbg.traceback) == "function" then
+        local ok, tb = pcall(dbg.traceback, err, 2)
+        if ok and type(tb) == "string" and tb ~= "" then
+            return tb
+        end
+    end
+    return err
+end
+
 function M.error_once(key, err)
     key = tostring(key)
     if seen_errors[key] and not M.verbose() then return end
@@ -35,14 +47,12 @@ function M.error_once(key, err)
     local count = seen_errors[key]
     local suffix = count > 1 and (" (x" .. count .. ")") or ""
     print("[April ERROR][" .. key .. "] " .. tostring(err) .. suffix)
-    if debug and debug.traceback then
-        print(debug.traceback(err, 2))
-    end
 end
 
 function M.guard(key, fn, ...)
     if type(fn) ~= "function" then return nil end
-    local ok, a, b, c = pcall(fn, ...)
+    -- xpcall keeps the stack; plain pcall only returns "attempt to call a nil value".
+    local ok, a, b, c = xpcall(fn, traceback_msg, ...)
     if not ok then
         M.error_once(key, a)
         return nil
@@ -51,7 +61,8 @@ function M.guard(key, fn, ...)
 end
 
 function M.guard_bool(key, fn, ...)
-    local ok, result = pcall(fn, ...)
+    if type(fn) ~= "function" then return false end
+    local ok, result = xpcall(fn, traceback_msg, ...)
     if not ok then
         M.error_once(key, result)
         return false
