@@ -595,10 +595,28 @@ end
 
 function M.tick_key_listen()
     if not M.listening_key then return end
+    if input.key_pressed(0x1B) then -- Escape cancels capture
+        M.listening_key = nil
+        return
+    end
+    if input.key_pressed(0x08) or input.key_pressed(0x2E) then -- Backspace/Delete clears
+        state.set_key(M.listening_key, 0)
+        M.listening_key = nil
+        return
+    end
     for i = 1, #LISTEN_VKS do
         local vk = LISTEN_VKS[i]
         if not listen_skip_vk(vk) and input.key_pressed(vk) then
-            state.set_key(M.listening_key, vk)
+            local id = M.listening_key
+            state.set_key(id, vk)
+            -- A newly assigned feature/aim key must do something without requiring
+            -- users to discover the RMB mode menu. Preserve explicit Hold/
+            -- Toggle choices, but promote the default Always mode to Toggle.
+            local mode_id = id .. "_mode"
+            local mode = state.get(mode_id, nil)
+            if mode ~= nil and tonumber(mode) == 0 then
+                state.set(mode_id, 2)
+            end
             M.listening_key = nil
             return
         end

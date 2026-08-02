@@ -53,7 +53,6 @@ end
 
 local function aiming()
     if not enabled() then return false end
-    aim_key.tick(P_AIM_KEY, P_AIM_KEY_MODE)
     return aim_key.active(P_AIM_KEY, P_AIM_KEY_MODE)
 end
 

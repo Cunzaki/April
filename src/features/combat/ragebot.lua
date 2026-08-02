@@ -106,9 +106,9 @@ function M.register_menu()
     menu.add_combo(T, G.SILENT_AIM, PREFIX .. "target_type", "Target Type", { "Crosshair", "Distance" }, 1,
         { parent = P_MASTER })
     menu.add_combo(T, G.SILENT_AIM, PREFIX .. "bone", "Hitbox", combat_menu.SILENT_BONES, 0, { parent = P_MASTER })
-    menu.add_multicombo(T, G.SILENT_AIM, PREFIX .. "targets", "Aim At", {
-        "Players", "NPCs",
-    }, { true, false }, { parent = P_MASTER })
+    combat_menu.expand_legacy_targets(PREFIX)
+    menu.add_multicombo(T, G.SILENT_AIM, PREFIX .. "targets", "Aim At",
+        combat_menu.AIM_AT_OPTIONS, combat_menu.AIM_AT_DEFAULTS, { parent = P_MASTER })
     menu.add_multicombo(T, G.SILENT_AIM, PREFIX .. "filters", "Filters", {
         "Health Check",
         "Visible Only",

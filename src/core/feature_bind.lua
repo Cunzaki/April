@@ -7,7 +7,24 @@ M.MODES = { "Always", "Hold", "Toggle" }
 
 local registry = {}
 local last_down = {}
+local last_key = {}
+local last_mode = {}
 local migrated = {}
+
+local function key_down(vk)
+    if not input then return false end
+    local fn = input.is_key_down or input.IsKeyDown
+    if type(fn) ~= "function" then return false end
+    local ok, down = pcall(fn, vk)
+    return ok and down == true
+end
+
+local function key_capture_active()
+    local ok, widgets = pcall(function()
+        return April.require("ui.gs_widgets")
+    end)
+    return ok and widgets and widgets.listening_key ~= nil
+end
 
 local function migrate_mode(mode_id)
     if not mode_id or migrated[mode_id] then return end
@@ -129,7 +146,7 @@ function M.active(id)
         local key = M.get_key(id)
         -- No key bound: treat Hold like Always so ESP doesn't silently vanish.
         if key <= 0 then return true end
-        return input and input.is_key_down and input.is_key_down(key)
+        return key_down(key)
     end
 
     -- Always + Toggle: checkbox/armed state is the feature on-state
@@ -137,22 +154,37 @@ function M.active(id)
 end
 
 function M.tick()
-    if not input or not input.is_key_down then return end
+    if not input or type(input.is_key_down or input.IsKeyDown) ~= "function" then return end
+    local capturing = key_capture_active()
 
     for id in pairs(registry) do
         local mode = M.mode_index(id)
         local key = M.get_key(id)
+        local changed = last_key[id] ~= key or last_mode[id] ~= mode
+        if changed then
+            -- Do not activate a bind from the same physical press used to
+            -- assign it or from a key already held while changing modes.
+            last_key[id] = key
+            last_mode[id] = mode
+            last_down[id] = key > 0 and key_down(key) or false
+        end
+        if capturing then
+            -- Consume key state while the UI is listening. Otherwise assigning
+            -- a key can toggle every other feature already using that VK.
+            last_down[id] = key > 0 and key_down(key) or false
+            goto continue
+        end
 
         if mode == 0 then -- Always: ignore key edge
             if key > 0 then
-                last_down[id] = input.is_key_down(key)
+                last_down[id] = key_down(key)
             end
             goto continue
         end
 
         if mode == 1 then -- Hold: no edge toggle
             if key > 0 then
-                last_down[id] = input.is_key_down(key)
+                last_down[id] = key_down(key)
             end
             goto continue
         end
@@ -160,8 +192,8 @@ function M.tick()
         -- Toggle
         if key <= 0 then goto continue end
 
-        local down = input.is_key_down(key)
-        if down and not last_down[id] then
+        local down = key_down(key)
+        if not changed and down and not last_down[id] then
             local cur = settings.bool(id, false)
             if menu and menu.set then
                 pcall(menu.set, id, not cur)

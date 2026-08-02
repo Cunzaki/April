@@ -104,6 +104,133 @@ function M.display_name(name, kind)
     return name
 end
 
+local function part_pos(part)
+    if not part then return nil end
+    return vec3(part.Position or part.position)
+end
+
+local function part_name_lower(part)
+    return tostring(part and (part.Name or part.name) or ""):lower()
+end
+
+-- Dump: ViewmodelController treats AttackHeli parts with RotorBonus > 0 as weak points
+-- ("HitHead"). Rotor part names are not in the static place dump — scan live attributes
+-- and common rotor-ish names from the player Flycopter as fallbacks.
+function M.collect_heli_weak_points(model)
+    if not model or not env.is_valid(model) then return {} end
+    local out = {}
+    local seen = {}
+
+    local function add(part, score)
+        if not part or not env.is_valid(part) then return end
+        local key = address(part)
+        if not key or seen[key] then return end
+        local x, y, z = part_pos(part)
+        if not x then return end
+        seen[key] = true
+        out[#out + 1] = {
+            part = part,
+            x = x, y = y, z = z,
+            score = score or 1,
+            name = part.Name or part.name,
+        }
+    end
+
+    local desc = env.safe_call(function()
+        if model.GetDescendants then return model:GetDescendants() end
+        if model.get_descendants then return model:get_descendants() end
+        return nil
+    end)
+
+    if type(desc) == "table" then
+        for i = 1, #desc do
+            local part = desc[i]
+            if not part then goto cont end
+            local cn = part.ClassName or part.class_name or ""
+            if cn ~= "Part" and cn ~= "MeshPart" and cn ~= "BasePart"
+                and cn ~= "WedgePart" and cn ~= "UnionOperation" then
+                goto cont
+            end
+            local bonus = tonumber(env.get_attribute(part, "RotorBonus")) or 0
+            if bonus > 0 then
+                add(part, 100 + bonus)
+            else
+                local n = part_name_lower(part)
+                if n:find("rotor", 1, true) or n:find("blade", 1, true)
+                    or n == "spinner" or n:find("tailrotor", 1, true)
+                    or n:find("mainrotor", 1, true) then
+                    add(part, 40)
+                end
+            end
+            ::cont::
+        end
+    else
+        -- Shallow fallback when GetDescendants is unavailable.
+        for _, name in ipairs({ "MainRotor", "TailRotor", "Blades", "Spinner" }) do
+            local part = find_child(model, name)
+            if part then add(part, 40) end
+            for _, child in ipairs(children(part)) do
+                local n = part_name_lower(child)
+                if n:find("rotor", 1, true) or n:find("blade", 1, true) or n == "spinner" then
+                    add(child, 40)
+                end
+            end
+        end
+    end
+
+    table.sort(out, function(a, b)
+        return (a.score or 0) > (b.score or 0)
+    end)
+    return out
+end
+
+-- Best heli aim point: prefer RotorBonus weak parts, then named rotors, else body.
+function M.heli_aim_world(entry, prefer_screen, cx, cy)
+    if not entry then return nil end
+    local model = entry.inst
+    if (not model or not env.is_valid(model)) and entry.entity then
+        model = entry.entity.Character or entry.entity.character
+    end
+    local weak = M.collect_heli_weak_points(model)
+    if #weak == 0 then
+        local body = entry.root or entry.anchor or entry.head
+        if (not body or not env.is_valid(body)) and model and env.is_valid(model) then
+            body = find_child(model, "Main") or find_child(model, "HumanoidRootPart")
+                or model.PrimaryPart or model.primary_part or esp_scan.find_main_part(model)
+        end
+        local x, y, z = part_pos(body)
+        if x then return { x = x, y = y, z = z } end
+        if entry.lx ~= nil and entry.ly ~= nil and entry.lz ~= nil then
+            return { x = entry.lx, y = entry.ly, z = entry.lz }
+        end
+        return nil
+    end
+
+    if prefer_screen and cx and cy then
+        local esp_util = April.require("core.esp_util")
+        local math_util = April.require("core.math_util")
+        local best, best_d = nil, math.huge
+        for i = 1, #weak do
+            local w = weak[i]
+            local sx, sy, on = esp_util.w2s(w.x, w.y, w.z)
+            if on then
+                local d = math_util.screen_fov_dist(sx, sy, cx, cy)
+                -- Prefer true RotorBonus slightly over mere name matches when FOV-close.
+                d = d - (w.score or 0) * 0.01
+                if d < best_d then
+                    best, best_d = w, d
+                end
+            end
+        end
+        if best then
+            return { x = best.x, y = best.y, z = best.z }
+        end
+    end
+
+    local top = weak[1]
+    return { x = top.x, y = top.y, z = top.z }
+end
+
 local function read_humanoid(model)
     if not model then return nil end
     return env.safe_call(function()

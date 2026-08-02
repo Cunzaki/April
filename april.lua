@@ -1,12 +1,12 @@
 --[[
     April Fallen - Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-08-02T16:31:15.091Z
+    Built: 2026-08-02T19:16:01.592Z
     UI: custom Gamesense menu (INSERT) - Vector menu tabs disabled
 ]]
 
 April = {
-    version = "4.0.20",
+    version = "4.0.24",
     debug = false,
     _mods = {},
     bundled = true,
@@ -1890,7 +1890,24 @@ M.MODES = { "Always", "Hold", "Toggle" }
 
 local registry = {}
 local last_down = {}
+local last_key = {}
+local last_mode = {}
 local migrated = {}
+
+local function key_down(vk)
+    if not input then return false end
+    local fn = input.is_key_down or input.IsKeyDown
+    if type(fn) ~= "function" then return false end
+    local ok, down = pcall(fn, vk)
+    return ok and down == true
+end
+
+local function key_capture_active()
+    local ok, widgets = pcall(function()
+        return April.require("ui.gs_widgets")
+    end)
+    return ok and widgets and widgets.listening_key ~= nil
+end
 
 local function migrate_mode(mode_id)
     if not mode_id or migrated[mode_id] then return end
@@ -2012,7 +2029,7 @@ function M.active(id)
         local key = M.get_key(id)
         -- No key bound: treat Hold like Always so ESP doesn't silently vanish.
         if key <= 0 then return true end
-        return input and input.is_key_down and input.is_key_down(key)
+        return key_down(key)
     end
 
     -- Always + Toggle: checkbox/armed state is the feature on-state
@@ -2020,22 +2037,37 @@ function M.active(id)
 end
 
 function M.tick()
-    if not input or not input.is_key_down then return end
+    if not input or type(input.is_key_down or input.IsKeyDown) ~= "function" then return end
+    local capturing = key_capture_active()
 
     for id in pairs(registry) do
         local mode = M.mode_index(id)
         local key = M.get_key(id)
+        local changed = last_key[id] ~= key or last_mode[id] ~= mode
+        if changed then
+            -- Do not activate a bind from the same physical press used to
+            -- assign it or from a key already held while changing modes.
+            last_key[id] = key
+            last_mode[id] = mode
+            last_down[id] = key > 0 and key_down(key) or false
+        end
+        if capturing then
+            -- Consume key state while the UI is listening. Otherwise assigning
+            -- a key can toggle every other feature already using that VK.
+            last_down[id] = key > 0 and key_down(key) or false
+            goto continue
+        end
 
         if mode == 0 then -- Always: ignore key edge
             if key > 0 then
-                last_down[id] = input.is_key_down(key)
+                last_down[id] = key_down(key)
             end
             goto continue
         end
 
         if mode == 1 then -- Hold: no edge toggle
             if key > 0 then
-                last_down[id] = input.is_key_down(key)
+                last_down[id] = key_down(key)
             end
             goto continue
         end
@@ -2043,8 +2075,8 @@ function M.tick()
         -- Toggle
         if key <= 0 then goto continue end
 
-        local down = input.is_key_down(key)
-        if down and not last_down[id] then
+        local down = key_down(key)
+        if not changed and down and not last_down[id] then
             local cur = settings.bool(id, false)
             if menu and menu.set then
                 pcall(menu.set, id, not cur)
@@ -2078,6 +2110,23 @@ M.MODES = { "Always", "Hold", "Toggle" }
 
 local toggled = {}
 local last_down = {}
+local last_key = {}
+local last_mode = {}
+
+local function key_down(vk)
+    if not input then return false end
+    local fn = input.is_key_down or input.IsKeyDown
+    if type(fn) ~= "function" then return false end
+    local ok, down = pcall(fn, vk)
+    return ok and down == true
+end
+
+local function key_capture_active()
+    local ok, widgets = pcall(function()
+        return April.require("ui.gs_widgets")
+    end)
+    return ok and widgets and widgets.listening_key ~= nil
+end
 
 local function key_store()
     return April.require("ui.gs_state")
@@ -2088,21 +2137,31 @@ function M.mode_index(mode_id)
 end
 
 function M.tick(key_id, mode_id)
-    if not input or not input.is_key_down then return end
+    if not input or type(input.is_key_down or input.IsKeyDown) ~= "function" then return end
     local mode = M.mode_index(mode_id)
     local vk = key_store().get_key(key_id)
+    local changed = last_key[key_id] ~= vk or last_mode[key_id] ~= mode
+    if changed then
+        last_key[key_id] = vk
+        last_mode[key_id] = mode
+        last_down[key_id] = vk > 0 and key_down(vk) or false
+    end
+    if key_capture_active() then
+        last_down[key_id] = vk > 0 and key_down(vk) or false
+        return
+    end
     if mode == 0 then
-        if vk > 0 then last_down[key_id] = input.is_key_down(vk) end
+        if vk > 0 then last_down[key_id] = key_down(vk) end
         return
     end
     if vk <= 0 then return end
-    local down = input.is_key_down(vk)
+    local down = key_down(vk)
     if mode == 1 then
         last_down[key_id] = down
         return
     end
     -- Toggle
-    if down and not last_down[key_id] then
+    if not changed and down and not last_down[key_id] then
         toggled[key_id] = not (toggled[key_id] == true)
     end
     last_down[key_id] = down
@@ -2114,7 +2173,7 @@ function M.active(key_id, mode_id)
     local vk = key_store().get_key(key_id)
     if vk <= 0 then return mode == 0 end
     if mode == 1 then
-        return input and input.is_key_down and input.is_key_down(vk)
+        return key_down(vk)
     end
     return toggled[key_id] == true
 end
@@ -2122,6 +2181,8 @@ end
 function M.reset(key_id)
     toggled[key_id] = false
     last_down[key_id] = false
+    last_key[key_id] = nil
+    last_mode[key_id] = nil
 end
 
 return M
@@ -6746,8 +6807,7 @@ local MENU_KEYS = {
     "april_gm_speed", "april_gm_speed_mult",
     "april_gm_range", "april_gm_range_mult",
     "april_gm_double_tap",
-    "april_farm_helper", "april_farm_helper_mode", "april_farm_radius", "april_farm_smooth",
-    "april_farm_silent",
+    "april_farm_helper", "april_farm_helper_mode", "april_farm_radius",
     "april_world_enabled", "april_world_enabled_mode", "april_stone_node", "april_metal_node", "april_phosphate_node",
     "april_corn_plant", "april_tomato_plant", "april_pumpkin_plant", "april_lemon_plant",
     "april_raspberry_plant", "april_blueberry_plant", "april_wool_plant",
@@ -6880,8 +6940,27 @@ local HOTKEY_KEYS = {
     "april_silent_aim",
     "april_rage_enabled",
     "april_player_enabled",
+    "april_aim_key",
     "april_ui_menu_key",
 }
+
+local function collect_hotkey_keys()
+    local out, seen = {}, {}
+    local function add(id)
+        if not id or seen[id] then return end
+        seen[id] = true
+        out[#out + 1] = id
+    end
+    for _, id in ipairs(HOTKEY_KEYS) do add(id) end
+    pcall(function()
+        local binds = April.require("core.feature_bind")
+        for _, entry in ipairs(binds.list_entries()) do
+            add(entry.key_id or entry.id)
+        end
+    end)
+    table.sort(out)
+    return out
+end
 
 function M.get_config_path(name)
     local base = os.getenv and os.getenv("LOCALAPPDATA") or ""
@@ -6983,6 +7062,7 @@ local function collect_menu_keys()
     pcall(function()
         local fb = April.require("core.feature_bind")
         for _, entry in ipairs(fb.list_entries()) do
+            add(entry.mode_id)
             add(fb.hide_key_id(entry.id))
         end
     end)
@@ -7092,11 +7172,11 @@ function M.save_slot(slot)
         end
     end
 
-    for _, id in ipairs(HOTKEY_KEYS) do
+    for _, id in ipairs(collect_hotkey_keys()) do
         if menu.get_key then
             local vk = menu.get_key(id)
-            if vk and vk > 0 then
-                table.insert(lines, string.format("@key:%s=%d", id, vk))
+            if vk ~= nil then
+                table.insert(lines, string.format("@key:%s=%d", id, tonumber(vk) or 0))
             end
         end
     end
@@ -7119,6 +7199,14 @@ function M.load_slot(slot, opts)
     local path = slot_path(slot)
     local f = io.open(path, "r")
     if not f then return false end
+
+    -- Profiles are complete snapshots. Clear runtime keys first so a profile
+    -- with an unbound/missing legacy key cannot inherit another slot's bind.
+    if menu.set_key then
+        for _, id in ipairs(collect_hotkey_keys()) do
+            menu.set_key(id, 0)
+        end
+    end
 
     for i = M.SLOT_MIN, M.SLOT_MAX do
         cache.waypoints[i] = nil
@@ -11558,7 +11646,7 @@ local NAME_HINTS = {
     "saw bat", "shovel",
 }
 
--- MeleeChecks reach from ToolInfo dump (RaycastUtil MouseRaycast / HitMelee).
+-- Verified fallbacks for runtimes where ToolInfo cannot be loaded.
 local MELEE_RANGE = {
     ["Stone Hatchet"] = 5,
     ["Iron Shard Hatchet"] = 5,
@@ -11756,11 +11844,18 @@ function M.melee_range(tool_name)
     tool_name = normalize(tool_name)
     if not tool_name then return 5 end
 
-    local cached = MELEE_RANGE[tool_name]
-    if cached then return cached end
-
     local data = bootstrap.get_module("ToolInfo")
     local entry = data and data[tool_name]
+    local melee = entry and entry.Melee
+    local max_range = type(melee) == "table"
+        and tonumber(melee.MaxRange or melee.max_range or melee.maxRange)
+        or nil
+    if max_range and max_range > 0 then
+        return max_range
+    end
+
+    -- Compatibility only: MeleeChecks contains ray/check definitions rather
+    -- than the authoritative maximum melee distance.
     local checks = entry and entry.Melee and entry.Melee.MeleeChecks
     if type(checks) == "table" then
         local best = 0
@@ -11776,7 +11871,7 @@ function M.melee_range(tool_name)
         end
     end
 
-    return 5
+    return MELEE_RANGE[tool_name] or 5
 end
 
 function M.all_names()
@@ -11795,23 +11890,42 @@ end)()
 
 -- â”€â”€ game/farm_targets.lua â”€â”€
 April._mods["game.farm_targets"] = (function()
---[[
-  Gather targeting — TreeX / NodeSpark preferred, Main fallback.
-
-  Perf: distance-gate on cheap Main/CactusPart first. Never resolve TreeX /
-  NodeSpark for models outside tool range.
-]]
-
+-- Gather target index and live TreeX / NodeSpark weak-point resolution.
+-- The dump proves HitMelee gives parts parented to TreeX/NodeSpark priority 3.
 local env = April.require("core.env")
 local folders = April.require("game.folders")
 
 local M = {}
 
+local CELL_SIZE = 24
+local INDEX_REFRESH_MS = 900
+local buckets = {}
+local records = {}
+local last_refresh_ms = -INDEX_REFRESH_MS
+
+local function now_ms()
+    local fn = utility and (utility.get_tick_count or utility.GetTickCount)
+    if type(fn) ~= "function" then return 0 end
+    local ok, value = pcall(fn)
+    return ok and (tonumber(value) or 0) or 0
+end
+
 local function child(parent, name)
     if not parent then return nil end
     return env.safe_call(function()
-        return parent:find_first_child(name) or parent:FindFirstChild(name)
+        if parent.FindFirstChild then return parent:FindFirstChild(name) end
+        if parent.find_first_child then return parent:find_first_child(name) end
+        return nil
     end)
+end
+
+local function children(parent)
+    if not parent then return {} end
+    return env.safe_call(function()
+        if parent.GetChildren then return parent:GetChildren() end
+        if parent.get_children then return parent:get_children() end
+        return {}
+    end) or {}
 end
 
 local function name_of(inst)
@@ -11821,13 +11935,29 @@ end
 local function read_pos(part)
     if not part or not env.is_valid(part) then return nil end
     local p = part.Position or part.position
-    if not p or p.x == nil then return nil end
-    return p
+    if not p then return nil end
+    local x, y, z = p.x or p.X, p.y or p.Y, p.z or p.Z
+    if x == nil or y == nil or z == nil then return nil end
+    return { x = x, y = y, z = z }
 end
 
 local function d2(a, b)
-    local dx, dy, dz = a.x - b.x, a.y - b.y, a.z - b.z
+    if not a or not b then return math.huge end
+    local ax, ay, az = a.x or a.X, a.y or a.Y, a.z or a.Z
+    local bx, by, bz = b.x or b.X, b.y or b.Y, b.z or b.Z
+    if ax == nil or ay == nil or az == nil or bx == nil or by == nil or bz == nil then
+        return math.huge
+    end
+    local dx, dy, dz = ax - bx, ay - by, az - bz
     return dx * dx + dy * dy + dz * dz
+end
+
+local function record_key(model)
+    return tostring(model and (model.Address or model.address or model) or "")
+end
+
+local function bucket_key(x, z)
+    return tostring(math.floor(x / CELL_SIZE)) .. ":" .. tostring(math.floor(z / CELL_SIZE))
 end
 
 function M.kind_from_name(name)
@@ -11843,10 +11973,11 @@ end
 local function marker_main(model, marker_name)
     local marker = child(model, marker_name)
     if not marker or not env.is_valid(marker) then return nil end
-    return child(marker, "Main")
+    local main = child(marker, "Main")
+    if main and env.is_valid(main) then return main end
+    return nil
 end
 
--- Cheap proxy part used only for distance gate (no TreeX/NodeSpark walk).
 local function proxy_part(model, kind)
     if kind == "Cactus" then return child(model, "CactusPart") end
     if kind == "Dig" then return child(model, "Dirt") end
@@ -11854,137 +11985,166 @@ local function proxy_part(model, kind)
     return child(model, "Main")
 end
 
--- Aim part once model is known in-range.
 local function aim_part(model, kind)
     if kind == "Trees" then
-        return marker_main(model, "TreeX") or child(model, "Main"), true
+        local mark = marker_main(model, "TreeX")
+        return mark or child(model, "Main"), mark ~= nil
     end
     if kind == "Nodes" then
-        local spark = marker_main(model, "NodeSpark")
-        if spark then return spark, true end
-        return child(model, "Main"), false
+        local mark = marker_main(model, "NodeSpark")
+        return mark or child(model, "Main"), mark ~= nil
     end
-    if kind == "Cactus" then
-        local p = child(model, "CactusPart")
-        return p, p ~= nil
-    end
-    if kind == "Dig" then
-        local p = child(model, "Dirt")
-        return p, p ~= nil
-    end
-    if kind == "Logs" then
-        local p = child(model, "Main") or child(model, "Branch")
-        return p, p ~= nil
-    end
-    return child(model, "Main"), false
+    local part = proxy_part(model, kind)
+    return part, part ~= nil
 end
 
-function M.hit_part(model, kind)
-    if not env.is_valid(model) then return nil, false end
-    kind = kind or M.kind_from_name(name_of(model))
-    local part, is_mark = aim_part(model, kind)
-    if kind == "Trees" then
-        is_mark = part ~= nil and child(model, "TreeX") ~= nil
-    elseif kind == "Nodes" then
-        is_mark = part ~= nil and child(model, "NodeSpark") ~= nil
-    end
-    return part, is_mark
-end
-
-local function folder_children(folder)
-    if not env.is_valid(folder) then return nil end
-    return env.safe_call(function() return folder:get_children() end)
-end
-
-local function folders_for_caps(caps)
-    local list = {}
-    local want_nodes = not caps or caps.Nodes
-    local want_trees = not caps or caps.Trees
-    local want_veg = caps and (caps.Logs or caps.Cactus or caps.Dig)
-
-    if want_nodes then list[#list + 1] = folders.from_key("nodes") end
-    if want_trees then list[#list + 1] = folders.get_folder("Trees") end
-    if want_veg then list[#list + 1] = folders.from_key("vegetation") end
-    return list
+local function depleted(model)
+    if not model or not env.is_valid(model) then return true end
+    local destroyed = env.get_attribute(model, "Destroyed")
+    if destroyed == true or destroyed == 1 then return true end
+    local health = tonumber(env.get_attribute(model, "Health"))
+    return health ~= nil and health <= 0
 end
 
 local function kind_allowed(caps, kind)
     if not kind then return false end
-    if not caps then
-        return kind == "Trees" or kind == "Nodes"
-    end
-    if kind == "Dig" then
-        return caps.Dig == true or caps.Shovel == true
-    end
+    if not caps then return kind == "Trees" or kind == "Nodes" end
+    if kind == "Dig" then return caps.Dig == true or caps.Shovel == true end
     return caps[kind] == true
 end
 
---[[
-  Nearest in-range aim point.
-  1) Gate on proxy Main distance (cheap)
-  2) Only then resolve TreeX / NodeSpark
-  3) Early-out if a close marker is found
-]]
-function M.find_nearest(origin, radius, tool_caps)
-    if not origin or not radius or radius <= 0 then return nil end
+local function add_record(model, parent)
+    if not model or not env.is_valid(model) then return end
+    local kind = M.kind_from_name(name_of(model))
+    if not kind then return end
+    local proxy = proxy_part(model, kind)
+    local pos = read_pos(proxy)
+    if not pos then return end
+    local record = {
+        model = model,
+        kind = kind,
+        proxy = proxy,
+        key = record_key(model),
+        parent_key = record_key(parent),
+    }
+    records[#records + 1] = record
+    local key = bucket_key(pos.x, pos.z)
+    buckets[key] = buckets[key] or {}
+    buckets[key][#buckets[key] + 1] = record
+end
 
-    local limit2 = radius * radius
-    local early2 = (radius * 0.45) * (radius * 0.45)
-    local best_mark, best_mark_d2 = nil, limit2
-    local best_plain, best_plain_d2 = nil, limit2
+local function resource_folders()
+    local out = {}
+    local nodes = folders.from_key("nodes")
+    local trees = folders.get_folder("Trees")
+    local vegetation = folders.from_key("vegetation")
+    if nodes then out[#out + 1] = nodes end
+    if trees then out[#out + 1] = trees end
+    if vegetation then out[#out + 1] = vegetation end
+    return out
+end
+
+function M.refresh_index(force)
+    local now = now_ms()
+    if not force and now - last_refresh_ms < INDEX_REFRESH_MS then return false end
+    last_refresh_ms = now
+    buckets = {}
+    records = {}
     local seen = {}
-
-    local folder_list = folders_for_caps(tool_caps)
-    for fi = 1, #folder_list do
-        local folder = folder_list[fi]
+    for _, folder in ipairs(resource_folders()) do
         if folder and not seen[folder] then
             seen[folder] = true
-            local children = folder_children(folder)
-            if children then
-                for i = 1, #children do
-                    local model = children[i]
-                    if env.is_valid(model) then
-                        local kind = M.kind_from_name(name_of(model))
-                        if kind_allowed(tool_caps, kind) then
-                            local proxy = proxy_part(model, kind)
-                            local ppos = read_pos(proxy)
-                            if ppos and d2(ppos, origin) <= limit2 then
-                                local part, is_mark = aim_part(model, kind)
-                                -- Trees: aim_part returns mark|main; detect marker properly
-                                if kind == "Trees" then
-                                    local mark = marker_main(model, "TreeX")
-                                    if mark then
-                                        part, is_mark = mark, true
-                                    else
-                                        part, is_mark = child(model, "Main"), false
-                                    end
-                                elseif kind == "Nodes" then
-                                    local mark = marker_main(model, "NodeSpark")
-                                    if mark then
-                                        part, is_mark = mark, true
-                                    else
-                                        part, is_mark = child(model, "Main"), false
-                                    end
-                                end
+            for _, model in ipairs(children(folder)) do
+                add_record(model, folder)
+            end
+        end
+    end
+    return true
+end
 
-                                local pos = read_pos(part)
-                                if pos then
-                                    local dist = d2(pos, origin)
-                                    if dist <= limit2 then
-                                        if is_mark then
-                                            if dist < best_mark_d2 then
-                                                best_mark_d2 = dist
-                                                best_mark = part
-                                                if dist <= early2 then
-                                                    return best_mark
-                                                end
-                                            end
-                                        elseif dist < best_plain_d2 then
-                                            best_plain_d2 = dist
-                                            best_plain = part
-                                        end
-                                    end
-                                end
+function M.invalidate()
+    buckets = {}
+    records = {}
+    last_refresh_ms = -INDEX_REFRESH_MS
+end
+
+function M.hit_part(model, kind)
+    if not model or depleted(model) then return nil, false end
+    kind = kind or M.kind_from_name(name_of(model))
+    return aim_part(model, kind)
+end
+
+function M.resolve(record)
+    if not record or depleted(record.model) then return nil end
+    local current_parent = record.model.Parent or record.model.parent
+    if not current_parent or record_key(current_parent) ~= record.parent_key then
+        return nil
+    end
+    local part, weak = aim_part(record.model, record.kind)
+    local pos = read_pos(part)
+    if not pos then return nil end
+    record.part = part
+    record.pos = pos
+    record.weak = weak == true
+    return record
+end
+
+local function visible(origin, pos)
+    if not origin or not pos or not raycast then return nil end
+    local ready_fn = raycast.is_ready or raycast.IsReady
+    if type(ready_fn) == "function" then
+        local ok, ready = pcall(ready_fn)
+        if ok and ready == false then return nil end
+    end
+    local fn = raycast.is_visible or raycast.IsVisible
+    if type(fn) ~= "function" then return nil end
+    local ox, oy, oz = origin.x or origin.X, origin.y or origin.Y, origin.z or origin.Z
+    if ox == nil or oy == nil or oz == nil then return nil end
+    local ok, clear = pcall(fn, ox, oy, oz, pos.x, pos.y, pos.z)
+    if not ok then return nil end
+    return clear == true
+end
+
+local function better(candidate, candidate_d2, best, best_d2)
+    if not best then return true end
+    if candidate_d2 < best_d2 - 1e-6 then return true end
+    if math.abs(candidate_d2 - best_d2) <= 1e-6 then
+        return tostring(candidate.key) < tostring(best.key)
+    end
+    return false
+end
+
+function M.find_target(origin, radius, tool_caps)
+    if not origin or not radius or radius <= 0 then return nil end
+    M.refresh_index(false)
+    local ox, oz = origin.x or origin.X, origin.z or origin.Z
+    if ox == nil or oz == nil then return nil end
+
+    local limit2 = radius * radius
+    local span = math.max(1, math.ceil(radius / CELL_SIZE) + 1)
+    local cell_x = math.floor(ox / CELL_SIZE)
+    local cell_z = math.floor(oz / CELL_SIZE)
+    local best_visible, best_visible_d2 = nil, limit2
+    local best_any, best_any_d2 = nil, limit2
+    local visited = {}
+
+    for x = cell_x - span, cell_x + span do
+        for z = cell_z - span, cell_z + span do
+            local list = buckets[tostring(x) .. ":" .. tostring(z)]
+            for _, record in ipairs(list or {}) do
+                if not visited[record.key] and kind_allowed(tool_caps, record.kind) then
+                    visited[record.key] = true
+                    local resolved = M.resolve(record)
+                    if resolved then
+                        local dist = d2(resolved.pos, origin)
+                        if dist <= limit2 then
+                            if better(resolved, dist, best_any, best_any_d2) then
+                                best_any, best_any_d2 = resolved, dist
+                            end
+                            if visible(origin, resolved.pos) ~= false
+                                and better(resolved, dist, best_visible, best_visible_d2)
+                            then
+                                best_visible, best_visible_d2 = resolved, dist
                             end
                         end
                     end
@@ -11993,7 +12153,17 @@ function M.find_nearest(origin, radius, tool_caps)
         end
     end
 
-    return best_mark or best_plain
+    local best = best_visible or best_any
+    if best then
+        best.distance2 = best == best_visible and best_visible_d2 or best_any_d2
+    end
+    return best
+end
+
+-- Legacy helpers retained for internal callers/config compatibility.
+function M.find_nearest(origin, radius, tool_caps)
+    local record = M.find_target(origin, radius, tool_caps)
+    return record and record.part or nil
 end
 
 function M.collect_near(origin, radius, out, _max_out, tool_caps)
@@ -12001,6 +12171,10 @@ function M.collect_near(origin, radius, out, _max_out, tool_caps)
     local part = M.find_nearest(origin, radius, tool_caps)
     if part then out[1] = part end
     return out
+end
+
+function M.distance2(pos, origin)
+    return d2(pos, origin)
 end
 
 return M
@@ -12736,6 +12910,133 @@ function M.display_name(name, kind)
     if kind == "diver_dave" then return "Diver Dave" end
     if kind == "pilot_pete" then return "Pilot Pete" end
     return name
+end
+
+local function part_pos(part)
+    if not part then return nil end
+    return vec3(part.Position or part.position)
+end
+
+local function part_name_lower(part)
+    return tostring(part and (part.Name or part.name) or ""):lower()
+end
+
+-- Dump: ViewmodelController treats AttackHeli parts with RotorBonus > 0 as weak points
+-- ("HitHead"). Rotor part names are not in the static place dump — scan live attributes
+-- and common rotor-ish names from the player Flycopter as fallbacks.
+function M.collect_heli_weak_points(model)
+    if not model or not env.is_valid(model) then return {} end
+    local out = {}
+    local seen = {}
+
+    local function add(part, score)
+        if not part or not env.is_valid(part) then return end
+        local key = address(part)
+        if not key or seen[key] then return end
+        local x, y, z = part_pos(part)
+        if not x then return end
+        seen[key] = true
+        out[#out + 1] = {
+            part = part,
+            x = x, y = y, z = z,
+            score = score or 1,
+            name = part.Name or part.name,
+        }
+    end
+
+    local desc = env.safe_call(function()
+        if model.GetDescendants then return model:GetDescendants() end
+        if model.get_descendants then return model:get_descendants() end
+        return nil
+    end)
+
+    if type(desc) == "table" then
+        for i = 1, #desc do
+            local part = desc[i]
+            if not part then goto cont end
+            local cn = part.ClassName or part.class_name or ""
+            if cn ~= "Part" and cn ~= "MeshPart" and cn ~= "BasePart"
+                and cn ~= "WedgePart" and cn ~= "UnionOperation" then
+                goto cont
+            end
+            local bonus = tonumber(env.get_attribute(part, "RotorBonus")) or 0
+            if bonus > 0 then
+                add(part, 100 + bonus)
+            else
+                local n = part_name_lower(part)
+                if n:find("rotor", 1, true) or n:find("blade", 1, true)
+                    or n == "spinner" or n:find("tailrotor", 1, true)
+                    or n:find("mainrotor", 1, true) then
+                    add(part, 40)
+                end
+            end
+            ::cont::
+        end
+    else
+        -- Shallow fallback when GetDescendants is unavailable.
+        for _, name in ipairs({ "MainRotor", "TailRotor", "Blades", "Spinner" }) do
+            local part = find_child(model, name)
+            if part then add(part, 40) end
+            for _, child in ipairs(children(part)) do
+                local n = part_name_lower(child)
+                if n:find("rotor", 1, true) or n:find("blade", 1, true) or n == "spinner" then
+                    add(child, 40)
+                end
+            end
+        end
+    end
+
+    table.sort(out, function(a, b)
+        return (a.score or 0) > (b.score or 0)
+    end)
+    return out
+end
+
+-- Best heli aim point: prefer RotorBonus weak parts, then named rotors, else body.
+function M.heli_aim_world(entry, prefer_screen, cx, cy)
+    if not entry then return nil end
+    local model = entry.inst
+    if (not model or not env.is_valid(model)) and entry.entity then
+        model = entry.entity.Character or entry.entity.character
+    end
+    local weak = M.collect_heli_weak_points(model)
+    if #weak == 0 then
+        local body = entry.root or entry.anchor or entry.head
+        if (not body or not env.is_valid(body)) and model and env.is_valid(model) then
+            body = find_child(model, "Main") or find_child(model, "HumanoidRootPart")
+                or model.PrimaryPart or model.primary_part or esp_scan.find_main_part(model)
+        end
+        local x, y, z = part_pos(body)
+        if x then return { x = x, y = y, z = z } end
+        if entry.lx ~= nil and entry.ly ~= nil and entry.lz ~= nil then
+            return { x = entry.lx, y = entry.ly, z = entry.lz }
+        end
+        return nil
+    end
+
+    if prefer_screen and cx and cy then
+        local esp_util = April.require("core.esp_util")
+        local math_util = April.require("core.math_util")
+        local best, best_d = nil, math.huge
+        for i = 1, #weak do
+            local w = weak[i]
+            local sx, sy, on = esp_util.w2s(w.x, w.y, w.z)
+            if on then
+                local d = math_util.screen_fov_dist(sx, sy, cx, cy)
+                -- Prefer true RotorBonus slightly over mere name matches when FOV-close.
+                d = d - (w.score or 0) * 0.01
+                if d < best_d then
+                    best, best_d = w, d
+                end
+            end
+        end
+        if best then
+            return { x = best.x, y = best.y, z = best.z }
+        end
+    end
+
+    local top = weak[1]
+    return { x = top.x, y = top.y, z = top.z }
 end
 
 local function read_humanoid(model)
@@ -13730,6 +14031,52 @@ return M
 
 end)()
 
+-- â”€â”€ ui/combat_labels.lua â”€â”€
+April._mods["ui.combat_labels"] = (function()
+-- Label lists shared by the custom UI catalog (no feature / menu deps).
+local M = {}
+
+M.TP_METHODS = {
+    "Center",
+    "Random Ring",
+    "Random Sphere",
+    "Offset Grid",
+    "Camera Face",
+    "Away From Cam",
+    "Shuffle Valid",
+    "Dense Shuffle",
+}
+
+M.SILENT_BONES = {
+    "Head",
+    "Torso",
+    "Left Arm",
+    "Right Arm",
+    "Left Leg",
+    "Right Leg",
+    "Closest",
+}
+
+-- Aim At multicombo: Players + per-NPC kinds (matches NPC ESP type list).
+M.AIM_AT_OPTIONS = {
+    "Players",
+    "Soldier",
+    "Bruno",
+    "Boris",
+    "Brutus",
+    "Attack Heli",
+    "BTR",
+    "Diver Dave",
+    "Pilot Pete",
+}
+
+-- Defaults: players on, NPC types off.
+M.AIM_AT_DEFAULTS = { true, false, false, false, false, false, false, false, false }
+
+return M
+
+end)()
+
 -- â”€â”€ features/combat/silent_whitelist.lua â”€â”€
 April._mods["features.combat.silent_whitelist"] = (function()
 -- Player whitelist for combat aim (middle-click toggle). Prefix-aware for silent + camera aim.
@@ -14455,6 +14802,7 @@ end)()
 April._mods["features.combat.combat_menu"] = (function()
 local menu_util = April.require("core.menu_util")
 local settings = April.require("core.settings")
+local combat_labels = April.require("ui.combat_labels")
 
 local M = {}
 
@@ -14497,9 +14845,22 @@ M.FILTER_SAFEZONE = 4
 M.FILTER_WHITELIST = 5
 M.FILTER_SKIP_DOWNED = 6
 
--- april_silent_targets / april_aim_targets (Players, NPCs)
+-- april_silent_targets / april_aim_targets / april_rage_targets
+-- 1 = Players, 2..9 = Soldier..Pilot Pete (see AIM_AT_OPTIONS).
 M.TARGET_PLAYERS = 1
-M.TARGET_NPCS = 2
+M.AIM_AT_OPTIONS = combat_labels.AIM_AT_OPTIONS
+M.AIM_AT_DEFAULTS = combat_labels.AIM_AT_DEFAULTS
+
+M.AIM_AT_KIND_INDEX = {
+    soldier = 2,
+    bruno = 3,
+    boris = 4,
+    brutus = 5,
+    heli = 6,
+    btr = 7,
+    diver_dave = 8,
+    pilot_pete = 9,
+}
 
 -- april_silent_options / april_aim_options indices (1-based)
 M.OPT_STICKY = 1
@@ -14517,19 +14878,73 @@ function M.downed_mode_from_filters(prefix)
     return 1
 end
 
+local function targets_table_len(t)
+    if type(t) ~= "table" then return 0 end
+    local max_i = 0
+    for k in pairs(t) do
+        local n = tonumber(k)
+        if n and n > max_i then max_i = n end
+    end
+    return max_i
+end
+
+-- Old Aim At was { Players, NPCs }. Expand NPC=on into every NPC type slot.
+function M.expand_legacy_targets(prefix)
+    local id = (prefix or "april_silent_") .. "targets"
+    local t = settings.get(id)
+    if targets_table_len(t) > 2 then return end
+    local players = settings.multi(id, 1, true)
+    local npcs = settings.multi(id, 2, false)
+    local expanded = { players }
+    for i = 2, #M.AIM_AT_OPTIONS do
+        expanded[i] = npcs
+    end
+    if menu and menu.set then
+        pcall(menu.set, id, expanded)
+    end
+    pcall(function()
+        April.require("ui.gs_state").set(id, expanded)
+    end)
+end
+
+function M.players_enabled(prefix)
+    M.expand_legacy_targets(prefix)
+    return settings.multi((prefix or "april_silent_") .. "targets", M.TARGET_PLAYERS, true)
+end
+
+function M.npc_kind_enabled(kind, prefix)
+    if not kind then return false end
+    M.expand_legacy_targets(prefix)
+    local idx = M.AIM_AT_KIND_INDEX[kind]
+    if not idx then return false end
+    return settings.multi((prefix or "april_silent_") .. "targets", idx, false)
+end
+
+function M.any_npc_enabled(prefix)
+    M.expand_legacy_targets(prefix)
+    for _, idx in pairs(M.AIM_AT_KIND_INDEX) do
+        if settings.multi((prefix or "april_silent_") .. "targets", idx, false) then
+            return true
+        end
+    end
+    return false
+end
+
 function M.register_silent_aim(T, G, prefix, parent_id, opts)
     opts = opts or {}
     local p = prefix
+    M.expand_legacy_targets(p)
 
     menu_util.section(T, G, "Targeting")
     menu.add_combo(T, G, p .. "target_type", "Target Type", { "Crosshair", "Distance" }, 0,
         { parent = parent_id })
     menu.add_combo(T, G, p .. "bone", "Hitbox", M.SILENT_BONES, 0, { parent = parent_id })
-    menu.add_multicombo(T, G, p .. "targets", "Aim At", {
-        "Players", "NPCs",
-    }, { false, false }, { parent = parent_id })
-    if menu and menu.set then
-        pcall(menu.set, p .. "targets", { true, false })
+    menu.add_multicombo(T, G, p .. "targets", "Aim At", M.AIM_AT_OPTIONS, M.AIM_AT_DEFAULTS,
+        { parent = parent_id })
+    if menu and menu.set and targets_table_len(settings.get(p .. "targets")) <= 2 then
+        pcall(menu.set, p .. "targets", {
+            true, false, false, false, false, false, false, false, false,
+        })
     end
     menu.add_multicombo(T, G, p .. "filters", "Filters", {
         "Health Check",
@@ -14589,16 +15004,18 @@ end
 function M.register_aimbot(T, G, prefix, parent_id, opts)
     opts = opts or {}
     local p = prefix
+    M.expand_legacy_targets(p)
 
     menu_util.section(T, G, "Targeting")
     menu.add_combo(T, G, p .. "target_type", "Target Type", { "Crosshair", "Distance" }, 0,
         { parent = parent_id })
     menu.add_combo(T, G, p .. "bone", "Hitbox", M.SILENT_BONES, 0, { parent = parent_id })
-    menu.add_multicombo(T, G, p .. "targets", "Aim At", {
-        "Players", "NPCs",
-    }, { false, false }, { parent = parent_id })
-    if menu and menu.set then
-        pcall(menu.set, p .. "targets", { true, false })
+    menu.add_multicombo(T, G, p .. "targets", "Aim At", M.AIM_AT_OPTIONS, M.AIM_AT_DEFAULTS,
+        { parent = parent_id })
+    if menu and menu.set and targets_table_len(settings.get(p .. "targets")) <= 2 then
+        pcall(menu.set, p .. "targets", {
+            true, false, false, false, false, false, false, false, false,
+        })
     end
     menu.add_multicombo(T, G, p .. "filters", "Filters", {
         "Health Check",
@@ -14668,7 +15085,8 @@ end
 
 local function npc_enabled(entry, prefix)
     if not entry then return false end
-    return settings.multi(prefix .. "targets", 2, false)
+    local kind = entry.kind or npcs.kind(entry.name or entry.raw_name)
+    return combat_menu.npc_kind_enabled(kind, prefix)
 end
 
 local function same_npc_inst(a, b)
@@ -14699,10 +15117,21 @@ function M.is_aim_target(target)
 end
 
 -- Prefer live Head part; cached lx/ly/lz is only a fallback (stale coords glue camera aimbot).
-local function npc_head_world(entry)
+-- AttackHeli: aim RotorBonus weak points (rotors), not the body/Main.
+local function npc_aim_world(entry, cx, cy)
     if not entry then
         return nil
     end
+
+    local kind = entry.kind or npcs.kind(entry.name or entry.raw_name)
+    if kind == "heli" then
+        local heli = npcs.heli_aim_world(entry, true, cx, cy)
+        if heli then
+            entry.lx, entry.ly, entry.lz = heli.x, heli.y, heli.z
+            return heli
+        end
+    end
+
     if entry.entity then
         local x, y, z = esp_util.vec3_pos(
             entry.entity.HeadPosition or entry.entity.head_position
@@ -14729,10 +15158,22 @@ local function npc_head_world(entry)
             return { x = pos.x, y = pos.y, z = pos.z }
         end
     end
+    -- Vehicles without Head: use Main / root / cached coords.
+    if entry.root and env.is_valid(entry.root) then
+        local x, y, z = esp_util.vec3_pos(entry.root.Position or entry.root.position)
+        if x then
+            entry.lx, entry.ly, entry.lz = x, y, z
+            return { x = x, y = y, z = z }
+        end
+    end
     if entry.lx then
         return { x = entry.lx, y = entry.ly, z = entry.lz }
     end
     return nil
+end
+
+local function npc_head_world(entry)
+    return npc_aim_world(entry, nil, nil)
 end
 
 -- Rebind a sticky NPC lock to the current cache entry + live head (or nil if gone).
@@ -14759,6 +15200,7 @@ function M.refresh_npc_target(target)
         target.entity = found.entity
         target.inst = found.inst
         target.head = found.head
+        target.root = found.root or found.anchor
         target.name = found.name or target.name
         target.kind = found.kind or target.kind
         target.lx = found.lx
@@ -14769,7 +15211,7 @@ function M.refresh_npc_target(target)
     if not M.is_npc_alive(target) then
         return nil
     end
-    if not npc_head_world(target) then
+    if not npc_aim_world(target, nil, nil) then
         return nil
     end
     return target
@@ -14918,14 +15360,14 @@ function M.within_max_distance(target, origin, prefix)
     return dist == nil or dist <= max_d
 end
 
-function M.bone_world(target, bone)
+function M.bone_world(target, bone, cx, cy)
     if not target then return nil end
 
     if M.is_npc_target(target) then
         if not M.refresh_npc_target(target) then
             return nil
         end
-        return npc_head_world(target)
+        return npc_aim_world(target, cx, cy)
     end
 
     if ep.is_alive(target) == false then return nil end
@@ -14963,7 +15405,7 @@ function M.closest_bone_world(target, cx, cy)
     cx = cx or 0
     cy = cy or 0
     if M.is_npc_target(target) then
-        return npc_head_world(target)
+        return npc_aim_world(target, cx, cy)
     end
     if target then
         local bones = ep.get_bones_screen(target)
@@ -15064,7 +15506,7 @@ function M.resolve_bone_world(target, bone, cx, cy)
     if bone == "Closest" then
         return M.closest_bone_world(target, cx, cy)
     end
-    return M.bone_world(target, bone)
+    return M.bone_world(target, bone, cx, cy)
 end
 
 function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
@@ -15128,7 +15570,7 @@ local function consider_target(target, prefix, screen_bone, use_fov, fov_px, ori
         return best, best_score
     end
 
-    local base = M.bone_world(target, screen_bone)
+    local base = M.bone_world(target, screen_bone, cx, cy)
     if not base then
         return best, best_score
     end
@@ -15183,8 +15625,8 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
     local best, best_score = nil, use_fov and math.huge or math.huge
     local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
     local filter_visible = not opts.ignore_visible and settings.multi(prefix .. "filters", 2, false)
-    local target_players = settings.multi(prefix .. "targets", 1, true)
-    local target_npcs = not opts.players_only and settings.multi(prefix .. "targets", 2, false)
+    local target_players = combat_menu.players_enabled(prefix)
+    local target_npcs = not opts.players_only and combat_menu.any_npc_enabled(prefix)
 
     if target_players then
         for _, p in ipairs(cache.players) do
@@ -15198,14 +15640,13 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
 
     if target_npcs and cache.npcs then
         for _, entry in ipairs(cache.npcs) do
-            if npcs.is_hostile_kind(entry.kind)
-                and npc_enabled(entry, prefix) and M.is_npc_alive(entry)
-            then
+            if npc_enabled(entry, prefix) and M.is_npc_alive(entry) then
                 local npc_target = {
                     is_npc = true,
                     entity = entry.entity,
                     inst = entry.inst,
                     head = entry.head,
+                    root = entry.root,
                     name = entry.name,
                     kind = entry.kind,
                     lx = entry.lx,
@@ -15831,7 +16272,6 @@ end
 
 local function aiming()
     if not enabled() then return false end
-    aim_key.tick(P_AIM_KEY, P_AIM_KEY_MODE)
     return aim_key.active(P_AIM_KEY, P_AIM_KEY_MODE)
 end
 
@@ -16711,9 +17151,9 @@ function M.register_menu()
     menu.add_combo(T, G.SILENT_AIM, PREFIX .. "target_type", "Target Type", { "Crosshair", "Distance" }, 1,
         { parent = P_MASTER })
     menu.add_combo(T, G.SILENT_AIM, PREFIX .. "bone", "Hitbox", combat_menu.SILENT_BONES, 0, { parent = P_MASTER })
-    menu.add_multicombo(T, G.SILENT_AIM, PREFIX .. "targets", "Aim At", {
-        "Players", "NPCs",
-    }, { true, false }, { parent = P_MASTER })
+    combat_menu.expand_legacy_targets(PREFIX)
+    menu.add_multicombo(T, G.SILENT_AIM, PREFIX .. "targets", "Aim At",
+        combat_menu.AIM_AT_OPTIONS, combat_menu.AIM_AT_DEFAULTS, { parent = P_MASTER })
     menu.add_multicombo(T, G.SILENT_AIM, PREFIX .. "filters", "Filters", {
         "Health Check",
         "Visible Only",
@@ -16844,13 +17284,8 @@ end)()
 
 -- â”€â”€ features/combat/perfect_farm.lua â”€â”€
 April._mods["features.combat.perfect_farm"] = (function()
---[[
-  Farm helper — only scans / aims when a gather target is inside tool range.
-
-  Idle  (always-on OK): rare cheap discovery scan, silent OFF
-  Active (in range):    aim at TreeX / NodeSpark; no world scan each frame
-]]
-
+-- Silent farm helper. Selects a resource model, then resolves its live
+-- TreeX.Main / NodeSpark.Main every frame while LMB is held.
 local settings = April.require("core.settings")
 local env = April.require("core.env")
 local farm_tools = April.require("game.farm_tools")
@@ -16862,132 +17297,117 @@ local M = {}
 
 local P = "april_farm_helper"
 local P_RADIUS = "april_farm_radius"
-local P_SMOOTH = "april_farm_smooth"
-local P_SILENT = "april_farm_silent"
 local SHOOT_VK = 0x01
 
--- Idle = far from anything (slow scan). Active = locked in range (validate only).
-local IDLE_SCAN_MS = 900
-local ACTIVE_RESERVE_MS = 700 -- occasional upgrade TreeX/spark while farming
-local TOOL_CACHE_MS = 250
-local LOCK_PAD = 1.15
+local TARGET_SCAN_MS = 75
+local TOOL_CACHE_MS = 150
+local SWITCH_MARGIN = 0.35
 
-local locked_part = nil
-local active = false
-local next_scan_ms = 0
+local locked_target = nil
+local locked_tool = nil
+local next_target_scan = 0
 local cached_tool = nil
 local cached_tool_until = 0
-local silent_on = false
+local was_enabled = false
 
 M._tracking = false
 
 local function now_ms()
-    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+    local fn = utility and (utility.get_tick_count or utility.GetTickCount)
+    if type(fn) ~= "function" then return 0 end
+    local ok, value = pcall(fn)
+    return ok and (tonumber(value) or 0) or 0
 end
 
-local function part_pos(part)
-    if not part or not env.is_valid(part) then return nil end
-    local p = part.Position or part.position
-    if not p or p.x == nil then return nil end
-    return p
+local function held_tool()
+    local now = now_ms()
+    if now < cached_tool_until then return cached_tool end
+    farm_tools.load()
+    cached_tool = farm_tools.get_held_farm_tool_name()
+    cached_tool_until = now + TOOL_CACHE_MS
+    return cached_tool
 end
 
-local function dist2(a, b)
-    local dx, dy, dz = a.x - b.x, a.y - b.y, a.z - b.z
-    return dx * dx + dy * dy + dz * dz
+local function position_of(value)
+    if not value then return nil end
+    local x, y, z = value.x or value.X, value.y or value.Y, value.z or value.Z
+    if x == nil or y == nil or z == nil then return nil end
+    return { x = x, y = y, z = z }
 end
 
 local function body_origin()
-    local lp = env.get_local_player()
-    if lp then
-        local pos = lp.position or lp.Position
-        if pos and pos.x ~= nil then return pos end
-        local char = lp.character
-        if char and env.is_valid(char) then
-            local hrp = env.safe_call(function()
-                return char:find_first_child("HumanoidRootPart") or char:FindFirstChild("HumanoidRootPart")
-            end)
-            local p = part_pos(hrp)
-            if p then return p end
+    local player = env.get_local_player()
+    local direct = player and position_of(player.position or player.Position)
+    if direct then return direct end
+    local character = player and (player.character or player.Character)
+    if character and env.is_valid(character) then
+        local root = env.safe_call(function()
+            if character.FindFirstChild then
+                return character:FindFirstChild("HumanoidRootPart")
+            end
+            if character.find_first_child then
+                return character:find_first_child("HumanoidRootPart")
+            end
+        end)
+        if root and env.is_valid(root) then
+            local pos = position_of(root.Position or root.position)
+            if pos then return pos end
         end
     end
     return silent_ray.get_camera_origin()
 end
 
-local function held_tool()
-    local t = now_ms()
-    if cached_tool and t < cached_tool_until then
-        return cached_tool
-    end
-    farm_tools.load()
-    cached_tool = farm_tools.get_held_farm_tool_name()
-    cached_tool_until = t + TOOL_CACHE_MS
-    return cached_tool
-end
-
--- Strict: only tool melee reach, capped by slider (never search the whole forest).
 local function radius_for(tool_name)
-    local tool_range = farm_tools.melee_range(tool_name)
-    local slider = settings.num(P_RADIUS, 7)
-    if slider <= 0 then return 0 end
-    return math.min(slider, tool_range + 0.35)
+    local configured = settings.num(P_RADIUS, 7)
+    if configured <= 0 then return 0 end
+    return math.min(configured, farm_tools.melee_range(tool_name))
 end
 
 local function tool_caps(tool_name)
-    local caps = farm_tools.tool_caps(tool_name)
-    if caps then return caps end
-    return { Trees = true, Nodes = true, Logs = true, Cactus = true }
+    return farm_tools.tool_caps(tool_name)
+        or { Trees = true, Nodes = true, Logs = true, Cactus = true }
 end
 
-local function in_range(part, origin, radius)
-    local pos = part_pos(part)
-    if not pos or not origin then return false end
-    local lim = radius * LOCK_PAD
-    return dist2(pos, origin) <= lim * lim
-end
-
-local function stop_silent()
-    if not silent_on and not M._tracking then return end
-    silent_ray.stop()
-    silent_on = false
+local function stop_tracking()
+    if M._tracking then silent_ray.stop() end
     M._tracking = false
 end
 
-local function deactivate()
-    locked_part = nil
-    active = false
-    stop_silent()
-end
-
-local function clear_all()
-    deactivate()
-    next_scan_ms = 0
-    cached_tool = nil
-    cached_tool_until = 0
-end
-
-local function try_discover(origin, radius, tool_name)
-    local t = now_ms()
-    if t < next_scan_ms then return nil end
-    next_scan_ms = t + (active and ACTIVE_RESERVE_MS or IDLE_SCAN_MS)
-
-    return farm_targets.find_nearest(origin, radius, tool_caps(tool_name))
-end
-
-local function aim_at(cam, aim)
-    local use_silent = settings.bool(P_SILENT, false) and silent_ray.available()
-    if use_silent then
-        silent_ray.ensure_hook()
-        silent_ray.track(cam, aim, SHOOT_VK, aim)
-        silent_on = true
-        M._tracking = true
-        return
+local function clear_lock(invalidate_index, reset_tool_cache)
+    locked_target = nil
+    locked_tool = nil
+    next_target_scan = 0
+    if reset_tool_cache then
+        cached_tool = nil
+        cached_tool_until = 0
     end
-    stop_silent()
-    if camera and camera.look_at then
-        local smooth = math.max(1, settings.num(P_SMOOTH, 8))
-        pcall(camera.look_at, aim.x, aim.y, aim.z, smooth)
+    stop_tracking()
+    if invalidate_index then farm_targets.invalidate() end
+end
+
+local function in_range(target, origin, radius)
+    if not target or not target.pos or not origin then return false end
+    return farm_targets.distance2(target.pos, origin) <= radius * radius
+end
+
+local function choose_target(origin, radius, caps)
+    local candidate = farm_targets.find_target(origin, radius, caps)
+    local current = farm_targets.resolve(locked_target)
+
+    if current and not in_range(current, origin, radius) then
+        current = nil
     end
+    if not candidate then return current end
+    if not current or candidate.model == current.model or candidate.key == current.key then
+        return candidate
+    end
+
+    local current_d = math.sqrt(farm_targets.distance2(current.pos, origin))
+    local candidate_d = math.sqrt(farm_targets.distance2(candidate.pos, origin))
+    if candidate_d + SWITCH_MARGIN < current_d then
+        return candidate
+    end
+    return current
 end
 
 function M.register_menu()
@@ -16997,71 +17417,69 @@ function M.register_menu()
 
     menu_util.section(T, G.MISC, "Farm")
     menu_util.register_keybind(T, G.MISC, P, "Farm Helper", false)
-    menu.add_checkbox(T, G.MISC, P_SILENT, "Silent Farm", false, root)
-    menu_util.gap(T, G.MISC)
     menu.add_slider_int(T, G.MISC, P_RADIUS, "Farm Range (studs)", 1, 10, 7, root)
-    menu.add_slider_int(T, G.MISC, P_SMOOTH, "Camera Smoothness", 1, 30, 8, root)
-    menu_util.bind_children(P, { P_SILENT, P_RADIUS, P_SMOOTH })
+    menu_util.bind_children(P, { P_RADIUS })
 end
 
 function M.update(_dt)
     if not settings.enabled(P) then
-        clear_all()
+        if was_enabled then clear_lock(true, true) end
+        was_enabled = false
         return
     end
+    was_enabled = true
 
     local tool_name = held_tool()
     if not tool_name then
-        clear_all()
+        clear_lock(false)
+        return
+    end
+    if locked_tool and locked_tool ~= tool_name then
+        locked_target = nil
+        next_target_scan = 0
+        stop_tracking()
+    end
+    locked_tool = tool_name
+
+    if not silent_ray.available() then
+        clear_lock(false)
         return
     end
 
-    local body = body_origin()
-    local cam = silent_ray.get_camera_origin()
-    if not body or not cam then
-        deactivate()
-        return
-    end
-
+    local origin = body_origin()
+    local camera_origin = silent_ray.get_camera_origin()
     local radius = radius_for(tool_name)
-    if radius <= 0 then
-        clear_all()
+    if not origin or not camera_origin or radius <= 0 then
+        clear_lock(false)
         return
     end
 
-    -- Active: stay on current spark/X while it remains in tool range.
-    if active and locked_part and in_range(locked_part, body, radius) then
-        -- Rare refresh for better marker; otherwise zero world scanning.
-        local refreshed = try_discover(body, radius, tool_name)
-        if refreshed then
-            locked_part = refreshed
-        end
-        local aim = part_pos(locked_part)
-        if aim then
-            aim_at(cam, aim)
-            return
-        end
-        deactivate()
-    elseif active then
-        -- Walked out of range — shut off aim/silent immediately.
-        deactivate()
-        next_scan_ms = 0 -- allow quick rediscover if still near something else
+    -- Marker instances can move or be replaced after every successful weak hit.
+    -- Resolve the current model every frame; only the nearby-model query is throttled.
+    locked_target = farm_targets.resolve(locked_target)
+    local now = now_ms()
+    if now >= next_target_scan or not locked_target then
+        next_target_scan = now + TARGET_SCAN_MS
+        locked_target = choose_target(origin, radius, tool_caps(tool_name))
     end
 
-    -- Idle: only occasional discovery. No silent / camera until something is in range.
-    local found = try_discover(body, radius, tool_name)
-    if found and in_range(found, body, radius) then
-        locked_part = found
-        active = true
-        local aim = part_pos(found)
-        if aim then
-            aim_at(cam, aim)
-        end
+    if not locked_target or not in_range(locked_target, origin, radius) then
+        locked_target = nil
+        stop_tracking()
         return
     end
 
-    -- Nothing in tool range — stay cold.
-    stop_silent()
+    M._tracking = silent_ray.track(
+        camera_origin,
+        locked_target.pos,
+        SHOOT_VK,
+        locked_target.pos
+    ) == true
+    if not M._tracking then silent_ray.stop() end
+end
+
+function M.get_target()
+    return locked_target
 end
 
 return M
@@ -20691,6 +21109,10 @@ end)()
 
 -- â”€â”€ features/world/raid_esp.lua â”€â”€
 April._mods["features.world.raid_esp"] = (function()
+-- Raid ESP: detect structure-raiding explosives from dump VFX / ToolInfo.
+-- Timed Charge (SoundName "C4"), Dynamite Bundle, and source-confirmed player
+-- Rockets are raid signals. The shared "Rocket" explosion sound is insufficient:
+-- HeliRocket uses it too, so tracer history disambiguates the source.
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
 local env = April.require("core.env")
@@ -20704,32 +21126,55 @@ local P = "april_raid_enabled"
 local ID_NOTIFY = "april_raid_notifications"
 local ID_RANGE = "april_raid_range"
 
-local CLUSTER_MERGE_M = 50
+local CLUSTER_MERGE_M = 40
 local CLUSTER_TTL_MS = 600000
-local SCAN_MS = 400
-local NOTIFY_DEDUP_MS = 8000
+local SCAN_MS = 350
+local ROCKET_TRACE_SCAN_MS = 50
+local ROCKET_TRACE_TTL_MS = 2500
+local ROCKET_TRACE_MATCH_M = 45
+local NOTIFY_DEDUP_MS = 10000
 
-local RAID_BOOM = {
-    c4 = "Timed Explosive Charge",
-    dynamitebundle = "Dynamite Bundle",
-    dynamitestick = "Dynamite Stick",
-    rocket = "Rocket",
-    explosion = "Explosion",
-    boom = "Explosion",
-    grenade = "Grenade",
-    shell = "Tank Shell",
-    charge = "Explosive Charge",
+-- Dump: ReplicatedStorage.VFX.Explosion sound names + ToolInfo SoundName values.
+-- Only these create / refresh a raid cluster.
+local RAID_SOUNDS = {
+    c4 = { label = "Timed Charge", weight = 3 },
+    dynamitebundle = { label = "Dynamite Bundle", weight = 2 },
+}
+local ROCKET_SIGNAL = { label = "Rocket", weight = 2 }
+
+-- Dump ToolInfo / VFX: combat / PvE noise that previously false-flagged raids.
+local IGNORE_NAMES = {
+    helirocket = true,
+    helicrashing = true,
+    militarygrenade = true,
+    landmine = true,
+    dynamitestick = true,
+    explosioneffect = true,
+    explosionpart = true,
+    explosion = true,
+    projectile = true,
+    boom = true,
+    grenade = true,
+    shell = true,
+    charge = true,
+    bomb = true,
 }
 
-local KEYWORDS = {
-    "explosion", "boom", "rocket", "charge", "c4", "projectile",
-    "grenade", "bomb", "shell", "dynamite",
+-- In-flight / sticky raid projectiles worth drawing (not auto-clustered alone).
+local RAID_PROJECTILE = {
+    ["timed charge"] = "Timed Charge",
+    timedcharge = "Timed Charge",
+    c4 = "Timed Charge",
+    ["dynamite bundle"] = "Dynamite Bundle",
+    dynamitebundle = "Dynamite Bundle",
 }
 
 M._processed = {}
 M._last_scan = 0
+M._last_trace_scan = 0
 M._last_notify = {}
 M._projectiles = {}
+M._rocket_traces = {}
 
 cache.raids = cache.raids or {}
 
@@ -20751,19 +21196,17 @@ local function dist3(ax, ay, az, bx, by, bz)
     return math.sqrt(dx * dx + dy * dy + dz * dz)
 end
 
-local function classify_name(name)
-    local lower = tostring(name or ""):lower()
-    for key, label in pairs(RAID_BOOM) do
-        if lower:find(key, 1, true) then
-            return true, label
-        end
-    end
-    for _, kw in ipairs(KEYWORDS) do
-        if lower:find(kw, 1, true) then
-            return true, name or "Explosion"
-        end
-    end
-    return false, nil
+local function norm_name(name)
+    return tostring(name or ""):lower():gsub("[%s_%-]", "")
+end
+
+local function children_of(inst)
+    if not inst then return {} end
+    return env.safe_call(function()
+        if inst.GetChildren then return inst:GetChildren() end
+        if inst.get_children then return inst:get_children() end
+        return {}
+    end) or {}
 end
 
 local function instance_pos(inst)
@@ -20777,24 +21220,121 @@ local function instance_pos(inst)
         local primary = inst.PrimaryPart or inst.primary_part
         x, y, z = vec_xyz(primary and (primary.Position or primary.position))
         if x then return x, y, z end
-        local ok, cf = pcall(function()
-            if inst.GetModelCFrame then return inst:GetModelCFrame() end
-            if inst.get_model_cframe then return inst:get_model_cframe() end
-            return nil
-        end)
-        if ok and cf then
-            return vec_xyz(cf.Position or cf.position or cf)
-        end
+    end
+
+    -- ExplosionPart / VFX clone often expose CFrame.
+    local ok, cf = pcall(function()
+        return inst.CFrame or inst.cframe
+    end)
+    if ok and cf then
+        return vec_xyz(cf.Position or cf.position or cf)
     end
     return nil
 end
 
-local function process_raid(explosion_type, x, y, z)
-    local now = tick_ms()
-    local display = explosion_type or "Explosion"
-    local ok, label = classify_name(explosion_type)
-    if ok and label then display = label end
+local function rocket_trace_kind(name)
+    local key = norm_name(name)
+    if key:find("helirocket", 1, true) then return "heli" end
+    if key:find("rocket", 1, true) then return "player" end
+    return nil
+end
 
+local function update_rocket_traces(vfx, now)
+    if not vfx then return end
+    for _, child in ipairs(children_of(vfx)) do
+        local kind = rocket_trace_kind(child and (child.Name or child.name))
+        if kind then
+            local x, y, z = instance_pos(child)
+            if x then
+                local addr = tostring(child.Address or child.address or child)
+                M._rocket_traces[addr] = {
+                    kind = kind,
+                    x = x, y = y, z = z,
+                    updated = now,
+                }
+            end
+        end
+    end
+    for addr, trace in pairs(M._rocket_traces) do
+        if not trace or now - (trace.updated or 0) > ROCKET_TRACE_TTL_MS then
+            M._rocket_traces[addr] = nil
+        end
+    end
+end
+
+local function rocket_source_near(x, y, z, now)
+    local best_kind, best_dist = nil, ROCKET_TRACE_MATCH_M
+    for _, trace in pairs(M._rocket_traces) do
+        if trace and now - (trace.updated or 0) <= ROCKET_TRACE_TTL_MS then
+            local dist = dist3(x, y, z, trace.x, trace.y, trace.z)
+            if dist < best_dist or (dist == best_dist and trace.kind == "heli") then
+                best_kind, best_dist = trace.kind, dist
+            end
+        end
+    end
+    return best_kind
+end
+
+local function sound_is_playing(snd)
+    if not snd then return false end
+    local playing = snd.IsPlaying or snd.is_playing or snd.Playing or snd.playing
+    if playing == true then return true end
+    local ok, v = pcall(function()
+        if snd.IsPlaying ~= nil then return snd.IsPlaying end
+        if snd.Playing ~= nil then return snd.Playing end
+        return nil
+    end)
+    return ok and v == true
+end
+
+-- Resolve dump SoundName from a VFX instance (ExplosionPart child sound, or
+-- Explosion clone with the matching Sound playing).
+local function raid_signal_from_inst(inst, rocket_source)
+    if not inst then return nil end
+    local name = inst.Name or inst.name or ""
+    local key = norm_name(name)
+
+    if IGNORE_NAMES[key] and not RAID_SOUNDS[key] then
+        -- Still inspect children for a playing raid sound (Explosion template).
+    elseif RAID_SOUNDS[key] then
+        return RAID_SOUNDS[key].label, RAID_SOUNDS[key].weight, key
+    end
+
+    local best_label, best_weight, best_key = nil, 0, nil
+    for _, child in ipairs(children_of(inst)) do
+        local cn = child.ClassName or child.class_name or ""
+        if cn == "Sound" or cn == "sound" then
+            local skey = norm_name(child.Name or child.name)
+            local info = RAID_SOUNDS[skey]
+            if skey == "rocket" and rocket_source == "player" then
+                info = ROCKET_SIGNAL
+            end
+            if info and (sound_is_playing(child) or key == "explosionpart") then
+                if info.weight > best_weight then
+                    best_label, best_weight, best_key = info.label, info.weight, skey
+                end
+            end
+        end
+    end
+    if best_label then
+        return best_label, best_weight, best_key
+    end
+    return nil
+end
+
+local function classify_projectile(name)
+    local raw = tostring(name or ""):lower()
+    local key = norm_name(name)
+    if IGNORE_NAMES[key] then return nil end
+    if key:find("helirocket", 1, true) or key:find("helicrash", 1, true) then
+        return nil
+    end
+    return RAID_PROJECTILE[raw] or RAID_PROJECTILE[key]
+end
+
+local function process_raid(display, x, y, z, weight)
+    local now = tick_ms()
+    weight = weight or 1
     local raids = cache.raids
     local best, best_d = nil, CLUSTER_MERGE_M
     for _, cl in ipairs(raids) do
@@ -20806,6 +21346,7 @@ local function process_raid(explosion_type, x, y, z)
 
     if best then
         best.count = (best.count or 1) + 1
+        best.weight = (best.weight or 1) + weight
         best.sum_x = (best.sum_x or best.x) + x
         best.sum_y = (best.sum_y or best.y) + y
         best.sum_z = (best.sum_z or best.z) + z
@@ -20821,61 +21362,58 @@ local function process_raid(explosion_type, x, y, z)
             x = x, y = y, z = z,
             sum_x = x, sum_y = y, sum_z = z,
             count = 1,
+            weight = weight,
             last_type = display,
             last_update = now,
             items = { { x = x, y = y, z = z, type = display } },
         }
     end
 
-    if settings.enabled(P) and settings.bool(ID_NOTIFY, true) then
-        local key = string.format("%.0f:%.0f:%.0f", x, y, z)
+    -- Notify only on real raid charge weight (C4 / bundle / rocket), not weak noise.
+    if settings.enabled(P) and settings.bool(ID_NOTIFY, true) and weight >= 2 then
+        local key = string.format("%.0f:%.0f:%.0f", x * 0.1, y * 0.1, z * 0.1)
         local prev = M._last_notify[key]
         if not prev or (now - prev) > NOTIFY_DEDUP_MS then
             M._last_notify[key] = now
-            notify.warning(string.format("Raid start at %.0f, %.0f, %.0f", x, y, z), 6000)
+            notify.warning(string.format("Raid: %s at %.0f, %.0f, %.0f", display, x, y, z), 6000)
         end
     end
-end
-
-local function name_matches(name)
-    local lower = tostring(name or ""):lower()
-    for _, kw in ipairs(KEYWORDS) do
-        if lower:find(kw, 1, true) then
-            return true
-        end
-    end
-    return false
 end
 
 local function scan_container(container, into, now)
     if not env.is_valid(container) then return end
-    local children = env.safe_call(function()
-        if container.get_children then return container:get_children() end
-        if container.GetChildren then return container:GetChildren() end
-        return {}
-    end) or {}
-
-    for i = 1, #children do
-        local child = children[i]
+    for _, child in ipairs(children_of(container)) do
         if not child then goto cont end
-        local cn = child.ClassName or child.class_name or ""
         local name = child.Name or child.name or ""
-        local is_match = (cn == "Explosion") or name_matches(name)
-        if not is_match then goto cont end
-
+        local cn = child.ClassName or child.class_name or ""
         local x, y, z = instance_pos(child)
         if not x then goto cont end
 
         local addr = tostring(child.Address or child.address or child)
-        into[#into + 1] = {
-            name = name,
-            x = x, y = y, z = z,
-            inst = child,
-        }
+        local rocket_source = rocket_source_near(x, y, z, now)
+        local label, weight = raid_signal_from_inst(child, rocket_source)
+        local proj_label = classify_projectile(name)
 
-        if not M._processed[addr] then
-            M._processed[addr] = now
-            process_raid(name, x, y, z)
+        if label then
+            into[#into + 1] = {
+                name = label,
+                x = x, y = y, z = z,
+                inst = child,
+                raid = true,
+            }
+            if not M._processed[addr] then
+                M._processed[addr] = now
+                process_raid(label, x, y, z, weight)
+            end
+        elseif proj_label then
+            into[#into + 1] = {
+                name = proj_label,
+                x = x, y = y, z = z,
+                inst = child,
+                raid = false,
+            }
+        elseif cn == "Explosion" and not IGNORE_NAMES[norm_name(name)] then
+            -- Bare Explosion instances without a raid sound are ignored (Heli / generic).
         end
 
         ::cont::
@@ -20900,14 +21438,30 @@ function M.update(_dt)
     local map_on = settings.enabled("april_map_enabled") and settings.bool("april_map_show_raids", false)
     if not esp_on and not map_on then
         M._projectiles = {}
+        M._rocket_traces = {}
         return
     end
 
     local now = tick_ms()
-    if (now - M._last_scan) < SCAN_MS then return end
+    local scan_due = (now - M._last_scan) >= SCAN_MS
+    local trace_due = (now - M._last_trace_scan) >= ROCKET_TRACE_SCAN_MS
+    if not scan_due and not trace_due then return end
+
+    local ws = env.get_workspace()
+    local vfx = nil
+    if ws then
+        vfx = env.safe_call(function()
+            return ws:FindFirstChild("VFX") or ws:find_first_child("VFX")
+        end)
+    end
+    if trace_due then
+        M._last_trace_scan = now
+        update_rocket_traces(vfx, now)
+    end
+    if not scan_due then return end
+
     M._last_scan = now
 
-    -- Prune old processed / clusters
     for addr, t in pairs(M._processed) do
         if (now - t) > 30000 then
             M._processed[addr] = nil
@@ -20921,14 +21475,11 @@ function M.update(_dt)
     end
 
     local projectiles = {}
-    local ws = env.get_workspace()
     if ws then
-        local vfx = env.safe_call(function()
-            return ws:FindFirstChild("VFX") or ws:find_first_child("VFX")
-        end)
         if vfx then
             scan_container(vfx, projectiles, now)
         end
+        -- Only shallow workspace roots (Timed Charge sticks, etc.) — not full tree.
         scan_container(ws, projectiles, now)
     end
     M._projectiles = projectiles
@@ -20940,7 +21491,7 @@ function M.draw()
     local range = settings.num(ID_RANGE, 1000)
     local range_sq = range * range
     local col = settings.color(P, { 1, 0.5, 0, 1 })
-    local proj_col = { 1, 0.2, 0.2, 1 }
+    local proj_col = { 1, 0.35, 0.15, 1 }
     local text_size = esp_util.text_size()
     local me = env.get_local_player()
     local mx, my, mz = nil, nil, nil
@@ -20961,10 +21512,11 @@ function M.draw()
         local sx, sy, vis = esp_util.w2s(proj.x, proj.y, proj.z)
         if vis then
             local dist = math.sqrt(dist_sq)
-            draw_util.box_esp(sx - 5, sy - 5, 10, 10, proj_col, 0)
-            draw_util.text_centered(sx, sy - text_size - 2, "[" .. tostring(proj.name) .. "]", proj_col, text_size)
+            local c = proj.raid and col or proj_col
+            draw_util.box_esp(sx - 5, sy - 5, 10, 10, c, 0)
+            draw_util.text_centered(sx, sy - text_size - 2, "[" .. tostring(proj.name) .. "]", c, text_size)
             if mx then
-                draw_util.text_centered(sx, sy + 4, string.format("[%.0fm]", dist), proj_col, text_size)
+                draw_util.text_centered(sx, sy + 4, string.format("[%.0fm]", dist), c, text_size)
             end
         end
         ::pcont::
@@ -20984,8 +21536,8 @@ function M.draw()
             local dist = math.sqrt(dist_sq)
             local age = math.floor((now - (cl.last_update or now)) / 1000)
             local lines = {
-                string.format("Potential Raid (%d items)", cl.count or 1),
-                string.format("Last: %s", tostring(cl.last_type or "Explosion")),
+                string.format("Raid (%d)", cl.count or 1),
+                string.format("Last: %s", tostring(cl.last_type or "Explosive")),
                 string.format("Updated %ds ago", age),
             }
             if mx then
@@ -24303,13 +24855,21 @@ function M.set_color(id, color)
     fire_change(id, color)
 end
 
+local function normalize_vk(vk)
+    vk = tonumber(vk)
+    if not vk then return 0 end
+    vk = math.floor(vk)
+    if vk < 1 or vk > 0xFE then return 0 end
+    return vk
+end
+
 function M.get_key(id)
-    return tonumber(M.keys[id]) or 0
+    return normalize_vk(M.keys[id])
 end
 
 function M.set_key(id, vk)
     if id == nil then return end
-    M.keys[id] = tonumber(vk) or 0
+    M.keys[id] = normalize_vk(vk)
 end
 
 function M.on_change(id, fn)
@@ -24987,8 +25547,7 @@ M.BY_ID = {
     april_fling_enabled = "Launches nearby entities upward.",
 
     -- Utility
-    april_farm_helper = "Automatically farms nearby nodes and plants.",
-    april_farm_silent = "Uses silent aim while farm helper is active.",
+    april_farm_helper = "Silently redirects held melee swings to the nearest compatible resource weak point.",
     april_anti_afk = "Prevents idle kick by simulating activity.",
     april_mod_checker_enabled = "Alerts you when staff or mods join the server.",
     april_keybinds_enabled = "Shows an on-screen list of your keybinds.",
@@ -25077,13 +25636,25 @@ end
 
 function M.for_item(item)
     if not M.should_tooltip(item) then return nil end
+    local tip = nil
     if item.tip and item.tip ~= "" then
-        return item.tip
+        tip = item.tip
+    elseif item.id and M.BY_ID[item.id] then
+        tip = M.BY_ID[item.id]
+    else
+        tip = fallback_tip(item)
     end
-    if item.id and M.BY_ID[item.id] then
-        return M.BY_ID[item.id]
+    if not tip then return nil end
+    if item.type == "keybind" then
+        return tip .. " Left-click the key chip to bind; right-click it for Always, Hold, or Toggle. Hold mode also requires the feature switch enabled. Escape cancels and Delete clears."
     end
-    return fallback_tip(item)
+    if item.type == "aim_key" then
+        return tip .. " Left-click the key chip to bind; right-click it for Always, Hold, or Toggle. Escape cancels and Delete clears."
+    end
+    if item.type == "hotkey" then
+        return tip .. " Left-click the key chip to bind. Escape cancels and Delete clears."
+    end
+    return tip
 end
 
 return M
@@ -25266,36 +25837,6 @@ end
 function M.api()
     return shim
 end
-
-return M
-
-end)()
-
--- â”€â”€ ui/combat_labels.lua â”€â”€
-April._mods["ui.combat_labels"] = (function()
--- Label lists shared by the custom UI catalog (no feature / menu deps).
-local M = {}
-
-M.TP_METHODS = {
-    "Center",
-    "Random Ring",
-    "Random Sphere",
-    "Offset Grid",
-    "Camera Face",
-    "Away From Cam",
-    "Shuffle Valid",
-    "Dense Shuffle",
-}
-
-M.SILENT_BONES = {
-    "Head",
-    "Torso",
-    "Left Arm",
-    "Right Arm",
-    "Left Leg",
-    "Right Leg",
-    "Closest",
-}
 
 return M
 
@@ -26068,10 +26609,28 @@ end
 
 function M.tick_key_listen()
     if not M.listening_key then return end
+    if input.key_pressed(0x1B) then -- Escape cancels capture
+        M.listening_key = nil
+        return
+    end
+    if input.key_pressed(0x08) or input.key_pressed(0x2E) then -- Backspace/Delete clears
+        state.set_key(M.listening_key, 0)
+        M.listening_key = nil
+        return
+    end
     for i = 1, #LISTEN_VKS do
         local vk = LISTEN_VKS[i]
         if not listen_skip_vk(vk) and input.key_pressed(vk) then
-            state.set_key(M.listening_key, vk)
+            local id = M.listening_key
+            state.set_key(id, vk)
+            -- A newly assigned feature/aim key must do something without requiring
+            -- users to discover the RMB mode menu. Preserve explicit Hold/
+            -- Toggle choices, but promote the default Always mode to Toggle.
+            local mode_id = id .. "_mode"
+            local mode = state.get(mode_id, nil)
+            if mode ~= nil and tonumber(mode) == 0 then
+                state.set(mode_id, 2)
+            end
             M.listening_key = nil
             return
         end
@@ -27184,7 +27743,7 @@ local function build_aim()
             sep(),
             combo("april_aim_target_type", "Target Type", { "Crosshair", "Distance" }, 0),
             combo("april_aim_bone", "Hitbox", combat_menu.SILENT_BONES, 0),
-            multi("april_aim_targets", "Aim At", { "Players", "NPCs" }, { true, false }),
+            multi("april_aim_targets", "Aim At", combat_menu.AIM_AT_OPTIONS, combat_menu.AIM_AT_DEFAULTS),
             multi("april_aim_filters", "Filters", {
                 "Health Check", "Visible Only", "Team Check",
                 "Skip Safezone", "Whitelist", "Skip Downed",
@@ -27211,7 +27770,7 @@ local function build_aim()
             sep(),
             combo("april_rage_target_type", "Target Type", { "Crosshair", "Distance" }, 1),
             combo("april_rage_bone", "Hitbox", combat_menu.SILENT_BONES, 0),
-            multi("april_rage_targets", "Aim At", { "Players", "NPCs" }, { true, false }),
+            multi("april_rage_targets", "Aim At", combat_menu.AIM_AT_OPTIONS, combat_menu.AIM_AT_DEFAULTS),
             multi("april_rage_filters", "Filters", {
                 "Health Check", "Visible Only", "Team Check",
                 "Skip Safezone", "Whitelist", "Skip Downed",
@@ -27234,7 +27793,7 @@ local function build_aim()
             sep(),
             combo("april_silent_target_type", "Target Type", { "Crosshair", "Distance" }, 0),
             combo("april_silent_bone", "Hitbox", combat_menu.SILENT_BONES, 0),
-            multi("april_silent_targets", "Aim At", { "Players", "NPCs" }, { true, false }),
+            multi("april_silent_targets", "Aim At", combat_menu.AIM_AT_OPTIONS, combat_menu.AIM_AT_DEFAULTS),
             multi("april_silent_filters", "Filters", {
                 "Health Check", "Visible Only", "Team Check",
                 "Skip Safezone", "Whitelist", "Skip Downed",
@@ -27550,9 +28109,7 @@ local function build_misc()
             title = "Utility",
             items = {
                 kb("april_farm_helper", "Farm Helper", false),
-                cb("april_farm_silent", "Silent Farm", false, nil, "april_farm_helper"),
                 sl("april_farm_radius", "Farm Range (studs)", 1, 10, 7, false, "april_farm_helper"),
-                sl("april_farm_smooth", "Camera Smoothness", 1, 30, 8, false, "april_farm_helper"),
                 sep(),
                 cb("april_anti_afk", "Anti AFK", false),
                 label("HUD panels are managed from the top dock."),
@@ -29049,6 +29606,12 @@ function M.on_frame()
     pcall(function()
         April.require("core.api_aliases").apply()
     end)
+    pcall(function()
+        April.require("core.feature_bind").tick()
+    end)
+    pcall(function()
+        April.require("core.aim_key").tick("april_aim_key", "april_aim_key_mode")
+    end)
     if startup_intro.is_active() then
         -- Reveal the fully initialized menu beneath the final black fade so it
         -- appears as part of the intro instead of popping in afterward.
@@ -29061,13 +29624,6 @@ function M.on_frame()
         startup_intro.cancel()
         debug.error_once("startup_intro", err)
     end
-    pcall(function()
-        April.require("core.feature_bind").tick()
-    end)
-    pcall(function()
-        April.require("core.aim_key").tick("april_aim_key", "april_aim_key_mode")
-    end)
-
     local dt = 0.016
     if utility and utility.get_delta_time then
         dt = utility.get_delta_time()

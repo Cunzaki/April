@@ -79,13 +79,21 @@ function M.set_color(id, color)
     fire_change(id, color)
 end
 
+local function normalize_vk(vk)
+    vk = tonumber(vk)
+    if not vk then return 0 end
+    vk = math.floor(vk)
+    if vk < 1 or vk > 0xFE then return 0 end
+    return vk
+end
+
 function M.get_key(id)
-    return tonumber(M.keys[id]) or 0
+    return normalize_vk(M.keys[id])
 end
 
 function M.set_key(id, vk)
     if id == nil then return end
-    M.keys[id] = tonumber(vk) or 0
+    M.keys[id] = normalize_vk(vk)
 end
 
 function M.on_change(id, fn)

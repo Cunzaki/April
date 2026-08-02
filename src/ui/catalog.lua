@@ -162,7 +162,7 @@ local function build_aim()
             sep(),
             combo("april_aim_target_type", "Target Type", { "Crosshair", "Distance" }, 0),
             combo("april_aim_bone", "Hitbox", combat_menu.SILENT_BONES, 0),
-            multi("april_aim_targets", "Aim At", { "Players", "NPCs" }, { true, false }),
+            multi("april_aim_targets", "Aim At", combat_menu.AIM_AT_OPTIONS, combat_menu.AIM_AT_DEFAULTS),
             multi("april_aim_filters", "Filters", {
                 "Health Check", "Visible Only", "Team Check",
                 "Skip Safezone", "Whitelist", "Skip Downed",
@@ -189,7 +189,7 @@ local function build_aim()
             sep(),
             combo("april_rage_target_type", "Target Type", { "Crosshair", "Distance" }, 1),
             combo("april_rage_bone", "Hitbox", combat_menu.SILENT_BONES, 0),
-            multi("april_rage_targets", "Aim At", { "Players", "NPCs" }, { true, false }),
+            multi("april_rage_targets", "Aim At", combat_menu.AIM_AT_OPTIONS, combat_menu.AIM_AT_DEFAULTS),
             multi("april_rage_filters", "Filters", {
                 "Health Check", "Visible Only", "Team Check",
                 "Skip Safezone", "Whitelist", "Skip Downed",
@@ -212,7 +212,7 @@ local function build_aim()
             sep(),
             combo("april_silent_target_type", "Target Type", { "Crosshair", "Distance" }, 0),
             combo("april_silent_bone", "Hitbox", combat_menu.SILENT_BONES, 0),
-            multi("april_silent_targets", "Aim At", { "Players", "NPCs" }, { true, false }),
+            multi("april_silent_targets", "Aim At", combat_menu.AIM_AT_OPTIONS, combat_menu.AIM_AT_DEFAULTS),
             multi("april_silent_filters", "Filters", {
                 "Health Check", "Visible Only", "Team Check",
                 "Skip Safezone", "Whitelist", "Skip Downed",
@@ -528,9 +528,7 @@ local function build_misc()
             title = "Utility",
             items = {
                 kb("april_farm_helper", "Farm Helper", false),
-                cb("april_farm_silent", "Silent Farm", false, nil, "april_farm_helper"),
                 sl("april_farm_radius", "Farm Range (studs)", 1, 10, 7, false, "april_farm_helper"),
-                sl("april_farm_smooth", "Camera Smoothness", 1, 30, 8, false, "april_farm_helper"),
                 sep(),
                 cb("april_anti_afk", "Anti AFK", false),
                 label("HUD panels are managed from the top dock."),

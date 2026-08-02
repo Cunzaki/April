@@ -35,7 +35,7 @@ local NAME_HINTS = {
     "saw bat", "shovel",
 }
 
--- MeleeChecks reach from ToolInfo dump (RaycastUtil MouseRaycast / HitMelee).
+-- Verified fallbacks for runtimes where ToolInfo cannot be loaded.
 local MELEE_RANGE = {
     ["Stone Hatchet"] = 5,
     ["Iron Shard Hatchet"] = 5,
@@ -233,11 +233,18 @@ function M.melee_range(tool_name)
     tool_name = normalize(tool_name)
     if not tool_name then return 5 end
 
-    local cached = MELEE_RANGE[tool_name]
-    if cached then return cached end
-
     local data = bootstrap.get_module("ToolInfo")
     local entry = data and data[tool_name]
+    local melee = entry and entry.Melee
+    local max_range = type(melee) == "table"
+        and tonumber(melee.MaxRange or melee.max_range or melee.maxRange)
+        or nil
+    if max_range and max_range > 0 then
+        return max_range
+    end
+
+    -- Compatibility only: MeleeChecks contains ray/check definitions rather
+    -- than the authoritative maximum melee distance.
     local checks = entry and entry.Melee and entry.Melee.MeleeChecks
     if type(checks) == "table" then
         local best = 0
@@ -253,7 +260,7 @@ function M.melee_range(tool_name)
         end
     end
 
-    return 5
+    return MELEE_RANGE[tool_name] or 5
 end
 
 function M.all_names()

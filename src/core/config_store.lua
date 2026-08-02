@@ -74,8 +74,7 @@ local MENU_KEYS = {
     "april_gm_speed", "april_gm_speed_mult",
     "april_gm_range", "april_gm_range_mult",
     "april_gm_double_tap",
-    "april_farm_helper", "april_farm_helper_mode", "april_farm_radius", "april_farm_smooth",
-    "april_farm_silent",
+    "april_farm_helper", "april_farm_helper_mode", "april_farm_radius",
     "april_world_enabled", "april_world_enabled_mode", "april_stone_node", "april_metal_node", "april_phosphate_node",
     "april_corn_plant", "april_tomato_plant", "april_pumpkin_plant", "april_lemon_plant",
     "april_raspberry_plant", "april_blueberry_plant", "april_wool_plant",
@@ -208,8 +207,27 @@ local HOTKEY_KEYS = {
     "april_silent_aim",
     "april_rage_enabled",
     "april_player_enabled",
+    "april_aim_key",
     "april_ui_menu_key",
 }
+
+local function collect_hotkey_keys()
+    local out, seen = {}, {}
+    local function add(id)
+        if not id or seen[id] then return end
+        seen[id] = true
+        out[#out + 1] = id
+    end
+    for _, id in ipairs(HOTKEY_KEYS) do add(id) end
+    pcall(function()
+        local binds = April.require("core.feature_bind")
+        for _, entry in ipairs(binds.list_entries()) do
+            add(entry.key_id or entry.id)
+        end
+    end)
+    table.sort(out)
+    return out
+end
 
 function M.get_config_path(name)
     local base = os.getenv and os.getenv("LOCALAPPDATA") or ""
@@ -311,6 +329,7 @@ local function collect_menu_keys()
     pcall(function()
         local fb = April.require("core.feature_bind")
         for _, entry in ipairs(fb.list_entries()) do
+            add(entry.mode_id)
             add(fb.hide_key_id(entry.id))
         end
     end)
@@ -420,11 +439,11 @@ function M.save_slot(slot)
         end
     end
 
-    for _, id in ipairs(HOTKEY_KEYS) do
+    for _, id in ipairs(collect_hotkey_keys()) do
         if menu.get_key then
             local vk = menu.get_key(id)
-            if vk and vk > 0 then
-                table.insert(lines, string.format("@key:%s=%d", id, vk))
+            if vk ~= nil then
+                table.insert(lines, string.format("@key:%s=%d", id, tonumber(vk) or 0))
             end
         end
     end
@@ -447,6 +466,14 @@ function M.load_slot(slot, opts)
     local path = slot_path(slot)
     local f = io.open(path, "r")
     if not f then return false end
+
+    -- Profiles are complete snapshots. Clear runtime keys first so a profile
+    -- with an unbound/missing legacy key cannot inherit another slot's bind.
+    if menu.set_key then
+        for _, id in ipairs(collect_hotkey_keys()) do
+            menu.set_key(id, 0)
+        end
+    end
 
     for i = M.SLOT_MIN, M.SLOT_MAX do
         cache.waypoints[i] = nil

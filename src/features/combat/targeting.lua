@@ -26,7 +26,8 @@ end
 
 local function npc_enabled(entry, prefix)
     if not entry then return false end
-    return settings.multi(prefix .. "targets", 2, false)
+    local kind = entry.kind or npcs.kind(entry.name or entry.raw_name)
+    return combat_menu.npc_kind_enabled(kind, prefix)
 end
 
 local function same_npc_inst(a, b)
@@ -57,10 +58,21 @@ function M.is_aim_target(target)
 end
 
 -- Prefer live Head part; cached lx/ly/lz is only a fallback (stale coords glue camera aimbot).
-local function npc_head_world(entry)
+-- AttackHeli: aim RotorBonus weak points (rotors), not the body/Main.
+local function npc_aim_world(entry, cx, cy)
     if not entry then
         return nil
     end
+
+    local kind = entry.kind or npcs.kind(entry.name or entry.raw_name)
+    if kind == "heli" then
+        local heli = npcs.heli_aim_world(entry, true, cx, cy)
+        if heli then
+            entry.lx, entry.ly, entry.lz = heli.x, heli.y, heli.z
+            return heli
+        end
+    end
+
     if entry.entity then
         local x, y, z = esp_util.vec3_pos(
             entry.entity.HeadPosition or entry.entity.head_position
@@ -87,10 +99,22 @@ local function npc_head_world(entry)
             return { x = pos.x, y = pos.y, z = pos.z }
         end
     end
+    -- Vehicles without Head: use Main / root / cached coords.
+    if entry.root and env.is_valid(entry.root) then
+        local x, y, z = esp_util.vec3_pos(entry.root.Position or entry.root.position)
+        if x then
+            entry.lx, entry.ly, entry.lz = x, y, z
+            return { x = x, y = y, z = z }
+        end
+    end
     if entry.lx then
         return { x = entry.lx, y = entry.ly, z = entry.lz }
     end
     return nil
+end
+
+local function npc_head_world(entry)
+    return npc_aim_world(entry, nil, nil)
 end
 
 -- Rebind a sticky NPC lock to the current cache entry + live head (or nil if gone).
@@ -117,6 +141,7 @@ function M.refresh_npc_target(target)
         target.entity = found.entity
         target.inst = found.inst
         target.head = found.head
+        target.root = found.root or found.anchor
         target.name = found.name or target.name
         target.kind = found.kind or target.kind
         target.lx = found.lx
@@ -127,7 +152,7 @@ function M.refresh_npc_target(target)
     if not M.is_npc_alive(target) then
         return nil
     end
-    if not npc_head_world(target) then
+    if not npc_aim_world(target, nil, nil) then
         return nil
     end
     return target
@@ -276,14 +301,14 @@ function M.within_max_distance(target, origin, prefix)
     return dist == nil or dist <= max_d
 end
 
-function M.bone_world(target, bone)
+function M.bone_world(target, bone, cx, cy)
     if not target then return nil end
 
     if M.is_npc_target(target) then
         if not M.refresh_npc_target(target) then
             return nil
         end
-        return npc_head_world(target)
+        return npc_aim_world(target, cx, cy)
     end
 
     if ep.is_alive(target) == false then return nil end
@@ -321,7 +346,7 @@ function M.closest_bone_world(target, cx, cy)
     cx = cx or 0
     cy = cy or 0
     if M.is_npc_target(target) then
-        return npc_head_world(target)
+        return npc_aim_world(target, cx, cy)
     end
     if target then
         local bones = ep.get_bones_screen(target)
@@ -422,7 +447,7 @@ function M.resolve_bone_world(target, bone, cx, cy)
     if bone == "Closest" then
         return M.closest_bone_world(target, cx, cy)
     end
-    return M.bone_world(target, bone)
+    return M.bone_world(target, bone, cx, cy)
 end
 
 function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
@@ -486,7 +511,7 @@ local function consider_target(target, prefix, screen_bone, use_fov, fov_px, ori
         return best, best_score
     end
 
-    local base = M.bone_world(target, screen_bone)
+    local base = M.bone_world(target, screen_bone, cx, cy)
     if not base then
         return best, best_score
     end
@@ -541,8 +566,8 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
     local best, best_score = nil, use_fov and math.huge or math.huge
     local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
     local filter_visible = not opts.ignore_visible and settings.multi(prefix .. "filters", 2, false)
-    local target_players = settings.multi(prefix .. "targets", 1, true)
-    local target_npcs = not opts.players_only and settings.multi(prefix .. "targets", 2, false)
+    local target_players = combat_menu.players_enabled(prefix)
+    local target_npcs = not opts.players_only and combat_menu.any_npc_enabled(prefix)
 
     if target_players then
         for _, p in ipairs(cache.players) do
@@ -556,14 +581,13 @@ function M.find_target(cx, cy, fov_px, prefix, opts)
 
     if target_npcs and cache.npcs then
         for _, entry in ipairs(cache.npcs) do
-            if npcs.is_hostile_kind(entry.kind)
-                and npc_enabled(entry, prefix) and M.is_npc_alive(entry)
-            then
+            if npc_enabled(entry, prefix) and M.is_npc_alive(entry) then
                 local npc_target = {
                     is_npc = true,
                     entity = entry.entity,
                     inst = entry.inst,
                     head = entry.head,
+                    root = entry.root,
                     name = entry.name,
                     kind = entry.kind,
                     lx = entry.lx,

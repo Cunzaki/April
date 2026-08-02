@@ -74,6 +74,7 @@ const ORDER = [
   "game/map_image.lua",
   "game/turret_stats.lua",
   "game/toolinfo_weapon_mods.lua",
+  "ui/combat_labels.lua",
   "features/combat/silent_whitelist.lua",
   "features/combat/bullet_tp_ray.lua",
   "features/combat/combat_menu.lua",
@@ -114,7 +115,6 @@ const ORDER = [
   "ui/gs_anim.lua",
   "ui/tooltips.lua",
   "ui/menu_shim.lua",
-  "ui/combat_labels.lua",
   "ui/gs_icons.lua",
   "ui/gs_widgets.lua",
   "ui/catalog.lua",
@@ -125,7 +125,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.0.20";
+const VERSION = "4.0.24";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector

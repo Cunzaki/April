@@ -1,20 +1,39 @@
---[[
-  Gather targeting — TreeX / NodeSpark preferred, Main fallback.
-
-  Perf: distance-gate on cheap Main/CactusPart first. Never resolve TreeX /
-  NodeSpark for models outside tool range.
-]]
-
+-- Gather target index and live TreeX / NodeSpark weak-point resolution.
+-- The dump proves HitMelee gives parts parented to TreeX/NodeSpark priority 3.
 local env = April.require("core.env")
 local folders = April.require("game.folders")
 
 local M = {}
 
+local CELL_SIZE = 24
+local INDEX_REFRESH_MS = 900
+local buckets = {}
+local records = {}
+local last_refresh_ms = -INDEX_REFRESH_MS
+
+local function now_ms()
+    local fn = utility and (utility.get_tick_count or utility.GetTickCount)
+    if type(fn) ~= "function" then return 0 end
+    local ok, value = pcall(fn)
+    return ok and (tonumber(value) or 0) or 0
+end
+
 local function child(parent, name)
     if not parent then return nil end
     return env.safe_call(function()
-        return parent:find_first_child(name) or parent:FindFirstChild(name)
+        if parent.FindFirstChild then return parent:FindFirstChild(name) end
+        if parent.find_first_child then return parent:find_first_child(name) end
+        return nil
     end)
+end
+
+local function children(parent)
+    if not parent then return {} end
+    return env.safe_call(function()
+        if parent.GetChildren then return parent:GetChildren() end
+        if parent.get_children then return parent:get_children() end
+        return {}
+    end) or {}
 end
 
 local function name_of(inst)
@@ -24,13 +43,29 @@ end
 local function read_pos(part)
     if not part or not env.is_valid(part) then return nil end
     local p = part.Position or part.position
-    if not p or p.x == nil then return nil end
-    return p
+    if not p then return nil end
+    local x, y, z = p.x or p.X, p.y or p.Y, p.z or p.Z
+    if x == nil or y == nil or z == nil then return nil end
+    return { x = x, y = y, z = z }
 end
 
 local function d2(a, b)
-    local dx, dy, dz = a.x - b.x, a.y - b.y, a.z - b.z
+    if not a or not b then return math.huge end
+    local ax, ay, az = a.x or a.X, a.y or a.Y, a.z or a.Z
+    local bx, by, bz = b.x or b.X, b.y or b.Y, b.z or b.Z
+    if ax == nil or ay == nil or az == nil or bx == nil or by == nil or bz == nil then
+        return math.huge
+    end
+    local dx, dy, dz = ax - bx, ay - by, az - bz
     return dx * dx + dy * dy + dz * dz
+end
+
+local function record_key(model)
+    return tostring(model and (model.Address or model.address or model) or "")
+end
+
+local function bucket_key(x, z)
+    return tostring(math.floor(x / CELL_SIZE)) .. ":" .. tostring(math.floor(z / CELL_SIZE))
 end
 
 function M.kind_from_name(name)
@@ -46,10 +81,11 @@ end
 local function marker_main(model, marker_name)
     local marker = child(model, marker_name)
     if not marker or not env.is_valid(marker) then return nil end
-    return child(marker, "Main")
+    local main = child(marker, "Main")
+    if main and env.is_valid(main) then return main end
+    return nil
 end
 
--- Cheap proxy part used only for distance gate (no TreeX/NodeSpark walk).
 local function proxy_part(model, kind)
     if kind == "Cactus" then return child(model, "CactusPart") end
     if kind == "Dig" then return child(model, "Dirt") end
@@ -57,137 +93,166 @@ local function proxy_part(model, kind)
     return child(model, "Main")
 end
 
--- Aim part once model is known in-range.
 local function aim_part(model, kind)
     if kind == "Trees" then
-        return marker_main(model, "TreeX") or child(model, "Main"), true
+        local mark = marker_main(model, "TreeX")
+        return mark or child(model, "Main"), mark ~= nil
     end
     if kind == "Nodes" then
-        local spark = marker_main(model, "NodeSpark")
-        if spark then return spark, true end
-        return child(model, "Main"), false
+        local mark = marker_main(model, "NodeSpark")
+        return mark or child(model, "Main"), mark ~= nil
     end
-    if kind == "Cactus" then
-        local p = child(model, "CactusPart")
-        return p, p ~= nil
-    end
-    if kind == "Dig" then
-        local p = child(model, "Dirt")
-        return p, p ~= nil
-    end
-    if kind == "Logs" then
-        local p = child(model, "Main") or child(model, "Branch")
-        return p, p ~= nil
-    end
-    return child(model, "Main"), false
+    local part = proxy_part(model, kind)
+    return part, part ~= nil
 end
 
-function M.hit_part(model, kind)
-    if not env.is_valid(model) then return nil, false end
-    kind = kind or M.kind_from_name(name_of(model))
-    local part, is_mark = aim_part(model, kind)
-    if kind == "Trees" then
-        is_mark = part ~= nil and child(model, "TreeX") ~= nil
-    elseif kind == "Nodes" then
-        is_mark = part ~= nil and child(model, "NodeSpark") ~= nil
-    end
-    return part, is_mark
-end
-
-local function folder_children(folder)
-    if not env.is_valid(folder) then return nil end
-    return env.safe_call(function() return folder:get_children() end)
-end
-
-local function folders_for_caps(caps)
-    local list = {}
-    local want_nodes = not caps or caps.Nodes
-    local want_trees = not caps or caps.Trees
-    local want_veg = caps and (caps.Logs or caps.Cactus or caps.Dig)
-
-    if want_nodes then list[#list + 1] = folders.from_key("nodes") end
-    if want_trees then list[#list + 1] = folders.get_folder("Trees") end
-    if want_veg then list[#list + 1] = folders.from_key("vegetation") end
-    return list
+local function depleted(model)
+    if not model or not env.is_valid(model) then return true end
+    local destroyed = env.get_attribute(model, "Destroyed")
+    if destroyed == true or destroyed == 1 then return true end
+    local health = tonumber(env.get_attribute(model, "Health"))
+    return health ~= nil and health <= 0
 end
 
 local function kind_allowed(caps, kind)
     if not kind then return false end
-    if not caps then
-        return kind == "Trees" or kind == "Nodes"
-    end
-    if kind == "Dig" then
-        return caps.Dig == true or caps.Shovel == true
-    end
+    if not caps then return kind == "Trees" or kind == "Nodes" end
+    if kind == "Dig" then return caps.Dig == true or caps.Shovel == true end
     return caps[kind] == true
 end
 
---[[
-  Nearest in-range aim point.
-  1) Gate on proxy Main distance (cheap)
-  2) Only then resolve TreeX / NodeSpark
-  3) Early-out if a close marker is found
-]]
-function M.find_nearest(origin, radius, tool_caps)
-    if not origin or not radius or radius <= 0 then return nil end
+local function add_record(model, parent)
+    if not model or not env.is_valid(model) then return end
+    local kind = M.kind_from_name(name_of(model))
+    if not kind then return end
+    local proxy = proxy_part(model, kind)
+    local pos = read_pos(proxy)
+    if not pos then return end
+    local record = {
+        model = model,
+        kind = kind,
+        proxy = proxy,
+        key = record_key(model),
+        parent_key = record_key(parent),
+    }
+    records[#records + 1] = record
+    local key = bucket_key(pos.x, pos.z)
+    buckets[key] = buckets[key] or {}
+    buckets[key][#buckets[key] + 1] = record
+end
 
-    local limit2 = radius * radius
-    local early2 = (radius * 0.45) * (radius * 0.45)
-    local best_mark, best_mark_d2 = nil, limit2
-    local best_plain, best_plain_d2 = nil, limit2
+local function resource_folders()
+    local out = {}
+    local nodes = folders.from_key("nodes")
+    local trees = folders.get_folder("Trees")
+    local vegetation = folders.from_key("vegetation")
+    if nodes then out[#out + 1] = nodes end
+    if trees then out[#out + 1] = trees end
+    if vegetation then out[#out + 1] = vegetation end
+    return out
+end
+
+function M.refresh_index(force)
+    local now = now_ms()
+    if not force and now - last_refresh_ms < INDEX_REFRESH_MS then return false end
+    last_refresh_ms = now
+    buckets = {}
+    records = {}
     local seen = {}
-
-    local folder_list = folders_for_caps(tool_caps)
-    for fi = 1, #folder_list do
-        local folder = folder_list[fi]
+    for _, folder in ipairs(resource_folders()) do
         if folder and not seen[folder] then
             seen[folder] = true
-            local children = folder_children(folder)
-            if children then
-                for i = 1, #children do
-                    local model = children[i]
-                    if env.is_valid(model) then
-                        local kind = M.kind_from_name(name_of(model))
-                        if kind_allowed(tool_caps, kind) then
-                            local proxy = proxy_part(model, kind)
-                            local ppos = read_pos(proxy)
-                            if ppos and d2(ppos, origin) <= limit2 then
-                                local part, is_mark = aim_part(model, kind)
-                                -- Trees: aim_part returns mark|main; detect marker properly
-                                if kind == "Trees" then
-                                    local mark = marker_main(model, "TreeX")
-                                    if mark then
-                                        part, is_mark = mark, true
-                                    else
-                                        part, is_mark = child(model, "Main"), false
-                                    end
-                                elseif kind == "Nodes" then
-                                    local mark = marker_main(model, "NodeSpark")
-                                    if mark then
-                                        part, is_mark = mark, true
-                                    else
-                                        part, is_mark = child(model, "Main"), false
-                                    end
-                                end
+            for _, model in ipairs(children(folder)) do
+                add_record(model, folder)
+            end
+        end
+    end
+    return true
+end
 
-                                local pos = read_pos(part)
-                                if pos then
-                                    local dist = d2(pos, origin)
-                                    if dist <= limit2 then
-                                        if is_mark then
-                                            if dist < best_mark_d2 then
-                                                best_mark_d2 = dist
-                                                best_mark = part
-                                                if dist <= early2 then
-                                                    return best_mark
-                                                end
-                                            end
-                                        elseif dist < best_plain_d2 then
-                                            best_plain_d2 = dist
-                                            best_plain = part
-                                        end
-                                    end
-                                end
+function M.invalidate()
+    buckets = {}
+    records = {}
+    last_refresh_ms = -INDEX_REFRESH_MS
+end
+
+function M.hit_part(model, kind)
+    if not model or depleted(model) then return nil, false end
+    kind = kind or M.kind_from_name(name_of(model))
+    return aim_part(model, kind)
+end
+
+function M.resolve(record)
+    if not record or depleted(record.model) then return nil end
+    local current_parent = record.model.Parent or record.model.parent
+    if not current_parent or record_key(current_parent) ~= record.parent_key then
+        return nil
+    end
+    local part, weak = aim_part(record.model, record.kind)
+    local pos = read_pos(part)
+    if not pos then return nil end
+    record.part = part
+    record.pos = pos
+    record.weak = weak == true
+    return record
+end
+
+local function visible(origin, pos)
+    if not origin or not pos or not raycast then return nil end
+    local ready_fn = raycast.is_ready or raycast.IsReady
+    if type(ready_fn) == "function" then
+        local ok, ready = pcall(ready_fn)
+        if ok and ready == false then return nil end
+    end
+    local fn = raycast.is_visible or raycast.IsVisible
+    if type(fn) ~= "function" then return nil end
+    local ox, oy, oz = origin.x or origin.X, origin.y or origin.Y, origin.z or origin.Z
+    if ox == nil or oy == nil or oz == nil then return nil end
+    local ok, clear = pcall(fn, ox, oy, oz, pos.x, pos.y, pos.z)
+    if not ok then return nil end
+    return clear == true
+end
+
+local function better(candidate, candidate_d2, best, best_d2)
+    if not best then return true end
+    if candidate_d2 < best_d2 - 1e-6 then return true end
+    if math.abs(candidate_d2 - best_d2) <= 1e-6 then
+        return tostring(candidate.key) < tostring(best.key)
+    end
+    return false
+end
+
+function M.find_target(origin, radius, tool_caps)
+    if not origin or not radius or radius <= 0 then return nil end
+    M.refresh_index(false)
+    local ox, oz = origin.x or origin.X, origin.z or origin.Z
+    if ox == nil or oz == nil then return nil end
+
+    local limit2 = radius * radius
+    local span = math.max(1, math.ceil(radius / CELL_SIZE) + 1)
+    local cell_x = math.floor(ox / CELL_SIZE)
+    local cell_z = math.floor(oz / CELL_SIZE)
+    local best_visible, best_visible_d2 = nil, limit2
+    local best_any, best_any_d2 = nil, limit2
+    local visited = {}
+
+    for x = cell_x - span, cell_x + span do
+        for z = cell_z - span, cell_z + span do
+            local list = buckets[tostring(x) .. ":" .. tostring(z)]
+            for _, record in ipairs(list or {}) do
+                if not visited[record.key] and kind_allowed(tool_caps, record.kind) then
+                    visited[record.key] = true
+                    local resolved = M.resolve(record)
+                    if resolved then
+                        local dist = d2(resolved.pos, origin)
+                        if dist <= limit2 then
+                            if better(resolved, dist, best_any, best_any_d2) then
+                                best_any, best_any_d2 = resolved, dist
+                            end
+                            if visible(origin, resolved.pos) ~= false
+                                and better(resolved, dist, best_visible, best_visible_d2)
+                            then
+                                best_visible, best_visible_d2 = resolved, dist
                             end
                         end
                     end
@@ -196,7 +261,17 @@ function M.find_nearest(origin, radius, tool_caps)
         end
     end
 
-    return best_mark or best_plain
+    local best = best_visible or best_any
+    if best then
+        best.distance2 = best == best_visible and best_visible_d2 or best_any_d2
+    end
+    return best
+end
+
+-- Legacy helpers retained for internal callers/config compatibility.
+function M.find_nearest(origin, radius, tool_caps)
+    local record = M.find_target(origin, radius, tool_caps)
+    return record and record.part or nil
 end
 
 function M.collect_near(origin, radius, out, _max_out, tool_caps)
@@ -204,6 +279,10 @@ function M.collect_near(origin, radius, out, _max_out, tool_caps)
     local part = M.find_nearest(origin, radius, tool_caps)
     if part then out[1] = part end
     return out
+end
+
+function M.distance2(pos, origin)
+    return d2(pos, origin)
 end
 
 return M

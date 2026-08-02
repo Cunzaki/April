@@ -130,8 +130,7 @@ M.BY_ID = {
     april_fling_enabled = "Launches nearby entities upward.",
 
     -- Utility
-    april_farm_helper = "Automatically farms nearby nodes and plants.",
-    april_farm_silent = "Uses silent aim while farm helper is active.",
+    april_farm_helper = "Silently redirects held melee swings to the nearest compatible resource weak point.",
     april_anti_afk = "Prevents idle kick by simulating activity.",
     april_mod_checker_enabled = "Alerts you when staff or mods join the server.",
     april_keybinds_enabled = "Shows an on-screen list of your keybinds.",
@@ -220,13 +219,25 @@ end
 
 function M.for_item(item)
     if not M.should_tooltip(item) then return nil end
+    local tip = nil
     if item.tip and item.tip ~= "" then
-        return item.tip
+        tip = item.tip
+    elseif item.id and M.BY_ID[item.id] then
+        tip = M.BY_ID[item.id]
+    else
+        tip = fallback_tip(item)
     end
-    if item.id and M.BY_ID[item.id] then
-        return M.BY_ID[item.id]
+    if not tip then return nil end
+    if item.type == "keybind" then
+        return tip .. " Left-click the key chip to bind; right-click it for Always, Hold, or Toggle. Hold mode also requires the feature switch enabled. Escape cancels and Delete clears."
     end
-    return fallback_tip(item)
+    if item.type == "aim_key" then
+        return tip .. " Left-click the key chip to bind; right-click it for Always, Hold, or Toggle. Escape cancels and Delete clears."
+    end
+    if item.type == "hotkey" then
+        return tip .. " Left-click the key chip to bind. Escape cancels and Delete clears."
+    end
+    return tip
 end
 
 return M

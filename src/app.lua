@@ -27,6 +27,12 @@ function M.on_frame()
     pcall(function()
         April.require("core.api_aliases").apply()
     end)
+    pcall(function()
+        April.require("core.feature_bind").tick()
+    end)
+    pcall(function()
+        April.require("core.aim_key").tick("april_aim_key", "april_aim_key_mode")
+    end)
     if startup_intro.is_active() then
         -- Reveal the fully initialized menu beneath the final black fade so it
         -- appears as part of the intro instead of popping in afterward.
@@ -39,13 +45,6 @@ function M.on_frame()
         startup_intro.cancel()
         debug.error_once("startup_intro", err)
     end
-    pcall(function()
-        April.require("core.feature_bind").tick()
-    end)
-    pcall(function()
-        April.require("core.aim_key").tick("april_aim_key", "april_aim_key_mode")
-    end)
-
     local dt = 0.016
     if utility and utility.get_delta_time then
         dt = utility.get_delta_time()

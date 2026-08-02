@@ -1,3 +1,7 @@
+-- Raid ESP: detect structure-raiding explosives from dump VFX / ToolInfo.
+-- Timed Charge (SoundName "C4"), Dynamite Bundle, and source-confirmed player
+-- Rockets are raid signals. The shared "Rocket" explosion sound is insufficient:
+-- HeliRocket uses it too, so tracer history disambiguates the source.
 local settings = April.require("core.settings")
 local cache = April.require("core.cache")
 local env = April.require("core.env")
@@ -11,32 +15,55 @@ local P = "april_raid_enabled"
 local ID_NOTIFY = "april_raid_notifications"
 local ID_RANGE = "april_raid_range"
 
-local CLUSTER_MERGE_M = 50
+local CLUSTER_MERGE_M = 40
 local CLUSTER_TTL_MS = 600000
-local SCAN_MS = 400
-local NOTIFY_DEDUP_MS = 8000
+local SCAN_MS = 350
+local ROCKET_TRACE_SCAN_MS = 50
+local ROCKET_TRACE_TTL_MS = 2500
+local ROCKET_TRACE_MATCH_M = 45
+local NOTIFY_DEDUP_MS = 10000
 
-local RAID_BOOM = {
-    c4 = "Timed Explosive Charge",
-    dynamitebundle = "Dynamite Bundle",
-    dynamitestick = "Dynamite Stick",
-    rocket = "Rocket",
-    explosion = "Explosion",
-    boom = "Explosion",
-    grenade = "Grenade",
-    shell = "Tank Shell",
-    charge = "Explosive Charge",
+-- Dump: ReplicatedStorage.VFX.Explosion sound names + ToolInfo SoundName values.
+-- Only these create / refresh a raid cluster.
+local RAID_SOUNDS = {
+    c4 = { label = "Timed Charge", weight = 3 },
+    dynamitebundle = { label = "Dynamite Bundle", weight = 2 },
+}
+local ROCKET_SIGNAL = { label = "Rocket", weight = 2 }
+
+-- Dump ToolInfo / VFX: combat / PvE noise that previously false-flagged raids.
+local IGNORE_NAMES = {
+    helirocket = true,
+    helicrashing = true,
+    militarygrenade = true,
+    landmine = true,
+    dynamitestick = true,
+    explosioneffect = true,
+    explosionpart = true,
+    explosion = true,
+    projectile = true,
+    boom = true,
+    grenade = true,
+    shell = true,
+    charge = true,
+    bomb = true,
 }
 
-local KEYWORDS = {
-    "explosion", "boom", "rocket", "charge", "c4", "projectile",
-    "grenade", "bomb", "shell", "dynamite",
+-- In-flight / sticky raid projectiles worth drawing (not auto-clustered alone).
+local RAID_PROJECTILE = {
+    ["timed charge"] = "Timed Charge",
+    timedcharge = "Timed Charge",
+    c4 = "Timed Charge",
+    ["dynamite bundle"] = "Dynamite Bundle",
+    dynamitebundle = "Dynamite Bundle",
 }
 
 M._processed = {}
 M._last_scan = 0
+M._last_trace_scan = 0
 M._last_notify = {}
 M._projectiles = {}
+M._rocket_traces = {}
 
 cache.raids = cache.raids or {}
 
@@ -58,19 +85,17 @@ local function dist3(ax, ay, az, bx, by, bz)
     return math.sqrt(dx * dx + dy * dy + dz * dz)
 end
 
-local function classify_name(name)
-    local lower = tostring(name or ""):lower()
-    for key, label in pairs(RAID_BOOM) do
-        if lower:find(key, 1, true) then
-            return true, label
-        end
-    end
-    for _, kw in ipairs(KEYWORDS) do
-        if lower:find(kw, 1, true) then
-            return true, name or "Explosion"
-        end
-    end
-    return false, nil
+local function norm_name(name)
+    return tostring(name or ""):lower():gsub("[%s_%-]", "")
+end
+
+local function children_of(inst)
+    if not inst then return {} end
+    return env.safe_call(function()
+        if inst.GetChildren then return inst:GetChildren() end
+        if inst.get_children then return inst:get_children() end
+        return {}
+    end) or {}
 end
 
 local function instance_pos(inst)
@@ -84,24 +109,121 @@ local function instance_pos(inst)
         local primary = inst.PrimaryPart or inst.primary_part
         x, y, z = vec_xyz(primary and (primary.Position or primary.position))
         if x then return x, y, z end
-        local ok, cf = pcall(function()
-            if inst.GetModelCFrame then return inst:GetModelCFrame() end
-            if inst.get_model_cframe then return inst:get_model_cframe() end
-            return nil
-        end)
-        if ok and cf then
-            return vec_xyz(cf.Position or cf.position or cf)
-        end
+    end
+
+    -- ExplosionPart / VFX clone often expose CFrame.
+    local ok, cf = pcall(function()
+        return inst.CFrame or inst.cframe
+    end)
+    if ok and cf then
+        return vec_xyz(cf.Position or cf.position or cf)
     end
     return nil
 end
 
-local function process_raid(explosion_type, x, y, z)
-    local now = tick_ms()
-    local display = explosion_type or "Explosion"
-    local ok, label = classify_name(explosion_type)
-    if ok and label then display = label end
+local function rocket_trace_kind(name)
+    local key = norm_name(name)
+    if key:find("helirocket", 1, true) then return "heli" end
+    if key:find("rocket", 1, true) then return "player" end
+    return nil
+end
 
+local function update_rocket_traces(vfx, now)
+    if not vfx then return end
+    for _, child in ipairs(children_of(vfx)) do
+        local kind = rocket_trace_kind(child and (child.Name or child.name))
+        if kind then
+            local x, y, z = instance_pos(child)
+            if x then
+                local addr = tostring(child.Address or child.address or child)
+                M._rocket_traces[addr] = {
+                    kind = kind,
+                    x = x, y = y, z = z,
+                    updated = now,
+                }
+            end
+        end
+    end
+    for addr, trace in pairs(M._rocket_traces) do
+        if not trace or now - (trace.updated or 0) > ROCKET_TRACE_TTL_MS then
+            M._rocket_traces[addr] = nil
+        end
+    end
+end
+
+local function rocket_source_near(x, y, z, now)
+    local best_kind, best_dist = nil, ROCKET_TRACE_MATCH_M
+    for _, trace in pairs(M._rocket_traces) do
+        if trace and now - (trace.updated or 0) <= ROCKET_TRACE_TTL_MS then
+            local dist = dist3(x, y, z, trace.x, trace.y, trace.z)
+            if dist < best_dist or (dist == best_dist and trace.kind == "heli") then
+                best_kind, best_dist = trace.kind, dist
+            end
+        end
+    end
+    return best_kind
+end
+
+local function sound_is_playing(snd)
+    if not snd then return false end
+    local playing = snd.IsPlaying or snd.is_playing or snd.Playing or snd.playing
+    if playing == true then return true end
+    local ok, v = pcall(function()
+        if snd.IsPlaying ~= nil then return snd.IsPlaying end
+        if snd.Playing ~= nil then return snd.Playing end
+        return nil
+    end)
+    return ok and v == true
+end
+
+-- Resolve dump SoundName from a VFX instance (ExplosionPart child sound, or
+-- Explosion clone with the matching Sound playing).
+local function raid_signal_from_inst(inst, rocket_source)
+    if not inst then return nil end
+    local name = inst.Name or inst.name or ""
+    local key = norm_name(name)
+
+    if IGNORE_NAMES[key] and not RAID_SOUNDS[key] then
+        -- Still inspect children for a playing raid sound (Explosion template).
+    elseif RAID_SOUNDS[key] then
+        return RAID_SOUNDS[key].label, RAID_SOUNDS[key].weight, key
+    end
+
+    local best_label, best_weight, best_key = nil, 0, nil
+    for _, child in ipairs(children_of(inst)) do
+        local cn = child.ClassName or child.class_name or ""
+        if cn == "Sound" or cn == "sound" then
+            local skey = norm_name(child.Name or child.name)
+            local info = RAID_SOUNDS[skey]
+            if skey == "rocket" and rocket_source == "player" then
+                info = ROCKET_SIGNAL
+            end
+            if info and (sound_is_playing(child) or key == "explosionpart") then
+                if info.weight > best_weight then
+                    best_label, best_weight, best_key = info.label, info.weight, skey
+                end
+            end
+        end
+    end
+    if best_label then
+        return best_label, best_weight, best_key
+    end
+    return nil
+end
+
+local function classify_projectile(name)
+    local raw = tostring(name or ""):lower()
+    local key = norm_name(name)
+    if IGNORE_NAMES[key] then return nil end
+    if key:find("helirocket", 1, true) or key:find("helicrash", 1, true) then
+        return nil
+    end
+    return RAID_PROJECTILE[raw] or RAID_PROJECTILE[key]
+end
+
+local function process_raid(display, x, y, z, weight)
+    local now = tick_ms()
+    weight = weight or 1
     local raids = cache.raids
     local best, best_d = nil, CLUSTER_MERGE_M
     for _, cl in ipairs(raids) do
@@ -113,6 +235,7 @@ local function process_raid(explosion_type, x, y, z)
 
     if best then
         best.count = (best.count or 1) + 1
+        best.weight = (best.weight or 1) + weight
         best.sum_x = (best.sum_x or best.x) + x
         best.sum_y = (best.sum_y or best.y) + y
         best.sum_z = (best.sum_z or best.z) + z
@@ -128,61 +251,58 @@ local function process_raid(explosion_type, x, y, z)
             x = x, y = y, z = z,
             sum_x = x, sum_y = y, sum_z = z,
             count = 1,
+            weight = weight,
             last_type = display,
             last_update = now,
             items = { { x = x, y = y, z = z, type = display } },
         }
     end
 
-    if settings.enabled(P) and settings.bool(ID_NOTIFY, true) then
-        local key = string.format("%.0f:%.0f:%.0f", x, y, z)
+    -- Notify only on real raid charge weight (C4 / bundle / rocket), not weak noise.
+    if settings.enabled(P) and settings.bool(ID_NOTIFY, true) and weight >= 2 then
+        local key = string.format("%.0f:%.0f:%.0f", x * 0.1, y * 0.1, z * 0.1)
         local prev = M._last_notify[key]
         if not prev or (now - prev) > NOTIFY_DEDUP_MS then
             M._last_notify[key] = now
-            notify.warning(string.format("Raid start at %.0f, %.0f, %.0f", x, y, z), 6000)
+            notify.warning(string.format("Raid: %s at %.0f, %.0f, %.0f", display, x, y, z), 6000)
         end
     end
-end
-
-local function name_matches(name)
-    local lower = tostring(name or ""):lower()
-    for _, kw in ipairs(KEYWORDS) do
-        if lower:find(kw, 1, true) then
-            return true
-        end
-    end
-    return false
 end
 
 local function scan_container(container, into, now)
     if not env.is_valid(container) then return end
-    local children = env.safe_call(function()
-        if container.get_children then return container:get_children() end
-        if container.GetChildren then return container:GetChildren() end
-        return {}
-    end) or {}
-
-    for i = 1, #children do
-        local child = children[i]
+    for _, child in ipairs(children_of(container)) do
         if not child then goto cont end
-        local cn = child.ClassName or child.class_name or ""
         local name = child.Name or child.name or ""
-        local is_match = (cn == "Explosion") or name_matches(name)
-        if not is_match then goto cont end
-
+        local cn = child.ClassName or child.class_name or ""
         local x, y, z = instance_pos(child)
         if not x then goto cont end
 
         local addr = tostring(child.Address or child.address or child)
-        into[#into + 1] = {
-            name = name,
-            x = x, y = y, z = z,
-            inst = child,
-        }
+        local rocket_source = rocket_source_near(x, y, z, now)
+        local label, weight = raid_signal_from_inst(child, rocket_source)
+        local proj_label = classify_projectile(name)
 
-        if not M._processed[addr] then
-            M._processed[addr] = now
-            process_raid(name, x, y, z)
+        if label then
+            into[#into + 1] = {
+                name = label,
+                x = x, y = y, z = z,
+                inst = child,
+                raid = true,
+            }
+            if not M._processed[addr] then
+                M._processed[addr] = now
+                process_raid(label, x, y, z, weight)
+            end
+        elseif proj_label then
+            into[#into + 1] = {
+                name = proj_label,
+                x = x, y = y, z = z,
+                inst = child,
+                raid = false,
+            }
+        elseif cn == "Explosion" and not IGNORE_NAMES[norm_name(name)] then
+            -- Bare Explosion instances without a raid sound are ignored (Heli / generic).
         end
 
         ::cont::
@@ -207,14 +327,30 @@ function M.update(_dt)
     local map_on = settings.enabled("april_map_enabled") and settings.bool("april_map_show_raids", false)
     if not esp_on and not map_on then
         M._projectiles = {}
+        M._rocket_traces = {}
         return
     end
 
     local now = tick_ms()
-    if (now - M._last_scan) < SCAN_MS then return end
+    local scan_due = (now - M._last_scan) >= SCAN_MS
+    local trace_due = (now - M._last_trace_scan) >= ROCKET_TRACE_SCAN_MS
+    if not scan_due and not trace_due then return end
+
+    local ws = env.get_workspace()
+    local vfx = nil
+    if ws then
+        vfx = env.safe_call(function()
+            return ws:FindFirstChild("VFX") or ws:find_first_child("VFX")
+        end)
+    end
+    if trace_due then
+        M._last_trace_scan = now
+        update_rocket_traces(vfx, now)
+    end
+    if not scan_due then return end
+
     M._last_scan = now
 
-    -- Prune old processed / clusters
     for addr, t in pairs(M._processed) do
         if (now - t) > 30000 then
             M._processed[addr] = nil
@@ -228,14 +364,11 @@ function M.update(_dt)
     end
 
     local projectiles = {}
-    local ws = env.get_workspace()
     if ws then
-        local vfx = env.safe_call(function()
-            return ws:FindFirstChild("VFX") or ws:find_first_child("VFX")
-        end)
         if vfx then
             scan_container(vfx, projectiles, now)
         end
+        -- Only shallow workspace roots (Timed Charge sticks, etc.) — not full tree.
         scan_container(ws, projectiles, now)
     end
     M._projectiles = projectiles
@@ -247,7 +380,7 @@ function M.draw()
     local range = settings.num(ID_RANGE, 1000)
     local range_sq = range * range
     local col = settings.color(P, { 1, 0.5, 0, 1 })
-    local proj_col = { 1, 0.2, 0.2, 1 }
+    local proj_col = { 1, 0.35, 0.15, 1 }
     local text_size = esp_util.text_size()
     local me = env.get_local_player()
     local mx, my, mz = nil, nil, nil
@@ -268,10 +401,11 @@ function M.draw()
         local sx, sy, vis = esp_util.w2s(proj.x, proj.y, proj.z)
         if vis then
             local dist = math.sqrt(dist_sq)
-            draw_util.box_esp(sx - 5, sy - 5, 10, 10, proj_col, 0)
-            draw_util.text_centered(sx, sy - text_size - 2, "[" .. tostring(proj.name) .. "]", proj_col, text_size)
+            local c = proj.raid and col or proj_col
+            draw_util.box_esp(sx - 5, sy - 5, 10, 10, c, 0)
+            draw_util.text_centered(sx, sy - text_size - 2, "[" .. tostring(proj.name) .. "]", c, text_size)
             if mx then
-                draw_util.text_centered(sx, sy + 4, string.format("[%.0fm]", dist), proj_col, text_size)
+                draw_util.text_centered(sx, sy + 4, string.format("[%.0fm]", dist), c, text_size)
             end
         end
         ::pcont::
@@ -291,8 +425,8 @@ function M.draw()
             local dist = math.sqrt(dist_sq)
             local age = math.floor((now - (cl.last_update or now)) / 1000)
             local lines = {
-                string.format("Potential Raid (%d items)", cl.count or 1),
-                string.format("Last: %s", tostring(cl.last_type or "Explosion")),
+                string.format("Raid (%d)", cl.count or 1),
+                string.format("Last: %s", tostring(cl.last_type or "Explosive")),
                 string.format("Updated %ds ago", age),
             }
             if mx then

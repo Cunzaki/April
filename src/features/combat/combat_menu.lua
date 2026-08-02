@@ -1,5 +1,6 @@
 local menu_util = April.require("core.menu_util")
 local settings = April.require("core.settings")
+local combat_labels = April.require("ui.combat_labels")
 
 local M = {}
 
@@ -42,9 +43,22 @@ M.FILTER_SAFEZONE = 4
 M.FILTER_WHITELIST = 5
 M.FILTER_SKIP_DOWNED = 6
 
--- april_silent_targets / april_aim_targets (Players, NPCs)
+-- april_silent_targets / april_aim_targets / april_rage_targets
+-- 1 = Players, 2..9 = Soldier..Pilot Pete (see AIM_AT_OPTIONS).
 M.TARGET_PLAYERS = 1
-M.TARGET_NPCS = 2
+M.AIM_AT_OPTIONS = combat_labels.AIM_AT_OPTIONS
+M.AIM_AT_DEFAULTS = combat_labels.AIM_AT_DEFAULTS
+
+M.AIM_AT_KIND_INDEX = {
+    soldier = 2,
+    bruno = 3,
+    boris = 4,
+    brutus = 5,
+    heli = 6,
+    btr = 7,
+    diver_dave = 8,
+    pilot_pete = 9,
+}
 
 -- april_silent_options / april_aim_options indices (1-based)
 M.OPT_STICKY = 1
@@ -62,19 +76,73 @@ function M.downed_mode_from_filters(prefix)
     return 1
 end
 
+local function targets_table_len(t)
+    if type(t) ~= "table" then return 0 end
+    local max_i = 0
+    for k in pairs(t) do
+        local n = tonumber(k)
+        if n and n > max_i then max_i = n end
+    end
+    return max_i
+end
+
+-- Old Aim At was { Players, NPCs }. Expand NPC=on into every NPC type slot.
+function M.expand_legacy_targets(prefix)
+    local id = (prefix or "april_silent_") .. "targets"
+    local t = settings.get(id)
+    if targets_table_len(t) > 2 then return end
+    local players = settings.multi(id, 1, true)
+    local npcs = settings.multi(id, 2, false)
+    local expanded = { players }
+    for i = 2, #M.AIM_AT_OPTIONS do
+        expanded[i] = npcs
+    end
+    if menu and menu.set then
+        pcall(menu.set, id, expanded)
+    end
+    pcall(function()
+        April.require("ui.gs_state").set(id, expanded)
+    end)
+end
+
+function M.players_enabled(prefix)
+    M.expand_legacy_targets(prefix)
+    return settings.multi((prefix or "april_silent_") .. "targets", M.TARGET_PLAYERS, true)
+end
+
+function M.npc_kind_enabled(kind, prefix)
+    if not kind then return false end
+    M.expand_legacy_targets(prefix)
+    local idx = M.AIM_AT_KIND_INDEX[kind]
+    if not idx then return false end
+    return settings.multi((prefix or "april_silent_") .. "targets", idx, false)
+end
+
+function M.any_npc_enabled(prefix)
+    M.expand_legacy_targets(prefix)
+    for _, idx in pairs(M.AIM_AT_KIND_INDEX) do
+        if settings.multi((prefix or "april_silent_") .. "targets", idx, false) then
+            return true
+        end
+    end
+    return false
+end
+
 function M.register_silent_aim(T, G, prefix, parent_id, opts)
     opts = opts or {}
     local p = prefix
+    M.expand_legacy_targets(p)
 
     menu_util.section(T, G, "Targeting")
     menu.add_combo(T, G, p .. "target_type", "Target Type", { "Crosshair", "Distance" }, 0,
         { parent = parent_id })
     menu.add_combo(T, G, p .. "bone", "Hitbox", M.SILENT_BONES, 0, { parent = parent_id })
-    menu.add_multicombo(T, G, p .. "targets", "Aim At", {
-        "Players", "NPCs",
-    }, { false, false }, { parent = parent_id })
-    if menu and menu.set then
-        pcall(menu.set, p .. "targets", { true, false })
+    menu.add_multicombo(T, G, p .. "targets", "Aim At", M.AIM_AT_OPTIONS, M.AIM_AT_DEFAULTS,
+        { parent = parent_id })
+    if menu and menu.set and targets_table_len(settings.get(p .. "targets")) <= 2 then
+        pcall(menu.set, p .. "targets", {
+            true, false, false, false, false, false, false, false, false,
+        })
     end
     menu.add_multicombo(T, G, p .. "filters", "Filters", {
         "Health Check",
@@ -134,16 +202,18 @@ end
 function M.register_aimbot(T, G, prefix, parent_id, opts)
     opts = opts or {}
     local p = prefix
+    M.expand_legacy_targets(p)
 
     menu_util.section(T, G, "Targeting")
     menu.add_combo(T, G, p .. "target_type", "Target Type", { "Crosshair", "Distance" }, 0,
         { parent = parent_id })
     menu.add_combo(T, G, p .. "bone", "Hitbox", M.SILENT_BONES, 0, { parent = parent_id })
-    menu.add_multicombo(T, G, p .. "targets", "Aim At", {
-        "Players", "NPCs",
-    }, { false, false }, { parent = parent_id })
-    if menu and menu.set then
-        pcall(menu.set, p .. "targets", { true, false })
+    menu.add_multicombo(T, G, p .. "targets", "Aim At", M.AIM_AT_OPTIONS, M.AIM_AT_DEFAULTS,
+        { parent = parent_id })
+    if menu and menu.set and targets_table_len(settings.get(p .. "targets")) <= 2 then
+        pcall(menu.set, p .. "targets", {
+            true, false, false, false, false, false, false, false, false,
+        })
     end
     menu.add_multicombo(T, G, p .. "filters", "Filters", {
         "Health Check",
