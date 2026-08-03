@@ -10,6 +10,8 @@ M.ALLOW_TYPES = {
     hotkey = true,
     button = true,
     multi = true,
+    combo = true,
+    input = true,
 }
 
 -- Visual / tuning controls — no hover tips.
@@ -37,6 +39,8 @@ M.SKIP_IDS = {
     april_ui_reduce_motion = true,
     april_ui_menu_fade = true,
     april_ui_per_element = true,
+    april_ui_menu_overlay = true,
+    april_ui_snow = true,
     april_fakeduck_spam = true,
 }
 
@@ -44,9 +48,7 @@ M.BY_ID = {
     -- Aimbot
     april_aimbot = "Smooth camera aim assist on your current target.",
     april_aim_key = "Hold or toggle this key to activate aimbot.",
-    april_rage_enabled = "Aggressive no-FOV aim with autofire on valid targets.",
     april_silent_aim = "Redirects shots to your locked target without moving the camera.",
-    april_rage_autofire = "Automatically clicks when ragebot has a valid shot.",
 
     -- Bullet
     april_bullet_enabled = "Turns on advanced bullet routing for silent aim.",
@@ -60,16 +62,17 @@ M.BY_ID = {
     april_aim_targets = "Choose whether aimbot targets players, NPCs, or both.",
     april_aim_filters = "Filters which targets aimbot will consider.",
     april_aim_options = "Extra aimbot behavior options.",
-
-    -- Ragebot options
-    april_rage_targets = "Choose whether ragebot targets players, NPCs, or both.",
-    april_rage_filters = "Filters which targets ragebot will consider.",
-    april_rage_options = "Extra ragebot behavior options.",
+    april_aim_smooth = "Higher values move the camera slower toward the target.",
+    april_aim_smooth_type = "How smoothing accelerates: Linear, Ease Out, Ease In-Out, Exponential, or Adaptive.",
+    april_aim_humanize = "Adds light drift and overshoot so mouse aim feels less robotic.",
+    april_aim_humanize_str = "How strong humanize drift and overshoot are.",
+    april_aim_whitelist_ids = "Comma-separated Roblox user IDs that Aimbot must ignore. Enable Whitelist inside Filters first. You can also middle-click the current player target to add or remove them.",
 
     -- Silent aim options
     april_silent_targets = "Choose whether silent aim targets players, NPCs, or both.",
     april_silent_filters = "Filters which targets silent aim will consider.",
     april_silent_options = "Extra silent aim behavior options.",
+    april_silent_whitelist_ids = "Comma-separated Roblox user IDs that Silent Aim must ignore. Enable Whitelist inside Filters first. You can also middle-click the current player target to add or remove them.",
 
     -- Visuals
     april_player_enabled = "Shows boxes and info on other players.",
@@ -159,9 +162,10 @@ M.BY_ID = {
     -- Config / actions
     april_ui_startup_intro = "Plays the April.lua intro whenever the script executes. Save it in your autoload profile.",
     april_ui_menu_key = "Key used to open and close this menu.",
+    april_ui_menu_overlay = "Darkens the whole screen behind the menu with a smooth fade. Does not cover menu controls.",
+    april_ui_snow = "Soft falling snow behind the menu. Hidden when Reduce Motion is on.",
     april_cfg_autoload = "Loads your saved profile automatically on inject.",
     april_aim_whitelist_clear = "Clears the aim whitelist player list.",
-    april_rage_whitelist_clear = "Clears the ragebot whitelist player list.",
     april_silent_whitelist_clear = "Clears the silent aim whitelist player list.",
     april_map_reset_position = "Moves the tactical map back to its default spot.",
     april_wp_set = "Saves your current position to the active waypoint slot.",
@@ -171,6 +175,102 @@ M.BY_ID = {
     april_cfg_load = "Loads settings from the active config slot.",
     april_cfg_delete = "Deletes the active config slot.",
     april_reload_modules = "Reloads game module offsets and caches.",
+}
+
+local FILTER_TIPS = {
+    "Rejects dead or zero-health targets. Leave this on unless you specifically need stale targets.",
+    "Only selects targets with a clear line of sight. Turning it off allows locking through walls, but shots may still be blocked.",
+    "Ignores players on your team. This applies to players only, not NPC types.",
+    "Ignores players protected by a safezone so the aim system does not lock onto targets you cannot damage.",
+    "Skips whitelisted players. Enter comma-separated Roblox user IDs below, or middle-click the current player target to toggle them. Aimbot and Silent Aim keep separate lists.",
+    "Ignores downed players and looks for a target that is still standing.",
+}
+
+local TARGET_TIPS = {
+    "Targets other players that pass the selected Filters.",
+    "Targets standard Soldier NPCs.",
+    "Targets the Bruno boss NPC.",
+    "Targets the Boris boss NPC.",
+    "Targets the Brutus boss NPC.",
+    "Targets the Attack Helicopter NPC.",
+    "Targets the BTR armored vehicle NPC.",
+    "Targets the Diver Dave NPC.",
+    "Targets the Pilot Pete NPC.",
+}
+
+local HITBOX_TIPS = {
+    "Aims at the head for the highest usual damage.",
+    "Aims at the torso for a larger, steadier target.",
+    "Aims at the target's left arm.",
+    "Aims at the target's right arm.",
+    "Aims at the target's left leg.",
+    "Aims at the target's right leg.",
+    "Automatically uses the valid body part closest to your crosshair.",
+}
+
+local TARGET_TYPE_TIPS = {
+    "Prefers the valid target closest to the center of your screen.",
+    "Prefers the valid target closest to your character in world distance.",
+}
+
+local STICKY_TIPS = {
+    "Keeps the current valid target instead of constantly switching to a slightly better one. The lock is released when that target becomes invalid.",
+}
+
+local SMOOTH_TIPS = {
+    "Moves toward the target at a consistent smoothing rate.",
+    "Moves faster while far away and settles softly near the target.",
+    "Uses a gradual acceleration and deceleration curve.",
+    "Uses an exponential curve for a responsive but smooth correction.",
+    "Automatically moves faster on large misses and slows down for small corrections.",
+}
+
+M.OPTION_TIPS = {
+    april_aim_target_type = TARGET_TYPE_TIPS,
+    april_silent_target_type = TARGET_TYPE_TIPS,
+    april_aim_bone = HITBOX_TIPS,
+    april_silent_bone = HITBOX_TIPS,
+    april_aim_targets = TARGET_TIPS,
+    april_silent_targets = TARGET_TIPS,
+    april_aim_filters = FILTER_TIPS,
+    april_silent_filters = FILTER_TIPS,
+    april_aim_options = STICKY_TIPS,
+    april_silent_options = STICKY_TIPS,
+    april_aim_smooth_type = SMOOTH_TIPS,
+    april_crosshair_source = {
+        "Uses the first enabled combat system with a valid target.",
+        "Follows Silent Aim's current target.",
+        "Follows the regular camera Aimbot's current target.",
+    },
+}
+
+M.OPTION_BY_LABEL = {
+    ["Outline"] = "Draws only the outside edge.",
+    ["Filled Circle"] = "Draws a translucent filled circle with an outline.",
+    ["Team Check"] = FILTER_TIPS[3],
+    ["Skip Safezone"] = FILTER_TIPS[4],
+    ["Skip Downed"] = FILTER_TIPS[6],
+    ["Visible Only"] = FILTER_TIPS[2],
+    ["Health Check"] = FILTER_TIPS[1],
+    ["Whitelist"] = FILTER_TIPS[5],
+    ["Sticky Target"] = STICKY_TIPS[1],
+    ["None"] = "Disables this visual or selection.",
+    ["Health Bar"] = "Shows the target's current health as a bar.",
+    ["Skeleton"] = "Draws lines between the target's body joints.",
+    ["Name"] = "Shows the target's display name.",
+    ["Clan Tag"] = "Shows the target's clan tag when available.",
+    ["Held Item"] = "Shows the item or weapon the target currently has equipped.",
+    ["Distance"] = "Shows how far away the target is.",
+    ["Downed"] = "Shows when a player is knocked down.",
+    ["Safezone"] = "Shows when a player is protected by a safezone.",
+    ["Staff"] = "Shows the staff/moderator status detected for a player.",
+    ["Reviving"] = "Shows when a player is reviving someone.",
+    ["Movement"] = "Shows useful movement-state information.",
+    ["VIP"] = "Shows the player's VIP status when available.",
+    ["Spin"] = "Continuously rotates the visual while enabled.",
+    ["Pulse Size"] = "Smoothly grows and shrinks the visual.",
+    ["Center Dot"] = "Adds a small dot at the exact screen center.",
+    ["Rainbow"] = "Cycles the visual through rainbow colors.",
 }
 
 local function register_esp_toggles(list, scope)
@@ -241,6 +341,13 @@ function M.for_item(item)
         return tip .. " Left-click the key chip to bind. Escape cancels and Delete clears."
     end
     return tip
+end
+
+function M.for_option(id, index, label)
+    local by_id = M.OPTION_TIPS[id]
+    local tip = by_id and by_id[index] or nil
+    if tip then return tip end
+    return M.OPTION_BY_LABEL[tostring(label or "")]
 end
 
 return M

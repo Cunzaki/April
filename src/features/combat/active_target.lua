@@ -1,4 +1,4 @@
--- Resolve the active combat target + aim point from ragebot / silent / aimbot.
+-- Resolve the active combat target + aim point from silent aim / aimbot.
 local settings = April.require("core.settings")
 local targeting = April.require("features.combat.targeting")
 local combat_origin = April.require("game.combat_origin")
@@ -6,12 +6,11 @@ local esp_util = April.require("core.esp_util")
 
 local M = {}
 
-M.SOURCE_NAMES = { "Auto", "Ragebot", "Silent Aim", "Aimbot" }
+M.SOURCE_NAMES = { "Auto", "Silent Aim", "Aimbot" }
 M.SOURCE_CROSSHAIR = "april_crosshair_source"
 M.SOURCE_GEAR = "april_target_gear_source"
 
 local MODULES = {
-    { id = "april_rage_enabled", path = "features.combat.ragebot", prefix = "april_rage_" },
     { id = "april_silent_aim", path = "features.combat.aimbot", prefix = "april_silent_" },
     { id = "april_aimbot", path = "features.combat.camera_aimbot", prefix = "april_aim_" },
 }

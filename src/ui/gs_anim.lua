@@ -461,8 +461,11 @@ function M.panel_bg()
     if not M.colors_enabled() then
         return theme.BG
     end
-    local dim = settings().num("april_ui_bg_dim", 0)
-    dim = clamp(dim, 0, 40) * 0.01
+    local dim = settings().num("april_ui_overlay_strength", 70)
+    if not settings().bool("april_ui_menu_overlay", true) then
+        dim = 0
+    end
+    dim = clamp(dim, 0, 100) * 0.004
     local bg = theme.BG
     return {
         bg[1] - dim * 0.04,

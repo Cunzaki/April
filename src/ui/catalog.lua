@@ -173,34 +173,16 @@ local function build_aim()
             sep(),
             multi("april_aim_options", "Options", { "Sticky Target" }, { false }),
             sl("april_aim_smooth", "Smoothness", 1, 25, 10),
-            sl("april_aim_fov", "FOV Radius (px)", 20, 600, 120),
+            combo("april_aim_smooth_type", "Smooth Type", {
+                "Linear", "Ease Out", "Ease In-Out", "Exponential", "Adaptive",
+            }, 0),
+            cb("april_aim_humanize", "Humanize", false),
+            sl("april_aim_humanize_str", "Humanize Strength", 1, 100, 35, false, "april_aim_humanize"),
+            sl("april_aim_fov", "FOV Radius (px)", 5, 600, 120),
             sep(),
             cb("april_aim_draw_fov", "FOV Circle", false, { 0.2, 1, 0.45, 1 }),
             combo("april_aim_fov_style", "FOV Style", { "Outline", "Filled Circle" }, 1, "april_aim_draw_fov"),
             cb("april_aim_target_line", "Target Line", false, { 0.2, 1, 0.45, 1 }),
-        },
-    }
-
-    local rage = {
-        title = "Ragebot",
-        master = "april_rage_enabled",
-        items = {
-            kb("april_rage_enabled", "Enable Ragebot", false),
-            sep(),
-            combo("april_rage_target_type", "Target Type", { "Crosshair", "Distance" }, 1),
-            combo("april_rage_bone", "Hitbox", combat_menu.SILENT_BONES, 0),
-            multi("april_rage_targets", "Aim At", combat_menu.AIM_AT_OPTIONS, combat_menu.AIM_AT_DEFAULTS),
-            multi("april_rage_filters", "Filters", {
-                "Health Check", "Visible Only", "Team Check",
-                "Skip Safezone", "Whitelist", "Skip Downed",
-            }, { true, false, true, true, false, true }),
-            input("april_rage_whitelist_ids", "Whitelist IDs", ""),
-            btn("april_rage_whitelist_clear", "Clear Whitelist"),
-            sl("april_rage_max_dist", "Max Distance (m)", 50, 2000, 500),
-            sep(),
-            multi("april_rage_options", "Options", { "Sticky Target" }, { false }),
-            cb("april_rage_autofire", "Autofire", true),
-            sl("april_rage_fire_delay", "Fire Delay (ms)", 20, 400, 80),
         },
     }
 
@@ -223,7 +205,7 @@ local function build_aim()
             sep(),
             multi("april_silent_options", "Options", { "Sticky Target" }, { false }),
             sl("april_silent_hit_chance", "Hit Chance %", 1, 100, 100),
-            sl("april_silent_fov", "FOV Radius (px)", 20, 600, 150),
+            sl("april_silent_fov", "FOV Radius (px)", 5, 600, 150),
             sep(),
             cb("april_silent_draw_fov", "FOV Circle", false, { 0.55, 0.2, 1, 1 }),
             combo("april_silent_fov_style", "FOV Style", { "Outline", "Filled Circle" }, 1, "april_silent_draw_fov"),
@@ -252,7 +234,7 @@ local function build_aim()
         },
     }
 
-    return { regular, rage, silent, bullet }
+    return { regular, silent, bullet }
 end
 
 local function build_visuals()
@@ -285,7 +267,7 @@ local function build_visuals()
         master = "april_target_overlay",
         items = {
             kb("april_target_overlay", "Target Gear Overlay", false),
-            sl("april_target_overlay_fov", "Gear FOV", 10, 500, 100, false, "april_target_overlay"),
+            sl("april_target_overlay_fov", "Gear FOV", 5, 500, 100, false, "april_target_overlay"),
             sl("april_target_overlay_max_dist", "Max Distance", 50, 2000, 500, false, "april_target_overlay"),
             sl("april_target_overlay_gear_size", "Gear Icon Size", 32, 64, 48, false, "april_target_overlay"),
             sl("april_target_overlay_top", "Top Offset", 48, 160, 88, false, "april_target_overlay"),
@@ -300,7 +282,7 @@ local function build_visuals()
                 "Cross", "Circle", "Dot", "T-Shape", "Diamond", "Plus", "Brackets", "X",
             }, 0, "april_crosshair_enabled"),
             cb("april_crosshair_follow", "Follow Target", false, nil, "april_crosshair_enabled"),
-            combo("april_crosshair_source", "Target From", { "Auto", "Ragebot", "Silent Aim", "Aimbot" }, 0, "april_crosshair_follow"),
+            combo("april_crosshair_source", "Target From", { "Auto", "Silent Aim", "Aimbot" }, 0, "april_crosshair_follow"),
             sl("april_crosshair_follow_smooth", "Follow Smoothness", 4, 40, 18, false, "april_crosshair_follow"),
             multi("april_ui_crosshair_motion", "Motion", { "Spin", "Pulse Size" }, { false, false }, "april_crosshair_enabled", {
                 sync_ids = { "april_crosshair_spin", "april_crosshair_pulse" },
@@ -522,7 +504,7 @@ local function build_misc()
                 sl("april_fakeduck_spam_ms", "Spam Interval (ms)", 20, 400, 80, false, "april_fakeduck_spam"),
                 sep(),
                 kb("april_fling_enabled", "Fling", false),
-                sl("april_fling_fov", "Fling FOV", 20, 600, 150, false, "april_fling_enabled"),
+                sl("april_fling_fov", "Fling FOV", 5, 600, 150, false, "april_fling_enabled"),
                 sl("april_fling_duration", "Fling Duration", 2, 10, 2, false, "april_fling_enabled"),
             },
         },
@@ -592,35 +574,50 @@ local function build_config()
     local COL = "april_ui_custom_colors"
     local ANM = "april_ui_custom_anim"
     local ELS = "april_ui_per_element"
+    local OVL = "april_ui_menu_overlay"
+    local SNOW = "april_ui_snow"
 
     local appearance = {
         title = "Appearance",
         items = {
+            label("Look", true),
             hk("april_ui_menu_key", "Menu Toggle Key"),
-            sep(),
             combo("april_ui_theme_preset", "Theme Preset", {
                 "Violet Glass", "Midnight Blue", "Graphite", "Emerald Glass",
             }, 0),
+            sep(),
             sl("april_ui_window_opacity", "Window Opacity %", 45, 100, 86),
             sl("april_ui_panel_opacity", "Panel Opacity %", 35, 100, 72),
             sl("april_ui_border_strength", "Border Strength %", 10, 100, 58),
-            combo("april_ui_corner_style", "Control Corners", { "Sharp", "Soft", "Rounded" }, 2),
+            combo("april_ui_corner_style", "Corners", { "Sharp", "Soft", "Rounded" }, 2),
             sl("april_ui_scale", "UI Scale %", 80, 125, 100),
             combo("april_ui_density", "Density", { "Compact", "Balanced", "Comfortable" }, 1),
-            sl("april_ui_bg_dim", "Backdrop Dim", 0, 40, 0),
-            cb("april_ui_show_cursor_dot", "Show Cursor Dot", true),
+            cb("april_ui_show_cursor_dot", "Cursor Dot", true),
+            sep(),
+            label("Backdrop", true),
+            cb("april_ui_menu_overlay", "Menu Overlay", true),
+            sl("april_ui_overlay_strength", "Overlay Strength", 5, 100, 70, false, OVL),
+            sep(),
+            label("Snow", true),
+            cb("april_ui_snow", "Enable Snow", false),
+            sl("april_ui_snow_amount", "Amount", 10, 140, 50, false, SNOW),
+            sl("april_ui_snow_speed", "Speed", 1, 100, 40, false, SNOW),
+            sl("april_ui_snow_size", "Size", 1, 8, 3, false, SNOW),
+            sl("april_ui_snow_opacity", "Opacity", 10, 100, 55, false, SNOW),
         },
     }
 
     local motion = {
         title = "Motion",
         items = {
+            label("Basics", true),
             cb("april_ui_startup_intro", "Startup Animation", true),
-            sep(),
             combo("april_ui_motion_profile", "Motion Profile", {
                 "Subtle", "Balanced", "Expressive",
             }, 1),
             cb("april_ui_reduce_motion", "Reduce Motion", false),
+            sep(),
+            label("Advanced", true),
             cb("april_ui_custom_anim", "Advanced Animation", false),
             combo("april_ui_accent_anim", "Accent Style", modes, 1, ANM),
             sl("april_ui_anim_speed", "Accent Speed", 1, 100, 40, false, ANM),
@@ -628,7 +625,7 @@ local function build_config()
             multi("april_ui_anim_targets", "Animate", {
                 "Title Bar", "Section Tops", "Sliders", "Scrollbars", "Navbar", "Switches", "Hover", "Overlay Panels",
             }, { true, true, true, true, true, true, true, true }, ANM),
-            cb("april_ui_per_element", "Individual Styles", false, nil, ANM),
+            cb("april_ui_per_element", "Per-Element Styles", false, nil, ANM),
             sep(ANM),
             { type = "combo", id = "april_ui_style_title", label = "Title Bar", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
             { type = "combo", id = "april_ui_style_section", label = "Section Tops", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
@@ -643,34 +640,40 @@ local function build_config()
     local accent = {
         title = "Accent Colors",
         items = {
-            cb("april_ui_custom_colors", "Color Options", false),
-            color("april_ui_accent", "Accent", { 0.78, 0.20, 0.92, 1 }, COL),
-            multi("april_ui_color_overrides", "Override Colors For", {
+            label("Accent", true),
+            cb("april_ui_custom_colors", "Custom Colors", false),
+            color("april_ui_accent", "Main Accent", { 0.78, 0.20, 0.92, 1 }, COL),
+            sep(COL),
+            label("Overrides", true, COL),
+            multi("april_ui_color_overrides", "Override For", {
                 "Title Bar", "Section Tops", "Sliders", "Scrollbars", "Navbar", "Switches", "Overlay Panels",
             }, {}, COL),
-            color("april_ui_col_title", "Title Bar Color", { 0.78, 0.20, 0.92, 1 }, COL, 1),
-            color("april_ui_col_section", "Section Top Color", { 0.78, 0.20, 0.92, 1 }, COL, 2),
-            color("april_ui_col_slider", "Slider Color", { 0.78, 0.20, 0.92, 1 }, COL, 3),
-            color("april_ui_col_scroll", "Scrollbar Color", { 0.78, 0.20, 0.92, 1 }, COL, 4),
-            color("april_ui_col_sidebar", "Navbar Color", { 0.78, 0.20, 0.92, 1 }, COL, 5),
-            color("april_ui_col_checkbox", "Switch Color", { 0.78, 0.20, 0.92, 1 }, COL, 6),
-            color("april_ui_col_overlay", "Overlay Panel Color", { 0.78, 0.20, 0.92, 1 }, COL, 7),
+            color("april_ui_col_title", "Title Bar", { 0.78, 0.20, 0.92, 1 }, COL, 1),
+            color("april_ui_col_section", "Section Tops", { 0.78, 0.20, 0.92, 1 }, COL, 2),
+            color("april_ui_col_slider", "Sliders", { 0.78, 0.20, 0.92, 1 }, COL, 3),
+            color("april_ui_col_scroll", "Scrollbars", { 0.78, 0.20, 0.92, 1 }, COL, 4),
+            color("april_ui_col_sidebar", "Navbar", { 0.78, 0.20, 0.92, 1 }, COL, 5),
+            color("april_ui_col_checkbox", "Switches", { 0.78, 0.20, 0.92, 1 }, COL, 6),
+            color("april_ui_col_overlay", "Overlay Panels", { 0.78, 0.20, 0.92, 1 }, COL, 7),
         },
     }
 
     local config_group = {
         title = "Config",
         items = {
+            label("Profiles", true),
             input("april_cfg_profile_name", "Profile Name", "Default"),
             sl("april_cfg_slot", "Active Slot (1-5)", 1, 5, 1),
             btn("april_cfg_save", "Save to Active Slot"),
             btn("april_cfg_load", "Load Active Slot"),
             btn("april_cfg_delete", "Delete Active Slot"),
             sep(),
+            label("Autoload", true),
             cb("april_cfg_autoload", "Autoload on Start", false),
             input("april_cfg_autoload_profile", "Autoload Profile Name", "", "april_cfg_autoload"),
             sl("april_cfg_autoload_slot", "Autoload Slot", 1, 5, 1, false, "april_cfg_autoload"),
             sep(),
+            label("Extras", true),
             sl("april_esp_text_size", "ESP Text Size", 8, 24, 13),
             btn("april_reload_modules", "Reload Game Modules"),
         },

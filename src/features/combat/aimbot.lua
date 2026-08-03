@@ -143,16 +143,6 @@ function M.update(dt)
     cached_track.manip = { state = "off" }
     cached_track.tracking = false
 
-    -- Ragebot owns the silent hook while active.
-    local rage_on = settings.enabled("april_rage_enabled")
-    if rage_on then
-        locked_target = nil
-        fire_was_down = false
-        shot_allowed = true
-        body_peek.tick(nil, nil)
-        return
-    end
-
     if not active() then
         locked_target = nil
         fire_was_down = false

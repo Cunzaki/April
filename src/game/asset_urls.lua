@@ -117,4 +117,8 @@ function M.mod_warning_png()
     return M.CDN_BASE .. "/mod_warning.png"
 end
 
+function M.author_profile_png()
+    return M.CDN_BASE .. "/cunzaki.png"
+end
+
 return M

@@ -644,7 +644,7 @@ function M.register_menu()
 
     menu_util.section(T, G.MISC, "Combat")
     menu_util.register_keybind(T, G.MISC, P, "Fling", false)
-    menu.add_slider_int(T, G.MISC, P_FOV, "Fling FOV", 20, 600, 150, root)
+    menu.add_slider_int(T, G.MISC, P_FOV, "Fling FOV", 5, 600, 150, root)
     menu.add_slider_int(T, G.MISC, P_DURATION, "Fling Duration", 2, 10, 2, root)
     menu_util.bind_children(P, { P_FOV, P_DURATION })
 end

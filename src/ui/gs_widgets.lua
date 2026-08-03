@@ -322,7 +322,7 @@ local function wrap_tip_lines(text, max_w, fs)
 end
 
 function M.draw_tooltip_overlay()
-    if M.block_under or M.open_combo or M.open_multi or M.open_color or M.open_bind_mode then
+    if M.block_under or M.open_color or M.open_bind_mode then
         return
     end
     if not M._tip_active or M._tip_hover_ms < M.TIP_DELAY_MS then
@@ -1087,8 +1087,11 @@ function M.combo(x, y, w, id, label, options, default_idx)
             local opt = options[i]
             if not opt then break end
             local iy = by + bh + row * 18
-            if input.hover(bx, iy, bw, 18) then
+            local option_hovered = input.hover(bx, iy, bw, 18)
+            if option_hovered then
                 M.rect(bx + 2, iy + 1, bw - 4, 16, theme.HOVER, true, theme.CORNER_SMALL)
+                local tip = tooltips.for_option(id, i, opt)
+                M.register_tooltip_hover(tostring(id) .. ":option:" .. tostring(i), tip, bx, iy, bw, 18)
             end
             if i - 1 == idx then
                 M.rect(bx + 3, iy + 4, 2, 10, anim.checkbox_fill(), true, 1)
@@ -1187,8 +1190,11 @@ function M.multi(x, y, w, id, label, options, defaults, opts)
             if not opt then break end
             local iy = by + bh + row * 18
             local on = vals[i] == true
-            if input.hover(bx, iy, bw, 18) then
+            local option_hovered = input.hover(bx, iy, bw, 18)
+            if option_hovered then
                 M.rect(bx + 2, iy + 1, bw - 4, 16, theme.HOVER, true, theme.CORNER_SMALL)
+                local tip = tooltips.for_option(id, i, opt)
+                M.register_tooltip_hover(tostring(id) .. ":option:" .. tostring(i), tip, bx, iy, bw, 18)
             end
             M.rect(bx + 5, iy + 3, 12, 12, theme.CHECK_OFF, true, 2)
             if on then

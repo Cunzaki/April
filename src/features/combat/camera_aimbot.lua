@@ -22,6 +22,16 @@ local TARGET_SCAN_MS = 33
 local cached_aim = nil
 local smoothed_aim = nil
 local last_target_scan = 0
+local human_phase = 0
+local human_drift = { x = 0, y = 0, z = 0 }
+local overshoot = { x = 0, y = 0, z = 0 }
+
+-- Smooth Type combo indices (catalog / Vector menu).
+local SMOOTH_LINEAR = 0
+local SMOOTH_EASE_OUT = 1
+local SMOOTH_EASE_IN_OUT = 2
+local SMOOTH_EXPONENTIAL = 3
+local SMOOTH_ADAPTIVE = 4
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -56,20 +66,101 @@ local function aiming()
     return aim_key.active(P_AIM_KEY, P_AIM_KEY_MODE)
 end
 
-local function smooth_alpha()
+local function aim_dist(a, b)
+    if not a or not b then return 0 end
+    local dx = (a.x or 0) - (b.x or 0)
+    local dy = (a.y or 0) - (b.y or 0)
+    local dz = (a.z or 0) - (b.z or 0)
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+
+local function base_smooth_alpha()
     local n = settings.num(PREFIX .. "smooth", 10)
     n = math.max(1, math.min(25, n))
     return math.max(0.08, math.min(0.95, 1.25 / n))
 end
 
+local function smooth_alpha(prev, nxt)
+    local base = base_smooth_alpha()
+    local style = math.floor(tonumber(settings.num(PREFIX .. "smooth_type", 0)) or 0)
+    if style == SMOOTH_LINEAR then
+        return base
+    end
+
+    -- Remaining gap in studs; ~8 studs reads as a long correction.
+    local t = math.min(1, aim_dist(prev, nxt) / 8)
+
+    if style == SMOOTH_EASE_OUT then
+        -- Fast catch-up when far, soft settle near the bone.
+        return math.max(0.05, math.min(0.98, base * (0.45 + 0.95 * t)))
+    elseif style == SMOOTH_EASE_IN_OUT then
+        local u = t * t * (3 - 2 * t)
+        return math.max(0.05, math.min(0.98, base * (0.5 + 0.85 * u)))
+    elseif style == SMOOTH_EXPONENTIAL then
+        return math.max(0.05, math.min(0.99, 1 - ((1 - base) ^ (1 + t * 1.6))))
+    elseif style == SMOOTH_ADAPTIVE then
+        -- Snappy on big misses, gentler once you're already close.
+        return math.max(0.04, math.min(0.98, base * (0.32 + 1.45 * t)))
+    end
+    return base
+end
+
+local function reset_humanize()
+    human_phase = 0
+    human_drift.x, human_drift.y, human_drift.z = 0, 0, 0
+    overshoot.x, overshoot.y, overshoot.z = 0, 0, 0
+end
+
+local function apply_humanize(aim, prev)
+    if not aim or not settings.bool(PREFIX .. "humanize", false) then
+        return aim
+    end
+    local str = math.max(0, math.min(100, settings.num(PREFIX .. "humanize_str", 35))) / 100
+    if str <= 0 then return aim end
+
+    human_phase = human_phase + (0.035 + str * 0.04)
+    local amp = 0.05 + str * 0.28
+    local target_drift = {
+        x = math.sin(human_phase * 1.7) * amp,
+        y = math.cos(human_phase * 1.25) * amp * 0.55,
+        z = math.sin(human_phase * 2.05 + 0.7) * amp * 0.4,
+    }
+    -- Drift eases in so it doesn't pop every frame.
+    local da = 0.12 + str * 0.1
+    human_drift.x = human_drift.x + (target_drift.x - human_drift.x) * da
+    human_drift.y = human_drift.y + (target_drift.y - human_drift.y) * da
+    human_drift.z = human_drift.z + (target_drift.z - human_drift.z) * da
+
+    -- Light overshoot along the correction vector, then decay.
+    if prev then
+        local dx = (aim.x - prev.x) * (0.08 + str * 0.18)
+        local dy = (aim.y - prev.y) * (0.08 + str * 0.18)
+        local dz = (aim.z - prev.z) * (0.08 + str * 0.18)
+        overshoot.x = overshoot.x * 0.78 + dx
+        overshoot.y = overshoot.y * 0.78 + dy
+        overshoot.z = overshoot.z * 0.78 + dz
+    else
+        overshoot.x = overshoot.x * 0.7
+        overshoot.y = overshoot.y * 0.7
+        overshoot.z = overshoot.z * 0.7
+    end
+
+    return {
+        x = aim.x + human_drift.x + overshoot.x,
+        y = aim.y + human_drift.y + overshoot.y,
+        z = aim.z + human_drift.z + overshoot.z,
+    }
+end
+
 local function blend_aim(prev, nxt)
     if not nxt then return prev end
-    if not prev then return { x = nxt.x, y = nxt.y, z = nxt.z } end
-    local a = smooth_alpha()
+    local target = apply_humanize(nxt, prev)
+    if not prev then return { x = target.x, y = target.y, z = target.z } end
+    local a = smooth_alpha(prev, target)
     return {
-        x = prev.x + (nxt.x - prev.x) * a,
-        y = prev.y + (nxt.y - prev.y) * a,
-        z = prev.z + (nxt.z - prev.z) * a,
+        x = prev.x + (target.x - prev.x) * a,
+        y = prev.y + (target.y - prev.y) * a,
+        z = prev.z + (target.z - prev.z) * a,
     }
 end
 
@@ -86,6 +177,7 @@ local function update_target(cx, cy, fov)
     if locked_target and not targeting.is_target_valid(locked_target, PREFIX, cx, cy, fov) then
         locked_target = nil
         smoothed_aim = nil
+        reset_humanize()
     end
 
     if locked_target and sticky then
@@ -134,9 +226,14 @@ function M.register_menu()
         PREFIX .. "filters",
         PREFIX .. "whitelist_ids", PREFIX .. "whitelist_clear",
         PREFIX .. "targets", PREFIX .. "options",
-        PREFIX .. "smooth",
+        PREFIX .. "smooth", PREFIX .. "smooth_type",
+        PREFIX .. "humanize", PREFIX .. "humanize_str",
         PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
         PREFIX .. "max_dist", PREFIX .. "fov",
+    })
+
+    menu_util.bind_children(PREFIX .. "humanize", {
+        PREFIX .. "humanize_str",
     })
 
     menu_util.bind_children(PREFIX .. "draw_fov", {
@@ -150,6 +247,7 @@ function M.update(_dt)
     if not enabled() then
         locked_target = nil
         smoothed_aim = nil
+        reset_humanize()
         return
     end
 
@@ -171,12 +269,14 @@ function M.update(_dt)
 
     if not locked_target or not targeting.is_aim_target(locked_target) then
         smoothed_aim = nil
+        reset_humanize()
         return
     end
 
     local aim = resolve_aim_point(locked_target, cx, cy)
     if not aim then
         smoothed_aim = nil
+        reset_humanize()
         return
     end
 
@@ -186,10 +286,17 @@ function M.update(_dt)
 
         if camera and camera.look_at then
             local smooth_frames = math.max(1, math.floor(settings.num(PREFIX .. "smooth", 10)))
+            local style = math.floor(tonumber(settings.num(PREFIX .. "smooth_type", 0)) or 0)
+            if style == SMOOTH_ADAPTIVE or style == SMOOTH_EXPONENTIAL then
+                -- Slightly fewer engine frames so our blend curve leads the feel.
+                smooth_frames = math.max(1, math.floor(smooth_frames * 0.75))
+            end
             pcall(camera.look_at, smoothed_aim.x, smoothed_aim.y, smoothed_aim.z, smooth_frames)
         end
     else
         -- Visuals (target line) use live aim point; camera only moves when aim key is active.
+        smoothed_aim = nil
+        reset_humanize()
         cached_aim = aim
     end
 end

@@ -1,12 +1,12 @@
 --[[
     April Fallen - Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-08-03T19:32:09.404Z
+    Built: 2026-08-03T21:53:17.089Z
     UI: custom Gamesense menu (INSERT) - Vector menu tabs disabled
 ]]
 
 April = {
-    version = "4.0.44",
+    version = "4.0.52",
     debug = false,
     -- Set true only while hunting native crashes (writes dense STEP breadcrumbs).
     crash_trace = false,
@@ -3031,6 +3031,9 @@ end
 function M.mod_warning_png()
     return M.CDN_BASE .. "/mod_warning.png"
 end
+function M.author_profile_png()
+    return M.CDN_BASE .. "/cunzaki.png"
+end
 return M
 end)()
 
@@ -6020,7 +6023,10 @@ local EXCLUDE = {
 local MENU_KEYS = {
     "april_ui_theme_preset", "april_ui_window_opacity", "april_ui_panel_opacity",
     "april_ui_border_strength", "april_ui_corner_style", "april_ui_scale", "april_ui_density",
-    "april_ui_bg_dim", "april_ui_startup_intro", "april_ui_motion_profile", "april_ui_reduce_motion",
+    "april_ui_menu_overlay", "april_ui_overlay_strength", "april_ui_bg_dim",
+    "april_ui_snow", "april_ui_snow_amount", "april_ui_snow_speed",
+    "april_ui_snow_size", "april_ui_snow_opacity",
+    "april_ui_startup_intro", "april_ui_motion_profile", "april_ui_reduce_motion",
     "april_ui_custom_colors", "april_ui_custom_anim", "april_ui_show_cursor_dot",
     "april_ui_accent_anim", "april_ui_anim_speed", "april_ui_menu_fade",
     "april_ui_anim_targets", "april_ui_color_overrides", "april_ui_per_element",
@@ -6054,6 +6060,7 @@ local MENU_KEYS = {
     "april_aim_targets", "april_aim_options",
     "april_aim_draw_fov", "april_aim_fov_style", "april_aim_target_line",
     "april_aim_max_dist", "april_aim_fov", "april_aim_smooth",
+    "april_aim_smooth_type", "april_aim_humanize", "april_aim_humanize_str",
     "april_silent_aim", "april_silent_aim_mode",
     "april_silent_target_type", "april_silent_bone",
     "april_silent_filters", "april_silent_whitelist_ids",
@@ -6065,11 +6072,6 @@ local MENU_KEYS = {
     "april_silent_manip_status", "april_silent_manip_peek_vis",
     "april_silent_draw_fov", "april_silent_fov_style", "april_silent_target_line",
     "april_silent_hit_chance", "april_silent_max_dist", "april_silent_fov", "april_silent_hitscan",
-    "april_rage_enabled", "april_rage_enabled_mode",
-    "april_rage_target_type", "april_rage_bone",
-    "april_rage_filters", "april_rage_whitelist_ids",
-    "april_rage_targets", "april_rage_options",
-    "april_rage_max_dist", "april_rage_autofire", "april_rage_fire_delay",
     "april_gunmods_enabled", "april_gunmods_enabled_mode",
     "april_gm_recoil", "april_gm_recoil_pct", "april_gm_spread", "april_gm_spread_pct",
     "april_gm_sway", "april_gm_fire_rate", "april_gm_fire_rate_mult",
@@ -6203,7 +6205,6 @@ local HOTKEY_KEYS = {
     "april_antiaim_enabled",
     "april_fakeduck_enabled",
     "april_silent_aim",
-    "april_rage_enabled",
     "april_player_enabled",
     "april_aim_key",
     "april_ui_menu_key",
@@ -13232,7 +13233,7 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
         "Sticky Target",
     }, { false }, { parent = parent_id })
     menu.add_slider_int(T, G, p .. "hit_chance", "Hit Chance %", 1, 100, 100, { parent = parent_id })
-    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 150, { parent = parent_id })
+    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 5, 600, opts.fov_default or 150, { parent = parent_id })
     menu_util.section(T, G, "Visuals")
     menu.add_checkbox(T, G, p .. "draw_fov", "FOV Circle", false,
         menu_util.parent(parent_id, { colorpicker = opts.fov_color or { 0.55, 0.2, 1, 1 } }))
@@ -13293,7 +13294,17 @@ function M.register_aimbot(T, G, prefix, parent_id, opts)
         "Sticky Target",
     }, { false }, { parent = parent_id })
     menu.add_slider_int(T, G, p .. "smooth", "Smoothness", 1, 25, 10, { parent = parent_id })
-    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 120, { parent = parent_id })
+    menu.add_combo(T, G, p .. "smooth_type", "Smooth Type", {
+        "Linear",
+        "Ease Out",
+        "Ease In-Out",
+        "Exponential",
+        "Adaptive",
+    }, 0, { parent = parent_id })
+    menu.add_checkbox(T, G, p .. "humanize", "Humanize", false, { parent = parent_id })
+    menu.add_slider_int(T, G, p .. "humanize_str", "Humanize Strength", 1, 100, 35,
+        menu_util.parent(p .. "humanize"))
+    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 5, 600, opts.fov_default or 120, { parent = parent_id })
     menu_util.section(T, G, "Visuals")
     menu.add_checkbox(T, G, p .. "draw_fov", "FOV Circle", false,
         menu_util.parent(parent_id, { colorpicker = opts.fov_color or { 0.2, 1, 0.45, 1 } }))
@@ -13836,11 +13847,10 @@ local targeting = April.require("features.combat.targeting")
 local combat_origin = April.require("game.combat_origin")
 local esp_util = April.require("core.esp_util")
 local M = {}
-M.SOURCE_NAMES = { "Auto", "Ragebot", "Silent Aim", "Aimbot" }
+M.SOURCE_NAMES = { "Auto", "Silent Aim", "Aimbot" }
 M.SOURCE_CROSSHAIR = "april_crosshair_source"
 M.SOURCE_GEAR = "april_target_gear_source"
 local MODULES = {
-    { id = "april_rage_enabled", path = "features.combat.ragebot", prefix = "april_rage_" },
     { id = "april_silent_aim", path = "features.combat.aimbot", prefix = "april_silent_" },
     { id = "april_aimbot", path = "features.combat.camera_aimbot", prefix = "april_aim_" },
 }
@@ -14304,6 +14314,14 @@ local TARGET_SCAN_MS = 33
 local cached_aim = nil
 local smoothed_aim = nil
 local last_target_scan = 0
+local human_phase = 0
+local human_drift = { x = 0, y = 0, z = 0 }
+local overshoot = { x = 0, y = 0, z = 0 }
+local SMOOTH_LINEAR = 0
+local SMOOTH_EASE_OUT = 1
+local SMOOTH_EASE_IN_OUT = 2
+local SMOOTH_EXPONENTIAL = 3
+local SMOOTH_ADAPTIVE = 4
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
@@ -14332,19 +14350,86 @@ local function aiming()
     if not enabled() then return false end
     return aim_key.active(P_AIM_KEY, P_AIM_KEY_MODE)
 end
-local function smooth_alpha()
+local function aim_dist(a, b)
+    if not a or not b then return 0 end
+    local dx = (a.x or 0) - (b.x or 0)
+    local dy = (a.y or 0) - (b.y or 0)
+    local dz = (a.z or 0) - (b.z or 0)
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+local function base_smooth_alpha()
     local n = settings.num(PREFIX .. "smooth", 10)
     n = math.max(1, math.min(25, n))
     return math.max(0.08, math.min(0.95, 1.25 / n))
 end
+local function smooth_alpha(prev, nxt)
+    local base = base_smooth_alpha()
+    local style = math.floor(tonumber(settings.num(PREFIX .. "smooth_type", 0)) or 0)
+    if style == SMOOTH_LINEAR then
+        return base
+    end
+    local t = math.min(1, aim_dist(prev, nxt) / 8)
+    if style == SMOOTH_EASE_OUT then
+        return math.max(0.05, math.min(0.98, base * (0.45 + 0.95 * t)))
+    elseif style == SMOOTH_EASE_IN_OUT then
+        local u = t * t * (3 - 2 * t)
+        return math.max(0.05, math.min(0.98, base * (0.5 + 0.85 * u)))
+    elseif style == SMOOTH_EXPONENTIAL then
+        return math.max(0.05, math.min(0.99, 1 - ((1 - base) ^ (1 + t * 1.6))))
+    elseif style == SMOOTH_ADAPTIVE then
+        return math.max(0.04, math.min(0.98, base * (0.32 + 1.45 * t)))
+    end
+    return base
+end
+local function reset_humanize()
+    human_phase = 0
+    human_drift.x, human_drift.y, human_drift.z = 0, 0, 0
+    overshoot.x, overshoot.y, overshoot.z = 0, 0, 0
+end
+local function apply_humanize(aim, prev)
+    if not aim or not settings.bool(PREFIX .. "humanize", false) then
+        return aim
+    end
+    local str = math.max(0, math.min(100, settings.num(PREFIX .. "humanize_str", 35))) / 100
+    if str <= 0 then return aim end
+    human_phase = human_phase + (0.035 + str * 0.04)
+    local amp = 0.05 + str * 0.28
+    local target_drift = {
+        x = math.sin(human_phase * 1.7) * amp,
+        y = math.cos(human_phase * 1.25) * amp * 0.55,
+        z = math.sin(human_phase * 2.05 + 0.7) * amp * 0.4,
+    }
+    local da = 0.12 + str * 0.1
+    human_drift.x = human_drift.x + (target_drift.x - human_drift.x) * da
+    human_drift.y = human_drift.y + (target_drift.y - human_drift.y) * da
+    human_drift.z = human_drift.z + (target_drift.z - human_drift.z) * da
+    if prev then
+        local dx = (aim.x - prev.x) * (0.08 + str * 0.18)
+        local dy = (aim.y - prev.y) * (0.08 + str * 0.18)
+        local dz = (aim.z - prev.z) * (0.08 + str * 0.18)
+        overshoot.x = overshoot.x * 0.78 + dx
+        overshoot.y = overshoot.y * 0.78 + dy
+        overshoot.z = overshoot.z * 0.78 + dz
+    else
+        overshoot.x = overshoot.x * 0.7
+        overshoot.y = overshoot.y * 0.7
+        overshoot.z = overshoot.z * 0.7
+    end
+    return {
+        x = aim.x + human_drift.x + overshoot.x,
+        y = aim.y + human_drift.y + overshoot.y,
+        z = aim.z + human_drift.z + overshoot.z,
+    }
+end
 local function blend_aim(prev, nxt)
     if not nxt then return prev end
-    if not prev then return { x = nxt.x, y = nxt.y, z = nxt.z } end
-    local a = smooth_alpha()
+    local target = apply_humanize(nxt, prev)
+    if not prev then return { x = target.x, y = target.y, z = target.z } end
+    local a = smooth_alpha(prev, target)
     return {
-        x = prev.x + (nxt.x - prev.x) * a,
-        y = prev.y + (nxt.y - prev.y) * a,
-        z = prev.z + (nxt.z - prev.z) * a,
+        x = prev.x + (target.x - prev.x) * a,
+        y = prev.y + (target.y - prev.y) * a,
+        z = prev.z + (target.z - prev.z) * a,
     }
 end
 local function update_target(cx, cy, fov)
@@ -14356,6 +14441,7 @@ local function update_target(cx, cy, fov)
     if locked_target and not targeting.is_target_valid(locked_target, PREFIX, cx, cy, fov) then
         locked_target = nil
         smoothed_aim = nil
+        reset_humanize()
     end
     if locked_target and sticky then
         return
@@ -14395,9 +14481,13 @@ function M.register_menu()
         PREFIX .. "filters",
         PREFIX .. "whitelist_ids", PREFIX .. "whitelist_clear",
         PREFIX .. "targets", PREFIX .. "options",
-        PREFIX .. "smooth",
+        PREFIX .. "smooth", PREFIX .. "smooth_type",
+        PREFIX .. "humanize", PREFIX .. "humanize_str",
         PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
         PREFIX .. "max_dist", PREFIX .. "fov",
+    })
+    menu_util.bind_children(PREFIX .. "humanize", {
+        PREFIX .. "humanize_str",
     })
     menu_util.bind_children(PREFIX .. "draw_fov", {
         PREFIX .. "fov_style",
@@ -14408,6 +14498,7 @@ function M.update(_dt)
     if not enabled() then
         locked_target = nil
         smoothed_aim = nil
+        reset_humanize()
         return
     end
     local sw, sh = targeting.screen_center()
@@ -14424,11 +14515,13 @@ function M.update(_dt)
     end
     if not locked_target or not targeting.is_aim_target(locked_target) then
         smoothed_aim = nil
+        reset_humanize()
         return
     end
     local aim = resolve_aim_point(locked_target, cx, cy)
     if not aim then
         smoothed_aim = nil
+        reset_humanize()
         return
     end
     if aiming() and holding_weapon() then
@@ -14436,9 +14529,15 @@ function M.update(_dt)
         cached_aim = smoothed_aim
         if camera and camera.look_at then
             local smooth_frames = math.max(1, math.floor(settings.num(PREFIX .. "smooth", 10)))
+            local style = math.floor(tonumber(settings.num(PREFIX .. "smooth_type", 0)) or 0)
+            if style == SMOOTH_ADAPTIVE or style == SMOOTH_EXPONENTIAL then
+                smooth_frames = math.max(1, math.floor(smooth_frames * 0.75))
+            end
             pcall(camera.look_at, smoothed_aim.x, smoothed_aim.y, smoothed_aim.z, smooth_frames)
         end
     else
+        smoothed_aim = nil
+        reset_humanize()
         cached_aim = aim
     end
 end
@@ -14793,14 +14892,6 @@ function M.update(dt)
     cached_track.aim = nil
     cached_track.manip = { state = "off" }
     cached_track.tracking = false
-    local rage_on = settings.enabled("april_rage_enabled")
-    if rage_on then
-        locked_target = nil
-        fire_was_down = false
-        shot_allowed = true
-        body_peek.tick(nil, nil)
-        return
-    end
     if not active() then
         locked_target = nil
         fire_was_down = false
@@ -14959,202 +15050,6 @@ function M.draw()
             end
         end
     end
-end
-return M
-end)()
-
-April._mods["features.combat.ragebot"] = (function()
-local settings = April.require("core.settings")
-local targeting = April.require("features.combat.targeting")
-local weapons = April.require("game.weapons")
-local combat_origin = April.require("game.combat_origin")
-local menu_util = April.require("core.menu_util")
-local combat_menu = April.require("features.combat.combat_menu")
-local silent_ray = April.require("core.silent_ray")
-local silent_resolve = April.require("features.combat.silent_resolve")
-local bullet_hud = April.require("features.combat.bullet_hud")
-local body_peek = April.require("features.combat.body_peek")
-local silent_whitelist = April.require("features.combat.silent_whitelist")
-local M = {}
-local PREFIX = "april_rage_"
-local P_MASTER = "april_rage_enabled"
-local TARGET_SCAN_MS = 33
-local locked_target = nil
-local last_target_scan = 0
-local last_fire_ms = 0
-local cached = { origin = nil, aim = nil, manip = { state = "off" } }
-local function tick_ms()
-    return utility and utility.get_tick_count and utility.get_tick_count() or 0
-end
-local function holding_weapon()
-    if weapons.holding_ranged_weapon() then return true end
-    if weapons.get_held_ranged_weapon_name() then return true end
-    local lp = entity and entity.get_local_player and entity.get_local_player()
-    if lp and lp.tool_name and lp.tool_name ~= "" then
-        return weapons.is_ranged_weapon_name(lp.tool_name)
-    end
-    return false
-end
-local function enabled()
-    return settings.enabled(P_MASTER) and silent_ray.available()
-end
-local function update_target(cx, cy)
-    local sticky = settings.multi(PREFIX .. "options", combat_menu.OPT_STICKY, false)
-    local now = tick_ms()
-    local opts = { ignore_fov = true }
-    if silent_resolve.bypass_visibility() then
-        opts.ignore_visible = true
-    end
-    if locked_target and targeting.is_npc_target(locked_target) then
-        locked_target = targeting.refresh_npc_target(locked_target)
-    end
-    if locked_target and not targeting.is_target_valid(locked_target, PREFIX, cx, cy, 99999, opts) then
-        locked_target = nil
-    end
-    if locked_target and sticky then
-        return
-    end
-    if sticky and now - last_target_scan < TARGET_SCAN_MS then
-        return
-    end
-    last_target_scan = now
-    locked_target = targeting.find_target(cx, cy, 99999, PREFIX, opts)
-end
-local function ok_to_fire(info, aim)
-    if not info then return false end
-    if info.state == "ready" or info.state == "direct" or info.state == "hitscan" or info.state == "tp" or info.state == "curve" then
-        return true
-    end
-    if not aim then return false end
-    return true
-end
-local function try_autofire()
-    if not settings.bool(PREFIX .. "autofire", true) then return end
-    local delay = math.max(20, settings.num(PREFIX .. "fire_delay", 80))
-    local now = tick_ms()
-    if now - last_fire_ms < delay then return end
-    if utility and utility.mouse_click then
-        pcall(utility.mouse_click, "left")
-        last_fire_ms = now
-    elseif input and input.key_press then
-        pcall(input.key_press, 0x01)
-        last_fire_ms = now
-    end
-end
-function M.register_menu()
-    local G = menu_util.G
-    local T, _ = menu_util.group(G.SILENT_AIM)
-    menu_util.register_keybind(T, G.SILENT_AIM, P_MASTER, "Enable Ragebot", false)
-    menu_util.section(T, G.SILENT_AIM, "Ragebot Targeting")
-    menu.add_combo(T, G.SILENT_AIM, PREFIX .. "target_type", "Target Type", { "Crosshair", "Distance" }, 1,
-        { parent = P_MASTER })
-    menu.add_combo(T, G.SILENT_AIM, PREFIX .. "bone", "Hitbox", combat_menu.SILENT_BONES, 0, { parent = P_MASTER })
-    combat_menu.expand_legacy_targets(PREFIX)
-    menu.add_multicombo(T, G.SILENT_AIM, PREFIX .. "targets", "Aim At",
-        combat_menu.AIM_AT_OPTIONS, combat_menu.AIM_AT_DEFAULTS, { parent = P_MASTER })
-    menu.add_multicombo(T, G.SILENT_AIM, PREFIX .. "filters", "Filters", {
-        "Health Check",
-        "Visible Only",
-        "Team Check",
-        "Skip Safezone",
-        "Whitelist",
-        "Skip Downed",
-    }, { true, false, true, true, false, true }, { parent = P_MASTER })
-    menu.add_input(T, G.SILENT_AIM, PREFIX .. "whitelist_ids", "Whitelist IDs", "")
-    menu.add_button(T, G.SILENT_AIM, PREFIX .. "whitelist_clear", "Clear Whitelist", function()
-        if silent_whitelist and silent_whitelist.clear then
-            silent_whitelist.clear(PREFIX)
-        end
-    end)
-    menu.add_slider_int(T, G.SILENT_AIM, PREFIX .. "max_dist", "Max Distance (m)", 50, 2000, 500, { parent = P_MASTER })
-    menu_util.section(T, G.SILENT_AIM, "Ragebot Fire")
-    menu.add_multicombo(T, G.SILENT_AIM, PREFIX .. "options", "Options", { "Sticky Target" }, { false },
-        { parent = P_MASTER })
-    menu.add_checkbox(T, G.SILENT_AIM, PREFIX .. "autofire", "Autofire", true, { parent = P_MASTER })
-    menu.add_slider_int(T, G.SILENT_AIM, PREFIX .. "fire_delay", "Fire Delay (ms)", 20, 400, 80,
-        { parent = P_MASTER })
-    menu_util.bind_children(P_MASTER, {
-        PREFIX .. "target_type", PREFIX .. "bone",
-        PREFIX .. "filters",
-        PREFIX .. "whitelist_ids", PREFIX .. "whitelist_clear",
-        PREFIX .. "targets", PREFIX .. "options",
-        PREFIX .. "max_dist",
-        PREFIX .. "autofire", PREFIX .. "fire_delay",
-    })
-end
-function M.update(dt)
-    bullet_hud.update(dt)
-    cached.origin = nil
-    cached.aim = nil
-    cached.manip = { state = "off" }
-    if not enabled() then
-        locked_target = nil
-        body_peek.tick(nil, nil)
-        return
-    end
-    silent_ray.ensure_hook()
-    if not holding_weapon() then
-        silent_ray.stop()
-        return
-    end
-    combat_origin.sync_weapon(weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name())
-    local sw, sh = targeting.screen_center()
-    local cx, cy = sw * 0.5, sh * 0.5
-    update_target(cx, cy)
-    local wl_target = locked_target
-    if not wl_target or not targeting.is_aim_target(wl_target) then
-        wl_target = targeting.find_target(cx, cy, 99999, PREFIX, {
-            ignore_fov = true,
-            ignore_whitelist = true,
-            ignore_visible = opts.ignore_visible,
-        })
-    end
-    silent_whitelist.tick(wl_target, PREFIX)
-    if not locked_target or not targeting.is_aim_target(locked_target) then
-        silent_ray.stop()
-        body_peek.tick(nil, nil)
-        return
-    end
-    local ok_resolve, origin, aim, manip_info = pcall(
-        silent_resolve.resolve_track, locked_target, PREFIX, cx, cy
-    )
-    if manip_info then
-        cached.manip = manip_info
-    end
-    if not ok_resolve or not aim or not origin then
-        silent_ray.stop()
-        return
-    end
-    cached.origin = origin
-    cached.aim = aim
-    if not ok_to_fire(manip_info, aim) then
-        silent_ray.stop()
-        return
-    end
-    local hit = (manip_info and manip_info.hitpart) or aim
-    local track_aim = aim
-    if silent_ray.track then
-        silent_ray.track(origin, track_aim, 0x01, hit)
-    end
-    silent_ray.set_target(origin, track_aim, hit)
-    try_autofire()
-    body_peek.tick(locked_target, hit)
-end
-function M.get_target()
-    return locked_target
-end
-function M.get_scoped_target()
-    if locked_target then return locked_target end
-    if not enabled() then return nil end
-    local sw, sh = targeting.screen_center()
-    return targeting.find_target(sw * 0.5, sh * 0.5, 99999, PREFIX, { ignore_fov = true })
-end
-function M.draw()
-    if not settings.bool("april_bullet_enabled", false) then return end
-    local sw, sh = targeting.screen_center()
-    local cx, cy = sw * 0.5, sh * 0.5
-    local fov = settings.num(PREFIX .. "fov", 150)
-    bullet_hud.draw(cx, cy, fov, cached)
 end
 return M
 end)()
@@ -17007,7 +16902,7 @@ function M.register_menu()
     menu_util.section(T, G.VISUALS, "Target Gear")
     menu_util.register_keybind(T, G.VISUALS, P, "Target Gear Overlay", false)
     local root = menu_util.parent(P)
-    menu.add_slider_int(T, G.VISUALS, P_FOV, "Gear FOV", 10, 500, DEFAULT_FOV, root)
+    menu.add_slider_int(T, G.VISUALS, P_FOV, "Gear FOV", 5, 500, DEFAULT_FOV, root)
     menu.add_slider_int(T, G.VISUALS, P_DIST, "Max Distance", 50, 2000, DEFAULT_MAX_DIST, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, root)
@@ -19449,7 +19344,7 @@ function M.register_menu()
     local root = menu_util.parent(P)
     menu_util.section(T, G.MISC, "Combat")
     menu_util.register_keybind(T, G.MISC, P, "Fling", false)
-    menu.add_slider_int(T, G.MISC, P_FOV, "Fling FOV", 20, 600, 150, root)
+    menu.add_slider_int(T, G.MISC, P_FOV, "Fling FOV", 5, 600, 150, root)
     menu.add_slider_int(T, G.MISC, P_DURATION, "Fling Duration", 2, 10, 2, root)
     menu_util.bind_children(P, { P_FOV, P_DURATION })
 end
@@ -22096,8 +21991,11 @@ function M.panel_bg()
     if not M.colors_enabled() then
         return theme.BG
     end
-    local dim = settings().num("april_ui_bg_dim", 0)
-    dim = clamp(dim, 0, 40) * 0.01
+    local dim = settings().num("april_ui_overlay_strength", 70)
+    if not settings().bool("april_ui_menu_overlay", true) then
+        dim = 0
+    end
+    dim = clamp(dim, 0, 100) * 0.004
     local bg = theme.BG
     return {
         bg[1] - dim * 0.04,
@@ -22128,6 +22026,8 @@ M.ALLOW_TYPES = {
     hotkey = true,
     button = true,
     multi = true,
+    combo = true,
+    input = true,
 }
 M.SKIP_IDS = {
     april_aim_draw_fov = true,
@@ -22153,14 +22053,14 @@ M.SKIP_IDS = {
     april_ui_reduce_motion = true,
     april_ui_menu_fade = true,
     april_ui_per_element = true,
+    april_ui_menu_overlay = true,
+    april_ui_snow = true,
     april_fakeduck_spam = true,
 }
 M.BY_ID = {
     april_aimbot = "Smooth camera aim assist on your current target.",
     april_aim_key = "Hold or toggle this key to activate aimbot.",
-    april_rage_enabled = "Aggressive no-FOV aim with autofire on valid targets.",
     april_silent_aim = "Redirects shots to your locked target without moving the camera.",
-    april_rage_autofire = "Automatically clicks when ragebot has a valid shot.",
     april_bullet_enabled = "Turns on advanced bullet routing for silent aim.",
     april_silent_hitscan = "Registers hits instantly on your locked target. Server may reject invalid shots.",
     april_silent_bullet_tp = "Scans the head for the closest visible point to your crosshair (manip-style math), spawns the ray on the target, and shoots through that point. Cycles offsets every frame.",
@@ -22170,12 +22070,15 @@ M.BY_ID = {
     april_aim_targets = "Choose whether aimbot targets players, NPCs, or both.",
     april_aim_filters = "Filters which targets aimbot will consider.",
     april_aim_options = "Extra aimbot behavior options.",
-    april_rage_targets = "Choose whether ragebot targets players, NPCs, or both.",
-    april_rage_filters = "Filters which targets ragebot will consider.",
-    april_rage_options = "Extra ragebot behavior options.",
+    april_aim_smooth = "Higher values move the camera slower toward the target.",
+    april_aim_smooth_type = "How smoothing accelerates: Linear, Ease Out, Ease In-Out, Exponential, or Adaptive.",
+    april_aim_humanize = "Adds light drift and overshoot so mouse aim feels less robotic.",
+    april_aim_humanize_str = "How strong humanize drift and overshoot are.",
+    april_aim_whitelist_ids = "Comma-separated Roblox user IDs that Aimbot must ignore. Enable Whitelist inside Filters first. You can also middle-click the current player target to add or remove them.",
     april_silent_targets = "Choose whether silent aim targets players, NPCs, or both.",
     april_silent_filters = "Filters which targets silent aim will consider.",
     april_silent_options = "Extra silent aim behavior options.",
+    april_silent_whitelist_ids = "Comma-separated Roblox user IDs that Silent Aim must ignore. Enable Whitelist inside Filters first. You can also middle-click the current player target to add or remove them.",
     april_player_enabled = "Shows boxes and info on other players.",
     april_ui_player_elements = "Choose which info to show on player ESP.",
     april_player_show_held = "Shows the item a player is holding (same read path as Target Gear).",
@@ -22248,9 +22151,10 @@ M.BY_ID = {
     april_base_chams_color = "Glow preset color (Fill Glow / Wireframe Glow only).",
     april_ui_startup_intro = "Plays the April.lua intro whenever the script executes. Save it in your autoload profile.",
     april_ui_menu_key = "Key used to open and close this menu.",
+    april_ui_menu_overlay = "Darkens the whole screen behind the menu with a smooth fade. Does not cover menu controls.",
+    april_ui_snow = "Soft falling snow behind the menu. Hidden when Reduce Motion is on.",
     april_cfg_autoload = "Loads your saved profile automatically on inject.",
     april_aim_whitelist_clear = "Clears the aim whitelist player list.",
-    april_rage_whitelist_clear = "Clears the ragebot whitelist player list.",
     april_silent_whitelist_clear = "Clears the silent aim whitelist player list.",
     april_map_reset_position = "Moves the tactical map back to its default spot.",
     april_wp_set = "Saves your current position to the active waypoint slot.",
@@ -22260,6 +22164,94 @@ M.BY_ID = {
     april_cfg_load = "Loads settings from the active config slot.",
     april_cfg_delete = "Deletes the active config slot.",
     april_reload_modules = "Reloads game module offsets and caches.",
+}
+local FILTER_TIPS = {
+    "Rejects dead or zero-health targets. Leave this on unless you specifically need stale targets.",
+    "Only selects targets with a clear line of sight. Turning it off allows locking through walls, but shots may still be blocked.",
+    "Ignores players on your team. This applies to players only, not NPC types.",
+    "Ignores players protected by a safezone so the aim system does not lock onto targets you cannot damage.",
+    "Skips whitelisted players. Enter comma-separated Roblox user IDs below, or middle-click the current player target to toggle them. Aimbot and Silent Aim keep separate lists.",
+    "Ignores downed players and looks for a target that is still standing.",
+}
+local TARGET_TIPS = {
+    "Targets other players that pass the selected Filters.",
+    "Targets standard Soldier NPCs.",
+    "Targets the Bruno boss NPC.",
+    "Targets the Boris boss NPC.",
+    "Targets the Brutus boss NPC.",
+    "Targets the Attack Helicopter NPC.",
+    "Targets the BTR armored vehicle NPC.",
+    "Targets the Diver Dave NPC.",
+    "Targets the Pilot Pete NPC.",
+}
+local HITBOX_TIPS = {
+    "Aims at the head for the highest usual damage.",
+    "Aims at the torso for a larger, steadier target.",
+    "Aims at the target's left arm.",
+    "Aims at the target's right arm.",
+    "Aims at the target's left leg.",
+    "Aims at the target's right leg.",
+    "Automatically uses the valid body part closest to your crosshair.",
+}
+local TARGET_TYPE_TIPS = {
+    "Prefers the valid target closest to the center of your screen.",
+    "Prefers the valid target closest to your character in world distance.",
+}
+local STICKY_TIPS = {
+    "Keeps the current valid target instead of constantly switching to a slightly better one. The lock is released when that target becomes invalid.",
+}
+local SMOOTH_TIPS = {
+    "Moves toward the target at a consistent smoothing rate.",
+    "Moves faster while far away and settles softly near the target.",
+    "Uses a gradual acceleration and deceleration curve.",
+    "Uses an exponential curve for a responsive but smooth correction.",
+    "Automatically moves faster on large misses and slows down for small corrections.",
+}
+M.OPTION_TIPS = {
+    april_aim_target_type = TARGET_TYPE_TIPS,
+    april_silent_target_type = TARGET_TYPE_TIPS,
+    april_aim_bone = HITBOX_TIPS,
+    april_silent_bone = HITBOX_TIPS,
+    april_aim_targets = TARGET_TIPS,
+    april_silent_targets = TARGET_TIPS,
+    april_aim_filters = FILTER_TIPS,
+    april_silent_filters = FILTER_TIPS,
+    april_aim_options = STICKY_TIPS,
+    april_silent_options = STICKY_TIPS,
+    april_aim_smooth_type = SMOOTH_TIPS,
+    april_crosshair_source = {
+        "Uses the first enabled combat system with a valid target.",
+        "Follows Silent Aim's current target.",
+        "Follows the regular camera Aimbot's current target.",
+    },
+}
+M.OPTION_BY_LABEL = {
+    ["Outline"] = "Draws only the outside edge.",
+    ["Filled Circle"] = "Draws a translucent filled circle with an outline.",
+    ["Team Check"] = FILTER_TIPS[3],
+    ["Skip Safezone"] = FILTER_TIPS[4],
+    ["Skip Downed"] = FILTER_TIPS[6],
+    ["Visible Only"] = FILTER_TIPS[2],
+    ["Health Check"] = FILTER_TIPS[1],
+    ["Whitelist"] = FILTER_TIPS[5],
+    ["Sticky Target"] = STICKY_TIPS[1],
+    ["None"] = "Disables this visual or selection.",
+    ["Health Bar"] = "Shows the target's current health as a bar.",
+    ["Skeleton"] = "Draws lines between the target's body joints.",
+    ["Name"] = "Shows the target's display name.",
+    ["Clan Tag"] = "Shows the target's clan tag when available.",
+    ["Held Item"] = "Shows the item or weapon the target currently has equipped.",
+    ["Distance"] = "Shows how far away the target is.",
+    ["Downed"] = "Shows when a player is knocked down.",
+    ["Safezone"] = "Shows when a player is protected by a safezone.",
+    ["Staff"] = "Shows the staff/moderator status detected for a player.",
+    ["Reviving"] = "Shows when a player is reviving someone.",
+    ["Movement"] = "Shows useful movement-state information.",
+    ["VIP"] = "Shows the player's VIP status when available.",
+    ["Spin"] = "Continuously rotates the visual while enabled.",
+    ["Pulse Size"] = "Smoothly grows and shrinks the visual.",
+    ["Center Dot"] = "Adds a small dot at the exact screen center.",
+    ["Rainbow"] = "Cycles the visual through rainbow colors.",
 }
 local function register_esp_toggles(list, scope)
     for _, t in ipairs(list or {}) do
@@ -22323,6 +22315,12 @@ function M.for_item(item)
         return tip .. " Left-click the key chip to bind. Escape cancels and Delete clears."
     end
     return tip
+end
+function M.for_option(id, index, label)
+    local by_id = M.OPTION_TIPS[id]
+    local tip = by_id and by_id[index] or nil
+    if tip then return tip end
+    return M.OPTION_BY_LABEL[tostring(label or "")]
 end
 return M
 end)()
@@ -22906,7 +22904,7 @@ local function wrap_tip_lines(text, max_w, fs)
     return #lines > 0 and lines or { text }
 end
 function M.draw_tooltip_overlay()
-    if M.block_under or M.open_combo or M.open_multi or M.open_color or M.open_bind_mode then
+    if M.block_under or M.open_color or M.open_bind_mode then
         return
     end
     if not M._tip_active or M._tip_hover_ms < M.TIP_DELAY_MS then
@@ -23585,8 +23583,11 @@ function M.combo(x, y, w, id, label, options, default_idx)
             local opt = options[i]
             if not opt then break end
             local iy = by + bh + row * 18
-            if input.hover(bx, iy, bw, 18) then
+            local option_hovered = input.hover(bx, iy, bw, 18)
+            if option_hovered then
                 M.rect(bx + 2, iy + 1, bw - 4, 16, theme.HOVER, true, theme.CORNER_SMALL)
+                local tip = tooltips.for_option(id, i, opt)
+                M.register_tooltip_hover(tostring(id) .. ":option:" .. tostring(i), tip, bx, iy, bw, 18)
             end
             if i - 1 == idx then
                 M.rect(bx + 3, iy + 4, 2, 10, anim.checkbox_fill(), true, 1)
@@ -23677,8 +23678,11 @@ function M.multi(x, y, w, id, label, options, defaults, opts)
             if not opt then break end
             local iy = by + bh + row * 18
             local on = vals[i] == true
-            if input.hover(bx, iy, bw, 18) then
+            local option_hovered = input.hover(bx, iy, bw, 18)
+            if option_hovered then
                 M.rect(bx + 2, iy + 1, bw - 4, 16, theme.HOVER, true, theme.CORNER_SMALL)
+                local tip = tooltips.for_option(id, i, opt)
+                M.register_tooltip_hover(tostring(id) .. ":option:" .. tostring(i), tip, bx, iy, bw, 18)
             end
             M.rect(bx + 5, iy + 3, 12, 12, theme.CHECK_OFF, true, 2)
             if on then
@@ -24179,33 +24183,16 @@ local function build_aim()
             sep(),
             multi("april_aim_options", "Options", { "Sticky Target" }, { false }),
             sl("april_aim_smooth", "Smoothness", 1, 25, 10),
-            sl("april_aim_fov", "FOV Radius (px)", 20, 600, 120),
+            combo("april_aim_smooth_type", "Smooth Type", {
+                "Linear", "Ease Out", "Ease In-Out", "Exponential", "Adaptive",
+            }, 0),
+            cb("april_aim_humanize", "Humanize", false),
+            sl("april_aim_humanize_str", "Humanize Strength", 1, 100, 35, false, "april_aim_humanize"),
+            sl("april_aim_fov", "FOV Radius (px)", 5, 600, 120),
             sep(),
             cb("april_aim_draw_fov", "FOV Circle", false, { 0.2, 1, 0.45, 1 }),
             combo("april_aim_fov_style", "FOV Style", { "Outline", "Filled Circle" }, 1, "april_aim_draw_fov"),
             cb("april_aim_target_line", "Target Line", false, { 0.2, 1, 0.45, 1 }),
-        },
-    }
-    local rage = {
-        title = "Ragebot",
-        master = "april_rage_enabled",
-        items = {
-            kb("april_rage_enabled", "Enable Ragebot", false),
-            sep(),
-            combo("april_rage_target_type", "Target Type", { "Crosshair", "Distance" }, 1),
-            combo("april_rage_bone", "Hitbox", combat_menu.SILENT_BONES, 0),
-            multi("april_rage_targets", "Aim At", combat_menu.AIM_AT_OPTIONS, combat_menu.AIM_AT_DEFAULTS),
-            multi("april_rage_filters", "Filters", {
-                "Health Check", "Visible Only", "Team Check",
-                "Skip Safezone", "Whitelist", "Skip Downed",
-            }, { true, false, true, true, false, true }),
-            input("april_rage_whitelist_ids", "Whitelist IDs", ""),
-            btn("april_rage_whitelist_clear", "Clear Whitelist"),
-            sl("april_rage_max_dist", "Max Distance (m)", 50, 2000, 500),
-            sep(),
-            multi("april_rage_options", "Options", { "Sticky Target" }, { false }),
-            cb("april_rage_autofire", "Autofire", true),
-            sl("april_rage_fire_delay", "Fire Delay (ms)", 20, 400, 80),
         },
     }
     local silent = {
@@ -24227,7 +24214,7 @@ local function build_aim()
             sep(),
             multi("april_silent_options", "Options", { "Sticky Target" }, { false }),
             sl("april_silent_hit_chance", "Hit Chance %", 1, 100, 100),
-            sl("april_silent_fov", "FOV Radius (px)", 20, 600, 150),
+            sl("april_silent_fov", "FOV Radius (px)", 5, 600, 150),
             sep(),
             cb("april_silent_draw_fov", "FOV Circle", false, { 0.55, 0.2, 1, 1 }),
             combo("april_silent_fov_style", "FOV Style", { "Outline", "Filled Circle" }, 1, "april_silent_draw_fov"),
@@ -24254,7 +24241,7 @@ local function build_aim()
             cb("april_silent_manip_peek_vis", "Peek Visual", false, nil, "april_bullet_enabled"),
         },
     }
-    return { regular, rage, silent, bullet }
+    return { regular, silent, bullet }
 end
 local function build_visuals()
     local left = {
@@ -24285,7 +24272,7 @@ local function build_visuals()
         master = "april_target_overlay",
         items = {
             kb("april_target_overlay", "Target Gear Overlay", false),
-            sl("april_target_overlay_fov", "Gear FOV", 10, 500, 100, false, "april_target_overlay"),
+            sl("april_target_overlay_fov", "Gear FOV", 5, 500, 100, false, "april_target_overlay"),
             sl("april_target_overlay_max_dist", "Max Distance", 50, 2000, 500, false, "april_target_overlay"),
             sl("april_target_overlay_gear_size", "Gear Icon Size", 32, 64, 48, false, "april_target_overlay"),
             sl("april_target_overlay_top", "Top Offset", 48, 160, 88, false, "april_target_overlay"),
@@ -24299,7 +24286,7 @@ local function build_visuals()
                 "Cross", "Circle", "Dot", "T-Shape", "Diamond", "Plus", "Brackets", "X",
             }, 0, "april_crosshair_enabled"),
             cb("april_crosshair_follow", "Follow Target", false, nil, "april_crosshair_enabled"),
-            combo("april_crosshair_source", "Target From", { "Auto", "Ragebot", "Silent Aim", "Aimbot" }, 0, "april_crosshair_follow"),
+            combo("april_crosshair_source", "Target From", { "Auto", "Silent Aim", "Aimbot" }, 0, "april_crosshair_follow"),
             sl("april_crosshair_follow_smooth", "Follow Smoothness", 4, 40, 18, false, "april_crosshair_follow"),
             multi("april_ui_crosshair_motion", "Motion", { "Spin", "Pulse Size" }, { false, false }, "april_crosshair_enabled", {
                 sync_ids = { "april_crosshair_spin", "april_crosshair_pulse" },
@@ -24511,7 +24498,7 @@ local function build_misc()
                 sl("april_fakeduck_spam_ms", "Spam Interval (ms)", 20, 400, 80, false, "april_fakeduck_spam"),
                 sep(),
                 kb("april_fling_enabled", "Fling", false),
-                sl("april_fling_fov", "Fling FOV", 20, 600, 150, false, "april_fling_enabled"),
+                sl("april_fling_fov", "Fling FOV", 5, 600, 150, false, "april_fling_enabled"),
                 sl("april_fling_duration", "Fling Duration", 2, 10, 2, false, "april_fling_enabled"),
             },
         },
@@ -24579,33 +24566,48 @@ local function build_config()
     local COL = "april_ui_custom_colors"
     local ANM = "april_ui_custom_anim"
     local ELS = "april_ui_per_element"
+    local OVL = "april_ui_menu_overlay"
+    local SNOW = "april_ui_snow"
     local appearance = {
         title = "Appearance",
         items = {
+            label("Look", true),
             hk("april_ui_menu_key", "Menu Toggle Key"),
-            sep(),
             combo("april_ui_theme_preset", "Theme Preset", {
                 "Violet Glass", "Midnight Blue", "Graphite", "Emerald Glass",
             }, 0),
+            sep(),
             sl("april_ui_window_opacity", "Window Opacity %", 45, 100, 86),
             sl("april_ui_panel_opacity", "Panel Opacity %", 35, 100, 72),
             sl("april_ui_border_strength", "Border Strength %", 10, 100, 58),
-            combo("april_ui_corner_style", "Control Corners", { "Sharp", "Soft", "Rounded" }, 2),
+            combo("april_ui_corner_style", "Corners", { "Sharp", "Soft", "Rounded" }, 2),
             sl("april_ui_scale", "UI Scale %", 80, 125, 100),
             combo("april_ui_density", "Density", { "Compact", "Balanced", "Comfortable" }, 1),
-            sl("april_ui_bg_dim", "Backdrop Dim", 0, 40, 0),
-            cb("april_ui_show_cursor_dot", "Show Cursor Dot", true),
+            cb("april_ui_show_cursor_dot", "Cursor Dot", true),
+            sep(),
+            label("Backdrop", true),
+            cb("april_ui_menu_overlay", "Menu Overlay", true),
+            sl("april_ui_overlay_strength", "Overlay Strength", 5, 100, 70, false, OVL),
+            sep(),
+            label("Snow", true),
+            cb("april_ui_snow", "Enable Snow", false),
+            sl("april_ui_snow_amount", "Amount", 10, 140, 50, false, SNOW),
+            sl("april_ui_snow_speed", "Speed", 1, 100, 40, false, SNOW),
+            sl("april_ui_snow_size", "Size", 1, 8, 3, false, SNOW),
+            sl("april_ui_snow_opacity", "Opacity", 10, 100, 55, false, SNOW),
         },
     }
     local motion = {
         title = "Motion",
         items = {
+            label("Basics", true),
             cb("april_ui_startup_intro", "Startup Animation", true),
-            sep(),
             combo("april_ui_motion_profile", "Motion Profile", {
                 "Subtle", "Balanced", "Expressive",
             }, 1),
             cb("april_ui_reduce_motion", "Reduce Motion", false),
+            sep(),
+            label("Advanced", true),
             cb("april_ui_custom_anim", "Advanced Animation", false),
             combo("april_ui_accent_anim", "Accent Style", modes, 1, ANM),
             sl("april_ui_anim_speed", "Accent Speed", 1, 100, 40, false, ANM),
@@ -24613,7 +24615,7 @@ local function build_config()
             multi("april_ui_anim_targets", "Animate", {
                 "Title Bar", "Section Tops", "Sliders", "Scrollbars", "Navbar", "Switches", "Hover", "Overlay Panels",
             }, { true, true, true, true, true, true, true, true }, ANM),
-            cb("april_ui_per_element", "Individual Styles", false, nil, ANM),
+            cb("april_ui_per_element", "Per-Element Styles", false, nil, ANM),
             sep(ANM),
             { type = "combo", id = "april_ui_style_title", label = "Title Bar", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
             { type = "combo", id = "april_ui_style_section", label = "Section Tops", options = elem_modes, default = 0, gate = ANM, gate2 = ELS },
@@ -24627,33 +24629,39 @@ local function build_config()
     local accent = {
         title = "Accent Colors",
         items = {
-            cb("april_ui_custom_colors", "Color Options", false),
-            color("april_ui_accent", "Accent", { 0.78, 0.20, 0.92, 1 }, COL),
-            multi("april_ui_color_overrides", "Override Colors For", {
+            label("Accent", true),
+            cb("april_ui_custom_colors", "Custom Colors", false),
+            color("april_ui_accent", "Main Accent", { 0.78, 0.20, 0.92, 1 }, COL),
+            sep(COL),
+            label("Overrides", true, COL),
+            multi("april_ui_color_overrides", "Override For", {
                 "Title Bar", "Section Tops", "Sliders", "Scrollbars", "Navbar", "Switches", "Overlay Panels",
             }, {}, COL),
-            color("april_ui_col_title", "Title Bar Color", { 0.78, 0.20, 0.92, 1 }, COL, 1),
-            color("april_ui_col_section", "Section Top Color", { 0.78, 0.20, 0.92, 1 }, COL, 2),
-            color("april_ui_col_slider", "Slider Color", { 0.78, 0.20, 0.92, 1 }, COL, 3),
-            color("april_ui_col_scroll", "Scrollbar Color", { 0.78, 0.20, 0.92, 1 }, COL, 4),
-            color("april_ui_col_sidebar", "Navbar Color", { 0.78, 0.20, 0.92, 1 }, COL, 5),
-            color("april_ui_col_checkbox", "Switch Color", { 0.78, 0.20, 0.92, 1 }, COL, 6),
-            color("april_ui_col_overlay", "Overlay Panel Color", { 0.78, 0.20, 0.92, 1 }, COL, 7),
+            color("april_ui_col_title", "Title Bar", { 0.78, 0.20, 0.92, 1 }, COL, 1),
+            color("april_ui_col_section", "Section Tops", { 0.78, 0.20, 0.92, 1 }, COL, 2),
+            color("april_ui_col_slider", "Sliders", { 0.78, 0.20, 0.92, 1 }, COL, 3),
+            color("april_ui_col_scroll", "Scrollbars", { 0.78, 0.20, 0.92, 1 }, COL, 4),
+            color("april_ui_col_sidebar", "Navbar", { 0.78, 0.20, 0.92, 1 }, COL, 5),
+            color("april_ui_col_checkbox", "Switches", { 0.78, 0.20, 0.92, 1 }, COL, 6),
+            color("april_ui_col_overlay", "Overlay Panels", { 0.78, 0.20, 0.92, 1 }, COL, 7),
         },
     }
     local config_group = {
         title = "Config",
         items = {
+            label("Profiles", true),
             input("april_cfg_profile_name", "Profile Name", "Default"),
             sl("april_cfg_slot", "Active Slot (1-5)", 1, 5, 1),
             btn("april_cfg_save", "Save to Active Slot"),
             btn("april_cfg_load", "Load Active Slot"),
             btn("april_cfg_delete", "Delete Active Slot"),
             sep(),
+            label("Autoload", true),
             cb("april_cfg_autoload", "Autoload on Start", false),
             input("april_cfg_autoload_profile", "Autoload Profile Name", "", "april_cfg_autoload"),
             sl("april_cfg_autoload_slot", "Autoload Slot", 1, 5, 1, false, "april_cfg_autoload"),
             sep(),
+            label("Extras", true),
             sl("april_esp_text_size", "ESP Text Size", 8, 24, 13),
             btn("april_reload_modules", "Reload Game Modules"),
         },
@@ -24940,12 +24948,149 @@ end
 return M
 end)()
 
+April._mods["ui.menu_fx"] = (function()
+local state = April.require("ui.gs_state")
+local widgets = April.require("ui.gs_widgets")
+local anim = April.require("ui.gs_anim")
+local settings = April.require("core.settings")
+local M = {}
+local flakes = {}
+local flake_count = 0
+local last_now = nil
+local function clamp(v, a, b)
+    if v < a then return a end
+    if v > b then return b end
+    return v
+end
+local function screen_size()
+    local w, h
+    if draw then
+        local fn = draw.get_screen_size or draw.GetScreenSize
+        if fn then
+            local ok, a, b = pcall(fn)
+            if ok then w, h = a, b end
+        end
+    end
+    if (not w or not h or w <= 0 or h <= 0) and utility then
+        local fn = utility.get_screen_size or utility.GetScreenSize
+        if fn then
+            local ok, a, b = pcall(fn)
+            if ok then w, h = a, b end
+        end
+    end
+    w = math.floor(tonumber(w) or 0)
+    h = math.floor(tonumber(h) or 0)
+    if w <= 0 then w = 1920 end
+    if h <= 0 then h = 1080 end
+    return w, h
+end
+local function rebuild(count, sw, sh)
+    flakes = {}
+    flake_count = count
+    for i = 1, count do
+        flakes[i] = {
+            x = math.random() * sw,
+            y = math.random() * sh,
+            size = 1.2 + math.random() * 2.4,
+            speed = 0.35 + math.random() * 1.15,
+            drift = (math.random() - 0.5) * 0.55,
+            phase = math.random() * 6.28318,
+            wobble = 0.6 + math.random() * 1.4,
+        }
+    end
+end
+local function dt()
+    local now = anim.now()
+    local d = 0.016
+    if last_now then d = clamp(now - last_now, 0, 0.05) end
+    last_now = now
+    return d
+end
+local function fill_rect(x, y, w, h, col)
+    if not draw or w <= 0 or h <= 0 then return end
+    local fill = draw.rect_filled or draw.RectFilled or draw.filled_rect
+    if not fill then return end
+    pcall(fill, x, y, w, h, col, 0)
+end
+function M.draw_overlay(sw, sh, open_progress)
+    if not settings.bool("april_ui_menu_overlay", true) then return end
+    local strength = clamp(settings.num("april_ui_overlay_strength", 70), 0, 100)
+    if strength <= 0 then
+        strength = 70
+    end
+    local t = open_progress or 0
+    if anim.ease_out_cubic then
+        t = anim.ease_out_cubic(t)
+    end
+    t = clamp(t, 0, 1)
+    if t < 0.01 then return end
+    local a = (strength / 100) * 0.88 * t
+    if a < 0.02 then return end
+    widgets.clip = nil
+    sw = math.floor(tonumber(sw) or 0)
+    sh = math.floor(tonumber(sh) or 0)
+    if sw <= 0 or sh <= 0 then
+        sw, sh = screen_size()
+    end
+    fill_rect(-1, -1, sw + 2, sh + 2, { 0, 0, 0, a })
+end
+function M.draw_snow(sw, sh, open_progress)
+    if not settings.bool("april_ui_snow", false) or anim.reduce_motion() then return end
+    local fade = anim.ease_out_cubic and anim.ease_out_cubic(open_progress or 0) or (open_progress or 0)
+    if fade < 0.02 then return end
+    sw = math.floor(tonumber(sw) or 0)
+    sh = math.floor(tonumber(sh) or 0)
+    if sw <= 0 or sh <= 0 then
+        sw, sh = screen_size()
+    end
+    local amount = math.floor(clamp(settings.num("april_ui_snow_amount", 50), 10, 140) + 0.5)
+    local speed_mul = clamp(settings.num("april_ui_snow_speed", 40), 1, 100) / 40
+    local opacity = clamp(settings.num("april_ui_snow_opacity", 55), 10, 100) / 100
+    local size_mul = clamp(settings.num("april_ui_snow_size", 3), 1, 8) / 3
+    if flake_count ~= amount or #flakes == 0 then rebuild(amount, sw, sh) end
+    widgets.clip = nil
+    local step = dt()
+    local fall = 38 * speed_mul * step
+    local alpha = opacity * fade * 0.9
+    for i = 1, #flakes do
+        local f = flakes[i]
+        f.phase = f.phase + step * f.wobble
+        f.y = f.y + fall * f.speed
+        f.x = f.x + math.sin(f.phase) * f.drift * 18 * step * speed_mul
+        if f.y > sh + 6 then
+            f.y = -6 - math.random() * 24
+            f.x = math.random() * sw
+        elseif f.x < -8 then
+            f.x = sw + 4
+        elseif f.x > sw + 8 then
+            f.x = -4
+        end
+        local s = math.max(1, f.size * size_mul)
+        local a = alpha * (0.55 + 0.45 * ((math.sin(f.phase * 0.7) + 1) * 0.5))
+        fill_rect(f.x, f.y, s, s, { 0.92, 0.95, 1.0, a })
+    end
+end
+function M.draw_backdrop(sw, sh, open_progress)
+    if (not sw or not sh or sw <= 0 or sh <= 0) then
+        sw, sh = screen_size()
+    end
+    M.draw_overlay(sw, sh, open_progress)
+    M.draw_snow(sw, sh, open_progress)
+end
+return M
+end)()
+
 April._mods["ui.startup_intro"] = (function()
 local theme = April.require("ui.gs_theme")
 local anim = April.require("ui.gs_anim")
 local settings = April.require("core.settings")
+local image_cache = April.require("core.image_cache")
+local asset_urls = April.require("game.asset_urls")
 local M = {}
-local DURATION = 5.25
+local DURATION = 4.35
+local MENU_REVEAL_AT = 3.72
+local TEXT_EXIT_AT = 3.12
+local PROFILE_KEY = "startup_author_profile"
 local active = false
 local started_at = 0
 local function clamp01(value)
@@ -25000,6 +25145,9 @@ local function draw_wave(text, center_x, y, size, alpha, phase_offset, amplitude
 end
 function M.init()
     active = settings.bool("april_ui_startup_intro", true)
+    if active then
+        image_cache.ensure(PROFILE_KEY, asset_urls.author_profile_png())
+    end
     started_at = now()
     return active
 end
@@ -25010,7 +25158,7 @@ function M.is_active()
     return active
 end
 function M.should_reveal_menu()
-    return active and (now() - started_at) >= 4.45
+    return active and (now() - started_at) >= MENU_REVEAL_AT
 end
 function M.draw()
     if not active or not draw then return false end
@@ -25023,34 +25171,52 @@ function M.draw()
     anim.sync_theme()
     local width, height = screen_size()
     local black_alpha
-    if elapsed < 0.65 then
-        black_alpha = ease_out_cubic(elapsed / 0.65)
-    elseif elapsed < 4.45 then
+    if elapsed < 0.22 then
+        black_alpha = ease_out_cubic(elapsed / 0.22)
+    elseif elapsed < MENU_REVEAL_AT then
         black_alpha = 1
     else
-        black_alpha = 1 - ease_out_cubic((elapsed - 4.45) / (DURATION - 4.45))
+        black_alpha = 1 - ease_out_cubic((elapsed - MENU_REVEAL_AT) / (DURATION - MENU_REVEAL_AT))
     end
     local fill = draw.rect_filled or draw.RectFilled
-    if fill then fill(0, 0, width, height, { 0, 0, 0, black_alpha }, 0) end
-    local title_t = ease_out_cubic((elapsed - 0.55) / 0.90)
-    local author_t = ease_out_cubic((elapsed - 1.18) / 0.82)
-    local text_out = 1 - ease_out_cubic((elapsed - 3.90) / 0.62)
+    if fill then fill(-1, -1, width + 2, height + 2, { 0, 0, 0, black_alpha }, 0) end
+    local title_t = ease_out_cubic((elapsed - 0.16) / 0.62)
+    local author_t = ease_out_cubic((elapsed - 0.58) / 0.52)
+    local profile_t = ease_out_cubic((elapsed - 0.86) / 0.72)
+    local text_out = 1 - ease_out_cubic((elapsed - TEXT_EXIT_AT) / 0.20)
+    local profile_out = 1 - ease_out_cubic((elapsed - (MENU_REVEAL_AT - 0.18)) / 0.26)
     local title_alpha = title_t * text_out * black_alpha
     local author_alpha = author_t * text_out * black_alpha
+    local profile_alpha = profile_t * profile_out * black_alpha
     local center_x = width * 0.5
     local center_y = height * 0.5
-    local title_x = center_x - (1 - title_t) * math.min(260, width * 0.22)
-    local author_x = center_x + (1 - author_t) * math.min(220, width * 0.18)
-    local title_size = math.max(34, math.floor(46 * (theme.SCALE or 1)))
-    local author_size = math.max(14, math.floor(17 * (theme.SCALE or 1)))
-    draw_wave("April.lua", title_x, center_y - 34, title_size, title_alpha, 0, 3.0)
-    draw_wave("Made by Cunzaki", author_x, center_y + 30, author_size, author_alpha, 1.7, 2.0)
+    local title_x = center_x - (1 - title_t) * math.min(160, width * 0.15)
+    local author_x = center_x + (1 - author_t) * math.min(125, width * 0.12)
+    local title_size = math.max(40, math.floor(54 * (theme.SCALE or 1)))
+    local author_size = math.max(15, math.floor(18 * (theme.SCALE or 1)))
+    draw_wave("April.lua", title_x, center_y - 38, title_size, title_alpha, 0, 1.35)
+    draw_wave("Made by Cunzaki", author_x, center_y + 22, author_size, author_alpha, 1.7, 0.8)
+    if profile_alpha > 0.01 then
+        local final_w = math.max(230, math.min(420, math.floor(math.min(width, height) * 0.50)))
+        local profile_w = final_w
+        local profile_h = math.floor(profile_w * 399 / 375)
+        local profile_x = width - profile_w * 0.76 + (1 - profile_t) * 94
+        local profile_y = height - profile_h * 0.80 + (1 - profile_t) * 74
+        image_cache.draw_fit(
+            PROFILE_KEY,
+            profile_x,
+            profile_y,
+            profile_w,
+            profile_h,
+            { 1, 1, 1, profile_alpha }
+        )
+    end
     local line = draw.line or draw.Line
     if line and author_alpha > 0 then
-        local line_t = ease_out_cubic((elapsed - 1.48) / 0.55) * text_out
-        local half = 58 * line_t
+        local line_t = ease_out_cubic((elapsed - 0.82) / 0.44) * text_out
+        local half = 76 * line_t
         local accent = anim.title_color()
-        line(center_x - half, center_y + 17, center_x + half, center_y + 17,
+        line(center_x - half, center_y + 46, center_x + half, center_y + 46,
             { accent[1], accent[2], accent[3], author_alpha * 0.58 }, 1)
     end
     return true
@@ -25067,6 +25233,7 @@ local icons = April.require("ui.gs_icons")
 local catalog = April.require("ui.catalog")
 local state = April.require("ui.gs_state")
 local hud_dock = April.require("ui.hud_dock")
+local menu_fx = April.require("ui.menu_fx")
 local M = {}
 local TOGGLE_VK_DEFAULT = 0x2D
 local function menu_toggle_vk()
@@ -25454,9 +25621,6 @@ local function draw_group_column(groups, x, y, w, h, scroll_key)
     draw_scrollbar(x + w - 5, y + pad, h - pad * 2, total, scroll_key, h)
 end
 local function split_groups(groups, tab_id)
-    if tab_id == "aim" and #groups >= 4 then
-        return { groups[1], groups[2] }, { groups[3], groups[4] }
-    end
     if tab_id == "aim" and #groups >= 3 then
         return { groups[1] }, { groups[2], groups[3] }
     end
@@ -25496,7 +25660,14 @@ function M.init()
     state.define("april_ui_accent", theme.ACCENT)
     state.define("april_ui_accent_anim", 1)
     state.define("april_ui_anim_speed", 40)
-    state.define("april_ui_bg_dim", 0)
+    state.define("april_ui_menu_overlay", true)
+    state.define("april_ui_overlay_strength", 70)
+    state.define("april_ui_bg_dim", 0) -- legacy (unused by overlay; kept for older profiles)
+    state.define("april_ui_snow", false)
+    state.define("april_ui_snow_amount", 50)
+    state.define("april_ui_snow_speed", 40)
+    state.define("april_ui_snow_size", 3)
+    state.define("april_ui_snow_opacity", 55)
     state.define("april_ui_menu_fade", false)
     state.define("april_ui_anim_targets", {
         true, true, true, true, true, true, true, true,
@@ -25573,12 +25744,10 @@ function M.draw()
     local y = win_y + math.floor((1 - open_progress) * 10 * (theme.SCALE or 1))
     local w, h = theme.WINDOW_W, theme.WINDOW_H
     last_menu_rect = { x = x, y = y, w = w, h = h }
-    gin.set_ui_rect(x, y, w, h)
+    widgets.clip = nil
     local sw, sh = screen_size()
-    local backdrop = math.max(0, math.min(40, tonumber(state.get("april_ui_bg_dim", 0)) or 0))
-    if backdrop > 0 then
-        widgets.rect(0, 0, sw, sh, { 0, 0, 0, backdrop * 0.008 * open_progress }, true)
-    end
+    pcall(menu_fx.draw_backdrop, sw, sh, open_progress)
+    gin.set_ui_rect(x, y, w, h)
     hud_dock.draw_floating(x + w * 0.5, math.max(8, y - 58 * (theme.SCALE or 1)), sw, sh)
     local fade = anim.menu_fade()
     local panel_bg = anim.panel_bg()
@@ -25661,7 +25830,6 @@ M._menu_registered = false
 M.FEATURE_ORDER = {
     "features.combat.camera_aimbot",
     "features.combat.aimbot",
-    "features.combat.ragebot",
     "features.combat.body_peek",
     "features.combat.gun_mods",
     "features.visuals.target_overlay",

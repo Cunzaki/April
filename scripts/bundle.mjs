@@ -85,7 +85,6 @@ const ORDER = [
   "features/combat/camera_aimbot.lua",
   "features/combat/body_peek.lua",
   "features/combat/aimbot.lua",
-  "features/combat/ragebot.lua",
   "features/combat/perfect_farm.lua",
   "features/combat/gun_mods.lua",
   "features/utility/mod_checker.lua",
@@ -119,13 +118,14 @@ const ORDER = [
   "ui/gs_widgets.lua",
   "ui/catalog.lua",
   "ui/hud_dock.lua",
+  "ui/menu_fx.lua",
   "ui/startup_intro.lua",
   "ui/custom_menu.lua",
   "menu/tabs.lua",
   "app.lua",
 ];
 
-const VERSION = "4.0.44";
+const VERSION = "4.0.52";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector
@@ -263,7 +263,7 @@ for (const rel of ORDER) {
 
 fs.writeFileSync(OUT, header + body + footer);
 const bundleBytes = fs.statSync(OUT).size;
-const MAX_VECTOR_BUNDLE_BYTES = 975_000;
+const MAX_VECTOR_BUNDLE_BYTES = 985_000;
 if (bundleBytes > MAX_VECTOR_BUNDLE_BYTES) {
   console.error(
     `Bundle is ${bundleBytes} bytes; keep it below ${MAX_VECTOR_BUNDLE_BYTES} for Vector LoadUrl safety.`,

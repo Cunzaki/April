@@ -10,7 +10,6 @@ M._menu_registered = false
 M.FEATURE_ORDER = {
     "features.combat.camera_aimbot",
     "features.combat.aimbot",
-    "features.combat.ragebot",
     "features.combat.body_peek",
     "features.combat.gun_mods",
     "features.visuals.target_overlay",

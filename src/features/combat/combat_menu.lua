@@ -43,7 +43,7 @@ M.FILTER_SAFEZONE = 4
 M.FILTER_WHITELIST = 5
 M.FILTER_SKIP_DOWNED = 6
 
--- april_silent_targets / april_aim_targets / april_rage_targets
+-- april_silent_targets / april_aim_targets
 -- 1 = Players, 2..9 = Soldier..Pilot Pete (see AIM_AT_OPTIONS).
 M.TARGET_PLAYERS = 1
 M.AIM_AT_OPTIONS = combat_labels.AIM_AT_OPTIONS
@@ -167,7 +167,7 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
         "Sticky Target",
     }, { false }, { parent = parent_id })
     menu.add_slider_int(T, G, p .. "hit_chance", "Hit Chance %", 1, 100, 100, { parent = parent_id })
-    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 150, { parent = parent_id })
+    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 5, 600, opts.fov_default or 150, { parent = parent_id })
 
     menu_util.section(T, G, "Visuals")
     menu.add_checkbox(T, G, p .. "draw_fov", "FOV Circle", false,
@@ -238,7 +238,17 @@ function M.register_aimbot(T, G, prefix, parent_id, opts)
         "Sticky Target",
     }, { false }, { parent = parent_id })
     menu.add_slider_int(T, G, p .. "smooth", "Smoothness", 1, 25, 10, { parent = parent_id })
-    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 20, 600, opts.fov_default or 120, { parent = parent_id })
+    menu.add_combo(T, G, p .. "smooth_type", "Smooth Type", {
+        "Linear",
+        "Ease Out",
+        "Ease In-Out",
+        "Exponential",
+        "Adaptive",
+    }, 0, { parent = parent_id })
+    menu.add_checkbox(T, G, p .. "humanize", "Humanize", false, { parent = parent_id })
+    menu.add_slider_int(T, G, p .. "humanize_str", "Humanize Strength", 1, 100, 35,
+        menu_util.parent(p .. "humanize"))
+    menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 5, 600, opts.fov_default or 120, { parent = parent_id })
 
     menu_util.section(T, G, "Visuals")
     menu.add_checkbox(T, G, p .. "draw_fov", "FOV Circle", false,

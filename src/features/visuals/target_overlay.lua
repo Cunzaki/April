@@ -408,7 +408,7 @@ function M.register_menu()
     menu_util.register_keybind(T, G.VISUALS, P, "Target Gear Overlay", false)
 
     local root = menu_util.parent(P)
-    menu.add_slider_int(T, G.VISUALS, P_FOV, "Gear FOV", 10, 500, DEFAULT_FOV, root)
+    menu.add_slider_int(T, G.VISUALS, P_FOV, "Gear FOV", 5, 500, DEFAULT_FOV, root)
     menu.add_slider_int(T, G.VISUALS, P_DIST, "Max Distance", 50, 2000, DEFAULT_MAX_DIST, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, root)

@@ -12,6 +12,7 @@ local icons = April.require("ui.gs_icons")
 local catalog = April.require("ui.catalog")
 local state = April.require("ui.gs_state")
 local hud_dock = April.require("ui.hud_dock")
+local menu_fx = April.require("ui.menu_fx")
 
 local M = {}
 
@@ -455,10 +456,7 @@ local function draw_group_column(groups, x, y, w, h, scroll_key)
 end
 
 local function split_groups(groups, tab_id)
-    -- Aim: left = Aimbot + Ragebot, right = Silent + Bullet
-    if tab_id == "aim" and #groups >= 4 then
-        return { groups[1], groups[2] }, { groups[3], groups[4] }
-    end
+    -- Aim: Aimbot left, Silent Aim + Bullet right.
     if tab_id == "aim" and #groups >= 3 then
         return { groups[1] }, { groups[2], groups[3] }
     end
@@ -499,7 +497,14 @@ function M.init()
     state.define("april_ui_accent", theme.ACCENT)
     state.define("april_ui_accent_anim", 1)
     state.define("april_ui_anim_speed", 40)
-    state.define("april_ui_bg_dim", 0)
+    state.define("april_ui_menu_overlay", true)
+    state.define("april_ui_overlay_strength", 70)
+    state.define("april_ui_bg_dim", 0) -- legacy (unused by overlay; kept for older profiles)
+    state.define("april_ui_snow", false)
+    state.define("april_ui_snow_amount", 50)
+    state.define("april_ui_snow_speed", 40)
+    state.define("april_ui_snow_size", 3)
+    state.define("april_ui_snow_opacity", 55)
     state.define("april_ui_menu_fade", false)
     state.define("april_ui_anim_targets", {
         true, true, true, true, true, true, true, true,
@@ -585,14 +590,13 @@ function M.draw()
     local y = win_y + math.floor((1 - open_progress) * 10 * (theme.SCALE or 1))
     local w, h = theme.WINDOW_W, theme.WINDOW_H
     last_menu_rect = { x = x, y = y, w = w, h = h }
-    gin.set_ui_rect(x, y, w, h)
 
-    -- Optional backdrop dim; the menu itself stays deliberately flat.
+    -- Fullscreen dim/snow first (no clip, behind every menu element).
+    widgets.clip = nil
     local sw, sh = screen_size()
-    local backdrop = math.max(0, math.min(40, tonumber(state.get("april_ui_bg_dim", 0)) or 0))
-    if backdrop > 0 then
-        widgets.rect(0, 0, sw, sh, { 0, 0, 0, backdrop * 0.008 * open_progress }, true)
-    end
+    pcall(menu_fx.draw_backdrop, sw, sh, open_progress)
+
+    gin.set_ui_rect(x, y, w, h)
 
     -- Static HUD launcher, independent of the menu window.
     hud_dock.draw_floating(x + w * 0.5, math.max(8, y - 58 * (theme.SCALE or 1)), sw, sh)
