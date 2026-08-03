@@ -74,9 +74,12 @@ M.BY_ID = {
     -- Visuals
     april_player_enabled = "Shows boxes and info on other players.",
     april_ui_player_elements = "Choose which info to show on player ESP.",
+    april_player_show_held = "Shows the item a player is holding (same read path as Target Gear).",
     april_player_esp_filters = "Filter which players appear on ESP.",
     april_player_esp_flags = "Show status flags (downed, SZ, staff, revive, movement state, VIP).",
-    april_target_overlay = "Shows your target's held weapon and gear loadout.",
+    april_target_overlay = "Shows held weapon and gear for the player closest to your crosshair.",
+    april_target_overlay_fov = "Independent FOV (pixels from crosshair) used only by Target Gear Overlay.",
+    april_target_overlay_max_dist = "Maximum world distance (studs) for Target Gear Overlay selection.",
     april_crosshair_enabled = "Draws a custom crosshair on screen.",
     april_crosshair_follow = "Moves the crosshair toward your active combat target.",
     april_ui_crosshair_motion = "Adds spin or pulse animation to the crosshair.",
@@ -134,7 +137,7 @@ M.BY_ID = {
     april_anti_afk = "Prevents idle kick by simulating activity.",
     april_mod_checker_enabled = "Alerts you when staff or mods join the server.",
     april_keybinds_enabled = "Shows an on-screen list of your keybinds.",
-    april_event_status_enabled = "Shows live timed crates, event NPCs, bosses, and raid activity.",
+    april_event_status_enabled = "Shows live timed crates, event NPCs, and bosses (raids use Raid ESP only).",
     april_event_status_active_only = "Hides inactive event rows from the event status panel.",
 
     -- Radar

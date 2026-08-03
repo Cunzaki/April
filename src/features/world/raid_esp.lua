@@ -16,7 +16,8 @@ local ID_NOTIFY = "april_raid_notifications"
 local ID_RANGE = "april_raid_range"
 
 local CLUSTER_MERGE_M = 40
-local CLUSTER_TTL_MS = 600000
+-- Auto-clear raid ESP / radar markers after 30 minutes without new signals.
+local CLUSTER_TTL_MS = 30 * 60 * 1000
 local SCAN_MS = 350
 local ROCKET_TRACE_SCAN_MS = 50
 local ROCKET_TRACE_TTL_MS = 2500

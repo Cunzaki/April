@@ -5,19 +5,25 @@ local image_cache = April.require("core.image_cache")
 local items = April.require("game.items")
 local player_gear = April.require("game.player_gear")
 local player_state = April.require("game.player_state")
-local active_target = April.require("features.combat.active_target")
 local text_util = April.require("core.text_util")
 local theme = April.require("core.ui_theme")
 local overlay_theme = April.require("core.overlay_theme")
 local ep = April.require("core.entity_props")
+local esp_util = April.require("core.esp_util")
+local math_util = April.require("core.math_util")
+local cache = April.require("core.cache")
 
 local M = {}
 
 local P = "april_target_overlay"
+local P_FOV = P .. "_fov"
+local P_DIST = P .. "_max_dist"
 local GEAR_SLOTS = 7
 local GEAR_TTL = 500
 local TARGET_POLL_MS = 120
 local MAX_ATTACHMENTS = 5
+local DEFAULT_FOV = 100
+local DEFAULT_MAX_DIST = 500
 
 local gear_cache = {}
 local last_poll_ms = 0
@@ -62,10 +68,50 @@ local function resolve_image_key(piece)
     return nil
 end
 
+local function local_origin()
+    local me = cache.local_player
+    if not me then return nil end
+    return esp_util.vec3_pos(
+        me.Position or me.position or me.HeadPosition or me.head_position
+    )
+end
+
+-- Independent of combat targeting: pick the combat player closest to crosshair
+-- within this overlay's own FOV and max distance.
 local function find_overlay_target()
-    local target = active_target.get_target(nil, active_target.SOURCE_GEAR)
-    if target then return target end
-    return nil
+    local fov = settings.num(P_FOV, DEFAULT_FOV)
+    local max_dist = settings.num(P_DIST, DEFAULT_MAX_DIST)
+    if fov <= 0 or max_dist <= 0 then return nil end
+
+    local ox, oy, oz = local_origin()
+    local sw, sh = draw_util.screen_size()
+    local cx, cy = sw * 0.5, sh * 0.5
+    local best, best_d = nil, fov
+    local max_dist_sq = max_dist * max_dist
+
+    for _, player in ipairs(cache.players or {}) do
+        if player_state.is_combat_target(player) then
+            local hx, hy, hz = esp_util.vec3_pos(ep.head_position(player) or ep.position(player))
+            if hx then
+                if ox then
+                    local dx, dy, dz = hx - ox, hy - oy, hz - oz
+                    if dx * dx + dy * dy + dz * dz > max_dist_sq then
+                        goto continue
+                    end
+                end
+                local sx, sy, on_screen = esp_util.w2s(hx, hy, hz)
+                if on_screen then
+                    local dist = math_util.screen_fov_dist(sx, sy, cx, cy)
+                    if dist <= fov and dist < best_d then
+                        best, best_d = player, dist
+                    end
+                end
+            end
+        end
+        ::continue::
+    end
+
+    return best
 end
 
 local function player_key(player)
@@ -362,13 +408,13 @@ function M.register_menu()
     menu_util.register_keybind(T, G.VISUALS, P, "Target Gear Overlay", false)
 
     local root = menu_util.parent(P)
-    menu.add_combo(T, G.VISUALS, "april_target_gear_source", "Target From",
-        active_target.SOURCE_NAMES, 0, root)
+    menu.add_slider_int(T, G.VISUALS, P_FOV, "Gear FOV", 10, 500, DEFAULT_FOV, root)
+    menu.add_slider_int(T, G.VISUALS, P_DIST, "Max Distance", 50, 2000, DEFAULT_MAX_DIST, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, root)
 
     menu_util.bind_children(P, {
-        "april_target_gear_source", P .. "_gear_size", P .. "_top",
+        P_FOV, P_DIST, P .. "_gear_size", P .. "_top",
     })
 end
 

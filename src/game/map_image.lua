@@ -1,5 +1,5 @@
--- Fallen G-map texture: resolve live Image, cache PNG, draw via tile atlas
--- (Vector has no Image UV crop / clip API — tiles keep the map inside the radar).
+-- Fallen G-map texture. Vector has no image UV crop / clip API, so zoomed
+-- viewports are fetched as one pre-cropped HTTPS image and drawn inside bounds.
 local env = April.require("core.env")
 local asset_urls = April.require("game.asset_urls")
 local config_store = April.require("core.config_store")
@@ -13,6 +13,7 @@ M.ORIGIN_X = 0
 M.ORIGIN_Z = 0
 M.DEFAULT_ASSET = "121836456123484"
 M.TILE_GRID = 16
+M.SOURCE_PX = 700
 -- Soft ocean fill behind tiles (matches Fallen map water-ish tone).
 M.OCEAN = { 0.55, 0.78, 0.90, 0.55 }
 
@@ -31,8 +32,8 @@ local state = {
     fetch_done = false,
     last_resolve_ms = 0,
     next_retry_ms = 0,
-    tiles = {}, -- ["i_j"] = { handle=, url=, failed= }
-    tiles_tried = {},
+    crops = {}, -- crop key -> async image entry
+    active_crop = nil,
 }
 
 local RETRY_MS = 30000
@@ -313,21 +314,21 @@ local function invalidate_handle()
     state.load_url = nil
 end
 
-local function invalidate_tiles()
+local function invalidate_crops()
     if draw and draw.free_image then
-        for _, tile in pairs(state.tiles) do
-            if tile and tile.handle then
-                pcall(draw.free_image, tile.handle)
+        for _, crop in pairs(state.crops) do
+            if crop and crop.handle then
+                pcall(draw.free_image, crop.handle)
             end
         end
     end
-    state.tiles = {}
-    state.tiles_tried = {}
+    state.crops = {}
+    state.active_crop = nil
 end
 
 function M.invalidate()
     invalidate_handle()
-    invalidate_tiles()
+    invalidate_crops()
     state.fetch_started = false
     state.fetch_done = false
     state.next_retry_ms = 0
@@ -496,53 +497,23 @@ function M.world_to_viewport(wx, wz, vp)
     return M.uv_to_viewport(u, v, vp)
 end
 
-local function tile_key(i, j)
-    return tostring(i) .. "_" .. tostring(j)
+local function image_is_loaded(handle)
+    if not handle or not draw then return false end
+    local loaded = draw.image_loaded or draw.ImageLoaded
+    if loaded then
+        local ok, yes = pcall(loaded, handle)
+        return ok and yes == true
+    end
+    -- If the API lacks ImageLoaded, assume ready once we have a handle.
+    return true
 end
 
-local function tile_candidates(asset_id, i, j)
-    local list = {}
-    -- Vector LoadImage only accepts HTTPS — skip local/file tile paths.
-    local cdn = asset_urls.map_tile(asset_id, i, j)
-    if is_usable_load_url(cdn) then
-        list[#list + 1] = cdn
-    end
-    return list
-end
-
-local function ensure_tile(i, j)
-    local asset_id = state.asset_id or M.DEFAULT_ASSET
-    local key = tile_key(i, j)
-    local tile = state.tiles[key]
-    if tile and tile.handle then
-        if draw.image_failed and draw.image_failed(tile.handle) then
-            tile.failed = true
-            tile.handle = nil
-        else
-            return tile.handle
-        end
-    end
-    if tile and tile.failed then return nil end
-    if not draw or not draw.load_image then return nil end
-
-    tile = tile or { idx = 1, urls = tile_candidates(asset_id, i, j) }
-    state.tiles[key] = tile
-    tile.urls = tile.urls or tile_candidates(asset_id, i, j)
-    tile.idx = tile.idx or 1
-
-    while tile.idx <= #tile.urls do
-        local url = tile.urls[tile.idx]
-        tile.idx = tile.idx + 1
-        local ok, handle = pcall(draw.load_image, url)
-        if ok and handle then
-            tile.handle = handle
-            tile.url = url
-            return handle
-        end
-    end
-
-    tile.failed = true
-    return nil
+local function image_has_failed(handle)
+    if not handle or not draw then return false end
+    local failed = draw.image_failed or draw.ImageFailed
+    if not failed then return false end
+    local ok, yes = pcall(failed, handle)
+    return ok and yes == true
 end
 
 local function image_draw(handle, x, y, w, h, alpha)
@@ -553,9 +524,147 @@ local function image_draw(handle, x, y, w, h, alpha)
     return pcall(image_fn, handle, x, y, w, h, 255, 255, 255, a)
 end
 
--- Draw the world map inside map_rect using the full HTTPS texture (fit).
--- Vector LoadImage only accepts certain HTTPS URLs (tr.rbxcdn.com), not local files.
--- Player/blip UVs use fit mode so geography stays correct inside the radar.
+local function draw_fit(map_rect, alpha)
+    if not (M.ready() and state.handle) then return false end
+    if image_has_failed(state.handle) then return false end
+    return image_draw(state.handle, map_rect.x, map_rect.y, map_rect.w, map_rect.h, alpha)
+end
+
+local MAX_CROP_HANDLES = 12
+
+local function crop_key(spec)
+    return table.concat({
+        spec.asset_id, spec.cx, spec.cy, spec.cw, spec.ch, spec.out_w, spec.out_h,
+    }, ":")
+end
+
+local function crop_spec(view, map_rect)
+    local img_size = tonumber(view and view.img_size) or 0
+    if img_size <= 0 then return nil end
+
+    local src = M.SOURCE_PX
+    local cw = math.max(1, math.min(src, math.floor(src * map_rect.w / img_size + 0.5)))
+    local ch = math.max(1, math.min(src, math.floor(src * map_rect.h / img_size + 0.5)))
+    if cw >= src and ch >= src then return nil end
+
+    local pu, pv = M.world_to_uv(view.view_x or 0, view.view_z or 0)
+    local cx = math.floor(pu * src - cw * 0.5 + 0.5)
+    local cy = math.floor(pv * src - ch * 0.5 + 0.5)
+    cx = math.max(0, math.min(src - cw, cx))
+    cy = math.max(0, math.min(src - ch, cy))
+
+    local spec = {
+        asset_id = tostring(state.asset_id or M.DEFAULT_ASSET),
+        cx = cx, cy = cy, cw = cw, ch = ch,
+        out_w = math.max(32, math.floor(map_rect.w + 0.5)),
+        out_h = math.max(32, math.floor(map_rect.h + 0.5)),
+        vp = {
+            u0 = cx / src,
+            v0 = cy / src,
+            u1 = (cx + cw) / src,
+            v1 = (cy + ch) / src,
+            ready = true,
+        },
+    }
+    spec.key = crop_key(spec)
+    return spec
+end
+
+local function free_crop(entry)
+    if entry and entry.handle and draw and draw.free_image then
+        pcall(draw.free_image, entry.handle)
+    end
+    if state.active_crop == entry then state.active_crop = nil end
+end
+
+local function prune_crops()
+    local count = 0
+    for _ in pairs(state.crops) do count = count + 1 end
+    while count > MAX_CROP_HANDLES do
+        local oldest_key, oldest
+        for key, entry in pairs(state.crops) do
+            if entry ~= state.active_crop
+                and (not oldest or (entry.last_used or 0) < (oldest.last_used or 0))
+            then
+                oldest_key, oldest = key, entry
+            end
+        end
+        if not oldest_key then break end
+        free_crop(oldest)
+        state.crops[oldest_key] = nil
+        count = count - 1
+    end
+end
+
+local function ensure_crop(spec)
+    if not spec or not draw then return nil end
+    local load_fn = draw.load_image or draw.LoadImage
+    if not load_fn then return nil end
+
+    local entry = state.crops[spec.key]
+    if not entry then
+        local urls = asset_urls.map_crop_urls(
+            spec.asset_id, spec.cx, spec.cy, spec.cw, spec.ch, spec.out_w, spec.out_h
+        )
+        entry = {
+            key = spec.key,
+            urls = urls,
+            idx = 1,
+            vp = spec.vp,
+            last_used = tick_ms(),
+        }
+        state.crops[spec.key] = entry
+        prune_crops()
+        -- prune_crops may evict this just-created request only if every older
+        -- entry is active; in that rare case, recreate it on the next frame.
+        if state.crops[spec.key] ~= entry then return nil end
+    end
+    entry.last_used = tick_ms()
+
+    if entry.handle then
+        if image_has_failed(entry.handle) then
+            free_crop(entry)
+            entry.handle = nil
+        elseif image_is_loaded(entry.handle) then
+            entry.ready = true
+            state.active_crop = entry
+            prune_crops()
+            return entry
+        else
+            return nil
+        end
+    end
+
+    while entry.idx <= #(entry.urls or {}) do
+        local url = entry.urls[entry.idx]
+        entry.idx = entry.idx + 1
+        local ok, handle = pcall(load_fn, url)
+        if ok and handle then
+            entry.handle = handle
+            entry.url = url
+            if image_is_loaded(handle) then
+                entry.ready = true
+                state.active_crop = entry
+                prune_crops()
+                return entry
+            end
+            return nil
+        end
+    end
+    entry.failed = true
+    prune_crops()
+    return nil
+end
+
+local function draw_crop(entry, map_rect, alpha)
+    if not entry or not entry.handle or not image_is_loaded(entry.handle) then
+        return false
+    end
+    return image_draw(entry.handle, map_rect.x, map_rect.y, map_rect.w, map_rect.h, alpha)
+end
+
+-- Draw one image exactly inside map_rect. Zoomed images are cropped remotely
+-- because Vector exposes neither a clip rect nor Image UV coordinates.
 function M.draw_centered(view, map_rect, alpha)
     if not view or not map_rect then
         return nil
@@ -563,17 +672,32 @@ function M.draw_centered(view, map_rect, alpha)
     M.ensure()
     alpha = alpha or 0.92
 
-    if draw and draw.rect_filled then
-        pcall(draw.rect_filled, map_rect.x, map_rect.y, map_rect.w, map_rect.h, M.OCEAN, 0)
+    if draw and (draw.rect_filled or draw.RectFilled) then
+        local rf = draw.rect_filled or draw.RectFilled
+        pcall(rf, map_rect.x, map_rect.y, map_rect.w, map_rect.h, M.OCEAN, 0)
     end
 
-    if M.ready() and state.handle then
-        if draw.image_failed and draw.image_failed(state.handle) then
-            return nil
+    local spec = crop_spec(view, map_rect)
+    if spec then
+        local wanted = ensure_crop(spec)
+        if wanted and draw_crop(wanted, map_rect, alpha) then
+            view.vp = wanted.vp
+            return "crop"
         end
-        if image_draw(state.handle, map_rect.x, map_rect.y, map_rect.w, map_rect.h, alpha) then
-            return "fit"
+
+        -- Keep the previous crop visible and keep blips aligned while the new
+        -- request loads. The desired handle is polled every frame automatically.
+        local active = state.active_crop
+        if active and draw_crop(active, map_rect, alpha) then
+            active.last_used = tick_ms()
+            view.vp = active.vp
+            return "crop"
         end
+    end
+
+    if draw_fit(map_rect, alpha) then
+        view.vp = { u0 = 0, v0 = 0, u1 = 1, v1 = 1, ready = true }
+        return "fit"
     end
 
     return nil

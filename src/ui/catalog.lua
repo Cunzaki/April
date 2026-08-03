@@ -263,11 +263,11 @@ local function build_visuals()
             kb("april_player_enabled", "Player ESP", false, nil, { hide_color = true }),
             combo("april_player_box_mode", "Player Box", { "None", "2D", "Corner" }, 1),
             multi("april_ui_player_elements", "Displayed Elements", {
-                "Health Bar", "Skeleton", "Name", "Clan Tag", "Distance",
-            }, { true, false, true, true, true }, nil, {
+                "Health Bar", "Skeleton", "Name", "Clan Tag", "Held Item", "Distance",
+            }, { true, false, true, true, false, true }, nil, {
                 sync_ids = {
                     "april_player_health", "april_player_skeleton", "april_player_show_name",
-                    "april_player_clan_tag", "april_player_show_distance",
+                    "april_player_clan_tag", "april_player_show_held", "april_player_show_distance",
                 },
             }),
             multi("april_player_esp_filters", "ESP Filters", {
@@ -285,7 +285,8 @@ local function build_visuals()
         master = "april_target_overlay",
         items = {
             kb("april_target_overlay", "Target Gear Overlay", false),
-            combo("april_target_gear_source", "Target From", { "Auto", "Ragebot", "Silent Aim", "Aimbot" }, 0, "april_target_overlay"),
+            sl("april_target_overlay_fov", "Gear FOV", 10, 500, 100, false, "april_target_overlay"),
+            sl("april_target_overlay_max_dist", "Max Distance", 50, 2000, 500, false, "april_target_overlay"),
             sl("april_target_overlay_gear_size", "Gear Icon Size", 32, 64, 48, false, "april_target_overlay"),
             sl("april_target_overlay_top", "Top Offset", 48, 160, 88, false, "april_target_overlay"),
         },
@@ -330,6 +331,7 @@ local function build_visuals()
             color("april_player_skeleton", "Skeleton", { 1, 1, 1, 0.92 }),
             color("april_player_show_name", "Name", { 1, 0.35, 0.35, 1 }),
             color("april_player_clan_tag", "Clan Tag", { 0.84, 0.31, 0.80, 1 }),
+            color("april_player_show_held", "Held Item", { 0.95, 0.9, 0.55, 0.95 }),
             color("april_player_show_distance", "Distance", { 0.82, 0.84, 0.88, 0.92 }),
             sep(),
             color("april_player_flag_downed", "Downed", { 1, 0.35, 0.35, 1 }),

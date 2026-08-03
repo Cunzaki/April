@@ -17,6 +17,47 @@ local NOCLIP_PARTS = {
 local HIP_OFFSET = 3.0
 local DEFAULT_GRAVITY = 196.2
 
+-- Snapshot CanCollide before noclip so restore never force-enables Head/Torso
+-- collision (Fallen keeps those off — forcing true blocks crouch gaps).
+local collide_snap = {}
+
+local function part_key(inst)
+    if not inst then return nil end
+    return inst.Address or inst.address or tostring(inst)
+end
+
+local function read_can_collide(inst)
+    if not inst then return nil end
+    local ok, v = pcall(function()
+        if part and part.get_can_collide then
+            return part.get_can_collide(inst)
+        end
+        if part and part.GetCanCollide then
+            return part.GetCanCollide(inst)
+        end
+        return inst.CanCollide
+    end)
+    if ok and v ~= nil then return v == true end
+    return nil
+end
+
+local function snapshot_collide(inst)
+    local key = part_key(inst)
+    if not key then return end
+    if collide_snap[key] == nil then
+        collide_snap[key] = read_can_collide(inst)
+    end
+end
+
+local function restore_collide(inst)
+    local key = part_key(inst)
+    if not key then return end
+    local prev = collide_snap[key]
+    collide_snap[key] = nil
+    if prev == nil then return end
+    M.set_part_collide(inst, prev)
+end
+
 function M.delta_time()
     if utility and utility.get_delta_time then
         local dt = utility.get_delta_time()
@@ -82,10 +123,44 @@ function M.iter_parts(char)
     return out
 end
 
+function M.clear_collide_snapshots()
+    for k in pairs(collide_snap) do
+        collide_snap[k] = nil
+    end
+end
+
+-- Fallen keeps Head/Torso non-collidable. Older builds force-enabled them on
+-- every fly-off tick and blocked crouch gaps; this restores sane defaults.
+local FALLEN_PART_COLLIDE = {
+    HumanoidRootPart = true,
+    Torso = false,
+    UpperTorso = false,
+    LowerTorso = false,
+    Head = false,
+}
+
+function M.reset_fallen_collision(char)
+    if not char then return end
+    M.clear_collide_snapshots()
+    for name, collide in pairs(FALLEN_PART_COLLIDE) do
+        local p = M.find_part(char, name)
+        if p and M.is_base_part(p) then
+            M.set_part_collide(p, collide)
+        end
+    end
+end
+
 function M.set_character_noclip(char, _root, enabled)
-    local collide = not enabled
+    if not char then return end
+    if enabled then
+        for _, inst in ipairs(M.iter_parts(char)) do
+            snapshot_collide(inst)
+            M.set_part_collide(inst, false)
+        end
+        return
+    end
     for _, inst in ipairs(M.iter_parts(char)) do
-        M.set_part_collide(inst, collide)
+        restore_collide(inst)
     end
 end
 
@@ -143,6 +218,8 @@ function M.set_part_collide(inst, collide)
     if not inst then return end
     if part and part.set_can_collide then
         pcall(part.set_can_collide, inst, collide)
+    elseif part and part.SetCanCollide then
+        pcall(part.SetCanCollide, inst, collide)
     else
         pcall(function() inst.CanCollide = collide end)
     end
@@ -150,11 +227,20 @@ end
 
 function M.set_noclip_parts(char, enabled)
     if not char then return end
-    local collide = not enabled
+    if enabled then
+        for i = 1, #NOCLIP_PARTS do
+            local p = M.find_part(char, NOCLIP_PARTS[i])
+            if p and M.is_base_part(p) then
+                snapshot_collide(p)
+                M.set_part_collide(p, false)
+            end
+        end
+        return
+    end
     for i = 1, #NOCLIP_PARTS do
         local p = M.find_part(char, NOCLIP_PARTS[i])
         if p and M.is_base_part(p) then
-            M.set_part_collide(p, collide)
+            restore_collide(p)
         end
     end
 end

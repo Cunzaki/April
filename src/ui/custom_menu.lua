@@ -1,7 +1,7 @@
 --[[
   Gamesense-style custom menu for April.
   INSERT toggles by default (rebindable in Config -> Menu).
-  Scroll: mouse wheel when Vector exposes a reader; else edge-hover (top/bottom of column).
+  Scroll: mouse wheel when available, middle-button drag, or edge hover.
 ]]
 
 local theme = April.require("ui.gs_theme")
@@ -29,6 +29,7 @@ local tab_index = 1
 local win_x, win_y = 80, 80
 local scroll = { left = 0, right = 0 }
 local scroll_visual = { left = 0, right = 0 }
+local middle_scroll = nil
 local collapsed_groups = {}
 local last_menu_rect = nil
 
@@ -36,6 +37,7 @@ local SCROLL_EDGE = 36
 local SCROLL_SPEED = 5
 local WHEEL_STEP = 48
 local PAGE_STEP = 90
+local MIDDLE_DRAG_SCALE = 1.35
 local VK_PRIOR, VK_NEXT = 0x21, 0x22
 
 local function screen_size()
@@ -272,12 +274,38 @@ end
 
 local function handle_column_scroll(x, y, w, h, scroll_key, content_h)
     local max_scroll = clamp_scroll(scroll_key, content_h, h)
-    if max_scroll <= 0 then return end
+    if max_scroll <= 0 then
+        if middle_scroll and middle_scroll.key == scroll_key then middle_scroll = nil end
+        return
+    end
 
     local hot = gin.hover(x, y, w + 14, h)
+    if middle_scroll and middle_scroll.key == scroll_key then
+        if gin.mmb then
+            scroll[scroll_key] = middle_scroll.start_scroll
+                + (middle_scroll.start_y - gin.my) * MIDDLE_DRAG_SCALE
+            clamp_scroll(scroll_key, content_h, h)
+            widgets.interacted = true
+            return
+        end
+        middle_scroll = nil
+    end
     if not hot then return end
 
-    -- Prefer real wheel when any probe delivers notches this frame.
+    -- Guaranteed documented fallback: hold the middle mouse button and drag.
+    -- Wheel rotation has no documented Vector reader, so this uses VK_MBUTTON
+    -- plus GetMousePosition and works even when Roblox wheel signals are absent.
+    if gin.mmb_click then
+        middle_scroll = {
+            key = scroll_key,
+            start_y = gin.my,
+            start_scroll = scroll[scroll_key],
+        }
+        widgets.interacted = true
+        return
+    end
+
+    -- Prefer real wheel when a runtime event/getter delivers notches this frame.
     -- Open dropdowns consume the wheel first (see gs_widgets).
     if gin.wheel ~= 0 and not widgets.wheel_consumed then
         scroll[scroll_key] = scroll[scroll_key] - gin.wheel * WHEEL_STEP
@@ -298,7 +326,8 @@ local function handle_column_scroll(x, y, w, h, scroll_key, content_h)
         return
     end
 
-    -- Fallback: edge hover (only when wheel isn't available / not moving).
+    -- Runtime wheel events are not available on every Vector build. Preserve
+    -- edge-hover as a no-click fallback alongside middle-button drag.
     if gin.my < y + SCROLL_EDGE then
         scroll[scroll_key] = scroll[scroll_key] - SCROLL_SPEED
         clamp_scroll(scroll_key, content_h, h)
@@ -306,6 +335,7 @@ local function handle_column_scroll(x, y, w, h, scroll_key, content_h)
         scroll[scroll_key] = scroll[scroll_key] + SCROLL_SPEED
         clamp_scroll(scroll_key, content_h, h)
     end
+
 end
 
 local function draw_group_title(x, box_top, w, title, collapsed, hot)

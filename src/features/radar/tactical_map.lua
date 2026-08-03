@@ -306,9 +306,8 @@ local function draw_map_item(wx, wz, col, label, shape, view, scale, layout, siz
     end
 end
 
-local function draw_radar_frame(layout, bg, grid, zoom, north_up)
+local function draw_radar_frame(layout, bg, _grid, zoom, _north_up)
     local x, y, w, h = layout.x, layout.y, layout.w, layout.h
-    local cx, cy = layout.cx, layout.cy
 
     overlay_theme.draw_panel(x, y, w, h, "RADAR")
 
@@ -321,35 +320,6 @@ local function draw_radar_frame(layout, bg, grid, zoom, north_up)
     local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
     local zoom_w = theme.text_w(zoom_text, 9)
     draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, theme.TEXT_DIM, 9)
-
-    local circle = draw_fn("circle", "Circle")
-    local accent = overlay_theme.accent()
-    if circle then
-        pcall(circle, cx, cy, layout.radius, theme.alpha(accent, 0.24), 40, 1)
-        pcall(circle, cx, cy, layout.radius * 0.66, theme.alpha(grid or theme.BORDER, 0.11), 32, 1)
-        pcall(circle, cx, cy, layout.radius * 0.33, theme.alpha(grid or theme.BORDER, 0.08), 24, 1)
-    end
-    local line = draw_fn("line", "Line")
-    if line then
-        local axis = theme.alpha(grid or theme.BORDER, 0.10)
-        pcall(line, cx - layout.radius, cy, cx - 10, cy, axis, 1)
-        pcall(line, cx + 10, cy, cx + layout.radius, cy, axis, 1)
-        pcall(line, cx, cy - layout.radius, cx, cy - 10, axis, 1)
-        pcall(line, cx, cy + 10, cx, cy + layout.radius, axis, 1)
-
-        local tick = theme.alpha(accent, 0.30)
-        pcall(line, cx - 3, cy - layout.radius, cx + 3, cy - layout.radius, tick, 1)
-        pcall(line, cx + layout.radius, cy - 3, cx + layout.radius, cy + 3, tick, 1)
-        pcall(line, cx - 3, cy + layout.radius, cx + 3, cy + layout.radius, tick, 1)
-        pcall(line, cx - layout.radius, cy - 3, cx - layout.radius, cy + 3, tick, 1)
-    end
-
-    local forward = theme.alpha(accent, 0.78)
-    if north_up then
-        draw_util.text(cx - 3, cy - layout.radius + 4, "N", forward, 9)
-    else
-        draw_util.text(cx - 3, cy - layout.radius + 5, "^", forward, 9)
-    end
 end
 
 -- Facing arrow. tip points along `ang` (0 = screen up / north).
@@ -394,9 +364,11 @@ local function draw_facing_arrow(mx, my, col, scale, ang)
 end
 
 -- Player-centered north-up view. Map pans under the local player.
+-- Scale against the square panel span so chunks fill the radar body (not just the inscribed circle).
 local function build_north_view(cx, cy, radius, zoom, body_x, body_z, map_rect)
     local visible = BASE_VISIBLE_STUDS / math.max(zoom, 0.05)
-    local pixels_per_stud = (radius * 2) / visible
+    local span = math.max(map_rect.w or 0, map_rect.h or 0, (radius or 0) * 2)
+    local pixels_per_stud = span / visible
     local world = map_image.world_size()
     local img_size = world * pixels_per_stud
     local pu, pv = map_image.world_to_uv(body_x or 0, body_z or 0)
@@ -437,12 +409,49 @@ local function attach_map_texture(view)
     if not ok or not mode then
         return false
     end
-    -- Fit (and future tile modes): project with UVs across the radar square.
-    view.vp = { u0 = 0, v0 = 0, u1 = 1, v1 = 1, ready = true }
-    if mode == "tiles" then
-        view.vp = nil
+    if mode == "crop" then
+        -- map_image supplies the exact crop viewport used by the displayed PNG.
+        view.texture_mode = "crop"
+    else
+        -- Fit only when the full world is visible — UVs span the radar square.
+        view.vp = { u0 = 0, v0 = 0, u1 = 1, v1 = 1, ready = true }
+        view.texture_mode = "fit"
     end
     return true
+end
+
+-- Repaint panel padding/title and map guides after the bounded image.
+-- Do NOT refill map_rect (draw_panel would wipe the map).
+local function cover_map_overflow(layout, map_rect, zoom, _north_up)
+    local rect_f = draw_fn("rect_filled", "RectFilled")
+    if not rect_f then return end
+    local x, y, w, h = layout.x, layout.y, layout.w, layout.h
+    local fill = overlay_theme.panel_bg()
+
+    -- Title bar strip (includes top padding above map_rect)
+    local title_h = math.max(TITLE_H + 3, map_rect.y - y)
+    pcall(rect_f, x, y, w, title_h, fill, 0)
+
+    local left_w = math.max(0, map_rect.x - x)
+    local right_x = map_rect.x + map_rect.w
+    local right_w = math.max(0, x + w - right_x)
+    local bottom_y = map_rect.y + map_rect.h
+    local bottom_h = math.max(0, y + h - bottom_y)
+    if left_w > 0 then
+        pcall(rect_f, x, map_rect.y, left_w, map_rect.h + bottom_h, fill, 0)
+    end
+    if right_w > 0 then
+        pcall(rect_f, right_x, map_rect.y, right_w, map_rect.h + bottom_h, fill, 0)
+    end
+    if bottom_h > 0 then
+        pcall(rect_f, map_rect.x, bottom_y, map_rect.w, bottom_h, fill, 0)
+    end
+
+    -- Re-draw title / zoom on top of the covered strips.
+    draw_util.text(x + 12, y + 8, "RADAR", overlay_theme.text(), 11)
+    local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
+    local zoom_w = theme.text_w(zoom_text, 9)
+    draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, theme.TEXT_DIM, 9)
 end
 
 function M.register_menu()
@@ -525,12 +534,14 @@ function M.draw_inner()
         w = w - 14,
         h = h - TITLE_H - 10,
     }
-    -- Fill the radar body so the map has no side letterbox bars.
+    -- Keep map imagery square and fully inside the radar body. A single image
+    -- now occupies this exact rect, so it cannot bleed beyond panel bounds.
+    local map_span = math.max(32, math.min(body.w, body.h))
     local map_rect = {
-        x = body.x,
-        y = body.y,
-        w = math.max(32, body.w),
-        h = math.max(32, body.h),
+        x = body.x + (body.w - map_span) * 0.5,
+        y = body.y + (body.h - map_span) * 0.5,
+        w = map_span,
+        h = map_span,
     }
     local cx = map_rect.x + map_rect.w * 0.5
     local cy = map_rect.y + map_rect.h * 0.5
@@ -568,10 +579,9 @@ function M.draw_inner()
 
     if north_up then
         attach_map_texture(view)
-        local rect_f = draw_fn("rect_filled", "RectFilled")
-        if rect_f then
-            pcall(rect_f, body.x, body.y, body.w, body.h,
-                theme.alpha(theme.PANEL_DEEP, 0.10), 7)
+        if view.texture_mode then
+            -- Repaint panel padding/title over the map image.
+            cover_map_overflow(layout, map_rect, zoom, true)
         end
     end
 

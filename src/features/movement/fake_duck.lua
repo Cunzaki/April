@@ -102,11 +102,9 @@ end
 
 local function set_hip_height(hum, value)
     if not hum then return end
+    -- Only write Humanoid.HipHeight. Fallen StateController owns this value;
+    -- writing it onto the player/entity object can leave a sticky oversized pose.
     pcall(function() hum.HipHeight = value end)
-    local lp = env.get_local_player()
-    if lp then
-        pcall(function() lp.HipHeight = value end)
-    end
 end
 
 local function static_duck_hip()

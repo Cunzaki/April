@@ -1,12 +1,12 @@
 --[[
     April Fallen - Fallen Survival for Project Vector
     https://github.com/Cunzaki/April
-    Built: 2026-08-02T19:16:01.592Z
+    Built: 2026-08-03T18:35:39.999Z
     UI: custom Gamesense menu (INSERT) - Vector menu tabs disabled
 ]]
 
 April = {
-    version = "4.0.24",
+    version = "4.0.38",
     debug = false,
     _mods = {},
     bundled = true,
@@ -3203,6 +3203,8 @@ April._mods["game.asset_urls"] = (function()
 local M = {}
 
 M.CDN_BASE = "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/assets"
+-- jsDelivr mirrors the same assets and is more reliable for LoadImage tile fetches.
+M.JSDELIVR_BASE = "https://cdn.jsdelivr.net/gh/Cunzaki/April@main/assets"
 
 local function digits(id)
     return id and tostring(id):match("(%d+)")
@@ -3268,10 +3270,49 @@ function M.map_png(asset_id)
     return M.CDN_BASE .. "/maps/" .. asset_id .. ".png"
 end
 
+-- Vector's draw API has no UV crop or clip rect. wsrv returns one already-cropped
+-- PNG, allowing the radar to draw a zoomed viewport as a single bounded image.
+function M.map_crop_urls(asset_id, cx, cy, cw, ch, out_w, out_h)
+    asset_id = digits(asset_id)
+    if not asset_id then return {} end
+
+    local source = string.format(
+        "raw.githubusercontent.com/Cunzaki/April/refs/heads/main/assets/maps/%s.png",
+        asset_id
+    )
+    local query = string.format(
+        "?url=%s&cx=%d&cy=%d&cw=%d&ch=%d&precrop&w=%d&h=%d&fit=fill&output=png",
+        source,
+        math.floor(cx), math.floor(cy),
+        math.floor(cw), math.floor(ch),
+        math.floor(out_w), math.floor(out_h)
+    )
+    return {
+        "https://wsrv.nl/" .. query,
+        "https://images.weserv.nl/" .. query,
+    }
+end
+
 function M.map_tile(asset_id, tx, ty)
     asset_id = digits(asset_id)
     if not asset_id then return nil end
     return string.format("%s/maps/%s/tiles/%d_%d.png", M.CDN_BASE, asset_id, tx, ty)
+end
+
+function M.map_tile_jsdelivr(asset_id, tx, ty)
+    asset_id = digits(asset_id)
+    if not asset_id then return nil end
+    return string.format("%s/maps/%s/tiles/%d_%d.png", M.JSDELIVR_BASE, asset_id, tx, ty)
+end
+
+-- Preferred order for Vector LoadImage (jsDelivr first — raw GitHub often 404s tiles).
+function M.map_tile_urls(asset_id, tx, ty)
+    local list = {}
+    local a = M.map_tile_jsdelivr(asset_id, tx, ty)
+    local b = M.map_tile(asset_id, tx, ty)
+    if a then list[#list + 1] = a end
+    if b and b ~= a then list[#list + 1] = b end
+    return list
 end
 
 function M.mod_warning_png()
@@ -5965,6 +6006,47 @@ local NOCLIP_PARTS = {
 local HIP_OFFSET = 3.0
 local DEFAULT_GRAVITY = 196.2
 
+-- Snapshot CanCollide before noclip so restore never force-enables Head/Torso
+-- collision (Fallen keeps those off — forcing true blocks crouch gaps).
+local collide_snap = {}
+
+local function part_key(inst)
+    if not inst then return nil end
+    return inst.Address or inst.address or tostring(inst)
+end
+
+local function read_can_collide(inst)
+    if not inst then return nil end
+    local ok, v = pcall(function()
+        if part and part.get_can_collide then
+            return part.get_can_collide(inst)
+        end
+        if part and part.GetCanCollide then
+            return part.GetCanCollide(inst)
+        end
+        return inst.CanCollide
+    end)
+    if ok and v ~= nil then return v == true end
+    return nil
+end
+
+local function snapshot_collide(inst)
+    local key = part_key(inst)
+    if not key then return end
+    if collide_snap[key] == nil then
+        collide_snap[key] = read_can_collide(inst)
+    end
+end
+
+local function restore_collide(inst)
+    local key = part_key(inst)
+    if not key then return end
+    local prev = collide_snap[key]
+    collide_snap[key] = nil
+    if prev == nil then return end
+    M.set_part_collide(inst, prev)
+end
+
 function M.delta_time()
     if utility and utility.get_delta_time then
         local dt = utility.get_delta_time()
@@ -6030,10 +6112,44 @@ function M.iter_parts(char)
     return out
 end
 
+function M.clear_collide_snapshots()
+    for k in pairs(collide_snap) do
+        collide_snap[k] = nil
+    end
+end
+
+-- Fallen keeps Head/Torso non-collidable. Older builds force-enabled them on
+-- every fly-off tick and blocked crouch gaps; this restores sane defaults.
+local FALLEN_PART_COLLIDE = {
+    HumanoidRootPart = true,
+    Torso = false,
+    UpperTorso = false,
+    LowerTorso = false,
+    Head = false,
+}
+
+function M.reset_fallen_collision(char)
+    if not char then return end
+    M.clear_collide_snapshots()
+    for name, collide in pairs(FALLEN_PART_COLLIDE) do
+        local p = M.find_part(char, name)
+        if p and M.is_base_part(p) then
+            M.set_part_collide(p, collide)
+        end
+    end
+end
+
 function M.set_character_noclip(char, _root, enabled)
-    local collide = not enabled
+    if not char then return end
+    if enabled then
+        for _, inst in ipairs(M.iter_parts(char)) do
+            snapshot_collide(inst)
+            M.set_part_collide(inst, false)
+        end
+        return
+    end
     for _, inst in ipairs(M.iter_parts(char)) do
-        M.set_part_collide(inst, collide)
+        restore_collide(inst)
     end
 end
 
@@ -6091,6 +6207,8 @@ function M.set_part_collide(inst, collide)
     if not inst then return end
     if part and part.set_can_collide then
         pcall(part.set_can_collide, inst, collide)
+    elseif part and part.SetCanCollide then
+        pcall(part.SetCanCollide, inst, collide)
     else
         pcall(function() inst.CanCollide = collide end)
     end
@@ -6098,11 +6216,20 @@ end
 
 function M.set_noclip_parts(char, enabled)
     if not char then return end
-    local collide = not enabled
+    if enabled then
+        for i = 1, #NOCLIP_PARTS do
+            local p = M.find_part(char, NOCLIP_PARTS[i])
+            if p and M.is_base_part(p) then
+                snapshot_collide(p)
+                M.set_part_collide(p, false)
+            end
+        end
+        return
+    end
     for i = 1, #NOCLIP_PARTS do
         local p = M.find_part(char, NOCLIP_PARTS[i])
         if p and M.is_base_part(p) then
-            M.set_part_collide(p, collide)
+            restore_collide(p)
         end
     end
 end
@@ -6523,6 +6650,7 @@ local _installed = false
 local fly_active = false
 local fly_noclip = false
 local tracked_char_id = nil
+local collision_healed_id = nil
 local last_fly_zero_ms = 0
 
 -- Slider 1-20 studs/s
@@ -6592,6 +6720,14 @@ local function has_move_input(mx, my, mz)
 end
 
 local function set_fly_noclip(char, enabled)
+    enabled = enabled == true
+    if enabled == fly_noclip then
+        -- Still apply enable so new characters get noclip after respawn.
+        if enabled and char then
+            move.set_noclip_parts(char, true)
+        end
+        return
+    end
     fly_noclip = enabled
     if not char then return end
     move.set_noclip_parts(char, enabled)
@@ -6695,9 +6831,14 @@ function M.tick(_dt)
 
     local cid = char_id(char)
     if cid ~= tracked_char_id then
+        if fly_noclip then
+            move.set_noclip_parts(char, false)
+        end
         fly_active = false
         fly_noclip = false
+        move.clear_collide_snapshots()
         tracked_char_id = cid
+        collision_healed_id = nil
     end
 
     local want_fly = settings.enabled(P_FLY)
@@ -6706,10 +6847,12 @@ function M.tick(_dt)
         fly_active = true
         tick_fly(root, hum, char)
     else
-        if fly_active then
+        if fly_active or fly_noclip then
             abort_active(root, char)
-        else
-            set_fly_noclip(char, false)
+        elseif collision_healed_id ~= cid then
+            -- One-shot heal for characters stuck with Head/Torso collide from older builds.
+            move.reset_fallen_collision(char)
+            collision_healed_id = cid
         end
         if settings.enabled(P_SLOWFALL) then
             tick_slowfall(root, hum, _dt)
@@ -6764,15 +6907,18 @@ local MENU_KEYS = {
     "april_player_enabled", "april_player_enabled_mode",
     "april_player_box_mode", "april_player_box_color",
     "april_player_health", "april_player_skeleton",
-    "april_player_show_name", "april_player_show_distance",
+    "april_player_show_name", "april_player_show_held", "april_player_show_distance",
     "april_player_clan_tag",
     "april_player_flag_downed", "april_player_flag_safezone",
     "april_player_flag_staff", "april_player_flag_reviving",
     "april_player_flag_movement", "april_player_flag_vip",
     "april_player_esp_filters", "april_player_esp_flags",
     "april_player_range",
-        "april_target_overlay", "april_target_overlay_gear_size", "april_target_overlay_top",
-    "april_crosshair_source", "april_target_gear_source",
+    "april_target_overlay", "april_target_overlay_fov", "april_target_overlay_max_dist",
+    "april_target_overlay_gear_size", "april_target_overlay_top",
+    "april_crosshair_source",
+    -- Legacy profile key retained for load compatibility.
+    "april_target_gear_source",
     "april_crosshair_enabled", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
     "april_crosshair_thickness", "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
     "april_crosshair_rainbow", "april_crosshair_rainbow_speed",
@@ -6876,7 +7022,7 @@ local COLOR_KEYS = {
     "april_aim_draw_fov", "april_aim_target_line",
     "april_silent_draw_fov", "april_silent_target_line",
     "april_player_enabled", "april_player_skeleton", "april_player_show_name", "april_player_clan_tag",
-    "april_player_show_distance",
+    "april_player_show_held", "april_player_show_distance",
     "april_player_flag_downed", "april_player_flag_safezone",
     "april_player_flag_staff", "april_player_flag_reviving",
     "april_player_flag_movement", "april_player_flag_vip",
@@ -12630,10 +12776,18 @@ local function find_held_on_character(char)
     return nil, nil
 end
 
+local function player_tool_name(player)
+    if not player then return nil end
+    local name = player.ToolName or player.tool_name
+    if type(name) == "string" and name ~= "" then return name end
+    return nil
+end
+
 local function resolve_held_weapon(player, char)
-    if player.tool_name and player.tool_name ~= "" and is_valid_held_label(player.tool_name) then
-        local inst = char and find_inst_by_name(char, player.tool_name) or nil
-        return player.tool_name, inst
+    local tool_name = player_tool_name(player)
+    if tool_name and is_valid_held_label(tool_name) then
+        local inst = char and find_inst_by_name(char, tool_name) or nil
+        return tool_name, inst
     end
 
     if char then
@@ -13239,8 +13393,8 @@ end)()
 
 -- â”€â”€ game/map_image.lua â”€â”€
 April._mods["game.map_image"] = (function()
--- Fallen G-map texture: resolve live Image, cache PNG, draw via tile atlas
--- (Vector has no Image UV crop / clip API — tiles keep the map inside the radar).
+-- Fallen G-map texture. Vector has no image UV crop / clip API, so zoomed
+-- viewports are fetched as one pre-cropped HTTPS image and drawn inside bounds.
 local env = April.require("core.env")
 local asset_urls = April.require("game.asset_urls")
 local config_store = April.require("core.config_store")
@@ -13254,6 +13408,7 @@ M.ORIGIN_X = 0
 M.ORIGIN_Z = 0
 M.DEFAULT_ASSET = "121836456123484"
 M.TILE_GRID = 16
+M.SOURCE_PX = 700
 -- Soft ocean fill behind tiles (matches Fallen map water-ish tone).
 M.OCEAN = { 0.55, 0.78, 0.90, 0.55 }
 
@@ -13272,8 +13427,8 @@ local state = {
     fetch_done = false,
     last_resolve_ms = 0,
     next_retry_ms = 0,
-    tiles = {}, -- ["i_j"] = { handle=, url=, failed= }
-    tiles_tried = {},
+    crops = {}, -- crop key -> async image entry
+    active_crop = nil,
 }
 
 local RETRY_MS = 30000
@@ -13554,21 +13709,21 @@ local function invalidate_handle()
     state.load_url = nil
 end
 
-local function invalidate_tiles()
+local function invalidate_crops()
     if draw and draw.free_image then
-        for _, tile in pairs(state.tiles) do
-            if tile and tile.handle then
-                pcall(draw.free_image, tile.handle)
+        for _, crop in pairs(state.crops) do
+            if crop and crop.handle then
+                pcall(draw.free_image, crop.handle)
             end
         end
     end
-    state.tiles = {}
-    state.tiles_tried = {}
+    state.crops = {}
+    state.active_crop = nil
 end
 
 function M.invalidate()
     invalidate_handle()
-    invalidate_tiles()
+    invalidate_crops()
     state.fetch_started = false
     state.fetch_done = false
     state.next_retry_ms = 0
@@ -13737,53 +13892,23 @@ function M.world_to_viewport(wx, wz, vp)
     return M.uv_to_viewport(u, v, vp)
 end
 
-local function tile_key(i, j)
-    return tostring(i) .. "_" .. tostring(j)
+local function image_is_loaded(handle)
+    if not handle or not draw then return false end
+    local loaded = draw.image_loaded or draw.ImageLoaded
+    if loaded then
+        local ok, yes = pcall(loaded, handle)
+        return ok and yes == true
+    end
+    -- If the API lacks ImageLoaded, assume ready once we have a handle.
+    return true
 end
 
-local function tile_candidates(asset_id, i, j)
-    local list = {}
-    -- Vector LoadImage only accepts HTTPS — skip local/file tile paths.
-    local cdn = asset_urls.map_tile(asset_id, i, j)
-    if is_usable_load_url(cdn) then
-        list[#list + 1] = cdn
-    end
-    return list
-end
-
-local function ensure_tile(i, j)
-    local asset_id = state.asset_id or M.DEFAULT_ASSET
-    local key = tile_key(i, j)
-    local tile = state.tiles[key]
-    if tile and tile.handle then
-        if draw.image_failed and draw.image_failed(tile.handle) then
-            tile.failed = true
-            tile.handle = nil
-        else
-            return tile.handle
-        end
-    end
-    if tile and tile.failed then return nil end
-    if not draw or not draw.load_image then return nil end
-
-    tile = tile or { idx = 1, urls = tile_candidates(asset_id, i, j) }
-    state.tiles[key] = tile
-    tile.urls = tile.urls or tile_candidates(asset_id, i, j)
-    tile.idx = tile.idx or 1
-
-    while tile.idx <= #tile.urls do
-        local url = tile.urls[tile.idx]
-        tile.idx = tile.idx + 1
-        local ok, handle = pcall(draw.load_image, url)
-        if ok and handle then
-            tile.handle = handle
-            tile.url = url
-            return handle
-        end
-    end
-
-    tile.failed = true
-    return nil
+local function image_has_failed(handle)
+    if not handle or not draw then return false end
+    local failed = draw.image_failed or draw.ImageFailed
+    if not failed then return false end
+    local ok, yes = pcall(failed, handle)
+    return ok and yes == true
 end
 
 local function image_draw(handle, x, y, w, h, alpha)
@@ -13794,9 +13919,147 @@ local function image_draw(handle, x, y, w, h, alpha)
     return pcall(image_fn, handle, x, y, w, h, 255, 255, 255, a)
 end
 
--- Draw the world map inside map_rect using the full HTTPS texture (fit).
--- Vector LoadImage only accepts certain HTTPS URLs (tr.rbxcdn.com), not local files.
--- Player/blip UVs use fit mode so geography stays correct inside the radar.
+local function draw_fit(map_rect, alpha)
+    if not (M.ready() and state.handle) then return false end
+    if image_has_failed(state.handle) then return false end
+    return image_draw(state.handle, map_rect.x, map_rect.y, map_rect.w, map_rect.h, alpha)
+end
+
+local MAX_CROP_HANDLES = 12
+
+local function crop_key(spec)
+    return table.concat({
+        spec.asset_id, spec.cx, spec.cy, spec.cw, spec.ch, spec.out_w, spec.out_h,
+    }, ":")
+end
+
+local function crop_spec(view, map_rect)
+    local img_size = tonumber(view and view.img_size) or 0
+    if img_size <= 0 then return nil end
+
+    local src = M.SOURCE_PX
+    local cw = math.max(1, math.min(src, math.floor(src * map_rect.w / img_size + 0.5)))
+    local ch = math.max(1, math.min(src, math.floor(src * map_rect.h / img_size + 0.5)))
+    if cw >= src and ch >= src then return nil end
+
+    local pu, pv = M.world_to_uv(view.view_x or 0, view.view_z or 0)
+    local cx = math.floor(pu * src - cw * 0.5 + 0.5)
+    local cy = math.floor(pv * src - ch * 0.5 + 0.5)
+    cx = math.max(0, math.min(src - cw, cx))
+    cy = math.max(0, math.min(src - ch, cy))
+
+    local spec = {
+        asset_id = tostring(state.asset_id or M.DEFAULT_ASSET),
+        cx = cx, cy = cy, cw = cw, ch = ch,
+        out_w = math.max(32, math.floor(map_rect.w + 0.5)),
+        out_h = math.max(32, math.floor(map_rect.h + 0.5)),
+        vp = {
+            u0 = cx / src,
+            v0 = cy / src,
+            u1 = (cx + cw) / src,
+            v1 = (cy + ch) / src,
+            ready = true,
+        },
+    }
+    spec.key = crop_key(spec)
+    return spec
+end
+
+local function free_crop(entry)
+    if entry and entry.handle and draw and draw.free_image then
+        pcall(draw.free_image, entry.handle)
+    end
+    if state.active_crop == entry then state.active_crop = nil end
+end
+
+local function prune_crops()
+    local count = 0
+    for _ in pairs(state.crops) do count = count + 1 end
+    while count > MAX_CROP_HANDLES do
+        local oldest_key, oldest
+        for key, entry in pairs(state.crops) do
+            if entry ~= state.active_crop
+                and (not oldest or (entry.last_used or 0) < (oldest.last_used or 0))
+            then
+                oldest_key, oldest = key, entry
+            end
+        end
+        if not oldest_key then break end
+        free_crop(oldest)
+        state.crops[oldest_key] = nil
+        count = count - 1
+    end
+end
+
+local function ensure_crop(spec)
+    if not spec or not draw then return nil end
+    local load_fn = draw.load_image or draw.LoadImage
+    if not load_fn then return nil end
+
+    local entry = state.crops[spec.key]
+    if not entry then
+        local urls = asset_urls.map_crop_urls(
+            spec.asset_id, spec.cx, spec.cy, spec.cw, spec.ch, spec.out_w, spec.out_h
+        )
+        entry = {
+            key = spec.key,
+            urls = urls,
+            idx = 1,
+            vp = spec.vp,
+            last_used = tick_ms(),
+        }
+        state.crops[spec.key] = entry
+        prune_crops()
+        -- prune_crops may evict this just-created request only if every older
+        -- entry is active; in that rare case, recreate it on the next frame.
+        if state.crops[spec.key] ~= entry then return nil end
+    end
+    entry.last_used = tick_ms()
+
+    if entry.handle then
+        if image_has_failed(entry.handle) then
+            free_crop(entry)
+            entry.handle = nil
+        elseif image_is_loaded(entry.handle) then
+            entry.ready = true
+            state.active_crop = entry
+            prune_crops()
+            return entry
+        else
+            return nil
+        end
+    end
+
+    while entry.idx <= #(entry.urls or {}) do
+        local url = entry.urls[entry.idx]
+        entry.idx = entry.idx + 1
+        local ok, handle = pcall(load_fn, url)
+        if ok and handle then
+            entry.handle = handle
+            entry.url = url
+            if image_is_loaded(handle) then
+                entry.ready = true
+                state.active_crop = entry
+                prune_crops()
+                return entry
+            end
+            return nil
+        end
+    end
+    entry.failed = true
+    prune_crops()
+    return nil
+end
+
+local function draw_crop(entry, map_rect, alpha)
+    if not entry or not entry.handle or not image_is_loaded(entry.handle) then
+        return false
+    end
+    return image_draw(entry.handle, map_rect.x, map_rect.y, map_rect.w, map_rect.h, alpha)
+end
+
+-- Draw one image exactly inside map_rect. Zoomed images are cropped remotely
+-- because Vector exposes neither a clip rect nor Image UV coordinates.
 function M.draw_centered(view, map_rect, alpha)
     if not view or not map_rect then
         return nil
@@ -13804,17 +14067,32 @@ function M.draw_centered(view, map_rect, alpha)
     M.ensure()
     alpha = alpha or 0.92
 
-    if draw and draw.rect_filled then
-        pcall(draw.rect_filled, map_rect.x, map_rect.y, map_rect.w, map_rect.h, M.OCEAN, 0)
+    if draw and (draw.rect_filled or draw.RectFilled) then
+        local rf = draw.rect_filled or draw.RectFilled
+        pcall(rf, map_rect.x, map_rect.y, map_rect.w, map_rect.h, M.OCEAN, 0)
     end
 
-    if M.ready() and state.handle then
-        if draw.image_failed and draw.image_failed(state.handle) then
-            return nil
+    local spec = crop_spec(view, map_rect)
+    if spec then
+        local wanted = ensure_crop(spec)
+        if wanted and draw_crop(wanted, map_rect, alpha) then
+            view.vp = wanted.vp
+            return "crop"
         end
-        if image_draw(state.handle, map_rect.x, map_rect.y, map_rect.w, map_rect.h, alpha) then
-            return "fit"
+
+        -- Keep the previous crop visible and keep blips aligned while the new
+        -- request loads. The desired handle is polled every frame automatically.
+        local active = state.active_crop
+        if active and draw_crop(active, map_rect, alpha) then
+            active.last_used = tick_ms()
+            view.vp = active.vp
+            return "crop"
         end
+    end
+
+    if draw_fit(map_rect, alpha) then
+        view.vp = { u0 = 0, v0 = 0, u1 = 1, v1 = 1, ready = true }
+        return "fit"
     end
 
     return nil
@@ -18421,6 +18699,7 @@ local ROW_H = 36
 -- already refreshed by game.npcs every 750 ms.
 local REFRESH_MS = 1000
 
+-- Raids are Raid-ESP only — never listed in the event viewer.
 local DEFINITIONS = {
     { id = "timed_crate", label = "Timed Crate", color = { 0.42, 0.95, 0.48, 1 } },
     { id = "btr", label = "BTR", color = { 0.95, 0.25, 0.15, 1 } },
@@ -18428,7 +18707,6 @@ local DEFINITIONS = {
     { id = "bruno", label = "Bruno", color = { 0.95, 0.66, 0.20, 1 } },
     { id = "boris", label = "Boris", color = { 0.78, 0.42, 1.00, 1 } },
     { id = "brutus", label = "Brutus", color = { 1.00, 0.30, 0.48, 1 } },
-    { id = "raid", label = "Raid Activity", color = { 1.00, 0.52, 0.12, 1 } },
 }
 
 local rows = {}
@@ -18555,9 +18833,6 @@ local function rebuild_rows(now)
     if crate_count > 0 then
         active.timed_crate = { count = crate_count, timer = crate_time }
     end
-    if #(cache.raids or {}) > 0 then
-        active.raid = { count = #cache.raids }
-    end
 
     local active_only = settings.bool("april_event_status_active_only", false)
     local next_rows = {}
@@ -18674,7 +18949,9 @@ local cache = April.require("core.cache")
 local draw_util = April.require("core.draw_util")
 local esp_util = April.require("core.esp_util")
 local menu_util = April.require("core.menu_util")
+local text_util = April.require("core.text_util")
 local player_state = April.require("game.player_state")
+local player_gear = April.require("game.player_gear")
 local mod_checker = April.require("features.utility.mod_checker")
 local mod_ids = April.require("game.mod_ids")
 
@@ -18687,6 +18964,7 @@ local ID_HEALTH = "april_player_health"
 local ID_SKELETON = "april_player_skeleton"
 local ID_NAME = "april_player_show_name"
 local ID_DIST = "april_player_show_distance"
+local ID_HELD = "april_player_show_held"
 local ID_CLAN = "april_player_clan_tag"
 local ID_BOX = "april_player_box_mode"
 local ID_BOX_COLOR = "april_player_box_color"
@@ -18706,6 +18984,7 @@ local DEFAULT_BOX = { 1, 0.35, 0.35, 1 }
 local DEFAULT_TEXT = { 1, 0.35, 0.35, 1 }
 local DEFAULT_CLAN = { 0.84, 0.31, 0.80, 1 }
 local DEFAULT_MUTED = { 0.82, 0.84, 0.88, 0.92 }
+local DEFAULT_HELD = { 0.95, 0.9, 0.55, 0.95 }
 local DEFAULT_FLAG = {
     DOWN = { 1, 0.35, 0.35, 1 },
     SZ = { 0.35, 0.85, 1, 1 },
@@ -18767,6 +19046,8 @@ function M.register_menu()
         menu_util.parent(P, { colorpicker = DEFAULT_TEXT }))
     menu.add_checkbox(T, G.VISUALS, ID_CLAN, "Player Clan Tag", true,
         menu_util.parent(P, { colorpicker = DEFAULT_CLAN }))
+    menu.add_checkbox(T, G.VISUALS, ID_HELD, "Held Item", false,
+        menu_util.parent(P, { colorpicker = DEFAULT_HELD }))
     menu.add_checkbox(T, G.VISUALS, ID_DIST, "Player Distance", true,
         menu_util.parent(P, { colorpicker = DEFAULT_MUTED }))
 
@@ -18792,12 +19073,22 @@ function M.register_menu()
 
     menu_util.bind_children(P, {
         ID_BOX, ID_BOX_COLOR, ID_HEALTH, ID_SKELETON,
-        ID_NAME, ID_CLAN, ID_DIST,
+        ID_NAME, ID_CLAN, ID_HELD, ID_DIST,
         FILTERS, FLAGS,
         ID_FLAG_DOWN, ID_FLAG_SZ, ID_FLAG_STAFF, ID_FLAG_REVIVE,
         ID_FLAG_MOVE, ID_FLAG_VIP,
         ID_RANGE,
     })
+end
+
+local function held_label(player)
+    local name = player_gear.held_name(player)
+    if not name or player_gear.is_empty_held_name(name) then return nil end
+    -- Match target gear display: drop skin/variant suffix after '/'.
+    local base = name:match("^([^/]+)") or name
+    base = text_util.sanitize(base)
+    if base == "" then return nil end
+    return base
 end
 
 local function horizontal_speed(p)
@@ -18886,6 +19177,7 @@ function M.draw()
     local show_skel = settings.bool(ID_SKELETON, false)
     local show_name = settings.bool(ID_NAME, true)
     local show_clan = settings.bool(ID_CLAN, true)
+    local show_held = settings.bool(ID_HELD, false)
     local show_dist = settings.bool(ID_DIST, true)
 
     local filter_team = settings.multi(FILTERS, F_TEAM, true)
@@ -18910,6 +19202,7 @@ function M.draw()
     local skel_col = settings.color(ID_SKELETON, { 1, 1, 1, 0.92 })
     local name_col = settings.color(ID_NAME, DEFAULT_TEXT)
     local clan_menu_col = settings.color(ID_CLAN, DEFAULT_CLAN)
+    local held_col = settings.color(ID_HELD, DEFAULT_HELD)
     local dist_col = settings.color(ID_DIST, DEFAULT_MUTED)
     local box_col = settings.color(ID_BOX_COLOR, DEFAULT_BOX)
     local flag_cols = {
@@ -18993,10 +19286,19 @@ function M.draw()
             draw_util.health_bar_on_box(bounds, p.Health or p.health, p.MaxHealth or p.max_health)
         end
 
+        local below_y = bounds.y + bounds.h + 3
+        if show_held then
+            local held = held_label(p)
+            if held then
+                draw_util.text_centered(cx, below_y, held, held_col, ts)
+                below_y = below_y + ts + 2
+            end
+        end
+
         if show_dist then
             draw_util.text_centered(
                 cx,
-                bounds.y + bounds.h + 3,
+                below_y,
                 string.format("%dm", math.floor(dist + 0.5)),
                 dist_col,
                 ts
@@ -19020,19 +19322,25 @@ local image_cache = April.require("core.image_cache")
 local items = April.require("game.items")
 local player_gear = April.require("game.player_gear")
 local player_state = April.require("game.player_state")
-local active_target = April.require("features.combat.active_target")
 local text_util = April.require("core.text_util")
 local theme = April.require("core.ui_theme")
 local overlay_theme = April.require("core.overlay_theme")
 local ep = April.require("core.entity_props")
+local esp_util = April.require("core.esp_util")
+local math_util = April.require("core.math_util")
+local cache = April.require("core.cache")
 
 local M = {}
 
 local P = "april_target_overlay"
+local P_FOV = P .. "_fov"
+local P_DIST = P .. "_max_dist"
 local GEAR_SLOTS = 7
 local GEAR_TTL = 500
 local TARGET_POLL_MS = 120
 local MAX_ATTACHMENTS = 5
+local DEFAULT_FOV = 100
+local DEFAULT_MAX_DIST = 500
 
 local gear_cache = {}
 local last_poll_ms = 0
@@ -19077,10 +19385,50 @@ local function resolve_image_key(piece)
     return nil
 end
 
+local function local_origin()
+    local me = cache.local_player
+    if not me then return nil end
+    return esp_util.vec3_pos(
+        me.Position or me.position or me.HeadPosition or me.head_position
+    )
+end
+
+-- Independent of combat targeting: pick the combat player closest to crosshair
+-- within this overlay's own FOV and max distance.
 local function find_overlay_target()
-    local target = active_target.get_target(nil, active_target.SOURCE_GEAR)
-    if target then return target end
-    return nil
+    local fov = settings.num(P_FOV, DEFAULT_FOV)
+    local max_dist = settings.num(P_DIST, DEFAULT_MAX_DIST)
+    if fov <= 0 or max_dist <= 0 then return nil end
+
+    local ox, oy, oz = local_origin()
+    local sw, sh = draw_util.screen_size()
+    local cx, cy = sw * 0.5, sh * 0.5
+    local best, best_d = nil, fov
+    local max_dist_sq = max_dist * max_dist
+
+    for _, player in ipairs(cache.players or {}) do
+        if player_state.is_combat_target(player) then
+            local hx, hy, hz = esp_util.vec3_pos(ep.head_position(player) or ep.position(player))
+            if hx then
+                if ox then
+                    local dx, dy, dz = hx - ox, hy - oy, hz - oz
+                    if dx * dx + dy * dy + dz * dz > max_dist_sq then
+                        goto continue
+                    end
+                end
+                local sx, sy, on_screen = esp_util.w2s(hx, hy, hz)
+                if on_screen then
+                    local dist = math_util.screen_fov_dist(sx, sy, cx, cy)
+                    if dist <= fov and dist < best_d then
+                        best, best_d = player, dist
+                    end
+                end
+            end
+        end
+        ::continue::
+    end
+
+    return best
 end
 
 local function player_key(player)
@@ -19377,13 +19725,13 @@ function M.register_menu()
     menu_util.register_keybind(T, G.VISUALS, P, "Target Gear Overlay", false)
 
     local root = menu_util.parent(P)
-    menu.add_combo(T, G.VISUALS, "april_target_gear_source", "Target From",
-        active_target.SOURCE_NAMES, 0, root)
+    menu.add_slider_int(T, G.VISUALS, P_FOV, "Gear FOV", 10, 500, DEFAULT_FOV, root)
+    menu.add_slider_int(T, G.VISUALS, P_DIST, "Max Distance", 50, 2000, DEFAULT_MAX_DIST, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_gear_size", "Gear Icon Size", 32, 64, 48, root)
     menu.add_slider_int(T, G.VISUALS, P .. "_top", "Top Offset", 48, 160, 88, root)
 
     menu_util.bind_children(P, {
-        "april_target_gear_source", P .. "_gear_size", P .. "_top",
+        P_FOV, P_DIST, P .. "_gear_size", P .. "_top",
     })
 end
 
@@ -21127,7 +21475,8 @@ local ID_NOTIFY = "april_raid_notifications"
 local ID_RANGE = "april_raid_range"
 
 local CLUSTER_MERGE_M = 40
-local CLUSTER_TTL_MS = 600000
+-- Auto-clear raid ESP / radar markers after 30 minutes without new signals.
+local CLUSTER_TTL_MS = 30 * 60 * 1000
 local SCAN_MS = 350
 local ROCKET_TRACE_SCAN_MS = 50
 local ROCKET_TRACE_TTL_MS = 2500
@@ -22890,11 +23239,9 @@ end
 
 local function set_hip_height(hum, value)
     if not hum then return end
+    -- Only write Humanoid.HipHeight. Fallen StateController owns this value;
+    -- writing it onto the player/entity object can leave a sticky oversized pose.
     pcall(function() hum.HipHeight = value end)
-    local lp = env.get_local_player()
-    if lp then
-        pcall(function() lp.HipHeight = value end)
-    end
 end
 
 local function static_duck_hip()
@@ -23497,9 +23844,8 @@ local function draw_map_item(wx, wz, col, label, shape, view, scale, layout, siz
     end
 end
 
-local function draw_radar_frame(layout, bg, grid, zoom, north_up)
+local function draw_radar_frame(layout, bg, _grid, zoom, _north_up)
     local x, y, w, h = layout.x, layout.y, layout.w, layout.h
-    local cx, cy = layout.cx, layout.cy
 
     overlay_theme.draw_panel(x, y, w, h, "RADAR")
 
@@ -23512,35 +23858,6 @@ local function draw_radar_frame(layout, bg, grid, zoom, north_up)
     local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
     local zoom_w = theme.text_w(zoom_text, 9)
     draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, theme.TEXT_DIM, 9)
-
-    local circle = draw_fn("circle", "Circle")
-    local accent = overlay_theme.accent()
-    if circle then
-        pcall(circle, cx, cy, layout.radius, theme.alpha(accent, 0.24), 40, 1)
-        pcall(circle, cx, cy, layout.radius * 0.66, theme.alpha(grid or theme.BORDER, 0.11), 32, 1)
-        pcall(circle, cx, cy, layout.radius * 0.33, theme.alpha(grid or theme.BORDER, 0.08), 24, 1)
-    end
-    local line = draw_fn("line", "Line")
-    if line then
-        local axis = theme.alpha(grid or theme.BORDER, 0.10)
-        pcall(line, cx - layout.radius, cy, cx - 10, cy, axis, 1)
-        pcall(line, cx + 10, cy, cx + layout.radius, cy, axis, 1)
-        pcall(line, cx, cy - layout.radius, cx, cy - 10, axis, 1)
-        pcall(line, cx, cy + 10, cx, cy + layout.radius, axis, 1)
-
-        local tick = theme.alpha(accent, 0.30)
-        pcall(line, cx - 3, cy - layout.radius, cx + 3, cy - layout.radius, tick, 1)
-        pcall(line, cx + layout.radius, cy - 3, cx + layout.radius, cy + 3, tick, 1)
-        pcall(line, cx - 3, cy + layout.radius, cx + 3, cy + layout.radius, tick, 1)
-        pcall(line, cx - layout.radius, cy - 3, cx - layout.radius, cy + 3, tick, 1)
-    end
-
-    local forward = theme.alpha(accent, 0.78)
-    if north_up then
-        draw_util.text(cx - 3, cy - layout.radius + 4, "N", forward, 9)
-    else
-        draw_util.text(cx - 3, cy - layout.radius + 5, "^", forward, 9)
-    end
 end
 
 -- Facing arrow. tip points along `ang` (0 = screen up / north).
@@ -23585,9 +23902,11 @@ local function draw_facing_arrow(mx, my, col, scale, ang)
 end
 
 -- Player-centered north-up view. Map pans under the local player.
+-- Scale against the square panel span so chunks fill the radar body (not just the inscribed circle).
 local function build_north_view(cx, cy, radius, zoom, body_x, body_z, map_rect)
     local visible = BASE_VISIBLE_STUDS / math.max(zoom, 0.05)
-    local pixels_per_stud = (radius * 2) / visible
+    local span = math.max(map_rect.w or 0, map_rect.h or 0, (radius or 0) * 2)
+    local pixels_per_stud = span / visible
     local world = map_image.world_size()
     local img_size = world * pixels_per_stud
     local pu, pv = map_image.world_to_uv(body_x or 0, body_z or 0)
@@ -23628,12 +23947,49 @@ local function attach_map_texture(view)
     if not ok or not mode then
         return false
     end
-    -- Fit (and future tile modes): project with UVs across the radar square.
-    view.vp = { u0 = 0, v0 = 0, u1 = 1, v1 = 1, ready = true }
-    if mode == "tiles" then
-        view.vp = nil
+    if mode == "crop" then
+        -- map_image supplies the exact crop viewport used by the displayed PNG.
+        view.texture_mode = "crop"
+    else
+        -- Fit only when the full world is visible — UVs span the radar square.
+        view.vp = { u0 = 0, v0 = 0, u1 = 1, v1 = 1, ready = true }
+        view.texture_mode = "fit"
     end
     return true
+end
+
+-- Repaint panel padding/title and map guides after the bounded image.
+-- Do NOT refill map_rect (draw_panel would wipe the map).
+local function cover_map_overflow(layout, map_rect, zoom, _north_up)
+    local rect_f = draw_fn("rect_filled", "RectFilled")
+    if not rect_f then return end
+    local x, y, w, h = layout.x, layout.y, layout.w, layout.h
+    local fill = overlay_theme.panel_bg()
+
+    -- Title bar strip (includes top padding above map_rect)
+    local title_h = math.max(TITLE_H + 3, map_rect.y - y)
+    pcall(rect_f, x, y, w, title_h, fill, 0)
+
+    local left_w = math.max(0, map_rect.x - x)
+    local right_x = map_rect.x + map_rect.w
+    local right_w = math.max(0, x + w - right_x)
+    local bottom_y = map_rect.y + map_rect.h
+    local bottom_h = math.max(0, y + h - bottom_y)
+    if left_w > 0 then
+        pcall(rect_f, x, map_rect.y, left_w, map_rect.h + bottom_h, fill, 0)
+    end
+    if right_w > 0 then
+        pcall(rect_f, right_x, map_rect.y, right_w, map_rect.h + bottom_h, fill, 0)
+    end
+    if bottom_h > 0 then
+        pcall(rect_f, map_rect.x, bottom_y, map_rect.w, bottom_h, fill, 0)
+    end
+
+    -- Re-draw title / zoom on top of the covered strips.
+    draw_util.text(x + 12, y + 8, "RADAR", overlay_theme.text(), 11)
+    local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
+    local zoom_w = theme.text_w(zoom_text, 9)
+    draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, theme.TEXT_DIM, 9)
 end
 
 function M.register_menu()
@@ -23716,12 +24072,14 @@ function M.draw_inner()
         w = w - 14,
         h = h - TITLE_H - 10,
     }
-    -- Fill the radar body so the map has no side letterbox bars.
+    -- Keep map imagery square and fully inside the radar body. A single image
+    -- now occupies this exact rect, so it cannot bleed beyond panel bounds.
+    local map_span = math.max(32, math.min(body.w, body.h))
     local map_rect = {
-        x = body.x,
-        y = body.y,
-        w = math.max(32, body.w),
-        h = math.max(32, body.h),
+        x = body.x + (body.w - map_span) * 0.5,
+        y = body.y + (body.h - map_span) * 0.5,
+        w = map_span,
+        h = map_span,
     }
     local cx = map_rect.x + map_rect.w * 0.5
     local cy = map_rect.y + map_rect.h * 0.5
@@ -23759,10 +24117,9 @@ function M.draw_inner()
 
     if north_up then
         attach_map_texture(view)
-        local rect_f = draw_fn("rect_filled", "RectFilled")
-        if rect_f then
-            pcall(rect_f, body.x, body.y, body.w, body.h,
-                theme.alpha(theme.PANEL_DEEP, 0.10), 7)
+        if view.texture_mode then
+            -- Repaint panel padding/title over the map image.
+            cover_map_overflow(layout, map_rect, zoom, true)
         end
     end
 
@@ -24426,9 +24783,9 @@ end)()
 April._mods["ui.gs_input"] = (function()
 -- Mouse / key helpers. Raw cursor only - no windowed offset correction.
 --
--- Wheel: Vector docs only expose utility.mouse_scroll() (inject). There is no
--- documented reader. We probe every known path and accumulate into M.wheel;
--- if none work, the menu keeps edge-hover scroll as fallback.
+-- Vector documents wheel injection but not a wheel reader. Capture normal
+-- wheel input from UserInputService or PlayerMouse and use getter-style API
+-- readers only as a fallback.
 
 local M = {}
 
@@ -24455,6 +24812,7 @@ M.wheel_source = nil -- "api" | "uis" | "mouse" | nil
 M._wheel_accum = 0
 M._scroll_ready = false
 M._scroll_hook_tries = 0
+M._event_scroll_ready = false
 M._api_readers = nil
 M._game_cursor_hidden = false
 M._menu_open = false
@@ -24503,7 +24861,7 @@ local function connect_signal(signal, fn)
 end
 
 local function collect_api_readers()
-    if M._api_readers then return M._api_readers end
+    if M._api_readers and #M._api_readers > 0 then return M._api_readers end
     local readers = {}
     local skip = {
         mouse_scroll = true,
@@ -24580,14 +24938,10 @@ local function try_hook_uis()
         on_wheel(z, "uis")
     end
 
-    local hooked = false
     if connect_signal(uis.InputChanged or uis.input_changed, handle) then
-        hooked = true
+        return true
     end
-    if connect_signal(uis.InputBegan or uis.input_began, handle) then
-        hooked = true
-    end
-    return hooked
+    return connect_signal(uis.InputBegan or uis.input_began, handle)
 end
 
 local function try_hook_player_mouse()
@@ -24637,9 +24991,12 @@ local function ensure_scroll_hooks()
     end
 
     local ok_uis = try_hook_uis()
-    local ok_mouse = try_hook_player_mouse()
-    collect_api_readers()
-    if ok_uis or ok_mouse or M._scroll_hook_tries >= 30 then
+    -- Do not subscribe to both sources: Roblox may emit both events for one
+    -- physical wheel notch, which would double-scroll the menu.
+    local ok_mouse = not ok_uis and try_hook_player_mouse() or false
+    M._event_scroll_ready = ok_uis or ok_mouse
+    local readers = collect_api_readers()
+    if M._event_scroll_ready or #readers > 0 then
         M._scroll_ready = true
     end
 end
@@ -24733,8 +25090,11 @@ function M.begin_frame()
     prev_rmb = M.rmb
     prev_mmb = M.mmb
 
-    -- Poll any getter-style APIs each frame, then drain event accumulators.
-    poll_api_readers()
+    -- Poll getter APIs only when no event source is active to avoid duplicate
+    -- notches from two input paths.
+    if not M._event_scroll_ready then
+        poll_api_readers()
+    end
     M.wheel = M._wheel_accum or 0
     M._wheel_accum = 0
 end
@@ -25491,9 +25851,12 @@ M.BY_ID = {
     -- Visuals
     april_player_enabled = "Shows boxes and info on other players.",
     april_ui_player_elements = "Choose which info to show on player ESP.",
+    april_player_show_held = "Shows the item a player is holding (same read path as Target Gear).",
     april_player_esp_filters = "Filter which players appear on ESP.",
     april_player_esp_flags = "Show status flags (downed, SZ, staff, revive, movement state, VIP).",
-    april_target_overlay = "Shows your target's held weapon and gear loadout.",
+    april_target_overlay = "Shows held weapon and gear for the player closest to your crosshair.",
+    april_target_overlay_fov = "Independent FOV (pixels from crosshair) used only by Target Gear Overlay.",
+    april_target_overlay_max_dist = "Maximum world distance (studs) for Target Gear Overlay selection.",
     april_crosshair_enabled = "Draws a custom crosshair on screen.",
     april_crosshair_follow = "Moves the crosshair toward your active combat target.",
     april_ui_crosshair_motion = "Adds spin or pulse animation to the crosshair.",
@@ -25551,7 +25914,7 @@ M.BY_ID = {
     april_anti_afk = "Prevents idle kick by simulating activity.",
     april_mod_checker_enabled = "Alerts you when staff or mods join the server.",
     april_keybinds_enabled = "Shows an on-screen list of your keybinds.",
-    april_event_status_enabled = "Shows live timed crates, event NPCs, bosses, and raid activity.",
+    april_event_status_enabled = "Shows live timed crates, event NPCs, and bosses (raids use Raid ESP only).",
     april_event_status_active_only = "Hides inactive event rows from the event status panel.",
 
     -- Radar
@@ -26037,6 +26400,7 @@ M.popup_used_click = false -- set when a popup consumes this frame's click
 M.interacted = false -- any widget captured LMB this frame
 M._hue_cache = {} -- id -> hue 0..1 for color picker
 M._list_scroll = {} -- id -> first visible option index (0-based)
+M._list_middle_drag = nil
 M.LIST_MAX_VISIBLE = 8
 M.wheel_consumed = false -- set when a dropdown/list eats the wheel this frame
 M.block_under = false -- true while pointer is over a floating popup (prior frame rect)
@@ -26167,6 +26531,7 @@ function M.begin_popups()
     M._active_input_rect = nil
     M._active_slider_input_rect = nil
     M._tip_candidate = nil
+    if not input.mmb then M._list_middle_drag = nil end
 
     -- Block underlay widgets when the cursor is over last frame's popup rect
     M.block_under = false
@@ -26239,20 +26604,47 @@ end
 
 local LIST_SCROLL_EDGE = 22
 
-local function apply_list_edge_scroll(id, count, max_vis, list_x, list_y, list_w, list_h)
+local function apply_list_wheel_scroll(id, count, max_vis, list_x, list_y, list_w, list_h)
     max_vis = max_vis or M.LIST_MAX_VISIBLE
     local max_off = math.max(0, count - max_vis)
     if max_off <= 0 then return end
-    if not input.hover(list_x, list_y, list_w, list_h) then return end
 
     local off = M._list_scroll[id] or 0
-    if input.wheel ~= 0 and not M.wheel_consumed then
-        off = off - input.wheel
+    local drag = M._list_middle_drag
+    if drag and drag.id == id then
+        if input.mmb then
+            local raw_rows = (drag.start_y - input.my) / 18
+            local rows = raw_rows >= 0 and math.floor(raw_rows) or math.ceil(raw_rows)
+            off = drag.start_off + rows
+            M.wheel_consumed = true
+            M.interacted = true
+        else
+            M._list_middle_drag = nil
+            drag = nil
+        end
+    end
+
+    if not input.hover(list_x, list_y, list_w, list_h) and not (drag and drag.id == id) then
+        return
+    end
+    if input.mmb_click and not M._list_middle_drag then
+        M._list_middle_drag = {
+            id = id,
+            start_y = input.my,
+            start_off = off,
+        }
         M.wheel_consumed = true
-    elseif input.my < list_y + LIST_SCROLL_EDGE then
-        off = off - 1
-    elseif input.my > list_y + list_h - LIST_SCROLL_EDGE then
-        off = off + 1
+        M.interacted = true
+    end
+    if not M.wheel_consumed then
+        if input.wheel ~= 0 then
+            off = off - input.wheel
+            M.wheel_consumed = true
+        elseif input.my < list_y + LIST_SCROLL_EDGE then
+            off = off - 1
+        elseif input.my > list_y + list_h - LIST_SCROLL_EDGE then
+            off = off + 1
+        end
     end
     if off < 0 then off = 0 end
     if off > max_off then off = max_off end
@@ -27062,7 +27454,7 @@ function M.combo(x, y, w, id, label, options, default_idx)
         local off, max_off, vis = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
         local list_h = vis * 18
         local list_y = by + bh
-        apply_list_edge_scroll(id, n, M.LIST_MAX_VISIBLE, bx, list_y, bw, list_h)
+        apply_list_wheel_scroll(id, n, M.LIST_MAX_VISIBLE, bx, list_y, bw, list_h)
         off = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
 
         M.rect(bx, by + bh, bw, list_h, theme.OVERLAY, true, theme.CORNER_SMALL)
@@ -27161,7 +27553,7 @@ function M.multi(x, y, w, id, label, options, defaults, opts)
         local off, max_off, vis = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
         local list_h = vis * 18
         local list_y = by + bh
-        apply_list_edge_scroll(id, n, M.LIST_MAX_VISIBLE, bx, list_y, bw, list_h)
+        apply_list_wheel_scroll(id, n, M.LIST_MAX_VISIBLE, bx, list_y, bw, list_h)
         off = list_scroll_for(id, n, M.LIST_MAX_VISIBLE)
 
         M.rect(bx, by + bh, bw, list_h, theme.OVERLAY, true, theme.CORNER_SMALL)
@@ -27844,11 +28236,11 @@ local function build_visuals()
             kb("april_player_enabled", "Player ESP", false, nil, { hide_color = true }),
             combo("april_player_box_mode", "Player Box", { "None", "2D", "Corner" }, 1),
             multi("april_ui_player_elements", "Displayed Elements", {
-                "Health Bar", "Skeleton", "Name", "Clan Tag", "Distance",
-            }, { true, false, true, true, true }, nil, {
+                "Health Bar", "Skeleton", "Name", "Clan Tag", "Held Item", "Distance",
+            }, { true, false, true, true, false, true }, nil, {
                 sync_ids = {
                     "april_player_health", "april_player_skeleton", "april_player_show_name",
-                    "april_player_clan_tag", "april_player_show_distance",
+                    "april_player_clan_tag", "april_player_show_held", "april_player_show_distance",
                 },
             }),
             multi("april_player_esp_filters", "ESP Filters", {
@@ -27866,7 +28258,8 @@ local function build_visuals()
         master = "april_target_overlay",
         items = {
             kb("april_target_overlay", "Target Gear Overlay", false),
-            combo("april_target_gear_source", "Target From", { "Auto", "Ragebot", "Silent Aim", "Aimbot" }, 0, "april_target_overlay"),
+            sl("april_target_overlay_fov", "Gear FOV", 10, 500, 100, false, "april_target_overlay"),
+            sl("april_target_overlay_max_dist", "Max Distance", 50, 2000, 500, false, "april_target_overlay"),
             sl("april_target_overlay_gear_size", "Gear Icon Size", 32, 64, 48, false, "april_target_overlay"),
             sl("april_target_overlay_top", "Top Offset", 48, 160, 88, false, "april_target_overlay"),
         },
@@ -27911,6 +28304,7 @@ local function build_visuals()
             color("april_player_skeleton", "Skeleton", { 1, 1, 1, 0.92 }),
             color("april_player_show_name", "Name", { 1, 0.35, 0.35, 1 }),
             color("april_player_clan_tag", "Clan Tag", { 0.84, 0.31, 0.80, 1 }),
+            color("april_player_show_held", "Held Item", { 0.95, 0.9, 0.55, 0.95 }),
             color("april_player_show_distance", "Distance", { 0.82, 0.84, 0.88, 0.92 }),
             sep(),
             color("april_player_flag_downed", "Downed", { 1, 0.35, 0.35, 1 }),
@@ -28735,7 +29129,7 @@ April._mods["ui.custom_menu"] = (function()
 --[[
   Gamesense-style custom menu for April.
   INSERT toggles by default (rebindable in Config -> Menu).
-  Scroll: mouse wheel when Vector exposes a reader; else edge-hover (top/bottom of column).
+  Scroll: mouse wheel when available, middle-button drag, or edge hover.
 ]]
 
 local theme = April.require("ui.gs_theme")
@@ -28763,6 +29157,7 @@ local tab_index = 1
 local win_x, win_y = 80, 80
 local scroll = { left = 0, right = 0 }
 local scroll_visual = { left = 0, right = 0 }
+local middle_scroll = nil
 local collapsed_groups = {}
 local last_menu_rect = nil
 
@@ -28770,6 +29165,7 @@ local SCROLL_EDGE = 36
 local SCROLL_SPEED = 5
 local WHEEL_STEP = 48
 local PAGE_STEP = 90
+local MIDDLE_DRAG_SCALE = 1.35
 local VK_PRIOR, VK_NEXT = 0x21, 0x22
 
 local function screen_size()
@@ -29006,12 +29402,38 @@ end
 
 local function handle_column_scroll(x, y, w, h, scroll_key, content_h)
     local max_scroll = clamp_scroll(scroll_key, content_h, h)
-    if max_scroll <= 0 then return end
+    if max_scroll <= 0 then
+        if middle_scroll and middle_scroll.key == scroll_key then middle_scroll = nil end
+        return
+    end
 
     local hot = gin.hover(x, y, w + 14, h)
+    if middle_scroll and middle_scroll.key == scroll_key then
+        if gin.mmb then
+            scroll[scroll_key] = middle_scroll.start_scroll
+                + (middle_scroll.start_y - gin.my) * MIDDLE_DRAG_SCALE
+            clamp_scroll(scroll_key, content_h, h)
+            widgets.interacted = true
+            return
+        end
+        middle_scroll = nil
+    end
     if not hot then return end
 
-    -- Prefer real wheel when any probe delivers notches this frame.
+    -- Guaranteed documented fallback: hold the middle mouse button and drag.
+    -- Wheel rotation has no documented Vector reader, so this uses VK_MBUTTON
+    -- plus GetMousePosition and works even when Roblox wheel signals are absent.
+    if gin.mmb_click then
+        middle_scroll = {
+            key = scroll_key,
+            start_y = gin.my,
+            start_scroll = scroll[scroll_key],
+        }
+        widgets.interacted = true
+        return
+    end
+
+    -- Prefer real wheel when a runtime event/getter delivers notches this frame.
     -- Open dropdowns consume the wheel first (see gs_widgets).
     if gin.wheel ~= 0 and not widgets.wheel_consumed then
         scroll[scroll_key] = scroll[scroll_key] - gin.wheel * WHEEL_STEP
@@ -29032,7 +29454,8 @@ local function handle_column_scroll(x, y, w, h, scroll_key, content_h)
         return
     end
 
-    -- Fallback: edge hover (only when wheel isn't available / not moving).
+    -- Runtime wheel events are not available on every Vector build. Preserve
+    -- edge-hover as a no-click fallback alongside middle-button drag.
     if gin.my < y + SCROLL_EDGE then
         scroll[scroll_key] = scroll[scroll_key] - SCROLL_SPEED
         clamp_scroll(scroll_key, content_h, h)
@@ -29040,6 +29463,7 @@ local function handle_column_scroll(x, y, w, h, scroll_key, content_h)
         scroll[scroll_key] = scroll[scroll_key] + SCROLL_SPEED
         clamp_scroll(scroll_key, content_h, h)
     end
+
 end
 
 local function draw_group_title(x, box_top, w, title, collapsed, hot)

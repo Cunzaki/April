@@ -1,8 +1,8 @@
 -- Mouse / key helpers. Raw cursor only - no windowed offset correction.
 --
--- Wheel: Vector docs only expose utility.mouse_scroll() (inject). There is no
--- documented reader. We probe every known path and accumulate into M.wheel;
--- if none work, the menu keeps edge-hover scroll as fallback.
+-- Vector documents wheel injection but not a wheel reader. Capture normal
+-- wheel input from UserInputService or PlayerMouse and use getter-style API
+-- readers only as a fallback.
 
 local M = {}
 
@@ -29,6 +29,7 @@ M.wheel_source = nil -- "api" | "uis" | "mouse" | nil
 M._wheel_accum = 0
 M._scroll_ready = false
 M._scroll_hook_tries = 0
+M._event_scroll_ready = false
 M._api_readers = nil
 M._game_cursor_hidden = false
 M._menu_open = false
@@ -77,7 +78,7 @@ local function connect_signal(signal, fn)
 end
 
 local function collect_api_readers()
-    if M._api_readers then return M._api_readers end
+    if M._api_readers and #M._api_readers > 0 then return M._api_readers end
     local readers = {}
     local skip = {
         mouse_scroll = true,
@@ -154,14 +155,10 @@ local function try_hook_uis()
         on_wheel(z, "uis")
     end
 
-    local hooked = false
     if connect_signal(uis.InputChanged or uis.input_changed, handle) then
-        hooked = true
+        return true
     end
-    if connect_signal(uis.InputBegan or uis.input_began, handle) then
-        hooked = true
-    end
-    return hooked
+    return connect_signal(uis.InputBegan or uis.input_began, handle)
 end
 
 local function try_hook_player_mouse()
@@ -211,9 +208,12 @@ local function ensure_scroll_hooks()
     end
 
     local ok_uis = try_hook_uis()
-    local ok_mouse = try_hook_player_mouse()
-    collect_api_readers()
-    if ok_uis or ok_mouse or M._scroll_hook_tries >= 30 then
+    -- Do not subscribe to both sources: Roblox may emit both events for one
+    -- physical wheel notch, which would double-scroll the menu.
+    local ok_mouse = not ok_uis and try_hook_player_mouse() or false
+    M._event_scroll_ready = ok_uis or ok_mouse
+    local readers = collect_api_readers()
+    if M._event_scroll_ready or #readers > 0 then
         M._scroll_ready = true
     end
 end
@@ -307,8 +307,11 @@ function M.begin_frame()
     prev_rmb = M.rmb
     prev_mmb = M.mmb
 
-    -- Poll any getter-style APIs each frame, then drain event accumulators.
-    poll_api_readers()
+    -- Poll getter APIs only when no event source is active to avoid duplicate
+    -- notches from two input paths.
+    if not M._event_scroll_ready then
+        poll_api_readers()
+    end
     M.wheel = M._wheel_accum or 0
     M._wheel_accum = 0
 end

@@ -19,6 +19,7 @@ local ROW_H = 36
 -- already refreshed by game.npcs every 750 ms.
 local REFRESH_MS = 1000
 
+-- Raids are Raid-ESP only — never listed in the event viewer.
 local DEFINITIONS = {
     { id = "timed_crate", label = "Timed Crate", color = { 0.42, 0.95, 0.48, 1 } },
     { id = "btr", label = "BTR", color = { 0.95, 0.25, 0.15, 1 } },
@@ -26,7 +27,6 @@ local DEFINITIONS = {
     { id = "bruno", label = "Bruno", color = { 0.95, 0.66, 0.20, 1 } },
     { id = "boris", label = "Boris", color = { 0.78, 0.42, 1.00, 1 } },
     { id = "brutus", label = "Brutus", color = { 1.00, 0.30, 0.48, 1 } },
-    { id = "raid", label = "Raid Activity", color = { 1.00, 0.52, 0.12, 1 } },
 }
 
 local rows = {}
@@ -152,9 +152,6 @@ local function rebuild_rows(now)
     local crate_count, crate_time = timed_crates()
     if crate_count > 0 then
         active.timed_crate = { count = crate_count, timer = crate_time }
-    end
-    if #(cache.raids or {}) > 0 then
-        active.raid = { count = #cache.raids }
     end
 
     local active_only = settings.bool("april_event_status_active_only", false)

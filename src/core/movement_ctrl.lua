@@ -14,6 +14,7 @@ local _installed = false
 local fly_active = false
 local fly_noclip = false
 local tracked_char_id = nil
+local collision_healed_id = nil
 local last_fly_zero_ms = 0
 
 -- Slider 1-20 studs/s
@@ -83,6 +84,14 @@ local function has_move_input(mx, my, mz)
 end
 
 local function set_fly_noclip(char, enabled)
+    enabled = enabled == true
+    if enabled == fly_noclip then
+        -- Still apply enable so new characters get noclip after respawn.
+        if enabled and char then
+            move.set_noclip_parts(char, true)
+        end
+        return
+    end
     fly_noclip = enabled
     if not char then return end
     move.set_noclip_parts(char, enabled)
@@ -186,9 +195,14 @@ function M.tick(_dt)
 
     local cid = char_id(char)
     if cid ~= tracked_char_id then
+        if fly_noclip then
+            move.set_noclip_parts(char, false)
+        end
         fly_active = false
         fly_noclip = false
+        move.clear_collide_snapshots()
         tracked_char_id = cid
+        collision_healed_id = nil
     end
 
     local want_fly = settings.enabled(P_FLY)
@@ -197,10 +211,12 @@ function M.tick(_dt)
         fly_active = true
         tick_fly(root, hum, char)
     else
-        if fly_active then
+        if fly_active or fly_noclip then
             abort_active(root, char)
-        else
-            set_fly_noclip(char, false)
+        elseif collision_healed_id ~= cid then
+            -- One-shot heal for characters stuck with Head/Torso collide from older builds.
+            move.reset_fallen_collision(char)
+            collision_healed_id = cid
         end
         if settings.enabled(P_SLOWFALL) then
             tick_slowfall(root, hum, _dt)

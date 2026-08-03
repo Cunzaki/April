@@ -3,7 +3,9 @@ local cache = April.require("core.cache")
 local draw_util = April.require("core.draw_util")
 local esp_util = April.require("core.esp_util")
 local menu_util = April.require("core.menu_util")
+local text_util = April.require("core.text_util")
 local player_state = April.require("game.player_state")
+local player_gear = April.require("game.player_gear")
 local mod_checker = April.require("features.utility.mod_checker")
 local mod_ids = April.require("game.mod_ids")
 
@@ -16,6 +18,7 @@ local ID_HEALTH = "april_player_health"
 local ID_SKELETON = "april_player_skeleton"
 local ID_NAME = "april_player_show_name"
 local ID_DIST = "april_player_show_distance"
+local ID_HELD = "april_player_show_held"
 local ID_CLAN = "april_player_clan_tag"
 local ID_BOX = "april_player_box_mode"
 local ID_BOX_COLOR = "april_player_box_color"
@@ -35,6 +38,7 @@ local DEFAULT_BOX = { 1, 0.35, 0.35, 1 }
 local DEFAULT_TEXT = { 1, 0.35, 0.35, 1 }
 local DEFAULT_CLAN = { 0.84, 0.31, 0.80, 1 }
 local DEFAULT_MUTED = { 0.82, 0.84, 0.88, 0.92 }
+local DEFAULT_HELD = { 0.95, 0.9, 0.55, 0.95 }
 local DEFAULT_FLAG = {
     DOWN = { 1, 0.35, 0.35, 1 },
     SZ = { 0.35, 0.85, 1, 1 },
@@ -96,6 +100,8 @@ function M.register_menu()
         menu_util.parent(P, { colorpicker = DEFAULT_TEXT }))
     menu.add_checkbox(T, G.VISUALS, ID_CLAN, "Player Clan Tag", true,
         menu_util.parent(P, { colorpicker = DEFAULT_CLAN }))
+    menu.add_checkbox(T, G.VISUALS, ID_HELD, "Held Item", false,
+        menu_util.parent(P, { colorpicker = DEFAULT_HELD }))
     menu.add_checkbox(T, G.VISUALS, ID_DIST, "Player Distance", true,
         menu_util.parent(P, { colorpicker = DEFAULT_MUTED }))
 
@@ -121,12 +127,22 @@ function M.register_menu()
 
     menu_util.bind_children(P, {
         ID_BOX, ID_BOX_COLOR, ID_HEALTH, ID_SKELETON,
-        ID_NAME, ID_CLAN, ID_DIST,
+        ID_NAME, ID_CLAN, ID_HELD, ID_DIST,
         FILTERS, FLAGS,
         ID_FLAG_DOWN, ID_FLAG_SZ, ID_FLAG_STAFF, ID_FLAG_REVIVE,
         ID_FLAG_MOVE, ID_FLAG_VIP,
         ID_RANGE,
     })
+end
+
+local function held_label(player)
+    local name = player_gear.held_name(player)
+    if not name or player_gear.is_empty_held_name(name) then return nil end
+    -- Match target gear display: drop skin/variant suffix after '/'.
+    local base = name:match("^([^/]+)") or name
+    base = text_util.sanitize(base)
+    if base == "" then return nil end
+    return base
 end
 
 local function horizontal_speed(p)
@@ -215,6 +231,7 @@ function M.draw()
     local show_skel = settings.bool(ID_SKELETON, false)
     local show_name = settings.bool(ID_NAME, true)
     local show_clan = settings.bool(ID_CLAN, true)
+    local show_held = settings.bool(ID_HELD, false)
     local show_dist = settings.bool(ID_DIST, true)
 
     local filter_team = settings.multi(FILTERS, F_TEAM, true)
@@ -239,6 +256,7 @@ function M.draw()
     local skel_col = settings.color(ID_SKELETON, { 1, 1, 1, 0.92 })
     local name_col = settings.color(ID_NAME, DEFAULT_TEXT)
     local clan_menu_col = settings.color(ID_CLAN, DEFAULT_CLAN)
+    local held_col = settings.color(ID_HELD, DEFAULT_HELD)
     local dist_col = settings.color(ID_DIST, DEFAULT_MUTED)
     local box_col = settings.color(ID_BOX_COLOR, DEFAULT_BOX)
     local flag_cols = {
@@ -322,10 +340,19 @@ function M.draw()
             draw_util.health_bar_on_box(bounds, p.Health or p.health, p.MaxHealth or p.max_health)
         end
 
+        local below_y = bounds.y + bounds.h + 3
+        if show_held then
+            local held = held_label(p)
+            if held then
+                draw_util.text_centered(cx, below_y, held, held_col, ts)
+                below_y = below_y + ts + 2
+            end
+        end
+
         if show_dist then
             draw_util.text_centered(
                 cx,
-                bounds.y + bounds.h + 3,
+                below_y,
                 string.format("%dm", math.floor(dist + 0.5)),
                 dist_col,
                 ts

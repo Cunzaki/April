@@ -294,10 +294,18 @@ local function find_held_on_character(char)
     return nil, nil
 end
 
+local function player_tool_name(player)
+    if not player then return nil end
+    local name = player.ToolName or player.tool_name
+    if type(name) == "string" and name ~= "" then return name end
+    return nil
+end
+
 local function resolve_held_weapon(player, char)
-    if player.tool_name and player.tool_name ~= "" and is_valid_held_label(player.tool_name) then
-        local inst = char and find_inst_by_name(char, player.tool_name) or nil
-        return player.tool_name, inst
+    local tool_name = player_tool_name(player)
+    if tool_name and is_valid_held_label(tool_name) then
+        local inst = char and find_inst_by_name(char, tool_name) or nil
+        return tool_name, inst
     end
 
     if char then
