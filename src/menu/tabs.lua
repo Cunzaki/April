@@ -118,23 +118,36 @@ function M.setup_scans()
 end
 
 function M.update(dt)
+    local dense = (April and April.crash_trace == true) or (debug.frame_count() <= 45)
+    local function mark(name)
+        if dense then debug.step(name) end
+    end
+
+    mark("tabs.update.cache")
     local cache = April.require("core.cache")
     cache.refresh_entities()
+    mark("tabs.update.npcs")
     April.require("game.npcs").refresh_cache(cache.workspace_entities)
+    mark("tabs.update.player_state")
     April.require("game.player_state").tick(cache.players)
 
+    mark("tabs.update.bootstrap")
     bootstrap.tick()
 
+    mark("tabs.update.weapons")
     local weapons = April.require("game.weapons")
     weapons.tick()
 
+    mark("tabs.update.runservice")
     local runservice = April.require("core.runservice")
     runservice.dispatch(dt)
 
+    mark("tabs.update.incremental_scan")
     April.require("core.incremental_scan").tick()
     for i, feat in ipairs(M.features) do
         if feat.update then
-            debug.guard("update:" .. i, feat.update, dt)
+            local name = M.FEATURE_ORDER[i] or ("#" .. i)
+            debug.guard("update:" .. name, feat.update, dt)
         end
     end
 end
@@ -142,12 +155,14 @@ end
 function M.draw()
     for i, feat in ipairs(M.features) do
         if feat.draw then
-            debug.guard("draw:" .. i, feat.draw)
+            local name = M.FEATURE_ORDER[i] or ("#" .. i)
+            debug.guard("draw:" .. name, feat.draw)
         end
     end
 end
 
 function M.init()
+    debug.step("tabs.init")
     local env = April.require("core.env")
     local ok, missing = env.require_apis({ "draw", "utility", "entity", "game" })
     if not ok then
@@ -156,17 +171,23 @@ function M.init()
     end
 
     -- Custom UI backend: feature register_menu() writes into gs_state, not Vector menu.
+    debug.step("tabs.init.menu_shim")
     pcall(function()
         April.require("ui.menu_shim").install()
     end)
 
+    debug.step("tabs.init.register_all")
     M.register_all()
+    debug.step("tabs.init.setup_scans")
     M.setup_scans()
+    debug.step("tabs.init.setup_player_hooks")
     M.setup_player_hooks()
 
+    debug.step("tabs.init.try_autoload")
     pcall(function()
         April.require("features.utility.config").try_autoload()
     end)
+    debug.step_done("tabs.init")
 
     return true
 end

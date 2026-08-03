@@ -125,7 +125,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.0.38";
+const VERSION = "4.0.44";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector
@@ -137,6 +137,8 @@ const header = `--[[
 April = {
     version = "${VERSION}",
     debug = false,
+    -- Set true only while hunting native crashes (writes dense STEP breadcrumbs).
+    crash_trace = false,
     _mods = {},
     bundled = true,
     custom_ui = true,
@@ -157,8 +159,13 @@ end
 const footer = `
 -- Install custom UI menu backend before any register_menu() calls.
 do
+    local dbg = April.require("core.debug")
+    dbg.begin_session("bundle_boot")
+    dbg.step("boot.menu_shim")
     April.require("ui.menu_shim").install()
+    dbg.step("boot.register_all")
     April.require("menu.tabs").register_all()
+    dbg.step_done("boot.register_all")
 end
 
 April._init_ok = false
@@ -168,26 +175,36 @@ local ok, err = pcall(function()
     local caps = April.require("core.capabilities")
     local app = April.require("app")
 
+    debug.step("boot.app.init")
     if not app.init() then
         debug.error_once("init", "app.init() returned false - features disabled")
         return
     end
+    debug.step_done("boot.app.init")
 
+    debug.step("boot.api_aliases")
     April.require("core.api_aliases").apply()
+    debug.step("boot.movement_ctrl.install")
     April.require("core.movement_ctrl").install()
+    debug.step("boot.fling.install")
     April.require("features.movement.fling").install()
+    debug.step("boot.anti_aim.install")
     April.require("features.movement.anti_aim").install()
+    debug.step("boot.fake_duck.install")
     April.require("features.movement.fake_duck").install()
 
     April._init_ok = true
     print("[April] v" .. tostring(April.version) .. " - custom UI (INSERT to toggle)")
 
+    debug.step("boot.caps.probe")
     local c = caps.probe()
     if c.fallen_gc then
         local gc = April.require("game.gc_weapon_mods")
+        debug.step("boot.gc.probe_on_load")
         gc.probe_on_load()
     end
 
+    debug.step("boot.register_frame_hook")
     if not debug.register_frame_hook(function()
         app.on_frame()
     end) then
@@ -197,9 +214,39 @@ end)
 
 if not ok then
     print("[April] Fatal: " .. tostring(err))
+    pcall(function()
+        local debug = April.require("core.debug")
+        debug.file("FATAL " .. tostring(err))
+    end)
     if debug and debug.traceback then print(debug.traceback(err)) end
 end
 `;
+
+// Keep the release bundle comfortably below Vector's remote LoadUrl parser
+// limit. Source files remain readable; only full-line comments and blank lines
+// are omitted from generated april.lua / Script 1.lua.
+function compactLuaSource(source) {
+  const out = [];
+  let inBlockComment = false;
+
+  for (const line of source.split(/\r?\n/)) {
+    const trimmed = line.trim();
+
+    if (inBlockComment) {
+      if (trimmed.includes("]]")) inBlockComment = false;
+      continue;
+    }
+
+    if (trimmed.startsWith("--[[")) {
+      if (!trimmed.includes("]]")) inBlockComment = true;
+      continue;
+    }
+    if (trimmed.startsWith("--") || trimmed === "") continue;
+    out.push(line);
+  }
+
+  return out.join("\n");
+}
 
 let body = "";
 for (const rel of ORDER) {
@@ -209,13 +256,21 @@ for (const rel of ORDER) {
     process.exit(1);
   }
   const modPath = rel.replace(/\.lua$/, "").replace(/\//g, ".");
-  const src = fs.readFileSync(full, "utf8");
-  body += `\n-- â”€â”€ ${rel} â”€â”€\n`;
+  const src = compactLuaSource(fs.readFileSync(full, "utf8"));
+  body += "\n";
   body += `April._mods["${modPath}"] = (function()\n${src}\nend)()\n`;
 }
 
 fs.writeFileSync(OUT, header + body + footer);
-console.log("Built", path.relative(ROOT, OUT), `(${(fs.statSync(OUT).size / 1024).toFixed(1)} KB)`);
+const bundleBytes = fs.statSync(OUT).size;
+const MAX_VECTOR_BUNDLE_BYTES = 975_000;
+if (bundleBytes > MAX_VECTOR_BUNDLE_BYTES) {
+  console.error(
+    `Bundle is ${bundleBytes} bytes; keep it below ${MAX_VECTOR_BUNDLE_BYTES} for Vector LoadUrl safety.`,
+  );
+  process.exit(1);
+}
+console.log("Built", path.relative(ROOT, OUT), `(${(bundleBytes / 1024).toFixed(1)} KB)`);
 
 // load.lua = GitHub remote loader (for release installs).
 const loader = `print("[April] load.lua pulls GitHub main - for local builds execute Script 1.lua or april.lua")

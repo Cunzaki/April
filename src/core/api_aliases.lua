@@ -96,6 +96,30 @@ function M.apply()
         alias(game, "workspace", "Workspace")
         alias(game, "get_service", "GetService")
     end
+
+    if camera then
+        alias(camera, "get_position", "GetPosition")
+        alias(camera, "get_look_vector", "GetLookVector")
+        alias(camera, "look_at", "LookAt")
+        alias(camera, "get_fov", "GetFov")
+        alias(camera, "set_fov", "SetFov")
+        alias(camera, "track_target", "TrackTarget")
+        alias(camera, "stop_tracking", "StopTracking")
+    end
+
+    if raycast then
+        alias(raycast, "is_ready", "IsReady")
+        alias(raycast, "is_player_visible", "IsPlayerVisible")
+        alias(raycast, "is_visible", "IsVisible")
+        alias(raycast, "cast", "Cast")
+        alias(raycast, "enable_silent_hook", "EnableSilentHook")
+        alias(raycast, "disable_silent_hook", "DisableSilentHook")
+        alias(raycast, "is_silent_hook_active", "IsSilentHookActive")
+        alias(raycast, "set_silent_target", "SetSilentTarget")
+        alias(raycast, "clear_silent_target", "ClearSilentTarget")
+        alias(raycast, "track_silent_target", "TrackSilentTarget")
+        alias(raycast, "stop_silent_tracking", "StopSilentTracking")
+    end
 end
 
 return M

@@ -6,23 +6,35 @@ local startup_intro = April.require("ui.startup_intro")
 
 local M = {}
 local initialized = false
+local first_post_intro = true
 
 function M.init()
+    debug.step("app.init")
     if initialized then return true end
     pcall(function()
         April.require("core.entity_props").ensure_api_aliases()
     end)
+    debug.step("app.init.tabs")
     initialized = tabs.init()
     if initialized then
+        debug.step("app.init.custom_menu")
         pcall(custom_menu.init)
+        debug.step("app.init.startup_intro")
         pcall(startup_intro.init)
     end
+    debug.file("app.init done ok=" .. tostring(initialized))
     return initialized
 end
 
 function M.on_frame()
     if not initialized then return end
     debug.tick_frame()
+    local fc = debug.frame_count()
+    -- Dense breadcrumbs for the first frames and the first post-intro frame.
+    local dense = fc <= 8 or first_post_intro
+    if dense then
+        debug.step("frame:" .. tostring(fc) .. ".begin")
+    end
 
     pcall(function()
         April.require("core.api_aliases").apply()
@@ -33,21 +45,28 @@ function M.on_frame()
     pcall(function()
         April.require("core.aim_key").tick("april_aim_key", "april_aim_key_mode")
     end)
+
     if startup_intro.is_active() then
-        -- Reveal the fully initialized menu beneath the final black fade so it
-        -- appears as part of the intro instead of popping in afterward.
+        if dense then debug.step("frame.intro.active") end
         if startup_intro.should_reveal_menu() then
             debug.guard("custom_menu.draw:intro", custom_menu.draw)
         end
         local ok, err = pcall(startup_intro.draw)
-        if ok then return end
-        -- A splash failure must never lock the user out of the menu.
+        if ok then
+            if dense then debug.step_done("frame.intro") end
+            return
+        end
         startup_intro.cancel()
         debug.error_once("startup_intro", err)
+    elseif first_post_intro then
+        first_post_intro = false
+        debug.file("POST_INTRO first normal frame fc=" .. tostring(fc))
     end
+
     local dt = 0.016
     if utility and utility.get_delta_time then
-        dt = utility.get_delta_time()
+        local ok, v = pcall(utility.get_delta_time)
+        if ok and type(v) == "number" then dt = v end
     end
 
     debug.guard("tabs.update", tabs.update, dt)
@@ -55,6 +74,10 @@ function M.on_frame()
     debug.guard("tabs.draw", tabs.draw)
     debug.guard("notify.draw", notify.draw)
     debug.guard("custom_menu.draw", custom_menu.draw)
+
+    if dense then
+        debug.step_done("frame:" .. tostring(fc))
+    end
 end
 
 return M

@@ -5,8 +5,6 @@ local M = {}
 local hook_ready = false
 local tracking = false
 
-local MOUSE_RAY_LEN = 1024
-
 M._last_origin = nil
 M._last_target = nil
 M._last_ok = false
@@ -19,31 +17,67 @@ local function unpack_pos(v)
     return nil
 end
 
+-- Docs: Set/TrackSilentTarget accept Vector3 only. Prefer Vector3.New.
 local function make_vec3(x, y, z)
-    if Vector3 and Vector3.new then
-        return Vector3.new(x, y, z)
+    if Vector3 then
+        local ctor = Vector3.New or Vector3.new
+        if type(ctor) == "function" then
+            local ok, v = pcall(ctor, x, y, z)
+            if ok and v ~= nil then return v end
+        end
     end
     return { x = x, y = y, z = z }
 end
 
+local function ray_fn(snake, pascal)
+    if not raycast then return nil end
+    pcall(function()
+        April.require("core.api_aliases").apply()
+    end)
+    local fn = raycast[snake] or raycast[pascal]
+    if type(fn) == "function" then return fn end
+    return nil
+end
+
+local function cam_fn(snake, pascal)
+    if not camera then return nil end
+    pcall(function()
+        April.require("core.api_aliases").apply()
+    end)
+    local fn = camera[snake] or camera[pascal]
+    if type(fn) == "function" then return fn end
+    return nil
+end
+
 function M.available()
-    return raycast
-        and (raycast.track_silent_target or raycast.set_silent_target)
-        and raycast.stop_silent_tracking
+    if not raycast then return false end
+    local track = ray_fn("track_silent_target", "TrackSilentTarget")
+    local set = ray_fn("set_silent_target", "SetSilentTarget")
+    local stop = ray_fn("stop_silent_tracking", "StopSilentTracking")
+    return (track or set) and stop ~= nil
 end
 
 function M.ensure_hook()
     if not M.available() then return false end
-    if hook_ready or (raycast.is_silent_hook_active and raycast.is_silent_hook_active()) then
+    local is_active = ray_fn("is_silent_hook_active", "IsSilentHookActive")
+    if is_active then
+        local ok_status, active = pcall(is_active)
+        if ok_status and active == true then
+            hook_ready = true
+            return true
+        end
+    elseif hook_ready then
+        return true
+    end
+
+    local enable = ray_fn("enable_silent_hook", "EnableSilentHook")
+    if not enable then
         hook_ready = true
         return true
     end
-    if not raycast.enable_silent_hook then
-        hook_ready = true
-        return true
-    end
-    local ok = raycast.enable_silent_hook()
-    hook_ready = ok == true
+
+    local ok_call, ok = pcall(enable)
+    hook_ready = ok_call and ok == true
     return hook_ready
 end
 
@@ -56,8 +90,9 @@ function M.last_ok()
 end
 
 function M.get_camera_origin()
-    if not camera or not camera.get_position then return nil end
-    local ok, pos = pcall(camera.get_position)
+    local get_pos = cam_fn("get_position", "GetPosition")
+    if not get_pos then return nil end
+    local ok, pos = pcall(get_pos)
     if not ok or not pos then return nil end
     local x, y, z = unpack_pos(pos)
     if not x then return nil end
@@ -73,13 +108,12 @@ function M.stop()
     M._last_ok = false
     tracking = false
 
-    -- Avoid spamming native stop while already idle (hitchance miss / no target).
     if not was_active then return end
     if not M.available() then return end
-    pcall(raycast.stop_silent_tracking)
-    if raycast.clear_silent_target then
-        pcall(raycast.clear_silent_target)
-    end
+    local stop = ray_fn("stop_silent_tracking", "StopSilentTracking")
+    if stop then pcall(stop) end
+    local clear = ray_fn("clear_silent_target", "ClearSilentTarget")
+    if clear then pcall(clear) end
 end
 
 function M.last_segment()
@@ -119,7 +153,7 @@ local function build_dir(origin, aim_point)
     return make_vec3(ox, oy, oz), dir
 end
 
--- Per-frame silent override (no key hold). Used by ragebot autofire.
+-- Docs primary path: SetSilentTarget every OnFrame with Vector3 origin/dir.
 function M.set_target(origin, aim_point, hitpart)
     M._last_ok = false
     M._last_curve = nil
@@ -137,7 +171,8 @@ function M.set_target(origin, aim_point, hitpart)
         return false
     end
 
-    if not raycast.set_silent_target then
+    local set_target = ray_fn("set_silent_target", "SetSilentTarget")
+    if not set_target then
         return false
     end
 
@@ -149,20 +184,21 @@ function M.set_target(origin, aim_point, hitpart)
     local ox, oy, oz = unpack_pos(origin)
     local ax, ay, az = unpack_pos(aim_point)
     M._last_origin = { x = ox, y = oy, z = oz }
-    if hitpart and hitpart.x then
-        M._last_target = { x = hitpart.x, y = hitpart.y, z = hitpart.z }
+    if hitpart and (hitpart.x or hitpart.X) then
+        local hx, hy, hz = unpack_pos(hitpart)
+        M._last_target = { x = hx, y = hy, z = hz }
     else
         M._last_target = { x = ax, y = ay, z = az }
     end
 
-    local ok_call, ok = pcall(raycast.set_silent_target, origin_v, dir)
+    local ok_call, ok = pcall(set_target, origin_v, dir)
     ok = ok_call and (ok == true or ok == nil)
     M._last_ok = ok
     tracking = ok
     return ok
 end
 
--- Direct ray to aim (legacy / bullet TP). Key-held track for silent aim.
+-- Docs secondary path: TrackSilentTarget while key held.
 function M.track(origin, aim_point, shoot_vk, hitpart)
     M._last_ok = false
     M._last_curve = nil
@@ -180,7 +216,8 @@ function M.track(origin, aim_point, shoot_vk, hitpart)
         return false
     end
 
-    if not raycast.track_silent_target then
+    local track_target = ray_fn("track_silent_target", "TrackSilentTarget")
+    if not track_target then
         return M.set_target(origin, aim_point, hitpart)
     end
 
@@ -194,21 +231,20 @@ function M.track(origin, aim_point, shoot_vk, hitpart)
     local key = shoot_vk or 0x01
 
     M._last_origin = { x = ox, y = oy, z = oz }
-    if hitpart and hitpart.x then
-        M._last_target = { x = hitpart.x, y = hitpart.y, z = hitpart.z }
+    if hitpart and (hitpart.x or hitpart.X) then
+        local hx, hy, hz = unpack_pos(hitpart)
+        M._last_target = { x = hx, y = hy, z = hz }
     else
         M._last_target = { x = ax, y = ay, z = az }
     end
 
-    local ok_call, ok = pcall(raycast.track_silent_target, origin_v, dir, key)
+    local ok_call, ok = pcall(track_target, origin_v, dir, key)
     ok = ok_call and ok == true
     M._last_ok = ok
     tracking = ok
     return ok
 end
 
--- Silent track straight to hitpart (API projectiles are near-hitscan speed).
--- Still builds a muzzle->hitpart drop curve for visuals / target line.
 function M.track_curve(origin, aim_point, weapon_name, shoot_vk, hitpart)
     origin = origin or M.get_camera_origin()
     if not origin or not aim_point then
@@ -220,11 +256,16 @@ function M.track_curve(origin, aim_point, weapon_name, shoot_vk, hitpart)
     local hit = hitpart or aim_point
     local curve = ballistic.curve_for_weapon(origin, hit, weapon_name, 24)
 
-    -- Never aim above the hitpart - direction is always origin -> selected hitpart.
-    local ok = M.track(origin, hit, shoot_vk, hit)
+    -- Docs: SetSilentTarget every frame is the reliable override.
+    -- TrackSilentTarget is additional while LMB is held.
+    local ok_set = M.set_target(origin, hit, hit)
+    local ok_track = M.track(origin, hit, shoot_vk, hit)
     M._last_curve = curve
-    M._last_target = { x = hit.x, y = hit.y, z = hit.z }
-    return ok
+    local hx, hy, hz = unpack_pos(hit)
+    M._last_target = hx and { x = hx, y = hy, z = hz } or nil
+    M._last_ok = ok_set or ok_track
+    tracking = M._last_ok
+    return M._last_ok
 end
 
 return M

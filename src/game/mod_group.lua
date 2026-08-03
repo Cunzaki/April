@@ -10,6 +10,7 @@ M._cache_ready = false
 M._cache_at = 0
 M._refresh_ms = 30 * 60 * 1000
 M._retry_ms = 20 * 1000
+M._rate_limit_ms = 120 * 1000
 M._next_attempt_at = 0
 M._refreshing = false
 M._started = false
@@ -17,25 +18,70 @@ M._thread_id = nil
 M._loaded_notified = false
 M._last_complete_count = 0
 M._staff_role_count = 0
+M._rate_limited_until = 0
 
 M._lookup_queue = {}
 M._lookup_seen = {}
 M._lookup_pending = {}
-M._lookup_interval_ms = 1500
+M._lookup_interval_ms = 2500
 M._lookup_thread_id = nil
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
 
+local function http_get(url)
+    if not utility then return nil, "no utility" end
+    local fn = utility.http_get or utility.HttpGet
+    if type(fn) ~= "function" then return nil, "no HttpGet" end
+    return fn(url)
+end
+
 local function http_ready()
-    return utility and type(utility.http_get) == "function"
+    return utility and type(utility.http_get or utility.HttpGet) == "function"
+end
+
+local function status_code(status)
+    local n = tonumber(status)
+    if n then return n end
+    if type(status) == "string" then
+        return tonumber(status:match("(%d%d%d)"))
+    end
+    return nil
+end
+
+local function is_rate_limited(status)
+    local code = status_code(status)
+    return code == 429
+end
+
+local function mark_rate_limited(status)
+    if not is_rate_limited(status) then return false end
+    local now = tick_ms()
+    M._rate_limited_until = now + M._rate_limit_ms
+    M._next_attempt_at = M._rate_limited_until
+    debug.warn_once("mod_group:429", "Roblox rate-limited staff scan; backing off 120s")
+    return true
+end
+
+local function under_rate_limit()
+    return tick_ms() < (M._rate_limited_until or 0)
 end
 
 local function http_ok(body, status)
+    if is_rate_limited(status) then return false end
     if type(body) ~= "string" or body == "" then return false end
     if status == nil then return true end
-    return status >= 200 and status < 300
+    local code = status_code(status)
+    if not code then return true end
+    return code >= 200 and code < 300
+end
+
+local function polite_wait(seconds)
+    seconds = tonumber(seconds) or 1
+    if sleep then
+        pcall(sleep, seconds)
+    end
 end
 
 local function normalize_uid(user_id)
@@ -164,13 +210,17 @@ local function fetch_role_page(role_id, role_name, cursor, out)
         url = url .. "&cursor=" .. url_encode(cursor)
     end
 
-    local body, status = utility.http_get(url)
+    local body, status = http_get(url)
+    if is_rate_limited(status) then
+        mark_rate_limited(status)
+        return false, out, nil, 0, true
+    end
     if not http_ok(body, status) then
-        return false, out, nil, 0
+        return false, out, nil, 0, false
     end
 
     local added = parse_role_users(body, role_name, out)
-    return true, out, parse_next_cursor(body), added
+    return true, out, parse_next_cursor(body), added, false
 end
 
 -- Fetch every page for one role. Succeeds only when pagination finishes AND
@@ -181,10 +231,17 @@ local function fetch_all_role_users(role_id, role_name, expected_count, out)
     local empty_pages = 0
 
     repeat
-        local ok, next_cursor, added = false, nil, 0
-        for attempt = 1, 4 do
-            ok, out, next_cursor, added = fetch_role_page(role_id, role_name, cursor, out)
+        if under_rate_limit() then
+            return false, ("rate limited for " .. tostring(role_name))
+        end
+        local ok, next_cursor, added, limited = false, nil, 0, false
+        for attempt = 1, 3 do
+            ok, out, next_cursor, added, limited = fetch_role_page(role_id, role_name, cursor, out)
             if ok then break end
+            if limited then
+                return false, ("rate limited for " .. tostring(role_name))
+            end
+            polite_wait(0.75 * attempt)
         end
         if not ok then
             return false, ("request failed for " .. tostring(role_name))
@@ -227,13 +284,18 @@ end
 function M.refresh_all()
     if not http_ready() then return false end
     if M._refreshing then return false end
+    if under_rate_limit() then return false end
 
     M._refreshing = true
     local ok, err = pcall(function()
-        local body, status = utility.http_get(string.format(
+        local body, status = http_get(string.format(
             "https://groups.roblox.com/v1/groups/%d/roles",
             M.GROUP_ID
         ))
+        if is_rate_limited(status) then
+            mark_rate_limited(status)
+            error("roles request rate-limited (429)")
+        end
         if not http_ok(body, status) then
             error("roles request failed: " .. tostring(status))
         end
@@ -241,7 +303,9 @@ function M.refresh_all()
         local staff_roles = parse_staff_roles(body)
         local expected_roles = role_count(staff_roles)
         if expected_roles < 1 then
-            error("no staff roles parsed from group roles response")
+            -- Empty/truncated bodies usually mean rate-limit or a soft API failure.
+            mark_rate_limited(429)
+            error("soft: empty staff roles response (likely rate-limited)")
         end
 
         -- Staging map only — never mark ready / notify until every role is complete.
@@ -260,10 +324,15 @@ function M.refresh_all()
             end
         end
 
-        -- One more pass on failures within this refresh (rate-limit recovery).
-        if #failed > 0 then
+        -- One recovery pass only when we are not currently rate-limited.
+        if #failed > 0 and not under_rate_limit() then
+            polite_wait(1.5)
             failed = {}
             for role_id, info in pairs(staff_roles) do
+                if under_rate_limit() then
+                    failed[#failed + 1] = "rate limited"
+                    break
+                end
                 local have = count_for_role(merged, info.name)
                 local need = tonumber(info.member_count) or 0
                 if need > 0 and have >= need then
@@ -288,6 +357,9 @@ function M.refresh_all()
 
         if #failed > 0 then
             M._cache_ready = false
+            if under_rate_limit() then
+                error("staff scan paused: Roblox rate limit (429)")
+            end
             error("staff scan incomplete: " .. table.concat(failed, "; ")
                 .. string.format(" (%d people so far)", cache_count(merged)))
         end
@@ -333,7 +405,16 @@ function M.refresh_all()
     M._refreshing = false
 
     if not ok then
-        debug.error_once("mod_group:refresh", err)
+        local msg = tostring(err or "")
+        if msg:find("soft:", 1, true)
+            or msg:find("429", 1, true)
+            or msg:find("rate", 1, true)
+            or under_rate_limit()
+        then
+            debug.warn_once("mod_group:refresh", msg)
+        else
+            debug.error_once("mod_group:refresh", err)
+        end
         return false
     end
 
@@ -376,13 +457,18 @@ end
 function M.lookup_user(user_id)
     local uid = normalize_uid(user_id)
     if not uid or not http_ready() then return nil end
+    if under_rate_limit() then return nil end
 
     if M._cache[uid] then return M._cache[uid] end
 
-    local body, status = utility.http_get(string.format(
+    local body, status = http_get(string.format(
         "https://groups.roblox.com/v2/users/%d/groups/roles",
         uid
     ))
+    if is_rate_limited(status) then
+        mark_rate_limited(status)
+        return nil
+    end
     if not http_ok(body, status) then return nil end
 
     local role = parse_user_group_role(body)
@@ -427,6 +513,9 @@ end
 
 local function refresh_tick()
     local now = tick_ms()
+    if under_rate_limit() then
+        return
+    end
     if M._cache_ready then
         if (now - M._cache_at) >= M._refresh_ms then
             -- Background revalidate; keep serving the last complete cache until
@@ -442,7 +531,8 @@ local function refresh_tick()
     if M.refresh_all() then
         M._next_attempt_at = 0
     else
-        M._next_attempt_at = now + M._retry_ms
+        local delay = under_rate_limit() and M._rate_limit_ms or M._retry_ms
+        M._next_attempt_at = now + delay
     end
 end
 
@@ -452,16 +542,19 @@ function M.ensure_started()
 
     if not http_ready() then return end
 
-    if thread and thread.create then
-        M._thread_id = thread.create(function()
+    local create = thread and (thread.create or thread.Create)
+    if create then
+        M._thread_id = create(function()
             refresh_tick()
         end, 5000)
 
-        M._lookup_thread_id = thread.create(function()
+        M._lookup_thread_id = create(function()
             process_lookup_queue()
         end, M._lookup_interval_ms)
     else
-        M.refresh_all()
+        -- Never block the main thread on a full staff crawl.
+        M._next_attempt_at = tick_ms() + 3000
+        debug.warn_once("mod_group:nothread", "thread API missing; staff scan deferred")
     end
 end
 

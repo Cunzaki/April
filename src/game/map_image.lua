@@ -365,6 +365,7 @@ local function advance_load()
 
     local url = chain[state.load_idx]
     state.load_url = url
+    debug.step("map_image.LoadImage.full " .. tostring(url))
     local ok, handle = pcall(draw.load_image, url)
     if not ok or not handle then
         state.load_idx = state.load_idx + 1
@@ -638,6 +639,7 @@ local function ensure_crop(spec)
     while entry.idx <= #(entry.urls or {}) do
         local url = entry.urls[entry.idx]
         entry.idx = entry.idx + 1
+        debug.step("map_image.LoadImage.crop " .. tostring(url))
         local ok, handle = pcall(load_fn, url)
         if ok and handle then
             entry.handle = handle
@@ -679,9 +681,11 @@ function M.draw_centered(view, map_rect, alpha)
 
     local spec = crop_spec(view, map_rect)
     if spec then
+        debug.step("map_image.ensure_crop:" .. tostring(spec.key))
         local wanted = ensure_crop(spec)
         if wanted and draw_crop(wanted, map_rect, alpha) then
             view.vp = wanted.vp
+            debug.step_done("map_image.crop")
             return "crop"
         end
 
@@ -691,12 +695,15 @@ function M.draw_centered(view, map_rect, alpha)
         if active and draw_crop(active, map_rect, alpha) then
             active.last_used = tick_ms()
             view.vp = active.vp
+            debug.step_done("map_image.crop_prev")
             return "crop"
         end
     end
 
+    debug.step("map_image.draw_fit")
     if draw_fit(map_rect, alpha) then
         view.vp = { u0 = 0, v0 = 0, u1 = 1, v1 = 1, ready = true }
+        debug.step_done("map_image.fit")
         return "fit"
     end
 

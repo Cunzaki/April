@@ -11,6 +11,7 @@ local silent_whitelist = April.require("features.combat.silent_whitelist")
 local bullet_hud = April.require("features.combat.bullet_hud")
 local body_peek = April.require("features.combat.body_peek")
 local theme = April.require("core.ui_theme")
+local ep = April.require("core.entity_props")
 
 local M = {}
 local locked_target = nil
@@ -41,9 +42,10 @@ end
 local function holding_weapon()
     if weapons.holding_ranged_weapon() then return true end
     if weapons.get_held_ranged_weapon_name() then return true end
-    local lp = entity and entity.get_local_player and entity.get_local_player()
-    if lp and lp.tool_name and lp.tool_name ~= "" then
-        return weapons.is_ranged_weapon_name(lp.tool_name)
+    local lp = ep.get_local_player()
+    local tool = lp and ep.tool_name(lp)
+    if tool and tool ~= "" then
+        return weapons.is_ranged_weapon_name(tool)
     end
     return false
 end
@@ -160,7 +162,9 @@ function M.update(dt)
         return
     end
 
-    silent_ray.ensure_hook()
+    if not silent_ray.ensure_hook() then
+        return
+    end
 
     local sw, sh = targeting.screen_center()
     local cx, cy = sw * 0.5, sh * 0.5
@@ -199,9 +203,11 @@ function M.update(dt)
         return
     end
 
+    local key_down = input and (input.is_key_down or input.IsKeyDown)
+    local firing = key_down and key_down(SHOOT_VK) == true
+
     -- Hit chance only for silent aim mouse-fire (not bullet-only).
     if use_silent_fov then
-        local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)
         if firing and not fire_was_down then
             local hit_chance = settings.num(PREFIX .. "hit_chance", 100)
             if hit_chance >= 100 then
@@ -238,14 +244,18 @@ function M.update(dt)
     cached_track.manip = manip_info or { state = "off" }
 
     local info = cached_track.manip
-    local ok_track = false
     local hit = info.hitpart or aim
     local track_aim = aim
+
+    -- Docs: SetSilentTarget every OnFrame. TrackSilentTarget while LMB held.
+    local ok_set = false
+    local ok_track = false
     if use_silent_fov then
         if info.use_curve and silent_ray.track_curve then
             ok_track = silent_ray.track_curve(
                 origin, hit, info.weapon, SHOOT_VK, hit
             ) == true
+            ok_set = silent_ray.last_ok() == true
             if not info.curve_path and silent_ray.last_curve then
                 local curve = silent_ray.last_curve()
                 if curve and curve.path then
@@ -253,14 +263,16 @@ function M.update(dt)
                 end
             end
         else
+            ok_set = silent_ray.set_target(origin, track_aim, hit) == true
             ok_track = silent_ray.track(origin, track_aim, SHOOT_VK, hit) == true
         end
     else
-        -- Bullet-only: per-frame set (works without holding LMB).
-        ok_track = silent_ray.set_target(origin, track_aim, hit) == true
+        ok_set = silent_ray.set_target(origin, track_aim, hit) == true
+        ok_track = ok_set
     end
+
     cached_track.aim = track_aim
-    cached_track.tracking = ok_track
+    cached_track.tracking = ok_set or ok_track
     body_peek.tick(locked_target, hit)
 end
 
