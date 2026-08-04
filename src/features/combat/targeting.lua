@@ -46,7 +46,7 @@ function M.is_npc_alive(entry)
         return hp == nil or hp > 0
     end
     if not entry.inst or not env.is_valid(entry.inst) then return false end
-    local health = April.require("game.npcs").read_health(entry.inst, entry.humanoid)
+    local health = npcs.read_health(entry.inst, entry.humanoid)
     return health ~= nil
 end
 

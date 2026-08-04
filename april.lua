@@ -1,11 +1,11 @@
 April = {
-    version = "4.0.83",
+    version = "4.0.99",
     debug = false,
     crash_logging = false,
 
     crash_trace = false,
 
-    autofarm_trace = true,
+    autofarm_trace = false,
     _mods = {},
     load_status = {
         { name = "Core", state = "loaded" },
@@ -38,11 +38,11 @@ April.load_status = {
 }
 
 local chunks = {
-    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/01-core.lua?v=4.0.83",
-    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/02-services.lua?v=4.0.83",
-    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/03-game.lua?v=4.0.83",
-    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/04-features.lua?v=4.0.83",
-    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/05-interface.lua?v=4.0.83",
+    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/01-core.lua?v=4.0.99",
+    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/02-services.lua?v=4.0.99",
+    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/03-game.lua?v=4.0.99",
+    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/04-features.lua?v=4.0.99",
+    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/05-interface.lua?v=4.0.99",
 }
 
 local loader_index = 1

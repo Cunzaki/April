@@ -1,11 +1,21 @@
 local menu_util = April.require("core.menu_util")
 local debug = April.require("core.debug")
 local bootstrap = April.require("game.bootstrap")
+local cache = April.require("core.cache")
+local npcs = April.require("game.npcs")
+local player_state = April.require("game.player_state")
+local weapons = April.require("game.weapons")
+local runservice = April.require("core.runservice")
+local incremental_scan = April.require("core.incremental_scan")
 
 local M = {}
 
 M.features = {}
 M._menu_registered = false
+
+local function mark(dense, name)
+    if dense then debug.step(name) end
+end
 
 M.FEATURE_ORDER = {
     "features.combat.camera_aimbot",
@@ -120,31 +130,25 @@ end
 
 function M.update(dt)
     local dense = (April and April.crash_trace == true) or (debug.frame_count() <= 45)
-    local function mark(name)
-        if dense then debug.step(name) end
-    end
 
-    mark("tabs.update.cache")
-    local cache = April.require("core.cache")
+    mark(dense, "tabs.update.cache")
     cache.refresh_entities()
-    mark("tabs.update.npcs")
-    April.require("game.npcs").refresh_cache(cache.workspace_entities)
-    mark("tabs.update.player_state")
-    April.require("game.player_state").tick(cache.players)
+    mark(dense, "tabs.update.npcs")
+    npcs.refresh_cache(cache.workspace_entities)
+    mark(dense, "tabs.update.player_state")
+    player_state.tick(cache.players)
 
-    mark("tabs.update.bootstrap")
+    mark(dense, "tabs.update.bootstrap")
     bootstrap.tick()
 
-    mark("tabs.update.weapons")
-    local weapons = April.require("game.weapons")
+    mark(dense, "tabs.update.weapons")
     weapons.tick()
 
-    mark("tabs.update.runservice")
-    local runservice = April.require("core.runservice")
+    mark(dense, "tabs.update.runservice")
     runservice.dispatch(dt)
 
-    mark("tabs.update.incremental_scan")
-    April.require("core.incremental_scan").tick()
+    mark(dense, "tabs.update.incremental_scan")
+    incremental_scan.tick()
     for i, feat in ipairs(M.features) do
         if feat.update then
             local name = M.FEATURE_ORDER[i] or ("#" .. i)

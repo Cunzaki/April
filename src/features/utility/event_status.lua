@@ -29,10 +29,16 @@ local DEFINITIONS = {
     { id = "brutus", label = "Brutus", color = { 1.00, 0.30, 0.48, 1 } },
 }
 
+-- Guide + BTR Crate FIRE/Locked dump: loot burns for 13 minutes after destroy.
+local BTR_LOOT_CD_MS = 13 * 60 * 1000
+
 local rows = {}
 local first_seen = {}
 local last_refresh = -REFRESH_MS
 local session_token = nil
+local btr_was_destroyed = false
+local btr_loot_until = nil
+local btr_crate_seen_at = nil
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -51,6 +57,9 @@ local function reset_session_state()
     rows = {}
     first_seen = {}
     last_refresh = -REFRESH_MS
+    btr_was_destroyed = false
+    btr_loot_until = nil
+    btr_crate_seen_at = nil
 end
 
 local function tick_session()
@@ -147,6 +156,95 @@ local function npc_event_state()
     return state
 end
 
+local function model_name(inst)
+    return inst and (inst.Name or inst.name) or ""
+end
+
+local function is_btr_crate(inst)
+    local name = model_name(inst)
+    return name == "BTR Crate" or (name:find("BTR Crate", 1, true) ~= nil)
+end
+
+local function crate_locked(model)
+    if env.get_attribute(model, "Locked") == true then return true end
+    if env.get_attribute(model, "BreakLocked") == true then return true end
+    local main = find_child(model, "Main")
+    local fire = find_child(main, "FIRE")
+    if fire then
+        local enabled = env.safe_call(function()
+            if fire.Enabled ~= nil then return fire.Enabled end
+            return fire.enabled
+        end)
+        if enabled == true then return true end
+    end
+    return false
+end
+
+-- Runtime BTR crates land under Bases/Loners or Drops depending on server path.
+local function scan_btr_crates(now)
+    local count, locked_count = 0, 0
+    local buckets = {
+        find_child(folders.from_key("loners"), "BTR Crate"),
+        folders.from_key("drops"),
+        folders.from_key("bases"),
+        folders.from_key("events"),
+    }
+    for _, bucket in ipairs(buckets) do
+        for _, child in ipairs(children(bucket)) do
+            local model = child
+            local name = model_name(child)
+            if name == "BTR Crate" then
+                -- folder of crates
+                for _, nested in ipairs(children(child)) do
+                    if is_btr_crate(nested) or model_name(nested) == "Default" or find_child(nested, "Main") then
+                        count = count + 1
+                        if crate_locked(nested) then locked_count = locked_count + 1 end
+                    end
+                end
+            elseif is_btr_crate(child) or (find_child(child, "Main") and name:find("BTR", 1, true)) then
+                count = count + 1
+                if crate_locked(child) then locked_count = locked_count + 1 end
+            end
+        end
+    end
+
+    if count > 0 then
+        btr_crate_seen_at = btr_crate_seen_at or now
+    else
+        btr_crate_seen_at = nil
+    end
+    return count, locked_count
+end
+
+local function update_btr_loot_timer(now, btr_item, crate_count, locked_count)
+    local destroyed = btr_item and btr_item.destroyed == true
+    local live = btr_item and (btr_item.count or 0) > 0 and not destroyed
+
+    if live then
+        btr_was_destroyed = false
+        btr_loot_until = nil
+        return
+    end
+
+    if destroyed and not btr_was_destroyed then
+        btr_loot_until = now + BTR_LOOT_CD_MS
+    end
+    btr_was_destroyed = destroyed
+
+    -- Joined mid-burn or missed Destroyed edge: infer from locked BTR crates.
+    if (not btr_loot_until or btr_loot_until <= now)
+        and crate_count > 0
+        and locked_count > 0
+        and btr_crate_seen_at
+    then
+        btr_loot_until = btr_crate_seen_at + BTR_LOOT_CD_MS
+    end
+
+    if btr_loot_until and btr_loot_until <= now and locked_count == 0 and crate_count == 0 and not destroyed then
+        btr_loot_until = nil
+    end
+end
+
 local function rebuild_rows(now)
     local active = npc_event_state()
     local crate_count, crate_time = timed_crates()
@@ -154,27 +252,44 @@ local function rebuild_rows(now)
         active.timed_crate = { count = crate_count, timer = crate_time }
     end
 
+    local btr_crates, btr_locked = scan_btr_crates(now)
+    update_btr_loot_timer(now, active.btr, btr_crates, btr_locked)
+
     local active_only = settings.bool("april_event_status_active_only", false)
     local next_rows = {}
     for _, definition in ipairs(DEFINITIONS) do
         local item = active[definition.id]
         local is_active = item ~= nil and (item.count or 0) > 0
+        local loot_left = nil
+        if definition.id == "btr" and btr_loot_until then
+            loot_left = btr_loot_until - now
+        end
+        local loot_cooling = definition.id == "btr" and loot_left ~= nil and loot_left > 0
+        local loot_ready = definition.id == "btr"
+            and btr_loot_until ~= nil
+            and loot_left ~= nil
+            and loot_left <= 0
+            and (btr_crates > 0 or (item and item.destroyed))
+
         if is_active then
             first_seen[definition.id] = first_seen[definition.id] or now
-        else
+        elseif not loot_cooling and not loot_ready then
             first_seen[definition.id] = nil
         end
 
-        if is_active or not active_only then
+        local show = is_active or loot_cooling or loot_ready or not active_only
+        if show then
             local status = is_active and "ACTIVE" or "INACTIVE"
             if definition.id == "timed_crate" and is_active then status = "AVAILABLE" end
             if item and item.destroyed then status = "DESTROYED" end
+            if loot_cooling then status = "LOOT CD" end
+            if loot_ready then status = "LOOT READY" end
 
             local elapsed = is_active and format_elapsed(now - (first_seen[definition.id] or now)) or "--:--"
             local meta = elapsed
             if item and item.timer then
                 meta = item.timer
-            elseif item and item.hp and item.max_hp and item.max_hp > 0 then
+            elseif item and item.hp and item.max_hp and item.max_hp > 0 and not loot_cooling then
                 meta = string.format(
                     "%d / %d HP  |  %s",
                     math.floor(item.hp + 0.5),
@@ -182,7 +297,18 @@ local function rebuild_rows(now)
                     elapsed
                 )
             end
-            if item and item.location then
+            if loot_cooling then
+                meta = "Loot fire  " .. format_elapsed(loot_left)
+                if btr_crates > 0 then
+                    meta = meta .. "  |  " .. tostring(btr_crates) .. " crate" .. (btr_crates > 1 and "s" or "")
+                end
+            elseif loot_ready then
+                meta = "Loot unlocked"
+                if btr_crates > 0 then
+                    meta = tostring(btr_crates) .. " crate" .. (btr_crates > 1 and "s" or "") .. "  |  " .. meta
+                end
+            end
+            if item and item.location and not loot_cooling then
                 meta = tostring(item.location) .. "  |  " .. meta
             end
             if item and (item.count or 0) > 1 then
@@ -192,7 +318,7 @@ local function rebuild_rows(now)
             next_rows[#next_rows + 1] = {
                 label = definition.label,
                 color = definition.color,
-                active = is_active,
+                active = is_active or loot_cooling or loot_ready,
                 status = status,
                 meta = meta,
             }
@@ -249,7 +375,7 @@ function M.draw()
         end
         draw_util.text(x + 26, ry + 1, row.label, row.active and theme.TEXT or theme.TEXT_MUTED, 11)
         local meta = tostring(row.meta or "")
-        if #meta > 42 then meta = meta:sub(1, 40) .. ".." end
+        if #meta > 48 then meta = meta:sub(1, 46) .. ".." end
         draw_util.text(x + 26, ry + 17, meta, theme.TEXT_MUTED, 10)
 
         local status_w = theme.text_w(row.status, 9)

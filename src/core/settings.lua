@@ -1,6 +1,7 @@
 local M = {}
 
 local _callbacks = {}
+local feature_bind = nil
 
 function M.invalidate() end
 
@@ -19,11 +20,14 @@ function M.bool(id, default)
 end
 
 function M.enabled(id)
-    local ok, fb = pcall(function()
-        return April.require("core.feature_bind")
-    end)
-    if ok and fb and fb.is_registered(id) then
-        return fb.active(id)
+    -- feature_bind requires settings, so resolve it lazily once to avoid a
+    -- circular module load and hundreds of repeated pcall/require calls/frame.
+    if not feature_bind then
+        local ok, fb = pcall(April.require, "core.feature_bind")
+        if ok then feature_bind = fb end
+    end
+    if feature_bind and feature_bind.is_registered(id) then
+        return feature_bind.active(id)
     end
 
     return M.bool(id, false)

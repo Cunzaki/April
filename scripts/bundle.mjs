@@ -129,7 +129,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.0.83";
+const VERSION = "4.0.99";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector
@@ -145,7 +145,7 @@ April = {
     -- Set true only while hunting native crashes (writes dense STEP breadcrumbs).
     crash_trace = false,
     -- Targeted file trace for Autofarm native-crash diagnosis.
-    autofarm_trace = true,
+    autofarm_trace = false,
     _mods = {},
     load_status = {
         { name = "Core", state = "loaded" },

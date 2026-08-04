@@ -812,6 +812,7 @@ end)()
 April._mods["core.settings"] = (function()
 local M = {}
 local _callbacks = {}
+local feature_bind = nil
 function M.invalidate() end
 function M.get(id, default)
     if menu and menu.get then
@@ -826,11 +827,12 @@ function M.bool(id, default)
     return v == true or v == 1
 end
 function M.enabled(id)
-    local ok, fb = pcall(function()
-        return April.require("core.feature_bind")
-    end)
-    if ok and fb and fb.is_registered(id) then
-        return fb.active(id)
+    if not feature_bind then
+        local ok, fb = pcall(April.require, "core.feature_bind")
+        if ok then feature_bind = fb end
+    end
+    if feature_bind and feature_bind.is_registered(id) then
+        return feature_bind.active(id)
     end
     return M.bool(id, false)
 end
@@ -4391,6 +4393,7 @@ local NOCLIP_PARTS = {
     "HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso", "Head",
 }
 local collide_snap = {}
+local noclip_owners = {}
 local function part_key(inst)
     if not inst then return nil end
     return inst.Address or inst.address or tostring(inst)
@@ -4661,8 +4664,31 @@ function M.ground_distance(x, y, z)
     return tonumber(dist)
 end
 function M.set_noclip_parts(char, enabled)
+    return M.set_noclip_parts_owned(char, enabled, "default")
+end
+local function another_owner_holds(char, except_owner)
+    for owner, held_char in pairs(noclip_owners) do
+        if owner ~= except_owner and held_char == char then return true end
+    end
+    return false
+end
+local function restore_noclip_char(char)
     if not char then return end
+    for i = 1, #NOCLIP_PARTS do
+        local p = M.find_part(char, NOCLIP_PARTS[i])
+        if p and M.is_base_part(p) then restore_collide(p) end
+    end
+end
+function M.set_noclip_parts_owned(char, enabled, owner)
+    owner = tostring(owner or "default")
     if enabled then
+        local previous = noclip_owners[owner]
+        if previous and previous ~= char then
+            noclip_owners[owner] = nil
+            if not another_owner_holds(previous, owner) then restore_noclip_char(previous) end
+        end
+        if not char then return end
+        noclip_owners[owner] = char
         for i = 1, #NOCLIP_PARTS do
             local p = M.find_part(char, NOCLIP_PARTS[i])
             if p and M.is_base_part(p) then
@@ -4672,12 +4698,9 @@ function M.set_noclip_parts(char, enabled)
         end
         return
     end
-    for i = 1, #NOCLIP_PARTS do
-        local p = M.find_part(char, NOCLIP_PARTS[i])
-        if p and M.is_base_part(p) then
-            restore_collide(p)
-        end
-    end
+    local held = noclip_owners[owner] or char
+    noclip_owners[owner] = nil
+    if held and not another_owner_holds(held, owner) then restore_noclip_char(held) end
 end
 function M.drive_velocity_target(root, tx, ty, tz, dt, opts)
     if not root then return end
@@ -4915,12 +4938,17 @@ local M = {}
 local P_FLY = "april_fly_enabled"
 local P_SPEED = "april_fly_speed"
 local P_NOCLIP = "april_fly_noclip"
+local P_FAKEDUCK = "april_fakeduck_enabled"
 local MIN_SPEED = 1
 local MAX_SPEED = 20
 local GROUND_DIST = 4.5
+local FLY_HIP = 0.01
+local STAND_HIP = 1.6
+local JUMP_STATE = 3
 local installed = false
 local fly_active = false
 local fly_noclip = false
+local fly_duck_applied = false
 local tracked_char_id = nil
 local collision_healed_id = nil
 local last_fly_zero_ms = 0
@@ -4948,6 +4976,35 @@ local function get_humanoid(lp, char)
     return env.safe_call(function()
         if char.FindFirstChildOfClass then return char:FindFirstChildOfClass("Humanoid") end
         if char.find_first_child_of_class then return char:find_first_child_of_class("Humanoid") end
+    end)
+end
+local function find_child(parent, name)
+    if not parent then return nil end
+    return env.safe_call(function()
+        if parent.FindFirstChild then return parent:FindFirstChild(name) end
+        if parent.find_first_child then return parent:find_first_child(name) end
+        return nil
+    end)
+end
+local function set_attr(inst, name, value)
+    if not inst then return end
+    pcall(function()
+        if inst.SetAttribute then
+            inst:SetAttribute(name, value)
+        elseif inst.set_attribute then
+            inst:set_attribute(name, value)
+        end
+    end)
+end
+local function set_hip_height(hum, value)
+    if not hum then return end
+    pcall(function() hum.HipHeight = value end)
+end
+local function set_root_size(root, duck)
+    if not root or not Vector3 then return end
+    local y = duck and 1.4 or 2.5
+    pcall(function()
+        root.Size = Vector3.new(2, y, 2)
     end)
 end
 local function hum_alive(hum)
@@ -4999,6 +5056,26 @@ local function clear_swim_block()
         end
     end)
 end
+local function apply_fly_duck(char, hum, root)
+    local state_ctrl = find_child(char, "StateController")
+    if state_ctrl then
+        set_attr(state_ctrl, "IsCrouch", true)
+    end
+    set_hip_height(hum, FLY_HIP)
+    set_root_size(root, true)
+    fly_duck_applied = true
+end
+local function restore_fly_duck(char, hum, root)
+    if not fly_duck_applied then return end
+    fly_duck_applied = false
+    if settings.enabled(P_FAKEDUCK) then return end
+    local state_ctrl = find_child(char, "StateController")
+    if state_ctrl then
+        set_attr(state_ctrl, "IsCrouch", false)
+    end
+    set_hip_height(hum, STAND_HIP)
+    set_root_size(root, false)
+end
 local function apply_fly_velocity(root, mx, my, mz, speed)
     local tx, ty, tz = 0, 0, 0
     local mag = math.sqrt(mx * mx + my * my + mz * mz)
@@ -5017,10 +5094,13 @@ local function tick_fly(root, hum, char)
     local moving = has_move_input(mx, my, mz)
     if on_ground and not moving then
         set_fly_noclip(char, false)
+        restore_fly_duck(char, hum, root)
         return
     end
     local speed = fly_speed()
     apply_fly_velocity(root, mx, my, mz, speed)
+    move.humanoid_state(hum, JUMP_STATE)
+    apply_fly_duck(char, hum, root)
     if settings.bool(P_NOCLIP, true) then
         set_fly_noclip(char, not on_ground or moving)
     else
@@ -5028,8 +5108,9 @@ local function tick_fly(root, hum, char)
     end
     clear_swim_block()
 end
-local function abort_active(root, char)
+local function abort_active(root, char, hum)
     set_fly_noclip(char, false)
+    restore_fly_duck(char, hum, root)
     if fly_active and root then
         local now = tick_ms()
         if now - last_fly_zero_ms > 80 then
@@ -5045,12 +5126,12 @@ function M.is_fly_active()
 end
 function M.tick(_dt)
     if not misc_gate.movement_allowed() then
-        abort_active(nil, nil)
+        abort_active(nil, nil, nil)
         return
     end
     local fling = April.require("features.movement.fling")
     if fling.is_active and fling.is_active() then
-        abort_active(nil, nil)
+        abort_active(nil, nil, nil)
         return
     end
     local lp = env.get_local_player()
@@ -5067,6 +5148,7 @@ function M.tick(_dt)
         end
         fly_active = false
         fly_noclip = false
+        fly_duck_applied = false
         move.clear_collide_snapshots()
         tracked_char_id = cid
         collision_healed_id = nil
@@ -5075,8 +5157,8 @@ function M.tick(_dt)
         fly_active = true
         tick_fly(root, hum, char)
     else
-        if fly_active or fly_noclip then
-            abort_active(root, char)
+        if fly_active or fly_noclip or fly_duck_applied then
+            abort_active(root, char, hum)
         elseif collision_healed_id ~= cid then
             move.reset_fallen_collision(char)
             collision_healed_id = cid

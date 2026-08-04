@@ -204,6 +204,8 @@ function M.cham_entry_part(entry, applied)
     end
 
     if entry.inst and env.is_valid(entry.inst) then
+        -- gpu_chams is bundled before game modules, so this dependency must
+        -- remain lazy even though this path is not reached for cached parts.
         local esp_scan = April.require("game.esp_scan")
         local main = esp_scan.find_main_part(entry.inst)
         if main then

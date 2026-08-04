@@ -4836,6 +4836,8 @@ April._mods["game.npcs"] = (function()
 local env = April.require("core.env")
 local folders = April.require("game.folders")
 local esp_scan = April.require("game.esp_scan")
+local esp_util = April.require("core.esp_util")
+local math_util = April.require("core.math_util")
 local M = {}
 M.HOSTILE_NAMES = {
     Soldier = true,
@@ -4991,13 +4993,36 @@ function M.collect_heli_weak_points(model)
     end)
     return out
 end
+local function cached_heli_weak_points(entry, model)
+    local now = tick_ms()
+    local model_key = address(model)
+    if entry._heli_weak_model ~= model_key
+        or now - (entry._heli_weak_at or -1000) >= 750
+    then
+        entry._heli_weak_model = model_key
+        entry._heli_weak_at = now
+        entry._heli_weak = M.collect_heli_weak_points(model)
+    end
+    local weak = entry._heli_weak or {}
+    for i = #weak, 1, -1 do
+        local item = weak[i]
+        local x, y, z
+        if item and item.part then x, y, z = part_pos(item.part) end
+        if x and env.is_valid(item.part) then
+            item.x, item.y, item.z = x, y, z
+        else
+            table.remove(weak, i)
+        end
+    end
+    return weak
+end
 function M.heli_aim_world(entry, prefer_screen, cx, cy)
     if not entry then return nil end
     local model = entry.inst
     if (not model or not env.is_valid(model)) and entry.entity then
         model = entry.entity.Character or entry.entity.character
     end
-    local weak = M.collect_heli_weak_points(model)
+    local weak = cached_heli_weak_points(entry, model)
     if #weak == 0 then
         local body = entry.root or entry.anchor or entry.head
         if (not body or not env.is_valid(body)) and model and env.is_valid(model) then
@@ -5012,8 +5037,6 @@ function M.heli_aim_world(entry, prefer_screen, cx, cy)
         return nil
     end
     if prefer_screen and cx and cy then
-        local esp_util = April.require("core.esp_util")
-        local math_util = April.require("core.math_util")
         local best, best_d = nil, math.huge
         for i = 1, #weak do
             local w = weak[i]

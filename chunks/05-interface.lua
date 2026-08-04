@@ -1163,7 +1163,7 @@ M.BY_ID = {
     april_gm_speed = "Boosts bullet speed via SpeedMult on live weapon tables. Not an attachment stat — Swift Heavy Ammo also adds speed; equip a gun before enabling.",
     april_gm_range = "Extends max range via RangeMult. Silencer and Compensator reduce range; this patches whatever range mults exist on your gun.",
     april_gm_double_tap = "Forces a 2-round burst on your held gun. Patches ToolInfo directly — does not use GC mults.",
-    april_fly_enabled = "Camera-relative HRP velocity fly (WASD + Space/Ctrl). Leaves normal walking alone on the ground with no input. Never changes WalkSpeed or JumpPower.",
+    april_fly_enabled = "Camera-relative HRP velocity fly (WASD + Space/Ctrl). Built-in duck (HipHeight 0.01) and jump state while airborne — does not toggle Fake Duck. Never changes WalkSpeed or JumpPower.",
     april_fly_noclip = "Disables collision on your key character parts while flying. Collision is restored when you land or turn Fly off.",
     april_spider_enabled = "Climbs upward while you press into a nearby wall. It pulses the jump state only after multi-height wall checks, reducing wall snap-back.",
     april_antifling_enabled = "Makes other players' character parts non-collidable on your client. Their original collision values are restored when disabled.",
@@ -1179,7 +1179,7 @@ M.BY_ID = {
     april_anti_afk = "Prevents idle kick by simulating activity.",
     april_mod_checker_enabled = "Alerts you when staff or mods join the server.",
     april_keybinds_enabled = "Shows an on-screen list of your keybinds.",
-    april_event_status_enabled = "Shows live timed crates, event NPCs, and bosses (raids use Raid ESP only).",
+    april_event_status_enabled = "Shows live timed crates, event NPCs, and bosses. BTR tracks the 13-minute loot-fire cooldown after destroy (raids use Raid ESP only).",
     april_event_status_active_only = "Hides inactive event rows from the event status panel.",
     april_map_enabled = "Shows a draggable tactical minimap overlay.",
     april_ui_radar_layers = "Choose what appears on the tactical map.",
@@ -4931,9 +4931,18 @@ April._mods["menu.tabs"] = (function()
 local menu_util = April.require("core.menu_util")
 local debug = April.require("core.debug")
 local bootstrap = April.require("game.bootstrap")
+local cache = April.require("core.cache")
+local npcs = April.require("game.npcs")
+local player_state = April.require("game.player_state")
+local weapons = April.require("game.weapons")
+local runservice = April.require("core.runservice")
+local incremental_scan = April.require("core.incremental_scan")
 local M = {}
 M.features = {}
 M._menu_registered = false
+local function mark(dense, name)
+    if dense then debug.step(name) end
+end
 M.FEATURE_ORDER = {
     "features.combat.camera_aimbot",
     "features.combat.aimbot",
@@ -5029,26 +5038,20 @@ function M.setup_scans()
 end
 function M.update(dt)
     local dense = (April and April.crash_trace == true) or (debug.frame_count() <= 45)
-    local function mark(name)
-        if dense then debug.step(name) end
-    end
-    mark("tabs.update.cache")
-    local cache = April.require("core.cache")
+    mark(dense, "tabs.update.cache")
     cache.refresh_entities()
-    mark("tabs.update.npcs")
-    April.require("game.npcs").refresh_cache(cache.workspace_entities)
-    mark("tabs.update.player_state")
-    April.require("game.player_state").tick(cache.players)
-    mark("tabs.update.bootstrap")
+    mark(dense, "tabs.update.npcs")
+    npcs.refresh_cache(cache.workspace_entities)
+    mark(dense, "tabs.update.player_state")
+    player_state.tick(cache.players)
+    mark(dense, "tabs.update.bootstrap")
     bootstrap.tick()
-    mark("tabs.update.weapons")
-    local weapons = April.require("game.weapons")
+    mark(dense, "tabs.update.weapons")
     weapons.tick()
-    mark("tabs.update.runservice")
-    local runservice = April.require("core.runservice")
+    mark(dense, "tabs.update.runservice")
     runservice.dispatch(dt)
-    mark("tabs.update.incremental_scan")
-    April.require("core.incremental_scan").tick()
+    mark(dense, "tabs.update.incremental_scan")
+    incremental_scan.tick()
     for i, feat in ipairs(M.features) do
         if feat.update then
             local name = M.FEATURE_ORDER[i] or ("#" .. i)
@@ -5107,9 +5110,14 @@ local debug = April.require("core.debug")
 local notify = April.require("core.notify")
 local custom_menu = April.require("ui.custom_menu")
 local startup_intro = April.require("ui.startup_intro")
+local api_aliases = April.require("core.api_aliases")
+local feature_bind = April.require("core.feature_bind")
+local aim_key = April.require("core.aim_key")
+local overlay_theme = April.require("core.overlay_theme")
 local M = {}
 local initialized = false
 local first_post_intro = true
+local alias_refresh_elapsed = 0
 function M.init()
     debug.step("app.init")
     if initialized then return true end
@@ -5135,15 +5143,8 @@ function M.on_frame()
     if dense then
         debug.step("frame:" .. tostring(fc) .. ".begin")
     end
-    pcall(function()
-        April.require("core.api_aliases").apply()
-    end)
-    pcall(function()
-        April.require("core.feature_bind").tick()
-    end)
-    pcall(function()
-        April.require("core.aim_key").tick("april_aim_key", "april_aim_key_mode")
-    end)
+    pcall(feature_bind.tick)
+    pcall(aim_key.tick, "april_aim_key", "april_aim_key_mode")
     if startup_intro.is_active() then
         if dense then debug.step("frame.intro.active") end
         if startup_intro.should_reveal_menu() then
@@ -5165,8 +5166,13 @@ function M.on_frame()
         local ok, v = pcall(utility.get_delta_time)
         if ok and type(v) == "number" then dt = v end
     end
+    alias_refresh_elapsed = alias_refresh_elapsed + dt
+    if alias_refresh_elapsed >= 2 then
+        alias_refresh_elapsed = 0
+        pcall(api_aliases.apply)
+    end
     debug.guard("tabs.update", tabs.update, dt)
-    debug.guard("overlay_theme.sync", April.require("core.overlay_theme").sync)
+    debug.guard("overlay_theme.sync", overlay_theme.sync)
     debug.guard("tabs.draw", tabs.draw)
     debug.guard("notify.draw", notify.draw)
     debug.guard("custom_menu.draw", custom_menu.draw)

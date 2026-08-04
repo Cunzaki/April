@@ -17,6 +17,7 @@ local NOCLIP_PARTS = {
 -- Snapshot CanCollide before noclip so restore never force-enables Head/Torso
 -- collision (Fallen keeps those off — forcing true blocks crouch gaps).
 local collide_snap = {}
+local noclip_owners = {}
 
 local function part_key(inst)
     if not inst then return nil end
@@ -329,8 +330,34 @@ function M.ground_distance(x, y, z)
 end
 
 function M.set_noclip_parts(char, enabled)
+    return M.set_noclip_parts_owned(char, enabled, "default")
+end
+
+local function another_owner_holds(char, except_owner)
+    for owner, held_char in pairs(noclip_owners) do
+        if owner ~= except_owner and held_char == char then return true end
+    end
+    return false
+end
+
+local function restore_noclip_char(char)
     if not char then return end
+    for i = 1, #NOCLIP_PARTS do
+        local p = M.find_part(char, NOCLIP_PARTS[i])
+        if p and M.is_base_part(p) then restore_collide(p) end
+    end
+end
+
+function M.set_noclip_parts_owned(char, enabled, owner)
+    owner = tostring(owner or "default")
     if enabled then
+        local previous = noclip_owners[owner]
+        if previous and previous ~= char then
+            noclip_owners[owner] = nil
+            if not another_owner_holds(previous, owner) then restore_noclip_char(previous) end
+        end
+        if not char then return end
+        noclip_owners[owner] = char
         for i = 1, #NOCLIP_PARTS do
             local p = M.find_part(char, NOCLIP_PARTS[i])
             if p and M.is_base_part(p) then
@@ -340,12 +367,9 @@ function M.set_noclip_parts(char, enabled)
         end
         return
     end
-    for i = 1, #NOCLIP_PARTS do
-        local p = M.find_part(char, NOCLIP_PARTS[i])
-        if p and M.is_base_part(p) then
-            restore_collide(p)
-        end
-    end
+    local held = noclip_owners[owner] or char
+    noclip_owners[owner] = nil
+    if held and not another_owner_holds(held, owner) then restore_noclip_char(held) end
 end
 
 function M.drive_velocity_target(root, tx, ty, tz, dt, opts)

@@ -1,5 +1,5 @@
 -- Velocity Fly restored from the pre-Spider movement controller.
--- HRP velocity only — never writes WalkSpeed, JumpPower, Gravity, or HipHeight.
+-- HRP velocity + built-in duck assist — never writes WalkSpeed or JumpPower.
 local settings = April.require("core.settings")
 local env = April.require("core.env")
 local move = April.require("core.cframe_move")
@@ -11,14 +11,19 @@ local M = {}
 local P_FLY = "april_fly_enabled"
 local P_SPEED = "april_fly_speed"
 local P_NOCLIP = "april_fly_noclip"
+local P_FAKEDUCK = "april_fakeduck_enabled"
 
 local MIN_SPEED = 1
 local MAX_SPEED = 20
 local GROUND_DIST = 4.5
+local FLY_HIP = 0.01
+local STAND_HIP = 1.6
+local JUMP_STATE = 3
 
 local installed = false
 local fly_active = false
 local fly_noclip = false
+local fly_duck_applied = false
 local tracked_char_id = nil
 local collision_healed_id = nil
 local last_fly_zero_ms = 0
@@ -50,6 +55,39 @@ local function get_humanoid(lp, char)
     return env.safe_call(function()
         if char.FindFirstChildOfClass then return char:FindFirstChildOfClass("Humanoid") end
         if char.find_first_child_of_class then return char:find_first_child_of_class("Humanoid") end
+    end)
+end
+
+local function find_child(parent, name)
+    if not parent then return nil end
+    return env.safe_call(function()
+        if parent.FindFirstChild then return parent:FindFirstChild(name) end
+        if parent.find_first_child then return parent:find_first_child(name) end
+        return nil
+    end)
+end
+
+local function set_attr(inst, name, value)
+    if not inst then return end
+    pcall(function()
+        if inst.SetAttribute then
+            inst:SetAttribute(name, value)
+        elseif inst.set_attribute then
+            inst:set_attribute(name, value)
+        end
+    end)
+end
+
+local function set_hip_height(hum, value)
+    if not hum then return end
+    pcall(function() hum.HipHeight = value end)
+end
+
+local function set_root_size(root, duck)
+    if not root or not Vector3 then return end
+    local y = duck and 1.4 or 2.5
+    pcall(function()
+        root.Size = Vector3.new(2, y, 2)
     end)
 end
 
@@ -108,6 +146,30 @@ local function clear_swim_block()
     end)
 end
 
+-- Built-in duck assist for Fly (does not toggle Fake Duck).
+local function apply_fly_duck(char, hum, root)
+    local state_ctrl = find_child(char, "StateController")
+    if state_ctrl then
+        set_attr(state_ctrl, "IsCrouch", true)
+    end
+    set_hip_height(hum, FLY_HIP)
+    set_root_size(root, true)
+    fly_duck_applied = true
+end
+
+local function restore_fly_duck(char, hum, root)
+    if not fly_duck_applied then return end
+    fly_duck_applied = false
+    -- Leave Fake Duck alone if the user has that bind on.
+    if settings.enabled(P_FAKEDUCK) then return end
+    local state_ctrl = find_child(char, "StateController")
+    if state_ctrl then
+        set_attr(state_ctrl, "IsCrouch", false)
+    end
+    set_hip_height(hum, STAND_HIP)
+    set_root_size(root, false)
+end
+
 local function apply_fly_velocity(root, mx, my, mz, speed)
     local tx, ty, tz = 0, 0, 0
     local mag = math.sqrt(mx * mx + my * my + mz * mz)
@@ -130,11 +192,14 @@ local function tick_fly(root, hum, char)
     -- On ground with no input: leave walking/jumping alone.
     if on_ground and not moving then
         set_fly_noclip(char, false)
+        restore_fly_duck(char, hum, root)
         return
     end
 
     local speed = fly_speed()
     apply_fly_velocity(root, mx, my, mz, speed)
+    move.humanoid_state(hum, JUMP_STATE)
+    apply_fly_duck(char, hum, root)
     if settings.bool(P_NOCLIP, true) then
         set_fly_noclip(char, not on_ground or moving)
     else
@@ -143,8 +208,9 @@ local function tick_fly(root, hum, char)
     clear_swim_block()
 end
 
-local function abort_active(root, char)
+local function abort_active(root, char, hum)
     set_fly_noclip(char, false)
+    restore_fly_duck(char, hum, root)
     if fly_active and root then
         local now = tick_ms()
         if now - last_fly_zero_ms > 80 then
@@ -162,13 +228,13 @@ end
 
 function M.tick(_dt)
     if not misc_gate.movement_allowed() then
-        abort_active(nil, nil)
+        abort_active(nil, nil, nil)
         return
     end
 
     local fling = April.require("features.movement.fling")
     if fling.is_active and fling.is_active() then
-        abort_active(nil, nil)
+        abort_active(nil, nil, nil)
         return
     end
 
@@ -189,6 +255,7 @@ function M.tick(_dt)
         end
         fly_active = false
         fly_noclip = false
+        fly_duck_applied = false
         move.clear_collide_snapshots()
         tracked_char_id = cid
         collision_healed_id = nil
@@ -198,8 +265,8 @@ function M.tick(_dt)
         fly_active = true
         tick_fly(root, hum, char)
     else
-        if fly_active or fly_noclip then
-            abort_active(root, char)
+        if fly_active or fly_noclip or fly_duck_applied then
+            abort_active(root, char, hum)
         elseif collision_healed_id ~= cid then
             move.reset_fallen_collision(char)
             collision_healed_id = cid

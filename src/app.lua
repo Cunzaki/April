@@ -3,10 +3,15 @@ local debug = April.require("core.debug")
 local notify = April.require("core.notify")
 local custom_menu = April.require("ui.custom_menu")
 local startup_intro = April.require("ui.startup_intro")
+local api_aliases = April.require("core.api_aliases")
+local feature_bind = April.require("core.feature_bind")
+local aim_key = April.require("core.aim_key")
+local overlay_theme = April.require("core.overlay_theme")
 
 local M = {}
 local initialized = false
 local first_post_intro = true
+local alias_refresh_elapsed = 0
 
 function M.init()
     debug.step("app.init")
@@ -36,15 +41,8 @@ function M.on_frame()
         debug.step("frame:" .. tostring(fc) .. ".begin")
     end
 
-    pcall(function()
-        April.require("core.api_aliases").apply()
-    end)
-    pcall(function()
-        April.require("core.feature_bind").tick()
-    end)
-    pcall(function()
-        April.require("core.aim_key").tick("april_aim_key", "april_aim_key_mode")
-    end)
+    pcall(feature_bind.tick)
+    pcall(aim_key.tick, "april_aim_key", "april_aim_key_mode")
 
     if startup_intro.is_active() then
         if dense then debug.step("frame.intro.active") end
@@ -68,9 +66,16 @@ function M.on_frame()
         local ok, v = pcall(utility.get_delta_time)
         if ok and type(v) == "number" then dt = v end
     end
+    -- API tables are stable after boot. Keep a slow refresh for late-provided
+    -- capabilities without repeating dozens of alias checks every render frame.
+    alias_refresh_elapsed = alias_refresh_elapsed + dt
+    if alias_refresh_elapsed >= 2 then
+        alias_refresh_elapsed = 0
+        pcall(api_aliases.apply)
+    end
 
     debug.guard("tabs.update", tabs.update, dt)
-    debug.guard("overlay_theme.sync", April.require("core.overlay_theme").sync)
+    debug.guard("overlay_theme.sync", overlay_theme.sync)
     debug.guard("tabs.draw", tabs.draw)
     debug.guard("notify.draw", notify.draw)
     debug.guard("custom_menu.draw", custom_menu.draw)

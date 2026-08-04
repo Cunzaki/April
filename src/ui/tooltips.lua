@@ -127,7 +127,7 @@ M.BY_ID = {
     april_gm_double_tap = "Forces a 2-round burst on your held gun. Patches ToolInfo directly — does not use GC mults.",
 
     -- Movement
-    april_fly_enabled = "Camera-relative HRP velocity fly (WASD + Space/Ctrl). Leaves normal walking alone on the ground with no input. Never changes WalkSpeed or JumpPower.",
+    april_fly_enabled = "Camera-relative HRP velocity fly (WASD + Space/Ctrl). Built-in duck (HipHeight 0.01) and jump state while airborne — does not toggle Fake Duck. Never changes WalkSpeed or JumpPower.",
     april_fly_noclip = "Disables collision on your key character parts while flying. Collision is restored when you land or turn Fly off.",
     april_spider_enabled = "Climbs upward while you press into a nearby wall. It pulses the jump state only after multi-height wall checks, reducing wall snap-back.",
     april_antifling_enabled = "Makes other players' character parts non-collidable on your client. Their original collision values are restored when disabled.",
@@ -145,7 +145,7 @@ M.BY_ID = {
     april_anti_afk = "Prevents idle kick by simulating activity.",
     april_mod_checker_enabled = "Alerts you when staff or mods join the server.",
     april_keybinds_enabled = "Shows an on-screen list of your keybinds.",
-    april_event_status_enabled = "Shows live timed crates, event NPCs, and bosses (raids use Raid ESP only).",
+    april_event_status_enabled = "Shows live timed crates, event NPCs, and bosses. BTR tracks the 13-minute loot-fire cooldown after destroy (raids use Raid ESP only).",
     april_event_status_active_only = "Hides inactive event rows from the event status panel.",
 
     -- Radar
