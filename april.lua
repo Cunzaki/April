@@ -1,17 +1,10 @@
---[[
-    April Fallen - Fallen Survival for Project Vector
-    https://github.com/Cunzaki/April
-    Built: 2026-08-04T03:51:12.896Z
-    UI: custom Gamesense menu (INSERT) - Vector menu tabs disabled
-]]
-
 April = {
-    version = "4.0.69",
+    version = "4.0.70",
     debug = false,
     crash_logging = false,
-    -- Set true only while hunting native crashes (writes dense STEP breadcrumbs).
+
     crash_trace = false,
-    -- Targeted file trace for Autofarm native-crash diagnosis.
+
     autofarm_trace = true,
     _mods = {},
     load_status = {
@@ -35,7 +28,6 @@ function April.require(path)
     return mod
 end
 
-
 April.bundled = false
 April.load_status = {
     { name = "Core", state = "pending" },
@@ -46,11 +38,11 @@ April.load_status = {
 }
 
 local chunks = {
-    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/01-core.lua?v=4.0.69",
-    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/02-services.lua?v=4.0.69",
-    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/03-game.lua?v=4.0.69",
-    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/04-features.lua?v=4.0.69",
-    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/05-interface.lua?v=4.0.69",
+    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/01-core.lua?v=4.0.70",
+    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/02-services.lua?v=4.0.70",
+    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/03-game.lua?v=4.0.70",
+    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/04-features.lua?v=4.0.70",
+    "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks/05-interface.lua?v=4.0.70",
 }
 
 local loader_index = 1

@@ -1,4 +1,3 @@
-
 April._mods["ui.gs_theme"] = (function()
 local M = {}
 M.PRESET_NAMES = { "Violet Glass", "Midnight Blue", "Graphite", "Emerald Glass" }
@@ -222,7 +221,7 @@ M.rmb_click = false
 M.mmb_click = false
 M.lmb_release = false
 M.wheel = 0
-M.wheel_source = nil -- "api" | "uis" | "mouse" | nil
+M.wheel_source = nil
 M._wheel_accum = 0
 M._scroll_ready = false
 M._scroll_hook_tries = 0
@@ -516,9 +515,9 @@ M.defaults = {}
 M.colors = {}
 M.keys = {}
 M.callbacks = {}
-M.menu_callback = {} -- id -> single fn (menu.set_callback replaces)
+M.menu_callback = {}
 M.buttons = {}
-M.visible = {} -- id -> bool (parent gating); nil means visible
+M.visible = {}
 local function copy_table(t)
     if type(t) ~= "table" then return t end
     local out = {}
@@ -1680,24 +1679,24 @@ M.listening_key = nil
 M.drag_offset_x = 0
 M.drag_offset_y = 0
 M.dragging_window = false
-M.clip = nil -- { x, y, w, h }
-M.popup_used_click = false -- set when a popup consumes this frame's click
-M.interacted = false -- any widget captured LMB this frame
-M._hue_cache = {} -- id -> hue 0..1 for color picker
-M._list_scroll = {} -- id -> first visible option index (0-based)
+M.clip = nil
+M.popup_used_click = false
+M.interacted = false
+M._hue_cache = {}
+M._list_scroll = {}
 M._list_middle_drag = nil
 M.LIST_MAX_VISIBLE = 8
-M.wheel_consumed = false -- set when a dropdown/list eats the wheel this frame
-M.block_under = false -- true while pointer is over a floating popup (prior frame rect)
-M._color_anchor = nil -- { id, x, y, w }
-M._color_hit = nil -- { x, y, w, h } last drawn picker rect
-M.open_bind_mode = nil -- keybind id whose Always/Hold/Toggle menu is open
-M._bind_mode_anchor = nil -- { id, x, y, w }
+M.wheel_consumed = false
+M.block_under = false
+M._color_anchor = nil
+M._color_hit = nil
+M.open_bind_mode = nil
+M._bind_mode_anchor = nil
 M._bind_mode_hit = nil
-M._active_input_rect = nil -- { x, y, w, h } for click-outside blur
+M._active_input_rect = nil
 M._active_slider_input_rect = nil
-M._slider_input_meta = {} -- id -> { min, max, float, fmt }
-M._slider_edit_text = {} -- id -> string while editing
+M._slider_input_meta = {}
+M._slider_edit_text = {}
 M._input_repeat_at = 0
 M._input_repeat_vk = nil
 M.TIP_DELAY_MS = 450
@@ -1706,7 +1705,7 @@ M._tip_candidate = nil
 M._tip_hover_id = nil
 M._tip_hover_ms = 0
 local LISTEN_SKIP = {
-    [0x01] = true, -- LMB used for UI
+    [0x01] = true,
 }
 local function listen_skip_vk(vk)
     return LISTEN_SKIP[vk] == true
@@ -2220,11 +2219,11 @@ for vk = 0x01, 0xFE do
 end
 function M.tick_key_listen()
     if not M.listening_key then return end
-    if input.key_pressed(0x1B) then -- Escape cancels capture
+    if input.key_pressed(0x1B) then
         M.listening_key = nil
         return
     end
-    if input.key_pressed(0x08) or input.key_pressed(0x2E) then -- Backspace/Delete clears
+    if input.key_pressed(0x08) or input.key_pressed(0x2E) then
         state.set_key(M.listening_key, 0)
         M.listening_key = nil
         return
@@ -2801,7 +2800,7 @@ function M.keybind(x, y, w, id, label, default_on, opts)
     state.define(id, default_on == true)
     local mode_id = id .. "_mode"
     local hide_id = id .. "_hide_kb"
-    state.define(mode_id, 0) -- default Always (Always=0, Hold=1, Toggle=2)
+    state.define(mode_id, 0)
     state.define(hide_id, false)
     local h = theme.ROW_H
     if not in_clip(y, h) then return h end
@@ -4768,7 +4767,7 @@ state.define("april_ui_accent_anim", 1)
 state.define("april_ui_anim_speed", 40)
 state.define("april_ui_menu_overlay", true)
 state.define("april_ui_overlay_strength", 70)
-state.define("april_ui_bg_dim", 0) -- legacy (unused by overlay; kept for older profiles)
+state.define("april_ui_bg_dim", 0)
 state.define("april_ui_snow", false)
 state.define("april_ui_snow_amount", 50)
 state.define("april_ui_snow_speed", 40)
@@ -5175,7 +5174,6 @@ end
 return M
 end)()
 
--- Install custom UI menu backend before any register_menu() calls.
 do
     local dbg = April.require("core.debug")
     dbg.begin_session("bundle_boot")

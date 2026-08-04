@@ -1,4 +1,3 @@
-
 April._mods["game.module_scan"] = (function()
 local M = {}
 M._table_cache = nil
@@ -2917,7 +2916,7 @@ local CACHE_MS = 250
 local cache = {
     t = -1,
     in_team = false,
-    members = {}, -- [userId] = true
+    members = {},
     member_list = {},
 }
 local function tick_ms()
@@ -3727,7 +3726,7 @@ local env = April.require("core.env")
 local M = {}
 local loaded = false
 local farm_tools = {}
-local tool_caps = {} -- name -> { Trees=, Nodes=, Logs=, Cactus=, Dig= }
+local tool_caps = {}
 local FALLBACK_GATHER_TOOLS = {
     ["Stone Hatchet"] = { Trees = true, Logs = true, Cactus = true },
     ["Iron Shard Hatchet"] = { Trees = true, Logs = true, Cactus = true },
@@ -5243,7 +5242,7 @@ local state = {
     fetch_done = false,
     last_resolve_ms = 0,
     next_retry_ms = 0,
-    crops = {}, -- crop key -> async image entry
+    crops = {},
     active_crop = nil,
 }
 local RETRY_MS = 30000

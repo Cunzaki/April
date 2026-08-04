@@ -1,4 +1,3 @@
-
 April._mods["ui.combat_labels"] = (function()
 local M = {}
 M.TP_METHODS = {
@@ -9143,7 +9142,7 @@ local function nudge()
         return true
     end
     if utility and utility.key_press then
-        pcall(utility.key_press, 0x20) -- space
+        pcall(utility.key_press, 0x20)
         return true
     end
     if utility and utility.mouse_click then

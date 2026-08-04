@@ -9,8 +9,10 @@ Read this at the start of every session.
 | Artifact | Purpose |
 |----------|---------|
 | `src/` | Modular source (edit here) |
-| `scripts/bundle.mjs` | Bundles `src/` → `april.lua` |
-| `load.lua` | Local-first loader, then GitHub URL |
+| `scripts/bundle.mjs` | Builds the remote loader, chunks, and full local test bundle |
+| `april.lua` | Small remote chunk loader |
+| `load.lua` | Public one-line `utility.LoadUrl(...)` |
+| `Script 1.lua` | Full local bundle used for pre-release testing |
 | `dump/` | Game dump (gitignored — local only) |
 | `tools/` | GC / rbxlx utilities (local workspace) |
 | `docs/API.md` | Vector Lua Engine API — read every session |
@@ -55,3 +57,13 @@ npm run dump
 ## Version bump
 
 After meaningful changes: bump version in `scripts/bundle.mjs`, rebuild.
+
+## Mandatory build and release workflow
+
+- Edit modular files under `src/`; do not hand-edit generated Lua artifacts.
+- Every build must generate the complete standalone runtime at `Script 1.lua`.
+- Test `Script 1.lua` before any release because it does not depend on unpushed GitHub chunks.
+- Release artifacts (`april.lua`, `load.lua`, `chunks/*.lua`, `Script 1.lua`, and `april_ui.lua`) must contain no Lua comments. The build scripts enforce this.
+- Keep the public usage as one `utility.LoadUrl(...)`; `april.lua` may load ordered remote chunks internally.
+- Do not commit or push after routine edits. Only commit and push when the user explicitly says to push.
+- Before an approved push: bump the version, run the complete build, verify generated artifacts, then commit and push all required source, loader, and chunk changes together.

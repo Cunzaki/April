@@ -6,6 +6,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { stripLuaComments } from "./lua-strip.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = path.join(ROOT, "src");
@@ -126,7 +127,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.0.69";
+const VERSION = "4.0.70";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector
@@ -296,7 +297,7 @@ const CHUNKS = [
 ];
 
 const fullBody = buildModuleBody(ORDER);
-const fullBundle = header + fullBody + footer;
+const fullBundle = stripLuaComments(header + fullBody + footer);
 fs.writeFileSync(SCRIPT1_OUT, fullBundle);
 const bundleBytes = Buffer.byteLength(fullBundle);
 const MAX_VECTOR_BUNDLE_BYTES = 1_050_000;
@@ -316,13 +317,13 @@ for (const old of fs.readdirSync(CHUNK_DIR)) {
 for (let i = 0; i < CHUNKS.length; i++) {
   const chunk = CHUNKS[i];
   const chunkFooter = i === CHUNKS.length - 1 ? footer : "";
-  const contents = buildModuleBody(chunk.files) + chunkFooter;
+  const contents = stripLuaComments(buildModuleBody(chunk.files) + chunkFooter);
   fs.writeFileSync(path.join(CHUNK_DIR, chunk.file), contents);
   console.log("Built", `chunks/${chunk.file}`, `(${(Buffer.byteLength(contents) / 1024).toFixed(1)} KB)`);
 }
 
 const remoteBase = "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks";
-const remoteLoader = `${header}
+const remoteLoader = stripLuaComments(`${header}
 April.bundled = false
 April.load_status = {
 ${CHUNKS.map((chunk) => `    { name = "${chunk.name}", state = "pending" },`).join("\n")}
@@ -417,7 +418,7 @@ OnFrame = function()
     status.state = "loaded"
     loader_index = loader_index + 1
 end
-`;
+`);
 fs.writeFileSync(OUT, remoteLoader);
 console.log("Built", path.relative(ROOT, OUT), `(${(Buffer.byteLength(remoteLoader) / 1024).toFixed(1)} KB remote loader)`);
 

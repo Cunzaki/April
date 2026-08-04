@@ -7,6 +7,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { stripLuaComments } from "./lua-strip.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = path.join(ROOT, "src");
@@ -82,5 +83,5 @@ for (const rel of ORDER) {
   body += `April._mods["${modPath}"] = (function()\n${src}\nend)()\n`;
 }
 
-fs.writeFileSync(OUT, header + body + footer);
+fs.writeFileSync(OUT, stripLuaComments(header + body + footer));
 console.log("Built", path.relative(ROOT, OUT), `(${(fs.statSync(OUT).size / 1024).toFixed(1)} KB)`);
