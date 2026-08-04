@@ -20,7 +20,7 @@ Menu: **INSERT** (custom UI)
 
 ```bash
 npm run build
-git add april.lua
+git add april.lua load.lua chunks src scripts
 git commit -m "Ship April vX.Y.Z"
 git push origin main
 ```
@@ -33,8 +33,9 @@ After push, `utility.LoadUrl(...)` serves the new build.
 
 | Path | Purpose |
 |------|---------|
-| `april.lua` | Bundled runtime (what LoadUrl downloads) |
-| `load.lua` | Same one-liner as above |
+| `april.lua` | Small remote loader executed by the one-line LoadUrl |
+| `chunks/` | Ordered runtime chunks loaded by `april.lua` |
+| `load.lua` | Same one-line LoadUrl shown above |
 | `src/` | Modular source |
 | `scripts/` | Bundle tools |
 | `docs/` | API notes |
