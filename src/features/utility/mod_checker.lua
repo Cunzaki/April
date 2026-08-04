@@ -60,6 +60,7 @@ end
 function M.on_session_changed()
     M.reset_state()
     mod_ids.reset_session()
+    M._group_started = false
 end
 
 function M.tick_session()
@@ -125,8 +126,10 @@ end
 function M.init()
     M.on_session_changed()
     M._session = session_id()
-    mod_ids.ensure_started()
-    M._group_started = true
+    -- Static staff IDs + in-game staff tags are safe and sufficient here.
+    -- Avoid Vector's background Roblox group crawl, which can hard-crash after
+    -- repeated HttpGet rate limits during startup.
+    M._group_started = false
 end
 
 function M.track_player(p, role)
@@ -156,17 +159,11 @@ function M.check_player(p, lookup_budget)
     if not settings.enabled(P) then return lookup_budget end
     if not p or p.is_local then return lookup_budget end
 
-    local queue = lookup_budget and lookup_budget > 0
     local role = mod_ids.role_for_player(p, {
-        queue_lookup = queue,
-        mark_unknown = not queue,
+        queue_lookup = true,
+        mark_unknown = false,
+        live_lookup = true,
     })
-    if queue and role == nil then
-        local uid = ep.user_id(p)
-        if uid and uid ~= 0 then
-            lookup_budget = lookup_budget - 1
-        end
-    end
     if not role then return lookup_budget end
 
     local uid = player_uid(p)
@@ -233,7 +230,7 @@ function M.reconcile_active(players)
     for _, p in ipairs(players) do
         if p.is_local then goto continue end
 
-        local role = mod_ids.role_for_player(p)
+        local role = mod_ids.role_for_player(p, { live_lookup = true })
         if not role then goto continue end
 
         local uid = player_uid(p)
@@ -300,7 +297,7 @@ function M.staff_role(player)
     if uid and active[uid] then
         return active[uid].role
     end
-    return mod_ids.role_for_player(player)
+    return mod_ids.role_for_player(player, { live_lookup = true })
 end
 
 function M.is_staff(player)
@@ -313,6 +310,7 @@ function M.update(_dt)
     if not settings.enabled(P) then
         if M._was_enabled then
             M.reset_state()
+            mod_ids.stop("mod_checker_disabled")
             M._group_started = false
         end
         M._was_enabled = false
@@ -321,8 +319,7 @@ function M.update(_dt)
     M._was_enabled = true
 
     if not M._group_started then
-        mod_ids.ensure_started()
-        M._group_started = true
+        M._group_started = mod_ids.ensure_started() == true
     end
 
     local now = tick_ms()

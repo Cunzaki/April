@@ -28,6 +28,7 @@ M.FEATURE_ORDER = {
     "features.movement.fake_duck",
     "features.movement.fling",
     "features.combat.perfect_farm",
+    "features.utility.autofarm",
     "features.utility.mod_checker",
     "features.utility.event_status",
     "features.utility.anti_afk",

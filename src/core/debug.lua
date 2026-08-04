@@ -11,6 +11,10 @@ local log_ready = false
 local last_step = "boot"
 local session_id = tostring(os.time and os.time() or 0)
 
+local function file_logging_enabled()
+    return not April or April.crash_logging ~= false
+end
+
 local function resolve_log_path()
     if log_path then return log_path end
     local base = ""
@@ -39,6 +43,7 @@ local function now_stamp()
 end
 
 local function write_raw(line)
+    if not file_logging_enabled() then return false end
     local path = resolve_log_path()
     local open = io and io.open
     if not open then
@@ -66,11 +71,18 @@ end
 
 function M.begin_session(reason)
     resolve_log_path()
+    if not file_logging_enabled() then
+        log_ready = true
+        last_step = "session_begin"
+        return log_path
+    end
     local open = io and io.open
     if open then
         pcall(function()
-            local f = open(log_path, "w")
+            -- Append so the crash evidence survives restarting/reloading April.
+            local f = open(log_path, "a")
             if not f then return end
+            f:write("\n")
             f:write("==== April crash log ====\n")
             f:write("session=" .. session_id .. "\n")
             f:write("reason=" .. tostring(reason or "start") .. "\n")
@@ -124,6 +136,21 @@ function M.step_done(name)
         M.begin_session("lazy")
     end
     write_raw(string.format("[%d] DONE %s", now_stamp(), n))
+end
+
+-- Targeted native-crash trace. Unlike the global crash trace, this can remain
+-- enabled during normal frames without tracing every feature in the script.
+function M.force_step(name)
+    if not (April and April.autofarm_trace == true) then return end
+    last_step = tostring(name or "?")
+    if not log_ready then M.begin_session("autofarm_trace") end
+    write_raw(string.format("[%d] AUTOFARM_STEP %s", now_stamp(), last_step))
+end
+
+function M.force_event(message)
+    if not (April and April.autofarm_trace == true) then return end
+    if not log_ready then M.begin_session("autofarm_trace") end
+    write_raw(string.format("[%d] AUTOFARM %s", now_stamp(), tostring(message)))
 end
 
 function M.enabled()

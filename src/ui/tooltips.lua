@@ -12,6 +12,7 @@ M.ALLOW_TYPES = {
     multi = true,
     combo = true,
     input = true,
+    slider = true,
 }
 
 -- Visual / tuning controls — no hover tips.
@@ -136,7 +137,11 @@ M.BY_ID = {
     april_fling_enabled = "Launches nearby entities upward.",
 
     -- Utility
-    april_farm_helper = "Silently redirects held melee swings to the nearest compatible resource weak point.",
+    april_autofarm = "Automatically turns and runs to selected resources, verifies the live weak point is visible and centered, then swings using the equipped compatible tool. Vector must be the foreground window because movement and clicks use OS input.",
+    april_autofarm_resources = "Select every resource type Autofarm may visit. Your held tool must support that type: axes for trees, pickaxes for nodes, or a compatible hybrid tool.",
+    april_autofarm_search_range = "Maximum distance in studs used when searching for the next resource. Larger ranges cover more area but can produce longer direct routes.",
+    april_autofarm_debug_path = "Draws a tracer to the exact TreeX or NodeSpark point plus the current state, distance, and held tool.",
+    april_farm_helper = "Manual alternative to Autofarm. It redirects your held melee swings to the nearest compatible weak point, but you move and hold attack yourself.",
     april_anti_afk = "Prevents idle kick by simulating activity.",
     april_mod_checker_enabled = "Alerts you when staff or mods join the server.",
     april_keybinds_enabled = "Shows an on-screen list of your keybinds.",
@@ -241,6 +246,12 @@ M.OPTION_TIPS = {
         "Uses the first enabled combat system with a valid target.",
         "Follows Silent Aim's current target.",
         "Follows the regular camera Aimbot's current target.",
+    },
+    april_autofarm_resources = {
+        "Allows Autofarm to harvest tree models. Equip an axe, hatchet, chainsaw, or compatible hybrid tool.",
+        "Allows Autofarm to mine Stone_Node models. Equip a pickaxe, mining drill, or compatible hybrid tool.",
+        "Allows Autofarm to mine Metal_Node models. Equip a pickaxe, mining drill, or compatible hybrid tool.",
+        "Allows Autofarm to mine Phosphate_Node models. Equip a pickaxe, mining drill, or compatible hybrid tool.",
     },
 }
 

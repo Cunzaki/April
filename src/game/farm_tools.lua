@@ -56,6 +56,20 @@ local MELEE_RANGE = {
     ["ez shovel"] = 5,
 }
 
+local SWING_COOLDOWN = {
+    ["Stone Hatchet"] = 0.9,
+    ["Iron Shard Hatchet"] = 0.9,
+    ["Steel Axe"] = 1.5,
+    Chainsaw = 0.15,
+    Machete = 0.9,
+    ["Saw Bat"] = 1.5,
+    ["Stone Pickaxe"] = 0.9,
+    ["Iron Shard Pickaxe"] = 0.9,
+    ["Steel Pickaxe"] = 1.5,
+    ["Mining Drill"] = 0.15,
+    Boulder = 1.5,
+}
+
 local function inst_name(inst)
     if not inst then return nil end
     return inst.name or inst.Name
@@ -177,19 +191,27 @@ local function scan_children(list)
     return nil
 end
 
+local function children(inst)
+    if not inst then return nil end
+    return env.safe_call(function()
+        local fn = inst.GetChildren or inst.get_children
+        return fn and fn(inst) or nil
+    end)
+end
+
 function M.get_held_farm_tool_name()
     if not loaded then M.load() end
 
     local lp = env.get_local_player()
     if not lp then return nil end
 
-    -- Cheap path first (entity tool_name).
-    local from_lp = pick_farm_name(lp.tool_name)
+    -- Cheap path first (documented entity ToolName).
+    local from_lp = pick_farm_name(lp.ToolName or lp.tool_name)
     if from_lp then return from_lp end
 
-    local char = lp.character
+    local char = lp.Character or lp.character
     if char and env.is_valid(char) then
-        local hit = scan_children(env.safe_call(function() return char:get_children() end))
+        local hit = scan_children(children(char))
         if hit then return hit end
     end
 
@@ -199,9 +221,9 @@ function M.get_held_farm_tool_name()
         local vms = env.safe_call(function() return ws:find_first_child("Viewmodels") end)
             or env.safe_call(function() return ws:FindFirstChild("Viewmodels") end)
         if vms then
-            for _, vm in ipairs(env.safe_call(function() return vms:get_children() end) or {}) do
+            for _, vm in ipairs(children(vms) or {}) do
                 if inst_name(vm) == "Viewmodel" then
-                    local hit = scan_children(env.safe_call(function() return vm:get_children() end))
+                    local hit = scan_children(children(vm))
                     if hit then return hit end
                 end
             end
@@ -261,6 +283,21 @@ function M.melee_range(tool_name)
     end
 
     return MELEE_RANGE[tool_name] or 5
+end
+
+function M.swing_cooldown(tool_name)
+    tool_name = normalize(tool_name)
+    if not tool_name then return 0.9 end
+    local data = bootstrap.get_module("ToolInfo")
+    local entry = data and data[tool_name]
+    local weapon = entry and entry.Weapon
+    local cooldown = type(weapon) == "table"
+        and tonumber(weapon.Cooldown or weapon.cooldown)
+        or nil
+    if cooldown and cooldown > 0 then
+        return math.max(0.1, cooldown)
+    end
+    return SWING_COOLDOWN[tool_name] or 0.9
 end
 
 function M.all_names()

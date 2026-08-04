@@ -71,6 +71,10 @@ function M.apply()
         alias(utility, "is_valid", "IsValid")
         alias(utility, "load_url", "LoadUrl")
         alias(utility, "http_get", "HttpGet")
+        alias(utility, "key_down", "KeyDown")
+        alias(utility, "key_up", "KeyUp")
+        alias(utility, "key_press", "KeyPress")
+        alias(utility, "mouse_click", "MouseClick")
     end
 
     if input then

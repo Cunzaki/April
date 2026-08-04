@@ -1,101 +1,88 @@
+-- Safe live staff discovery. One scheduler, one HttpGet at most per tick.
 local debug = April.require("core.debug")
 
 local M = {}
 
 M.GROUP_ID = 1154360
-M.MIN_STAFF_RANK = 6 -- above Fan (rank 5)
-
+M.MIN_STAFF_RANK = 6
 M._cache = {}
 M._cache_ready = false
 M._cache_at = 0
 M._refresh_ms = 30 * 60 * 1000
-M._retry_ms = 20 * 1000
-M._rate_limit_ms = 120 * 1000
-M._next_attempt_at = 0
-M._refreshing = false
 M._started = false
 M._thread_id = nil
-M._loaded_notified = false
-M._last_complete_count = 0
-M._staff_role_count = 0
-M._rate_limited_until = 0
 
-M._lookup_queue = {}
-M._lookup_seen = {}
-M._lookup_pending = {}
-M._lookup_interval_ms = 2500
-M._lookup_thread_id = nil
+local TICK_MS = 3500
+local RATE_LIMIT_MS = 15 * 60 * 1000
+local RETRY_BASE_MS = 30 * 1000
+local RETRY_MAX_MS = 10 * 60 * 1000
+local MAX_QUEUE = 64
+local MAX_PAGES = 80
+local MAX_ROLES = 32
+local MAX_TOTAL_PAGES = 256
+local MAX_STAFF_ENTRIES = 10000
+local MAX_BODY_BYTES = 2 * 1024 * 1024
+
+local lookup_queue = {}
+local lookup_pending = {}
+local lookup_seen = {}
+local lookup_attempts = {}
+local crawl = nil
+local next_attempt_at = 0
+local crawl_failure_count = 0
+local lookup_failure_count = 0
+local loaded_notified = false
+local tick_busy = false
 
 local function tick_ms()
-    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+    local fn = utility and (utility.get_tick_count or utility.GetTickCount)
+    if type(fn) ~= "function" then return 0 end
+    local ok, value = pcall(fn)
+    return ok and (tonumber(value) or 0) or 0
 end
 
-local function http_get(url)
-    if not utility then return nil, "no utility" end
-    local fn = utility.http_get or utility.HttpGet
-    if type(fn) ~= "function" then return nil, "no HttpGet" end
-    return fn(url)
+local function log(message)
+    debug.file("STAFF_CRAWLER " .. tostring(message))
 end
 
-local function http_ready()
-    return utility and type(utility.http_get or utility.HttpGet) == "function"
+local function normalize_uid(value)
+    local uid = tonumber(value)
+    return uid and uid ~= 0 and uid or nil
+end
+
+local function http_fn()
+    return utility and (utility.http_get or utility.HttpGet) or nil
 end
 
 local function status_code(status)
-    local n = tonumber(status)
-    if n then return n end
-    if type(status) == "string" then
-        return tonumber(status:match("(%d%d%d)"))
-    end
+    local code = tonumber(status)
+    if code then return code end
+    if type(status) == "string" then return tonumber(status:match("(%d%d%d)")) end
     return nil
 end
 
-local function is_rate_limited(status)
+local function request(url)
+    local fn = http_fn()
+    if type(fn) ~= "function" then return nil, "no HttpGet", nil end
+    local ok, body, status = pcall(fn, url)
+    if not ok then return nil, tostring(body), nil end
     local code = status_code(status)
-    return code == 429
-end
-
-local function mark_rate_limited(status)
-    if not is_rate_limited(status) then return false end
-    local now = tick_ms()
-    M._rate_limited_until = now + M._rate_limit_ms
-    M._next_attempt_at = M._rate_limited_until
-    debug.warn_once("mod_group:429", "Roblox rate-limited staff scan; backing off 120s")
-    return true
-end
-
-local function under_rate_limit()
-    return tick_ms() < (M._rate_limited_until or 0)
-end
-
-local function http_ok(body, status)
-    if is_rate_limited(status) then return false end
-    if type(body) ~= "string" or body == "" then return false end
-    if status == nil then return true end
-    local code = status_code(status)
-    if not code then return true end
-    return code >= 200 and code < 300
-end
-
-local function polite_wait(seconds)
-    seconds = tonumber(seconds) or 1
-    if sleep then
-        pcall(sleep, seconds)
+    if type(body) == "string" and #body > MAX_BODY_BYTES then
+        return nil, "response too large", code
     end
-end
-
-local function normalize_uid(user_id)
-    local uid = tonumber(user_id)
-    if not uid or uid == 0 then return nil end
-    return uid
+    if type(body) ~= "string" or body == "" then
+        return nil, tostring(status or "empty response"), code
+    end
+    if code and (code < 200 or code >= 300) then
+        return nil, "HTTP " .. tostring(code), code
+    end
+    return body, nil, code or 200
 end
 
 local function cache_count(tbl)
-    local n = 0
-    for _ in pairs(tbl or M._cache) do
-        n = n + 1
-    end
-    return n
+    local count = 0
+    for _ in pairs(tbl or {}) do count = count + 1 end
+    return count
 end
 
 local function url_encode(value)
@@ -104,470 +91,368 @@ local function url_encode(value)
     end))
 end
 
-local function notify_loaded(count, role_count)
-    if M._loaded_notified then return end
-    M._loaded_notified = true
-    M._last_complete_count = count or 0
+local function parse_cursor(body)
+    if not body or body:find('"nextPageCursor"%s*:%s*null') then return nil end
+    local cursor = body:match('"nextPageCursor"%s*:%s*"([^"]+)"')
+    return cursor ~= "" and cursor ~= "null" and cursor or nil
+end
+
+local function parse_roles(body)
+    local roles = {}
+    local overflow = false
+    local payload = body and (body:match('"roles"%s*:%s*(%b[])') or body) or ""
+    for block in payload:gmatch("%b{}") do
+        local id = tonumber(block:match('"id"%s*:%s*(%d+)'))
+        local name = block:match('"name"%s*:%s*"([^"]+)"')
+        local rank = tonumber(block:match('"rank"%s*:%s*(%d+)'))
+        local members = tonumber(block:match('"memberCount"%s*:%s*(%d+)')) or 0
+        if id and name and rank and rank >= M.MIN_STAFF_RANK then
+            if #roles >= MAX_ROLES then
+                overflow = true
+            else
+                roles[#roles + 1] = {
+                    id = id,
+                    name = name,
+                    rank = rank,
+                    members = members,
+                    loaded = 0,
+                    pages = 0,
+                }
+            end
+        end
+    end
+    table.sort(roles, function(a, b) return a.rank > b.rank end)
+    return roles, overflow
+end
+
+local function parse_role_users(body, role_name, out, max_new)
+    local added = 0
+    for uid_text in tostring(body or ""):gmatch('"userId"%s*:%s*(%d+)') do
+        local uid = tonumber(uid_text)
+        if uid then
+            if out[uid] == nil then
+                if added >= max_new then return added, true end
+                added = added + 1
+            end
+            out[uid] = role_name
+        end
+    end
+    return added, false
+end
+
+local function parse_user_role(body)
+    local gid = tostring(M.GROUP_ID)
+    local pos = 1
+    while true do
+        local start_at = body:find('"group"', pos, true)
+        if not start_at then return nil end
+        local chunk = body:sub(start_at, math.min(#body, start_at + 500))
+        if chunk:match('"id"%s*:%s*(%d+)') == gid then
+            local role = chunk:match('"role"%s*:%s*{(.-)}')
+            local rank = role and tonumber(role:match('"rank"%s*:%s*(%d+)'))
+            local name = role and role:match('"name"%s*:%s*"([^"]+)"')
+            if rank and name then return rank >= M.MIN_STAFF_RANK and name or false end
+            return nil
+        end
+        pos = start_at + 7
+    end
+end
+
+local function invalidate_role_cache(uid)
     pcall(function()
-        local notify = April.require("core.notify")
-        notify.success(string.format(
-            "Staff detector loaded (%d people, %d roles)",
-            count or 0,
-            role_count or 0
+        local ids = April.require("game.mod_ids")
+        if uid and ids.invalidate_uid then
+            ids.invalidate_uid(uid)
+        elseif ids.clear_role_cache then
+            ids.clear_role_cache()
+        end
+    end)
+end
+
+local function notify_loaded(count, roles)
+    if loaded_notified then return end
+    loaded_notified = true
+    pcall(function()
+        April.require("core.notify").success(string.format(
+            "Live staff crawler ready (%d people, %d roles)", count, roles
         ), 5500)
     end)
 end
 
+local function abort_crawl()
+    crawl = nil
+end
+
+local function backoff(reason, code, uid)
+    if uid then
+        lookup_failure_count = lookup_failure_count + 1
+    else
+        crawl_failure_count = crawl_failure_count + 1
+    end
+    local failures = uid and lookup_failure_count or crawl_failure_count
+    local now = tick_ms()
+    local delay
+    if code == 429 then
+        delay = RATE_LIMIT_MS
+    else
+        delay = math.min(RETRY_BASE_MS * (2 ^ math.min(failures - 1, 5)), RETRY_MAX_MS)
+    end
+    next_attempt_at = now + delay
+    abort_crawl()
+    if uid and (lookup_attempts[uid] or 0) < 3 and not lookup_pending[uid] then
+        lookup_pending[uid] = true
+        lookup_queue[#lookup_queue + 1] = uid
+    end
+    log(string.format(
+        "backoff reason=%s status=%s delay_ms=%d",
+        tostring(reason), tostring(code or "none"), delay
+    ))
+end
+
+local function begin_crawl()
+    crawl = {
+        phase = "roles",
+        roles = nil,
+        role_index = 1,
+        cursor = nil,
+        staging = {},
+        entry_count = 0,
+        total_pages = 0,
+    }
+    log("state=roles")
+end
+
+local function commit_crawl()
+    local count = cache_count(crawl.staging)
+    if count < 1 then
+        backoff("empty roster", nil)
+        return
+    end
+    M._cache = crawl.staging
+    M._cache_ready = true
+    M._cache_at = tick_ms()
+    local role_count = #crawl.roles
+    crawl = nil
+    crawl_failure_count = 0
+    next_attempt_at = 0
+    invalidate_role_cache()
+    log(string.format("commit people=%d roles=%d", count, role_count))
+    notify_loaded(count, role_count)
+end
+
+local function step_lookup()
+    local uid = table.remove(lookup_queue, 1)
+    if not uid then return false end
+    lookup_pending[uid] = nil
+    lookup_attempts[uid] = (lookup_attempts[uid] or 0) + 1
+    local body, err, code = request(string.format(
+        "https://groups.roblox.com/v2/users/%d/groups/roles", uid
+    ))
+    if not body then
+        backoff("user " .. tostring(uid) .. ": " .. tostring(err), code, uid)
+        return true
+    end
+    local role = parse_user_role(body)
+    lookup_seen[uid] = true
+    lookup_attempts[uid] = nil
+    lookup_failure_count = 0
+    if role then
+        M._cache[uid] = role
+        invalidate_role_cache(uid)
+        log("user_match uid=" .. tostring(uid) .. " role=" .. tostring(role))
+    end
+    return true
+end
+
+local function step_roles()
+    local body, err, code = request(string.format(
+        "https://groups.roblox.com/v1/groups/%d/roles", M.GROUP_ID
+    ))
+    if not body then
+        backoff("roles: " .. tostring(err), code)
+        return
+    end
+    local roles, overflow = parse_roles(body)
+    if overflow then
+        backoff("role limit", code)
+        return
+    end
+    if #roles < 1 then
+        backoff("roles: empty response", code)
+        return
+    end
+    crawl.roles = roles
+    crawl.role_index = 1
+    crawl.cursor = nil
+    crawl.phase = "pages"
+    log("state=pages roles=" .. tostring(#roles))
+end
+
+local function advance_role()
+    crawl.role_index = crawl.role_index + 1
+    crawl.cursor = nil
+    if crawl.role_index > #crawl.roles then commit_crawl() end
+end
+
+local function step_page()
+    local role = crawl.roles[crawl.role_index]
+    if not role then
+        commit_crawl()
+        return
+    end
+    role.pages = role.pages + 1
+    crawl.total_pages = crawl.total_pages + 1
+    if role.pages > MAX_PAGES or crawl.total_pages > MAX_TOTAL_PAGES then
+        backoff("page limit for " .. tostring(role.name), nil)
+        return
+    end
+    local url = string.format(
+        "https://groups.roblox.com/v1/groups/%d/roles/%d/users?limit=100&sortOrder=Asc",
+        M.GROUP_ID, role.id
+    )
+    if crawl.cursor then url = url .. "&cursor=" .. url_encode(crawl.cursor) end
+    local body, err, code = request(url)
+    if not body then
+        backoff("role " .. tostring(role.name) .. ": " .. tostring(err), code)
+        return
+    end
+    local added, overflow = parse_role_users(
+        body, role.name, crawl.staging, MAX_STAFF_ENTRIES - crawl.entry_count
+    )
+    role.loaded = role.loaded + added
+    crawl.entry_count = crawl.entry_count + added
+    if overflow then
+        backoff("staff entry limit", nil)
+        return
+    end
+    crawl.cursor = parse_cursor(body)
+    if not crawl.cursor then
+        if role.members > 0 and role.loaded < role.members then
+            backoff(string.format(
+                "incomplete %s %d/%d", role.name, role.loaded, role.members
+            ), nil)
+            return
+        end
+        log(string.format(
+            "role_complete name=%s members=%d pages=%d",
+            role.name, role.loaded, role.pages
+        ))
+        advance_role()
+    end
+end
+
+local function scheduler_tick()
+    if not M._started then return end
+    local now = tick_ms()
+    if now < next_attempt_at then return end
+    if step_lookup() then return end
+    if not crawl then
+        if M._cache_ready and now - M._cache_at < M._refresh_ms then return end
+        begin_crawl()
+    end
+    if crawl.phase == "roles" then
+        step_roles()
+    elseif crawl.phase == "pages" then
+        step_page()
+    end
+end
+
+local function guarded_tick()
+    if tick_busy then return end
+    tick_busy = true
+    local ok, err = pcall(scheduler_tick)
+    tick_busy = false
+    if not ok then backoff("scheduler error: " .. tostring(err), nil) end
+end
+
 function M.available()
-    return http_ready()
+    return type(http_fn()) == "function"
+end
+
+function M.is_started()
+    return M._started == true
 end
 
 function M.role_for(user_id)
     local uid = normalize_uid(user_id)
-    if not uid then return nil end
-    return M._cache[uid]
+    return uid and M._cache[uid] or nil
 end
 
 function M.is_ready()
     return M._cache_ready == true
 end
 
-function M.reset_session()
-    M._lookup_queue = {}
-    M._lookup_pending = {}
-    M._lookup_seen = {}
-    M._cache_at = 0
-    M._next_attempt_at = 0
+function M.queue_lookup(user_id)
+    local uid = normalize_uid(user_id)
+    if not uid or M._cache[uid] or lookup_seen[uid] or lookup_pending[uid] then return end
+    if #lookup_queue >= MAX_QUEUE or (lookup_attempts[uid] or 0) >= 3 then return end
+    lookup_pending[uid] = true
+    lookup_queue[#lookup_queue + 1] = uid
 end
 
-local function parse_next_cursor(body)
-    if not body then return nil end
-    -- Explicit null means done.
-    if body:find('"nextPageCursor"%s*:%s*null', 1) then
-        return nil
-    end
-    local cursor = body:match('"nextPageCursor"%s*:%s*"([^"]+)"')
-    if not cursor or cursor == "" or cursor == "null" then
-        return nil
-    end
-    return cursor
-end
-
-local function parse_role_users(body, role_name, out)
-    if not body or not role_name or not out then return 0 end
-    local added = 0
-    for user_id in body:gmatch('"userId"%s*:%s*(%d+)') do
-        local uid = tonumber(user_id)
-        if uid and not out[uid] then
-            out[uid] = role_name
-            added = added + 1
-        elseif uid then
-            out[uid] = role_name
-        end
-    end
-    return added
-end
-
-local function count_for_role(out, role_name)
-    local n = 0
-    for _, name in pairs(out) do
-        if name == role_name then n = n + 1 end
-    end
-    return n
-end
-
--- Roles payload includes memberCount; use it to know when a role is fully fetched.
-local function parse_staff_roles(body)
-    local roles = {}
-    if not body then return roles end
-
-    local roles_json = body:match('"roles"%s*:%s*(%b[])') or body
-    for block in roles_json:gmatch("%b{}") do
-        local id = tonumber(block:match('"id"%s*:%s*(%d+)'))
-        local name = block:match('"name"%s*:%s*"([^"]+)"')
-        local rank = tonumber(block:match('"rank"%s*:%s*(%d+)'))
-        local member_count = tonumber(block:match('"memberCount"%s*:%s*(%d+)')) or 0
-        if id and name and rank and rank >= M.MIN_STAFF_RANK then
-            roles[id] = {
-                id = id,
-                name = name,
-                rank = rank,
-                member_count = member_count,
-            }
-        end
-    end
-
-    return roles
-end
-
-local function fetch_role_page(role_id, role_name, cursor, out)
-    local url = string.format(
-        "https://groups.roblox.com/v1/groups/%d/roles/%d/users?limit=100&sortOrder=Asc",
-        M.GROUP_ID,
-        role_id
-    )
-    if cursor and cursor ~= "" then
-        url = url .. "&cursor=" .. url_encode(cursor)
-    end
-
-    local body, status = http_get(url)
-    if is_rate_limited(status) then
-        mark_rate_limited(status)
-        return false, out, nil, 0, true
-    end
-    if not http_ok(body, status) then
-        return false, out, nil, 0, false
-    end
-
-    local added = parse_role_users(body, role_name, out)
-    return true, out, parse_next_cursor(body), added, false
-end
-
--- Fetch every page for one role. Succeeds only when pagination finishes AND
--- loaded count meets the API memberCount (when known).
-local function fetch_all_role_users(role_id, role_name, expected_count, out)
-    local cursor = nil
-    local pages = 0
-    local empty_pages = 0
-
-    repeat
-        if under_rate_limit() then
-            return false, ("rate limited for " .. tostring(role_name))
-        end
-        local ok, next_cursor, added, limited = false, nil, 0, false
-        for attempt = 1, 3 do
-            ok, out, next_cursor, added, limited = fetch_role_page(role_id, role_name, cursor, out)
-            if ok then break end
-            if limited then
-                return false, ("rate limited for " .. tostring(role_name))
-            end
-            polite_wait(0.75 * attempt)
-        end
-        if not ok then
-            return false, ("request failed for " .. tostring(role_name))
-        end
-
-        pages = pages + 1
-        if (added or 0) == 0 and next_cursor then
-            empty_pages = empty_pages + 1
-            if empty_pages >= 3 then
-                return false, ("empty pages for " .. tostring(role_name))
-            end
-        else
-            empty_pages = 0
-        end
-
-        cursor = next_cursor
-        if pages > 80 then
-            return false, ("too many pages for " .. tostring(role_name))
-        end
-    until not cursor
-
-    local got = count_for_role(out, role_name)
-    expected_count = tonumber(expected_count) or 0
-    if expected_count > 0 and got < expected_count then
-        return false, string.format(
-            "%s incomplete (%d/%d)",
-            tostring(role_name), got, expected_count
-        )
-    end
-
-    return true, nil
-end
-
-local function role_count(roles)
-    local n = 0
-    for _ in pairs(roles or {}) do n = n + 1 end
-    return n
+-- Compatibility: asynchronous only; never performs HttpGet on the caller.
+function M.lookup_user(user_id)
+    M.queue_lookup(user_id)
+    return M.role_for(user_id)
 end
 
 function M.refresh_all()
-    if not http_ready() then return false end
-    if M._refreshing then return false end
-    if under_rate_limit() then return false end
-
-    M._refreshing = true
-    local ok, err = pcall(function()
-        local body, status = http_get(string.format(
-            "https://groups.roblox.com/v1/groups/%d/roles",
-            M.GROUP_ID
-        ))
-        if is_rate_limited(status) then
-            mark_rate_limited(status)
-            error("roles request rate-limited (429)")
-        end
-        if not http_ok(body, status) then
-            error("roles request failed: " .. tostring(status))
-        end
-
-        local staff_roles = parse_staff_roles(body)
-        local expected_roles = role_count(staff_roles)
-        if expected_roles < 1 then
-            -- Empty/truncated bodies usually mean rate-limit or a soft API failure.
-            mark_rate_limited(429)
-            error("soft: empty staff roles response (likely rate-limited)")
-        end
-
-        -- Staging map only — never mark ready / notify until every role is complete.
-        local merged = {}
-        local failed = {}
-
-        for role_id, info in pairs(staff_roles) do
-            local role_ok, role_err = fetch_all_role_users(
-                role_id,
-                info.name,
-                info.member_count,
-                merged
-            )
-            if not role_ok then
-                failed[#failed + 1] = role_err or tostring(info.name)
-            end
-        end
-
-        -- One recovery pass only when we are not currently rate-limited.
-        if #failed > 0 and not under_rate_limit() then
-            polite_wait(1.5)
-            failed = {}
-            for role_id, info in pairs(staff_roles) do
-                if under_rate_limit() then
-                    failed[#failed + 1] = "rate limited"
-                    break
-                end
-                local have = count_for_role(merged, info.name)
-                local need = tonumber(info.member_count) or 0
-                if need > 0 and have >= need then
-                    -- already complete for this role
-                else
-                    -- Clear this role's partials and refetch cleanly.
-                    for uid, rname in pairs(merged) do
-                        if rname == info.name then merged[uid] = nil end
-                    end
-                    local role_ok, role_err = fetch_all_role_users(
-                        role_id,
-                        info.name,
-                        info.member_count,
-                        merged
-                    )
-                    if not role_ok then
-                        failed[#failed + 1] = role_err or tostring(info.name)
-                    end
-                end
-            end
-        end
-
-        if #failed > 0 then
-            M._cache_ready = false
-            if under_rate_limit() then
-                error("staff scan paused: Roblox rate limit (429)")
-            end
-            error("staff scan incomplete: " .. table.concat(failed, "; ")
-                .. string.format(" (%d people so far)", cache_count(merged)))
-        end
-
-        -- Final integrity check: every role must meet memberCount.
-        for _, info in pairs(staff_roles) do
-            local got = count_for_role(merged, info.name)
-            local need = tonumber(info.member_count) or 0
-            if need > 0 and got < need then
-                M._cache_ready = false
-                error(string.format(
-                    "staff scan incomplete: %s %d/%d",
-                    tostring(info.name), got, need
-                ))
-            end
-        end
-
-        local n = cache_count(merged)
-        if n < 1 then
-            M._cache_ready = false
-            error("staff scan produced zero users")
-        end
-
-        M._cache = merged
-        M._cache_ready = true
-        M._cache_at = tick_ms()
-        M._staff_role_count = expected_roles
-
-        pcall(function()
-            local ids = April.require("game.mod_ids")
-            if ids.clear_role_cache then ids.clear_role_cache() end
-        end)
-
-        if April and April.debug then
-            debug.log(string.format(
-                "Mod group cache complete (%d staff across %d roles)",
-                n, expected_roles
-            ))
-        end
-        notify_loaded(n, expected_roles)
-    end)
-
-    M._refreshing = false
-
-    if not ok then
-        local msg = tostring(err or "")
-        if msg:find("soft:", 1, true)
-            or msg:find("429", 1, true)
-            or msg:find("rate", 1, true)
-            or under_rate_limit()
-        then
-            debug.warn_once("mod_group:refresh", msg)
-        else
-            debug.error_once("mod_group:refresh", err)
-        end
-        return false
-    end
-
-    return true
-end
-
-local function parse_user_group_role(body)
-    if not body or body == "" then return nil end
-
-    local gid = tostring(M.GROUP_ID)
-    local pos = 1
-
-    while true do
-        local gs = body:find('"group"', pos, true)
-        if not gs then break end
-
-        local chunk = body:sub(gs, math.min(#body, gs + 420))
-        local group_id = chunk:match('"id"%s*:%s*(%d+)')
-        if group_id == gid then
-            local role_chunk = chunk:match('"role"%s*:%s*{(.-)}')
-            if role_chunk then
-                local rank = tonumber(role_chunk:match('"rank"%s*:%s*(%d+)'))
-                local name = role_chunk:match('"name"%s*:%s*"([^"]+)"')
-                if rank and name then
-                    if rank >= M.MIN_STAFF_RANK then
-                        return name
-                    end
-                    return false
-                end
-            end
-            return nil
-        end
-
-        pos = gs + 7
-    end
-
-    return nil
-end
-
-function M.lookup_user(user_id)
-    local uid = normalize_uid(user_id)
-    if not uid or not http_ready() then return nil end
-    if under_rate_limit() then return nil end
-
-    if M._cache[uid] then return M._cache[uid] end
-
-    local body, status = http_get(string.format(
-        "https://groups.roblox.com/v2/users/%d/groups/roles",
-        uid
-    ))
-    if is_rate_limited(status) then
-        mark_rate_limited(status)
-        return nil
-    end
-    if not http_ok(body, status) then return nil end
-
-    local role = parse_user_group_role(body)
-    if role == false then
-        M._lookup_seen[uid] = true
-        return nil
-    end
-    if role then
-        -- Opportunistic single-user fill only. Never mark the full scan ready here.
-        M._cache[uid] = role
-        M._lookup_seen[uid] = true
-        pcall(function()
-            local ids = April.require("game.mod_ids")
-            if ids.invalidate_uid then ids.invalidate_uid(uid) end
-        end)
-        return role
-    end
-
-    M._lookup_seen[uid] = true
-    return nil
-end
-
-function M.queue_lookup(user_id)
-    local uid = normalize_uid(user_id)
-    if not uid then return end
-    if M._cache[uid] or M._lookup_seen[uid] or M._lookup_pending[uid] then return end
-
-    M._lookup_pending[uid] = true
-    M._lookup_queue[#M._lookup_queue + 1] = uid
-end
-
-local function process_lookup_queue()
-    if #M._lookup_queue == 0 then return end
-
-    local uid = table.remove(M._lookup_queue, 1)
-    M._lookup_pending[uid] = nil
-    local ok, err = pcall(M.lookup_user, uid)
-    if not ok then
-        debug.error_once("mod_group:lookup", err)
-    end
-end
-
-local function refresh_tick()
-    local now = tick_ms()
-    if under_rate_limit() then
-        return
-    end
-    if M._cache_ready then
-        if (now - M._cache_at) >= M._refresh_ms then
-            -- Background revalidate; keep serving the last complete cache until
-            -- the new scan finishes cleanly.
-            M.refresh_all()
-        end
-        return
-    end
-
-    if now < (M._next_attempt_at or 0) then
-        return
-    end
-    if M.refresh_all() then
-        M._next_attempt_at = 0
-    else
-        local delay = under_rate_limit() and M._rate_limit_ms or M._retry_ms
-        M._next_attempt_at = now + delay
-    end
-end
-
-function M.ensure_started()
-    if M._started then return end
-    M._started = true
-
-    if not http_ready() then return end
-
-    local create = thread and (thread.create or thread.Create)
-    if create then
-        M._thread_id = create(function()
-            refresh_tick()
-        end, 5000)
-
-        M._lookup_thread_id = create(function()
-            process_lookup_queue()
-        end, M._lookup_interval_ms)
-    else
-        -- Never block the main thread on a full staff crawl.
-        M._next_attempt_at = tick_ms() + 3000
-        debug.warn_once("mod_group:nothread", "thread API missing; staff scan deferred")
-    end
-end
-
-function M.tick()
-    M.ensure_started()
+    if tick_ms() < next_attempt_at then return false end
+    M._cache_at = 0
+    abort_crawl()
+    return M._started
 end
 
 function M.force_refresh()
-    M._cache_at = 0
-    M._cache_ready = false
-    M._next_attempt_at = 0
-    M._loaded_notified = false
+    loaded_notified = false
     return M.refresh_all()
+end
+
+function M.ensure_started()
+    if M._started or not M.available() then return M._started end
+    local create = thread and (thread.create or thread.Create)
+    if type(create) ~= "function" then
+        debug.warn_once("mod_group:nothread", "Live staff crawler unavailable: no thread API")
+        return false
+    end
+    M._started = true
+    local ok, id = pcall(create, guarded_tick, TICK_MS)
+    if not ok or not id then
+        M._started = false
+        M._thread_id = nil
+        debug.error_once("mod_group:start", id or "thread.Create failed")
+        return false
+    end
+    M._thread_id = id
+    local first_tick = tick_ms() + TICK_MS
+    if next_attempt_at < first_tick then next_attempt_at = first_tick end
+    log("started interval_ms=" .. tostring(TICK_MS))
+    return true
+end
+
+function M.stop(reason)
+    if M._thread_id then
+        local stop = thread and (thread.stop or thread.Stop)
+        if type(stop) == "function" then pcall(stop, M._thread_id) end
+    end
+    M._thread_id = nil
+    M._started = false
+    tick_busy = false
+    abort_crawl()
+    lookup_queue = {}
+    lookup_pending = {}
+    log("stopped reason=" .. tostring(reason or "disabled"))
+end
+
+function M.reset_session()
+    M.stop("session_changed")
+    lookup_seen = {}
+    lookup_attempts = {}
+    M._cache_at = 0
+end
+
+function M.tick()
+    return M.ensure_started()
 end
 
 return M

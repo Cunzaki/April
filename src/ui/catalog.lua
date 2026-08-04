@@ -511,7 +511,14 @@ local function build_misc()
         {
             title = "Utility",
             items = {
-                kb("april_farm_helper", "Farm Helper", false),
+                kb("april_autofarm", "Autofarm", false),
+                multi("april_autofarm_resources", "Farm Resources", {
+                    "Trees", "Stone", "Metal", "Phosphate",
+                }, { true, true, true, true }, "april_autofarm"),
+                sl("april_autofarm_search_range", "Search Range", 50, 2000, 500, false, "april_autofarm"),
+                cb("april_autofarm_debug_path", "Debug Target Path", false, nil, "april_autofarm"),
+                sep(),
+                kb("april_farm_helper", "Manual Farm Helper", false),
                 sl("april_farm_radius", "Farm Range (studs)", 1, 10, 7, false, "april_farm_helper"),
                 sep(),
                 cb("april_anti_afk", "Anti AFK", false),

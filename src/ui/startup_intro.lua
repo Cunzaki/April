@@ -72,6 +72,56 @@ local function draw_wave(text, center_x, y, size, alpha, phase_offset, amplitude
     end
 end
 
+local function draw_module_status(center_x, y, elapsed, alpha)
+    if alpha <= 0 or not April or type(April.load_status) ~= "table" then return end
+    local draw_text = draw and (draw.text or draw.Text)
+    local line = draw and (draw.line or draw.Line)
+    if not draw_text or not line then return end
+    local accent = anim.title_color()
+    local size = math.max(12, math.floor(13 * (theme.SCALE or 1)))
+    local heading = "Loading modules"
+    local heading_size = math.max(11, size - 1)
+    draw_text(center_x - text_width(heading, heading_size) * 0.5, y, heading,
+        { theme.TEXT_ACTIVE[1], theme.TEXT_ACTIVE[2], theme.TEXT_ACTIVE[3], alpha * 0.48 },
+        heading_size)
+    local rows_y = y + 21
+
+    for index, status in ipairs(April.load_status) do
+        local appear_at = 0.92 + (index - 1) * 0.24
+        local appear = ease_out_cubic((elapsed - appear_at) / 0.22)
+        if appear > 0 then
+            local loaded = status.state == "loaded"
+            local failed = status.state == "failed"
+            local checked = loaded and ease_out_cubic((elapsed - appear_at - 0.13) / 0.20) or 0
+            local label = loaded and tostring(status.name)
+                or failed and ("Failed: " .. tostring(status.name))
+                or ("Loading " .. tostring(status.name) .. "...")
+            local label_width = text_width(label, size)
+            local row_alpha = alpha * appear
+            local icon_x = center_x - (label_width + 24) * 0.5
+            local icon_y = rows_y + (index - 1) * 19 + 7
+            local text_color = failed and { 1, 0.28, 0.28, row_alpha }
+                or { theme.TEXT_ACTIVE[1], theme.TEXT_ACTIVE[2], theme.TEXT_ACTIVE[3], row_alpha * 0.82 }
+
+            if failed then
+                line(icon_x, icon_y - 4, icon_x + 8, icon_y + 4, text_color, 1.5)
+                line(icon_x + 8, icon_y - 4, icon_x, icon_y + 4, text_color, 1.5)
+            elseif checked > 0 then
+                local check_color = {
+                    accent[1], accent[2], accent[3], row_alpha * checked,
+                }
+                line(icon_x, icon_y, icon_x + 3 * checked, icon_y + 4 * checked, check_color, 1.7)
+                line(icon_x + 3, icon_y + 4, icon_x + 10 * checked, icon_y - 5 * checked, check_color, 1.7)
+            else
+                local pulse = 0.35 + (math.sin(now() * 5 + index) + 1) * 0.22
+                line(icon_x, icon_y, icon_x + 7, icon_y,
+                    { accent[1], accent[2], accent[3], row_alpha * pulse }, 1.7)
+            end
+            draw_text(icon_x + 18, rows_y + (index - 1) * 19, label, text_color, size)
+        end
+    end
+end
+
 function M.init()
     -- tabs.init loads the autoload profile before this check.
     active = settings.bool("april_ui_startup_intro", true)
@@ -142,6 +192,7 @@ function M.draw()
 
     draw_wave("April.lua", title_x, center_y - 38, title_size, title_alpha, 0, 1.35)
     draw_wave("Made by Cunzaki", author_x, center_y + 22, author_size, author_alpha, 1.7, 0.8)
+    draw_module_status(center_x, center_y + 62, elapsed, author_alpha)
 
     if profile_alpha > 0.01 then
         -- The portrait peeks in from the bottom-right instead of competing

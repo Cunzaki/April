@@ -136,6 +136,12 @@ function M.register_menu()
 end
 
 function M.update(_dt)
+    -- Autofarm owns movement, clicks, and the silent ray while enabled.
+    if settings.enabled("april_autofarm") then
+        if was_enabled then clear_lock(true, true) end
+        was_enabled = false
+        return
+    end
     if not settings.enabled(P) then
         if was_enabled then clear_lock(true, true) end
         was_enabled = false

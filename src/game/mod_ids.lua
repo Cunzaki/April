@@ -344,7 +344,6 @@ function M.role_for(user_id)
 
     local group = mod_group()
     if group.available() then
-        group.ensure_started()
         local live = group.role_for(uid)
         if live then return live end
     end
@@ -366,7 +365,7 @@ function M.role_for_player(player, opts)
     if tag_role then
         local uid = player_uid(player)
         if uid then
-            local precise = M.role_for(uid)
+            local precise = opts.live_lookup == false and M.ROLES[uid] or M.role_for(uid)
             if precise then
                 write_cached_role(key, precise)
                 return precise
@@ -383,14 +382,13 @@ function M.role_for_player(player, opts)
     end
 
     local group = mod_group()
-    if group.available() then
-        group.ensure_started()
+    if opts.live_lookup ~= false and group.available() then
         local live = group.role_for(uid)
         if live then
             write_cached_role(key, live)
             return live
         end
-        if opts.queue_lookup then
+        if opts.queue_lookup and group.is_started and group.is_started() then
             group.queue_lookup(uid)
         end
     end
@@ -419,8 +417,14 @@ end
 function M.ensure_started()
     local group = mod_group()
     if group.available() then
-        group.ensure_started()
+        return group.ensure_started()
     end
+    return false
+end
+
+function M.stop(reason)
+    local group = mod_group()
+    if group.stop then group.stop(reason) end
 end
 
 function M.tick()

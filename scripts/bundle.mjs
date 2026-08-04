@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env node
 /**
- * Builds april.lua â€” the single Vector-executable script.
+ * Builds the remote chunk loader plus a full local Vector test bundle.
  */
 
 import fs from "fs";
@@ -86,6 +86,7 @@ const ORDER = [
   "features/combat/body_peek.lua",
   "features/combat/aimbot.lua",
   "features/combat/perfect_farm.lua",
+  "features/utility/autofarm.lua",
   "features/combat/gun_mods.lua",
   "features/utility/mod_checker.lua",
   "features/utility/event_status.lua",
@@ -125,7 +126,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.0.52";
+const VERSION = "4.0.68";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector
@@ -137,9 +138,19 @@ const header = `--[[
 April = {
     version = "${VERSION}",
     debug = false,
+    crash_logging = false,
     -- Set true only while hunting native crashes (writes dense STEP breadcrumbs).
     crash_trace = false,
+    -- Targeted file trace for Autofarm native-crash diagnosis.
+    autofarm_trace = true,
     _mods = {},
+    load_status = {
+        { name = "Core", state = "loaded" },
+        { name = "Services", state = "loaded" },
+        { name = "Game Data", state = "loaded" },
+        { name = "Features", state = "loaded" },
+        { name = "Interface", state = "loaded" },
+    },
     bundled = true,
     custom_ui = true,
 }
@@ -223,9 +234,9 @@ end
 `;
 
 // Keep the release bundle comfortably below Vector's remote LoadUrl parser
-// limit. Source files remain readable; only full-line comments and blank lines
-// are omitted from generated april.lua / Script 1.lua.
-function compactLuaSource(source) {
+// limit. Source files remain readable; generated bundles omit comments/blanks.
+// Large UI/autofarm modules also drop indentation (Lua is not indentation-sensitive).
+function compactLuaSource(source, stripIndent = false) {
   const out = [];
   let inBlockComment = false;
 
@@ -242,46 +253,104 @@ function compactLuaSource(source) {
       continue;
     }
     if (trimmed.startsWith("--") || trimmed === "") continue;
-    out.push(line);
+    out.push(stripIndent ? line.trimStart() : line);
   }
 
   return out.join("\n");
 }
 
-let body = "";
-for (const rel of ORDER) {
-  const full = path.join(SRC, rel);
-  if (!fs.existsSync(full)) {
-    console.error("Missing:", rel);
-    process.exit(1);
+function buildModuleBody(files) {
+  let body = "";
+  for (const rel of files) {
+    const full = path.join(SRC, rel);
+    if (!fs.existsSync(full)) {
+      console.error("Missing:", rel);
+      process.exit(1);
+    }
+    const modPath = rel.replace(/\.lua$/, "").replace(/\//g, ".");
+    const stripIndent = rel === "features/utility/autofarm.lua"
+      || rel === "ui/custom_menu.lua"
+      || rel === "ui/catalog.lua";
+    const src = compactLuaSource(fs.readFileSync(full, "utf8"), stripIndent);
+    body += `\nApril._mods["${modPath}"] = (function()\n${src}\nend)()\n`;
   }
-  const modPath = rel.replace(/\.lua$/, "").replace(/\//g, ".");
-  const src = compactLuaSource(fs.readFileSync(full, "utf8"));
-  body += "\n";
-  body += `April._mods["${modPath}"] = (function()\n${src}\nend)()\n`;
+  return body;
 }
 
-fs.writeFileSync(OUT, header + body + footer);
-const bundleBytes = fs.statSync(OUT).size;
-const MAX_VECTOR_BUNDLE_BYTES = 985_000;
+function through(file) {
+  const index = ORDER.indexOf(file);
+  if (index < 0) throw new Error(`Unknown chunk boundary: ${file}`);
+  return index + 1;
+}
+
+const coreEnd = through("core/debug.lua");
+const servicesEnd = through("core/config_store.lua");
+const gameEnd = through("game/toolinfo_weapon_mods.lua");
+const featuresEnd = through("features/utility/config.lua");
+const CHUNKS = [
+  { name: "Core", file: "01-core.lua", files: ORDER.slice(0, coreEnd) },
+  { name: "Services", file: "02-services.lua", files: ORDER.slice(coreEnd, servicesEnd) },
+  { name: "Game Data", file: "03-game.lua", files: ORDER.slice(servicesEnd, gameEnd) },
+  { name: "Features", file: "04-features.lua", files: ORDER.slice(gameEnd, featuresEnd) },
+  { name: "Interface", file: "05-interface.lua", files: ORDER.slice(featuresEnd) },
+];
+
+const fullBody = buildModuleBody(ORDER);
+const fullBundle = header + fullBody + footer;
+fs.writeFileSync(SCRIPT1_OUT, fullBundle);
+const bundleBytes = Buffer.byteLength(fullBundle);
+const MAX_VECTOR_BUNDLE_BYTES = 1_050_000;
 if (bundleBytes > MAX_VECTOR_BUNDLE_BYTES) {
   console.error(
     `Bundle is ${bundleBytes} bytes; keep it below ${MAX_VECTOR_BUNDLE_BYTES} for Vector LoadUrl safety.`,
   );
   process.exit(1);
 }
-console.log("Built", path.relative(ROOT, OUT), `(${(bundleBytes / 1024).toFixed(1)} KB)`);
+console.log("Built", path.relative(ROOT, SCRIPT1_OUT), `(${(bundleBytes / 1024).toFixed(1)} KB full local bundle)`);
 
-// load.lua = GitHub remote loader (for release installs).
-const loader = `print("[April] load.lua pulls GitHub main - for local builds execute Script 1.lua or april.lua")
-utility.LoadUrl("https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/april.lua")
+const CHUNK_DIR = path.join(ROOT, "chunks");
+fs.mkdirSync(CHUNK_DIR, { recursive: true });
+for (const old of fs.readdirSync(CHUNK_DIR)) {
+  if (old.endsWith(".lua")) fs.unlinkSync(path.join(CHUNK_DIR, old));
+}
+for (let i = 0; i < CHUNKS.length; i++) {
+  const chunk = CHUNKS[i];
+  const chunkFooter = i === CHUNKS.length - 1 ? footer : "";
+  const contents = buildModuleBody(chunk.files) + chunkFooter;
+  fs.writeFileSync(path.join(CHUNK_DIR, chunk.file), contents);
+  console.log("Built", `chunks/${chunk.file}`, `(${(Buffer.byteLength(contents) / 1024).toFixed(1)} KB)`);
+}
+
+const remoteBase = "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks";
+const remoteLoader = `${header}
+April.bundled = false
+April.load_status = {
+${CHUNKS.map((chunk) => `    { name = "${chunk.name}", state = "pending" },`).join("\n")}
+}
+
+local chunks = {
+${CHUNKS.map((chunk) => `    "${remoteBase}/${chunk.file}?v=${VERSION}",`).join("\n")}
+}
+
+for index = 1, #chunks do
+    local status = April.load_status[index]
+    status.state = "loading"
+    local ok, err = utility.LoadUrl(chunks[index])
+    if not ok then
+        status.state = "failed"
+        status.error = tostring(err)
+        error("[April] Failed to load " .. status.name .. ": " .. tostring(err))
+    end
+    status.state = "loaded"
+end
 `;
-fs.writeFileSync(LOAD_OUT, loader);
-console.log("Built", path.relative(ROOT, LOAD_OUT));
+fs.writeFileSync(OUT, remoteLoader);
+console.log("Built", path.relative(ROOT, OUT), `(${(Buffer.byteLength(remoteLoader) / 1024).toFixed(1)} KB remote loader)`);
 
-// Script 1.lua = full local bundle so Vector "Execute Script 1" uses THIS build.
-fs.copyFileSync(OUT, SCRIPT1_OUT);
-console.log("Built", path.relative(ROOT, SCRIPT1_OUT), "(full local april.lua copy)");
+// load.lua mirrors the small release loader, avoiding an unnecessary nested
+// LoadUrl when users execute the local loader file directly.
+fs.writeFileSync(LOAD_OUT, remoteLoader);
+console.log("Built", path.relative(ROOT, LOAD_OUT));
 
 // Do not keep a duplicate full-bundle Script 2.lua around.
 const SCRIPT2_OUT = path.join(ROOT, "Script 2.lua");

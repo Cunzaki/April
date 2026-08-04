@@ -76,6 +76,8 @@ local MENU_KEYS = {
     "april_gm_speed", "april_gm_speed_mult",
     "april_gm_range", "april_gm_range_mult",
     "april_gm_double_tap",
+    "april_autofarm", "april_autofarm_mode", "april_autofarm_resources",
+    "april_autofarm_search_range", "april_autofarm_debug_path",
     "april_farm_helper", "april_farm_helper_mode", "april_farm_radius",
     "april_world_enabled", "april_world_enabled_mode", "april_stone_node", "april_metal_node", "april_phosphate_node",
     "april_corn_plant", "april_tomato_plant", "april_pumpkin_plant", "april_lemon_plant",
@@ -192,6 +194,7 @@ local LEGACY_HOTKEY_TO_CHECKBOX = {
 
 local HOTKEY_KEYS = {
     "april_gunmods_enabled",
+    "april_autofarm",
     "april_farm_helper",
     "april_world_enabled",
     "april_loot_enabled",
