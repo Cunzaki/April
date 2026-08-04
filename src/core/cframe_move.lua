@@ -211,6 +211,24 @@ function M.set_position(inst, x, y, z)
     M.set_position_only(inst, x, y, z)
 end
 
+function M.set_cframe_position(inst, x, y, z)
+    if not inst then return false end
+    local ok = pcall(function()
+        local cf = inst.CFrame or inst.cframe
+        if cf and cf.Position and CFrame and CFrame.new then
+            local rotation = cf - cf.Position
+            inst.CFrame = CFrame.new(x, y, z) * rotation
+        else
+            error("CFrame unavailable")
+        end
+    end)
+    -- Vector's direct CFrame assignment can be accepted but ignored by some
+    -- live part handles. Its position primitive is the reliable movement write;
+    -- retain the CFrame rotation attempt, then commit the translated position.
+    M.set_position_only(inst, x, y, z)
+    return ok
+end
+
 function M.set_part_collide(inst, collide)
     if not inst then return end
     if part and part.set_can_collide then
@@ -286,6 +304,48 @@ function M.read_flat_input()
     local mag = math.sqrt(mx * mx + mz * mz)
     if mag < 0.001 then return 0, 0 end
     return mx / mag, mz / mag
+end
+
+function M.read_fly_input()
+    local mx, mz = M.read_flat_input()
+    local my = 0
+    if M.key_down(0x20) then my = 1 end
+    if M.key_down(0x11) then my = -1 end
+    return mx, my, mz
+end
+
+function M.ground_distance(x, y, z)
+    if not raycast then return nil end
+    local cast = raycast.cast or raycast.Cast
+    if type(cast) ~= "function" then return nil end
+    local ready = raycast.is_ready or raycast.IsReady
+    if type(ready) == "function" then
+        local ok, value = pcall(ready)
+        if ok and value == false then return nil end
+    end
+    local ok, hit, _, dist = pcall(cast, x, y + 2, z, x, y - 512, z)
+    if not ok or not hit then return nil end
+    return tonumber(dist)
+end
+
+function M.set_noclip_parts(char, enabled)
+    if not char then return end
+    if enabled then
+        for i = 1, #NOCLIP_PARTS do
+            local p = M.find_part(char, NOCLIP_PARTS[i])
+            if p and M.is_base_part(p) then
+                snapshot_collide(p)
+                M.set_part_collide(p, false)
+            end
+        end
+        return
+    end
+    for i = 1, #NOCLIP_PARTS do
+        local p = M.find_part(char, NOCLIP_PARTS[i])
+        if p and M.is_base_part(p) then
+            restore_collide(p)
+        end
+    end
 end
 
 function M.drive_velocity_target(root, tx, ty, tz, dt, opts)

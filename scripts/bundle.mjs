@@ -49,6 +49,7 @@ const ORDER = [
   "core/cframe_move.lua",
   "core/runservice.lua",
   "core/misc_gate.lua",
+  "core/movement_ctrl.lua",
   "core/spider_ctrl.lua",
   "core/config_store.lua",
   "game/module_scan.lua",
@@ -105,6 +106,7 @@ const ORDER = [
   "features/movement/desync.lua",
   "features/movement/anti_aim.lua",
   "features/movement/fake_duck.lua",
+  "features/movement/anti_fling.lua",
   "features/radar/waypoints.lua",
   "features/radar/tactical_map.lua",
   "features/utility/keybind_viewer.lua",
@@ -127,7 +129,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.0.80";
+const VERSION = "4.0.83";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector
@@ -196,12 +198,16 @@ local ok, err = pcall(function()
 
     debug.step("boot.api_aliases")
     April.require("core.api_aliases").apply()
+    debug.step("boot.movement_ctrl.install")
+    April.require("core.movement_ctrl").install()
     debug.step("boot.spider_ctrl.install")
     April.require("core.spider_ctrl").install()
     debug.step("boot.fling.install")
     April.require("features.movement.fling").install()
     debug.step("boot.anti_aim.install")
     April.require("features.movement.anti_aim").install()
+    debug.step("boot.anti_fling.install")
+    April.require("features.movement.anti_fling").install()
     debug.step("boot.fake_duck.install")
     April.require("features.movement.fake_duck").install()
 

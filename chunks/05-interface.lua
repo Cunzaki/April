@@ -1163,7 +1163,10 @@ M.BY_ID = {
     april_gm_speed = "Boosts bullet speed via SpeedMult on live weapon tables. Not an attachment stat — Swift Heavy Ammo also adds speed; equip a gun before enabling.",
     april_gm_range = "Extends max range via RangeMult. Silencer and Compensator reduce range; this patches whatever range mults exist on your gun.",
     april_gm_double_tap = "Forces a 2-round burst on your held gun. Patches ToolInfo directly — does not use GC mults.",
-    april_spider_enabled = "Climbs upward while you press into a nearby wall. Uses two wall checks to avoid triggering on floors and ledges.",
+    april_fly_enabled = "Camera-relative HRP velocity fly (WASD + Space/Ctrl). Leaves normal walking alone on the ground with no input. Never changes WalkSpeed or JumpPower.",
+    april_fly_noclip = "Disables collision on your key character parts while flying. Collision is restored when you land or turn Fly off.",
+    april_spider_enabled = "Climbs upward while you press into a nearby wall. It pulses the jump state only after multi-height wall checks, reducing wall snap-back.",
+    april_antifling_enabled = "Makes other players' character parts non-collidable on your client. Their original collision values are restored when disabled.",
     april_desync_enabled = "Desyncs your network position from where you appear.",
     april_antiaim_enabled = "Spoofs your look direction to other players.",
     april_fakeduck_enabled = "Rapidly ducks your hitbox height.",
@@ -3508,6 +3511,10 @@ return {
 {
 title = "Movement",
 items = {
+kb("april_fly_enabled", "Fly", false),
+sl("april_fly_speed", "Fly Speed", 1, 20, 5, false, "april_fly_enabled"),
+cb("april_fly_noclip", "Fly Noclip", true, nil, "april_fly_enabled"),
+sep(),
 kb("april_spider_enabled", "Spider", false),
 sl("april_spider_speed", "Spider Speed", 18, 30, 18, false, "april_spider_enabled"),
 sep(),
@@ -3561,6 +3568,7 @@ kb("april_farm_helper", "Manual Farm Helper", false),
 sl("april_farm_radius", "Farm Range (studs)", 1, 10, 7, false, "april_farm_helper"),
 sep(),
 cb("april_anti_afk", "Anti AFK", false),
+kb("april_antifling_enabled", "Anti Fling", false),
 label("HUD panels are managed from the top dock."),
 },
 },
@@ -4946,6 +4954,7 @@ M.FEATURE_ORDER = {
     "features.movement.anti_aim",
     "features.movement.fake_duck",
     "features.movement.fling",
+    "features.movement.anti_fling",
     "features.combat.perfect_farm",
     "features.utility.autofarm",
     "features.utility.mod_checker",
@@ -5194,12 +5203,16 @@ local ok, err = pcall(function()
 
     debug.step("boot.api_aliases")
     April.require("core.api_aliases").apply()
+    debug.step("boot.movement_ctrl.install")
+    April.require("core.movement_ctrl").install()
     debug.step("boot.spider_ctrl.install")
     April.require("core.spider_ctrl").install()
     debug.step("boot.fling.install")
     April.require("features.movement.fling").install()
     debug.step("boot.anti_aim.install")
     April.require("features.movement.anti_aim").install()
+    debug.step("boot.anti_fling.install")
+    April.require("features.movement.anti_fling").install()
     debug.step("boot.fake_duck.install")
     April.require("features.movement.fake_duck").install()
 

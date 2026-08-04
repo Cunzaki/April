@@ -22,6 +22,9 @@ local EXCLUDE = {
     april_slowfall_enabled = true,
     april_slowfall_enabled_mode = true,
     april_slowfall_speed = true,
+    april_speed_enabled = true,
+    april_speed_enabled_mode = true,
+    april_speed_speed = true,
 }
 
 local MENU_KEYS = {
@@ -122,7 +125,9 @@ local MENU_KEYS = {
     "april_map_show_players", "april_map_show_npcs", "april_map_show_loot", "april_map_show_world",
     "april_map_show_base", "april_map_show_waypoints", "april_map_show_raids",
     "april_map_labels", "april_map_x", "april_map_y",
+    "april_fly_enabled", "april_fly_enabled_mode", "april_fly_speed", "april_fly_noclip",
     "april_spider_enabled", "april_spider_enabled_mode", "april_spider_speed",
+    "april_antifling_enabled", "april_antifling_enabled_mode",
     "april_fling_enabled", "april_fling_enabled_mode", "april_fling_fov", "april_fling_duration",
     "april_desync_enabled", "april_desync_enabled_mode",
     "april_desync_visualizer",
@@ -205,7 +210,9 @@ local HOTKEY_KEYS = {
     "april_base_enabled",
     "april_waypoints_enabled",
     "april_map_enabled",
+    "april_fly_enabled",
     "april_spider_enabled",
+    "april_antifling_enabled",
     "april_fling_enabled",
     "april_desync_enabled",
     "april_antiaim_enabled",

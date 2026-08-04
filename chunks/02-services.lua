@@ -4561,6 +4561,20 @@ end
 function M.set_position(inst, x, y, z)
     M.set_position_only(inst, x, y, z)
 end
+function M.set_cframe_position(inst, x, y, z)
+    if not inst then return false end
+    local ok = pcall(function()
+        local cf = inst.CFrame or inst.cframe
+        if cf and cf.Position and CFrame and CFrame.new then
+            local rotation = cf - cf.Position
+            inst.CFrame = CFrame.new(x, y, z) * rotation
+        else
+            error("CFrame unavailable")
+        end
+    end)
+    M.set_position_only(inst, x, y, z)
+    return ok
+end
 function M.set_part_collide(inst, collide)
     if not inst then return end
     if part and part.set_can_collide then
@@ -4625,6 +4639,45 @@ function M.read_flat_input()
     local mag = math.sqrt(mx * mx + mz * mz)
     if mag < 0.001 then return 0, 0 end
     return mx / mag, mz / mag
+end
+function M.read_fly_input()
+    local mx, mz = M.read_flat_input()
+    local my = 0
+    if M.key_down(0x20) then my = 1 end
+    if M.key_down(0x11) then my = -1 end
+    return mx, my, mz
+end
+function M.ground_distance(x, y, z)
+    if not raycast then return nil end
+    local cast = raycast.cast or raycast.Cast
+    if type(cast) ~= "function" then return nil end
+    local ready = raycast.is_ready or raycast.IsReady
+    if type(ready) == "function" then
+        local ok, value = pcall(ready)
+        if ok and value == false then return nil end
+    end
+    local ok, hit, _, dist = pcall(cast, x, y + 2, z, x, y - 512, z)
+    if not ok or not hit then return nil end
+    return tonumber(dist)
+end
+function M.set_noclip_parts(char, enabled)
+    if not char then return end
+    if enabled then
+        for i = 1, #NOCLIP_PARTS do
+            local p = M.find_part(char, NOCLIP_PARTS[i])
+            if p and M.is_base_part(p) then
+                snapshot_collide(p)
+                M.set_part_collide(p, false)
+            end
+        end
+        return
+    end
+    for i = 1, #NOCLIP_PARTS do
+        local p = M.find_part(char, NOCLIP_PARTS[i])
+        if p and M.is_base_part(p) then
+            restore_collide(p)
+        end
+    end
 end
 function M.drive_velocity_target(root, tx, ty, tz, dt, opts)
     if not root then return end
@@ -4852,6 +4905,194 @@ end
 return M
 end)()
 
+April._mods["core.movement_ctrl"] = (function()
+local settings = April.require("core.settings")
+local env = April.require("core.env")
+local move = April.require("core.cframe_move")
+local runservice = April.require("core.runservice")
+local misc_gate = April.require("core.misc_gate")
+local M = {}
+local P_FLY = "april_fly_enabled"
+local P_SPEED = "april_fly_speed"
+local P_NOCLIP = "april_fly_noclip"
+local MIN_SPEED = 1
+local MAX_SPEED = 20
+local GROUND_DIST = 4.5
+local installed = false
+local fly_active = false
+local fly_noclip = false
+local tracked_char_id = nil
+local collision_healed_id = nil
+local last_fly_zero_ms = 0
+local function tick_ms()
+    local fn = utility and (utility.get_tick_count or utility.GetTickCount)
+    if type(fn) ~= "function" then return 0 end
+    local ok, value = pcall(fn)
+    return ok and (tonumber(value) or 0) or 0
+end
+local function char_id(char)
+    if not char then return nil end
+    return char.Address or char.address or tostring(char)
+end
+local function get_character(lp)
+    if lp and (lp.Character or lp.character) then
+        return lp.Character or lp.character
+    end
+    local game_lp = game and (game.LocalPlayer or game.local_player)
+    return game_lp and (game_lp.Character or game_lp.character) or nil
+end
+local function get_humanoid(lp, char)
+    local hum = lp and (lp.Humanoid or lp.humanoid)
+    if hum and env.is_valid(hum) then return hum end
+    if not char then return nil end
+    return env.safe_call(function()
+        if char.FindFirstChildOfClass then return char:FindFirstChildOfClass("Humanoid") end
+        if char.find_first_child_of_class then return char:find_first_child_of_class("Humanoid") end
+    end)
+end
+local function hum_alive(hum)
+    if not hum then return false end
+    local hp = hum.Health or hum.health
+    if hp == nil then return true end
+    return hp > 0
+end
+local function fly_speed()
+    local spd = settings.num(P_SPEED, 5)
+    if spd < MIN_SPEED then spd = MIN_SPEED end
+    if spd > MAX_SPEED then spd = MAX_SPEED end
+    return spd
+end
+local function is_on_ground(root)
+    local pos = move.read_pos(root)
+    if not pos then return false end
+    local dist = move.ground_distance(pos.x, pos.y, pos.z)
+    if dist == nil then return false end
+    return dist <= GROUND_DIST
+end
+local function has_move_input(mx, my, mz)
+    return mx ~= 0 or my ~= 0 or mz ~= 0
+end
+local function set_fly_noclip(char, enabled)
+    enabled = enabled == true
+    if enabled == fly_noclip then
+        if enabled and char then
+            move.set_noclip_parts(char, true)
+        end
+        return
+    end
+    fly_noclip = enabled
+    if not char then return end
+    move.set_noclip_parts(char, enabled)
+end
+local function clear_swim_block()
+    local lp = env.get_local_player()
+    local char = get_character(lp)
+    if not char then return end
+    local water = env.safe_call(function()
+        if char.FindFirstChild then return char:FindFirstChild("WaterController") end
+        if char.find_first_child then return char:find_first_child("WaterController") end
+    end)
+    if not water then return end
+    pcall(function()
+        if water.set_attribute then water:set_attribute("IsSwim", false)
+        elseif water.SetAttribute then water:SetAttribute("IsSwim", false)
+        end
+    end)
+end
+local function apply_fly_velocity(root, mx, my, mz, speed)
+    local tx, ty, tz = 0, 0, 0
+    local mag = math.sqrt(mx * mx + my * my + mz * mz)
+    if mag >= 0.001 then
+        tx = mx / mag * speed
+        ty = my / mag * speed
+        tz = mz / mag * speed
+    end
+    move.set_velocity(root, tx, ty, tz)
+    move.set_angular_velocity(root, 0, 0, 0)
+end
+local function tick_fly(root, hum, char)
+    if not hum_alive(hum) then return end
+    local mx, my, mz = move.read_fly_input()
+    local on_ground = is_on_ground(root)
+    local moving = has_move_input(mx, my, mz)
+    if on_ground and not moving then
+        set_fly_noclip(char, false)
+        return
+    end
+    local speed = fly_speed()
+    apply_fly_velocity(root, mx, my, mz, speed)
+    if settings.bool(P_NOCLIP, true) then
+        set_fly_noclip(char, not on_ground or moving)
+    else
+        set_fly_noclip(char, false)
+    end
+    clear_swim_block()
+end
+local function abort_active(root, char)
+    set_fly_noclip(char, false)
+    if fly_active and root then
+        local now = tick_ms()
+        if now - last_fly_zero_ms > 80 then
+            local vx, _, vz = move.read_velocity(root)
+            move.set_velocity(root, vx, 0, vz)
+            last_fly_zero_ms = now
+        end
+    end
+    fly_active = false
+end
+function M.is_fly_active()
+    return fly_active
+end
+function M.tick(_dt)
+    if not misc_gate.movement_allowed() then
+        abort_active(nil, nil)
+        return
+    end
+    local fling = April.require("features.movement.fling")
+    if fling.is_active and fling.is_active() then
+        abort_active(nil, nil)
+        return
+    end
+    local lp = env.get_local_player()
+    if not lp then return end
+    local char = get_character(lp)
+    if not char or not env.is_valid(char) then return end
+    local root = move.find_part(char, "HumanoidRootPart")
+    local hum = get_humanoid(lp, char)
+    if not root or not hum then return end
+    local cid = char_id(char)
+    if cid ~= tracked_char_id then
+        if fly_noclip then
+            move.set_noclip_parts(char, false)
+        end
+        fly_active = false
+        fly_noclip = false
+        move.clear_collide_snapshots()
+        tracked_char_id = cid
+        collision_healed_id = nil
+    end
+    if settings.enabled(P_FLY) then
+        fly_active = true
+        tick_fly(root, hum, char)
+    else
+        if fly_active or fly_noclip then
+            abort_active(root, char)
+        elseif collision_healed_id ~= cid then
+            move.reset_fallen_collision(char)
+            collision_healed_id = cid
+        end
+    end
+end
+function M.install()
+    if installed then return end
+    installed = true
+    runservice.on_sim(function(dt)
+        M.tick(dt)
+    end)
+end
+return M
+end)()
+
 April._mods["core.spider_ctrl"] = (function()
 local settings = April.require("core.settings")
 local env = April.require("core.env")
@@ -4863,12 +5104,14 @@ local WALL_REACH = 3.0
 local WALL_GRACE_MS = 280
 local MIN_SPEED = 18
 local MAX_SPEED = 30
+local JUMP_PULSE_MS = 280
 local installed = false
 local active = false
 local tracked_char_id = nil
 local last_wall_at = 0
 local last_wall_x = 0
 local last_wall_z = 0
+local last_jump_at = 0
 local function now_ms()
     local fn = utility and (utility.get_tick_count or utility.GetTickCount)
     if type(fn) ~= "function" then return 0 end
@@ -4950,6 +5193,7 @@ end
 local function stop()
     active = false
     last_wall_at = 0
+    last_jump_at = 0
 end
 function M.tick(dt)
     local misc_gate = April.require("core.misc_gate")
@@ -4959,6 +5203,11 @@ function M.tick(dt)
     end
     local fling = April.require("features.movement.fling")
     if fling.is_active and fling.is_active() then
+        stop()
+        return
+    end
+    local movement = April.require("core.movement_ctrl")
+    if movement.is_fly_active() then
         stop()
         return
     end
@@ -5003,7 +5252,13 @@ function M.tick(dt)
     end
     local speed = spider_speed()
     local push = wall_hits and wall_hits < 3 and 4.5 or 2.5
-    move.drive_velocity_target(root, dx * push, speed, dz * push, dt, {
+    local vertical = speed
+    if now - last_jump_at >= JUMP_PULSE_MS then
+        move.humanoid_state(hum, 3)
+        last_jump_at = now
+        vertical = math.min(speed, 22)
+    end
+    move.drive_velocity_target(root, dx * push, vertical, dz * push, dt, {
         response = 32,
         vertical_blend = 1,
         zero_angular = true,
@@ -5044,6 +5299,9 @@ local EXCLUDE = {
     april_slowfall_enabled = true,
     april_slowfall_enabled_mode = true,
     april_slowfall_speed = true,
+    april_speed_enabled = true,
+    april_speed_enabled_mode = true,
+    april_speed_speed = true,
 }
 local MENU_KEYS = {
     "april_ui_theme_preset", "april_ui_window_opacity", "april_ui_panel_opacity",
@@ -5142,7 +5400,9 @@ local MENU_KEYS = {
     "april_map_show_players", "april_map_show_npcs", "april_map_show_loot", "april_map_show_world",
     "april_map_show_base", "april_map_show_waypoints", "april_map_show_raids",
     "april_map_labels", "april_map_x", "april_map_y",
+    "april_fly_enabled", "april_fly_enabled_mode", "april_fly_speed", "april_fly_noclip",
     "april_spider_enabled", "april_spider_enabled_mode", "april_spider_speed",
+    "april_antifling_enabled", "april_antifling_enabled_mode",
     "april_fling_enabled", "april_fling_enabled_mode", "april_fling_fov", "april_fling_duration",
     "april_desync_enabled", "april_desync_enabled_mode",
     "april_desync_visualizer",
@@ -5222,7 +5482,9 @@ local HOTKEY_KEYS = {
     "april_base_enabled",
     "april_waypoints_enabled",
     "april_map_enabled",
+    "april_fly_enabled",
     "april_spider_enabled",
+    "april_antifling_enabled",
     "april_fling_enabled",
     "april_desync_enabled",
     "april_antiaim_enabled",

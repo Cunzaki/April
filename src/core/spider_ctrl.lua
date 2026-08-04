@@ -10,6 +10,7 @@ local WALL_REACH = 3.0
 local WALL_GRACE_MS = 280
 local MIN_SPEED = 18
 local MAX_SPEED = 30
+local JUMP_PULSE_MS = 280
 
 local installed = false
 local active = false
@@ -17,6 +18,7 @@ local tracked_char_id = nil
 local last_wall_at = 0
 local last_wall_x = 0
 local last_wall_z = 0
+local last_jump_at = 0
 
 local function now_ms()
     local fn = utility and (utility.get_tick_count or utility.GetTickCount)
@@ -110,6 +112,7 @@ end
 local function stop()
     active = false
     last_wall_at = 0
+    last_jump_at = 0
 end
 
 function M.tick(dt)
@@ -121,6 +124,11 @@ function M.tick(dt)
 
     local fling = April.require("features.movement.fling")
     if fling.is_active and fling.is_active() then
+        stop()
+        return
+    end
+    local movement = April.require("core.movement_ctrl")
+    if movement.is_fly_active() then
         stop()
         return
     end
@@ -171,7 +179,15 @@ function M.tick(dt)
 
     local speed = spider_speed()
     local push = wall_hits and wall_hits < 3 and 4.5 or 2.5
-    move.drive_velocity_target(root, dx * push, speed, dz * push, dt, {
+    local vertical = speed
+    if now - last_jump_at >= JUMP_PULSE_MS then
+        -- Jumping state keeps the local humanoid animation/state machine in
+        -- sync with the wall boost and reduces visible snap-back on walls.
+        move.humanoid_state(hum, 3)
+        last_jump_at = now
+        vertical = math.min(speed, 22)
+    end
+    move.drive_velocity_target(root, dx * push, vertical, dz * push, dt, {
         response = 32,
         vertical_blend = 1,
         zero_angular = true,

@@ -467,6 +467,10 @@ local function build_misc()
         {
             title = "Movement",
             items = {
+                kb("april_fly_enabled", "Fly", false),
+                sl("april_fly_speed", "Fly Speed", 1, 20, 5, false, "april_fly_enabled"),
+                cb("april_fly_noclip", "Fly Noclip", true, nil, "april_fly_enabled"),
+                sep(),
                 kb("april_spider_enabled", "Spider", false),
                 sl("april_spider_speed", "Spider Speed", 18, 30, 18, false, "april_spider_enabled"),
                 sep(),
@@ -520,6 +524,7 @@ local function build_misc()
                 sl("april_farm_radius", "Farm Range (studs)", 1, 10, 7, false, "april_farm_helper"),
                 sep(),
                 cb("april_anti_afk", "Anti AFK", false),
+                kb("april_antifling_enabled", "Anti Fling", false),
                 label("HUD panels are managed from the top dock."),
             },
         },

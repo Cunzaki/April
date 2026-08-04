@@ -127,7 +127,10 @@ M.BY_ID = {
     april_gm_double_tap = "Forces a 2-round burst on your held gun. Patches ToolInfo directly — does not use GC mults.",
 
     -- Movement
-    april_spider_enabled = "Climbs upward while you press into a nearby wall. Uses two wall checks to avoid triggering on floors and ledges.",
+    april_fly_enabled = "Camera-relative HRP velocity fly (WASD + Space/Ctrl). Leaves normal walking alone on the ground with no input. Never changes WalkSpeed or JumpPower.",
+    april_fly_noclip = "Disables collision on your key character parts while flying. Collision is restored when you land or turn Fly off.",
+    april_spider_enabled = "Climbs upward while you press into a nearby wall. It pulses the jump state only after multi-height wall checks, reducing wall snap-back.",
+    april_antifling_enabled = "Makes other players' character parts non-collidable on your client. Their original collision values are restored when disabled.",
     april_desync_enabled = "Desyncs your network position from where you appear.",
     april_antiaim_enabled = "Spoofs your look direction to other players.",
     april_fakeduck_enabled = "Rapidly ducks your hitbox height.",
