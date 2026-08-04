@@ -1076,8 +1076,6 @@ M.SKIP_IDS = {
     april_silent_draw_fov = true,
     april_silent_fov_style = true,
     april_silent_target_line = true,
-    april_silent_tp_ray_vis = true,
-    april_silent_tp_method = true,
     april_silent_manip_status = true,
     april_silent_manip_peek_vis = true,
     april_desync_visualizer = true,
@@ -1165,8 +1163,7 @@ M.BY_ID = {
     april_gm_speed = "Boosts bullet speed via SpeedMult on live weapon tables. Not an attachment stat — Swift Heavy Ammo also adds speed; equip a gun before enabling.",
     april_gm_range = "Extends max range via RangeMult. Silencer and Compensator reduce range; this patches whatever range mults exist on your gun.",
     april_gm_double_tap = "Forces a 2-round burst on your held gun. Patches ToolInfo directly — does not use GC mults.",
-    april_noclip_enabled = "Lets you fly through the world.",
-    april_slowfall_enabled = "Slows your fall speed.",
+    april_spider_enabled = "Climbs upward while you press into a nearby wall. Uses two wall checks to avoid triggering on floors and ledges.",
     april_desync_enabled = "Desyncs your network position from where you appear.",
     april_antiaim_enabled = "Spoofs your look direction to other players.",
     april_fakeduck_enabled = "Rapidly ducks your hitbox height.",
@@ -3511,10 +3508,8 @@ return {
 {
 title = "Movement",
 items = {
-kb("april_noclip_enabled", "Fly", false),
-sl("april_noclip_speed", "Fly Speed", 1, 20, 5, false, "april_noclip_enabled"),
-kb("april_slowfall_enabled", "Slowfall", false),
-sl("april_slowfall_speed", "Fall Speed", 1, 50, 5, false, "april_slowfall_enabled"),
+kb("april_spider_enabled", "Spider", false),
+sl("april_spider_speed", "Spider Speed", 18, 30, 18, false, "april_spider_enabled"),
 sep(),
 kb("april_desync_enabled", "Desync", false),
 cb("april_desync_visualizer", "Desync Visualize", false, { 0.2, 0.85, 1, 0.9 }, "april_desync_enabled"),
@@ -4767,7 +4762,6 @@ state.define("april_ui_accent_anim", 1)
 state.define("april_ui_anim_speed", 40)
 state.define("april_ui_menu_overlay", true)
 state.define("april_ui_overlay_strength", 70)
-state.define("april_ui_bg_dim", 0)
 state.define("april_ui_snow", false)
 state.define("april_ui_snow_amount", 50)
 state.define("april_ui_snow_speed", 40)
@@ -5200,8 +5194,8 @@ local ok, err = pcall(function()
 
     debug.step("boot.api_aliases")
     April.require("core.api_aliases").apply()
-    debug.step("boot.movement_ctrl.install")
-    April.require("core.movement_ctrl").install()
+    debug.step("boot.spider_ctrl.install")
+    April.require("core.spider_ctrl").install()
     debug.step("boot.fling.install")
     April.require("features.movement.fling").install()
     debug.step("boot.anti_aim.install")

@@ -3818,11 +3818,16 @@ local FLAG_DEFAULTS = {
     DataSenderRate = 60,
     S2PhysicsSenderRate = 15,
 }
+local function fflag_api(snake, pascal)
+    if not fflag then return nil end
+    local fn = fflag[snake] or fflag[pascal]
+    return type(fn) == "function" and fn or nil
+end
 local function can_mem()
-    return memory and type(memory.write) == "function"
+    return memory and type(memory.write or memory.Write) == "function"
 end
 local function can_fflag()
-    return fflag and type(fflag.set_value) == "function"
+    return fflag_api("set_value", "SetValue") ~= nil
 end
 function M.available()
     return can_mem() or can_fflag()
@@ -3830,8 +3835,12 @@ end
 function M.refresh()
     cache = {}
     ready = false
-    if not fflag or not fflag.is_scanned or not fflag.is_scanned() then return end
-    local ok, all = pcall(fflag.get_all)
+    local is_scanned = fflag_api("is_scanned", "IsScanned")
+    local get_all = fflag_api("get_all", "GetAll")
+    if not is_scanned or not get_all then return end
+    local ok_scan, scanned = pcall(is_scanned)
+    if not ok_scan or scanned ~= true then return end
+    local ok, all = pcall(get_all)
     if ok and type(all) == "table" then
         for i = 1, #all do
             local e = all[i]
@@ -3847,10 +3856,12 @@ function M.refresh()
 end
 local function lookup(name)
     if cache[name] then return cache[name] end
-    if not fflag or not fflag.find then return nil end
-    local ok, hits = pcall(fflag.find, name)
-    if ok and type(hits) == "table" and hits[1] and hits[1].address then
-        local e = { addr = hits[1].address, original = hits[1].original or hits[1].value }
+    local find = fflag_api("find", "Find")
+    if not find then return nil end
+    local ok, hits = pcall(find, name)
+    if ok and type(hits) == "table" and hits[1] then
+        local hit = hits[1]
+        local e = { addr = hit.address, original = hit.original or hit.value }
         cache[name] = e
         return e
     end
@@ -3863,21 +3874,39 @@ function M.set_int(name, value)
     if num == nil then return false end
     local e = lookup(name)
     if e and e.addr and can_mem() then
-        local ok = pcall(memory.write, e.addr, "int32", num)
-        if ok then return true end
+        local write = memory.write or memory.Write
+        local ok, result = pcall(write, e.addr, "int32", num)
+        if ok and result ~= false then return true end
     end
     if can_fflag() then
-        return pcall(fflag.set_value, name, num) == true
+        local ok, result = pcall(fflag_api("set_value", "SetValue"), name, num)
+        return ok and result == true
     end
     return false
+end
+function M.get_int(name)
+    if not name then return nil end
+    if not ready then M.refresh() end
+    local e = lookup(name)
+    local read = memory and (memory.read or memory.Read)
+    if e and e.addr and type(read) == "function" then
+        local ok, value = pcall(read, e.addr, "int32")
+        if ok and tonumber(value) ~= nil then return tonumber(value) end
+    end
+    local get_value = fflag_api("get_value", "GetValue")
+    if not get_value then return nil end
+    local ok, value = pcall(get_value, name)
+    return ok and tonumber(value) or nil
 end
 function M.reset(name)
     if not name then return false end
     local e = lookup(name)
     local orig = (e and e.original) or FLAG_DEFAULTS[name]
     if orig == nil then
-        if fflag and fflag.reset_value then
-            return pcall(fflag.reset_value, name)
+        local reset_value = fflag_api("reset_value", "ResetValue")
+        if reset_value then
+            local ok, result = pcall(reset_value, name)
+            return ok and result == true
         end
         return false
     end
@@ -4361,8 +4390,6 @@ local BASE_PARTS = {
 local NOCLIP_PARTS = {
     "HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso", "Head",
 }
-local HIP_OFFSET = 3.0
-local DEFAULT_GRAVITY = 196.2
 local collide_snap = {}
 local function part_key(inst)
     if not inst then return nil end
@@ -4544,25 +4571,6 @@ function M.set_part_collide(inst, collide)
         pcall(function() inst.CanCollide = collide end)
     end
 end
-function M.set_noclip_parts(char, enabled)
-    if not char then return end
-    if enabled then
-        for i = 1, #NOCLIP_PARTS do
-            local p = M.find_part(char, NOCLIP_PARTS[i])
-            if p and M.is_base_part(p) then
-                snapshot_collide(p)
-                M.set_part_collide(p, false)
-            end
-        end
-        return
-    end
-    for i = 1, #NOCLIP_PARTS do
-        local p = M.find_part(char, NOCLIP_PARTS[i])
-        if p and M.is_base_part(p) then
-            restore_collide(p)
-        end
-    end
-end
 function M.humanoid_state(hum, state)
     if not hum or state == nil then return end
     pcall(function()
@@ -4595,14 +4603,6 @@ function M.zero_character(char, root)
         end
     end
 end
-function M.workspace_gravity()
-    local ws = env.get_workspace and env.get_workspace() or (game and game.workspace)
-    if ws then
-        local g = ws.Gravity or ws.gravity
-        if type(g) == "number" and g > 0 then return g end
-    end
-    return DEFAULT_GRAVITY
-end
 function M.camera_flat_axes()
     if not camera or not camera.get_look_vector then return nil end
     local ok, look = pcall(camera.get_look_vector)
@@ -4626,76 +4626,48 @@ function M.read_flat_input()
     if mag < 0.001 then return 0, 0 end
     return mx / mag, mz / mag
 end
-function M.read_fly_input()
-    local mx, mz = M.read_flat_input()
-    local my = 0
-    if M.key_down(0x20) then my = 1 end
-    if M.key_down(0x11) then my = -1 end
-    return mx, my, mz
-end
-function M.ground_distance(x, y, z)
-    if not raycast or not raycast.cast then return nil end
-    if raycast.is_ready and not raycast.is_ready() then return nil end
-    local hit, _, dist = raycast.cast(x, y + 2, z, x, y - 512, z)
-    if not hit then return nil end
-    return dist
-end
-function M.floor_y_at(x, y, z)
-    local dist = M.ground_distance(x, y, z)
-    if not dist then return nil end
-    return y + 2 - dist + HIP_OFFSET
-end
-function M.clamp_above_floor(x, y, z)
-    local floor_y = M.floor_y_at(x, y, z)
-    if floor_y and y < floor_y then return floor_y end
-    return y
-end
-function M.drive_root(root, pos, dx, dy, dz, speed, dt)
-    if not root or not pos then return pos end
-    dt = dt or M.delta_time()
-    local mag = math.sqrt(dx * dx + dy * dy + dz * dz)
-    if mag < 0.001 then
-        M.set_velocity(root, 0, 0, 0)
-        return pos
-    end
-    dx, dy, dz = dx / mag, dy / mag, dz / mag
-    local step = speed * dt
-    local nx = pos.x + dx * step
-    local ny = pos.y + dy * step
-    local nz = pos.z + dz * step
-    M.set_position_only(root, nx, ny, nz)
-    M.set_velocity(root, dx * speed, dy * speed, dz * speed)
-    return { x = nx, y = ny, z = nz }
-end
-function M.drive_root_velocity(root, dx, dy, dz, speed, dt, opts)
+function M.drive_velocity_target(root, tx, ty, tz, dt, opts)
     if not root then return end
     opts = opts or {}
     dt = dt or M.delta_time()
+    tx, ty, tz = tx or 0, ty or 0, tz or 0
+    local cx, cy, cz = M.read_velocity(root)
+    local blend = opts.blend
+    if blend == nil then
+        local response = math.max(1, tonumber(opts.response) or 16)
+        blend = 1 - math.exp(-response * math.max(0.001, math.min(dt, 0.1)))
+    end
+    blend = math.max(0.05, math.min(1, blend))
+    local nx = cx + (tx - cx) * blend
+    local vertical_blend = tonumber(opts.vertical_blend) or blend
+    vertical_blend = math.max(0.05, math.min(1, vertical_blend))
+    local ny = cy + (ty - cy) * vertical_blend
+    local nz = cz + (tz - cz) * blend
+    local max_speed = tonumber(opts.max_speed)
+    if max_speed and max_speed > 0 then
+        local sm = math.sqrt(nx * nx + ny * ny + nz * nz)
+        if sm > max_speed and sm > 0.001 then
+            local scale = max_speed / sm
+            nx, ny, nz = nx * scale, ny * scale, nz * scale
+        end
+    end
+    M.set_velocity(root, nx, ny, nz)
+    if opts.zero_angular then
+        M.set_angular_velocity(root, 0, 0, 0)
+    end
+    return nx, ny, nz
+end
+function M.drive_root_velocity(root, dx, dy, dz, speed, dt, opts)
+    opts = opts or {}
     local mag = math.sqrt(dx * dx + dy * dy + dz * dz)
     local tx, ty, tz = 0, 0, 0
     if mag >= 0.001 then
-        dx, dy, dz = dx / mag, dy / mag, dz / mag
-        tx, ty, tz = dx * speed, dy * speed, dz * speed
+        tx = dx / mag * speed
+        ty = dy / mag * speed
+        tz = dz / mag * speed
     end
-    if opts.cancel_gravity ~= false and math.abs(ty) < 0.01 and mag < 0.001 then
-        ty = 0
-    elseif opts.cancel_gravity ~= false and math.abs(dy) < 0.01 and mag >= 0.001 then
-        ty = 0
-    end
-    local cx, cy, cz = M.read_velocity(root)
-    local blend = opts.blend or 0.35
-    blend = math.max(0.05, math.min(1, blend))
-    local nx = cx + (tx - cx) * blend
-    local ny = cy + (ty - cy) * blend
-    local nz = cz + (tz - cz) * blend
-    local max_speed = opts.max_speed or (speed * 1.15)
-    local sm = math.sqrt(nx * nx + ny * ny + nz * nz)
-    if sm > max_speed and sm > 0.001 then
-        local s = max_speed / sm
-        nx, ny, nz = nx * s, ny * s, nz * s
-    end
-    M.set_velocity(root, nx, ny, nz)
-    M.set_angular_velocity(root, 0, 0, 0)
+    opts.max_speed = opts.max_speed or (speed * 1.15)
+    return M.drive_velocity_target(root, tx, ty, tz, dt, opts)
 end
 return M
 end)()
@@ -4880,197 +4852,170 @@ end
 return M
 end)()
 
-April._mods["core.movement_ctrl"] = (function()
+April._mods["core.spider_ctrl"] = (function()
 local settings = April.require("core.settings")
 local env = April.require("core.env")
 local move = April.require("core.cframe_move")
 local M = {}
-local P_FLY = "april_noclip_enabled"
-local P_SPEED = "april_noclip_speed"
-local P_SLOWFALL = "april_slowfall_enabled"
-local _installed = false
-local fly_active = false
-local fly_noclip = false
+local P_SPIDER = "april_spider_enabled"
+local P_SPEED = "april_spider_speed"
+local WALL_REACH = 3.0
+local WALL_GRACE_MS = 280
+local MIN_SPEED = 18
+local MAX_SPEED = 30
+local installed = false
+local active = false
 local tracked_char_id = nil
-local collision_healed_id = nil
-local last_fly_zero_ms = 0
-local MIN_FLY_SPEED = 1
-local MAX_FLY_SPEED = 20
-local GROUND_DIST = 4.5
-local function tick_ms()
-    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+local last_wall_at = 0
+local last_wall_x = 0
+local last_wall_z = 0
+local function now_ms()
+    local fn = utility and (utility.get_tick_count or utility.GetTickCount)
+    if type(fn) ~= "function" then return 0 end
+    local ok, value = pcall(fn)
+    return ok and (tonumber(value) or 0) or 0
 end
 local function char_id(char)
     if not char then return nil end
     return char.Address or char.address or tostring(char)
 end
 local function get_character(lp)
-    if lp and lp.character then return lp.character end
-    if game and game.local_player and game.local_player.character then
-        return game.local_player.character
+    if lp and (lp.Character or lp.character) then
+        return lp.Character or lp.character
     end
-    return nil
+    local game_lp = game and (game.LocalPlayer or game.local_player)
+    return game_lp and (game_lp.Character or game_lp.character) or nil
 end
-local function get_root(lp)
-    local char = get_character(lp)
-    if not char then return nil end
-    return move.find_part(char, "HumanoidRootPart")
-end
-local function get_humanoid(lp)
-    if lp and lp.humanoid and env.is_valid(lp.humanoid) then
-        return lp.humanoid
-    end
-    local char = get_character(lp)
+local function get_humanoid(lp, char)
+    local direct = lp and (lp.Humanoid or lp.humanoid)
+    if direct and env.is_valid(direct) then return direct end
     if not char then return nil end
     return env.safe_call(function()
+        if char.FindFirstChildOfClass then return char:FindFirstChildOfClass("Humanoid") end
         if char.find_first_child_of_class then return char:find_first_child_of_class("Humanoid") end
-        return char:FindFirstChildOfClass("Humanoid")
     end)
 end
-local function hum_alive(hum)
+local function alive(hum)
     if not hum then return false end
-    local hp = hum.Health or hum.health
-    if hp == nil then return true end
-    return hp > 0
+    local health = hum.Health or hum.health
+    return health == nil or health > 0
 end
-local function fly_speed()
-    local spd = settings.num(P_SPEED, 5)
-    if spd < MIN_FLY_SPEED then spd = MIN_FLY_SPEED end
-    if spd > MAX_FLY_SPEED then spd = MAX_FLY_SPEED end
-    return spd
+local function spider_speed()
+    local speed = settings.num(P_SPEED, 18)
+    return math.max(MIN_SPEED, math.min(MAX_SPEED, speed))
 end
-local function is_on_ground(root)
+local function cast_wall(pos, dx, dz, y_offset)
+    if not raycast then return false, nil end
+    local ready = raycast.is_ready or raycast.IsReady
+    if type(ready) == "function" then
+        local ok, value = pcall(ready)
+        if ok and value == false then return false, nil end
+    end
+    local cast = raycast.cast or raycast.Cast
+    if type(cast) ~= "function" then return false, nil end
+    local from_x = pos.x + dx * 0.35
+    local from_y = pos.y + y_offset
+    local from_z = pos.z + dz * 0.35
+    local ok, hit, _, distance = pcall(
+        cast,
+        from_x, from_y, from_z,
+        pos.x + dx * WALL_REACH, from_y, pos.z + dz * WALL_REACH
+    )
+    if not ok or hit ~= true then return false, nil end
+    distance = tonumber(distance)
+    return distance ~= nil and distance <= WALL_REACH, distance
+end
+local function wall_ahead(root)
     local pos = move.read_pos(root)
     if not pos then return false end
-    local dist = move.ground_distance(pos.x, pos.y, pos.z)
-    if dist == nil then return false end
-    return dist <= GROUND_DIST
-end
-local function has_move_input(mx, my, mz)
-    return mx ~= 0 or my ~= 0 or mz ~= 0
-end
-local function set_fly_noclip(char, enabled)
-    enabled = enabled == true
-    if enabled == fly_noclip then
-        if enabled and char then
-            move.set_noclip_parts(char, true)
-        end
-        return
-    end
-    fly_noclip = enabled
-    if not char then return end
-    move.set_noclip_parts(char, enabled)
-end
-local function clear_swim_block()
-    local lp = env.get_local_player()
-    local char = get_character(lp)
-    if not char then return end
-    local water = env.safe_call(function()
-        return char:FindFirstChild("WaterController")
-            or (char.find_first_child and char:find_first_child("WaterController"))
-    end)
-    if not water then return end
-    pcall(function()
-        if water.set_attribute then water:set_attribute("IsSwim", false)
-        elseif water.SetAttribute then water:SetAttribute("IsSwim", false)
-        end
-    end)
-end
-local function apply_fly_velocity(root, mx, my, mz, speed)
-    local tx, ty, tz = 0, 0, 0
-    local mag = math.sqrt(mx * mx + my * my + mz * mz)
-    if mag >= 0.001 then
-        tx = mx / mag * speed
-        ty = my / mag * speed
-        tz = mz / mag * speed
-    end
-    move.set_velocity(root, tx, ty, tz)
-    move.set_angular_velocity(root, 0, 0, 0)
-end
-local function tick_fly(root, hum, char)
-    if not hum_alive(hum) then return end
-    local mx, my, mz = move.read_fly_input()
-    local on_ground = is_on_ground(root)
-    local moving = has_move_input(mx, my, mz)
-    if on_ground and not moving then
-        set_fly_noclip(char, false)
-        return
-    end
-    local speed = fly_speed()
-    apply_fly_velocity(root, mx, my, mz, speed)
-    set_fly_noclip(char, not on_ground or moving)
-    clear_swim_block()
-end
-local function tick_slowfall(root, hum, _dt)
-    local raw = settings.num("april_slowfall_speed", 5)
-    if raw < 1 then raw = 1 end
-    local cap = -(0.8 + (raw * 0.22))
-    local vx, vy, vz = move.read_velocity(root)
-    if vy < cap then
-        move.set_velocity(root, vx, cap, vz)
-    end
-    clear_swim_block()
-end
-local function abort_active(root, char)
-    set_fly_noclip(char, false)
-    if fly_active and root then
-        local now = tick_ms()
-        if now - last_fly_zero_ms > 80 then
-            local vx, _, vz = move.read_velocity(root)
-            move.set_velocity(root, vx, 0, vz)
-            last_fly_zero_ms = now
+    local dx, dz = move.read_flat_input()
+    if dx == 0 and dz == 0 then return false end
+    local low, low_dist = cast_wall(pos, dx, dz, -1.0)
+    local middle, middle_dist = cast_wall(pos, dx, dz, 0)
+    local high, high_dist = cast_wall(pos, dx, dz, 1.15)
+    local hits = (low and 1 or 0) + (middle and 1 or 0) + (high and 1 or 0)
+    if hits < 2 then return false, dx, dz end
+    local nearest, farthest
+    for _, value in ipairs({ low_dist, middle_dist, high_dist }) do
+        if value then
+            nearest = nearest and math.min(nearest, value) or value
+            farthest = farthest and math.max(farthest, value) or value
         end
     end
-    fly_active = false
+    if nearest and farthest and farthest - nearest > 1.5 then
+        return false, dx, dz
+    end
+    return true, dx, dz, hits
 end
-function M.tick(_dt)
+local function stop()
+    active = false
+    last_wall_at = 0
+end
+function M.tick(dt)
     local misc_gate = April.require("core.misc_gate")
     if not misc_gate.movement_allowed() then
-        abort_active(nil, nil)
+        stop()
         return
     end
     local fling = April.require("features.movement.fling")
     if fling.is_active and fling.is_active() then
-        abort_active(nil, nil)
+        stop()
         return
     end
     local lp = env.get_local_player()
-    if not lp then return end
     local char = get_character(lp)
-    if not char or not env.is_valid(char) then return end
-    local root = get_root(lp)
-    local hum = get_humanoid(lp)
-    if not root or not hum then return end
+    if not lp or not char or not env.is_valid(char) then
+        stop()
+        return
+    end
     local cid = char_id(char)
     if cid ~= tracked_char_id then
-        if fly_noclip then
-            move.set_noclip_parts(char, false)
-        end
-        fly_active = false
-        fly_noclip = false
         move.clear_collide_snapshots()
+        move.reset_fallen_collision(char)
         tracked_char_id = cid
-        collision_healed_id = nil
+        active = false
     end
-    local want_fly = settings.enabled(P_FLY)
-    if want_fly then
-        fly_active = true
-        tick_fly(root, hum, char)
-    else
-        if fly_active or fly_noclip then
-            abort_active(root, char)
-        elseif collision_healed_id ~= cid then
-            move.reset_fallen_collision(char)
-            collision_healed_id = cid
-        end
-        if settings.enabled(P_SLOWFALL) then
-            tick_slowfall(root, hum, _dt)
+    if not settings.enabled(P_SPIDER) then
+        stop()
+        return
+    end
+    local root = move.find_part(char, "HumanoidRootPart")
+    local hum = get_humanoid(lp, char)
+    if not root or not alive(hum) then
+        stop()
+        return
+    end
+    local touching_wall, dx, dz, wall_hits = wall_ahead(root)
+    local now = now_ms()
+    if touching_wall then
+        last_wall_at = now
+        last_wall_x, last_wall_z = dx, dz
+    elseif dx ~= 0 or dz ~= 0 then
+        touching_wall = last_wall_at > 0 and now - last_wall_at <= WALL_GRACE_MS
+        if touching_wall then
+            dx, dz = last_wall_x, last_wall_z
+            wall_hits = 3
         end
     end
+    if not touching_wall then
+        stop()
+        return
+    end
+    local speed = spider_speed()
+    local push = wall_hits and wall_hits < 3 and 4.5 or 2.5
+    move.drive_velocity_target(root, dx * push, speed, dz * push, dt, {
+        response = 32,
+        vertical_blend = 1,
+        zero_angular = true,
+    })
+    active = true
+end
+function M.is_active()
+    return active
 end
 function M.install()
-    if _installed then return end
-    _installed = true
+    if installed then return end
+    installed = true
     April.require("core.runservice").on_sim(function(dt)
         M.tick(dt)
     end)
@@ -5086,17 +5031,24 @@ M.SLOT_MAX = 5
 M.FILE_VERSION = 2
 local META_FILE = "April_meta.txt"
 local EXCLUDE = {
+    version = true,
     april_cfg_slot = true,
     april_cfg_profile_name = true,
     april_cfg_autoload = true,
     april_cfg_autoload_slot = true,
     april_cfg_autoload_profile = true,
-    april_debug_overlay = true,
+    april_ui_bg_dim = true,
+    april_noclip_enabled = true,
+    april_noclip_enabled_mode = true,
+    april_noclip_speed = true,
+    april_slowfall_enabled = true,
+    april_slowfall_enabled_mode = true,
+    april_slowfall_speed = true,
 }
 local MENU_KEYS = {
     "april_ui_theme_preset", "april_ui_window_opacity", "april_ui_panel_opacity",
     "april_ui_border_strength", "april_ui_corner_style", "april_ui_scale", "april_ui_density",
-    "april_ui_menu_overlay", "april_ui_overlay_strength", "april_ui_bg_dim",
+    "april_ui_menu_overlay", "april_ui_overlay_strength",
     "april_ui_snow", "april_ui_snow_amount", "april_ui_snow_speed",
     "april_ui_snow_size", "april_ui_snow_opacity",
     "april_ui_startup_intro", "april_ui_motion_profile", "april_ui_reduce_motion",
@@ -5120,7 +5072,6 @@ local MENU_KEYS = {
     "april_target_overlay", "april_target_overlay_fov", "april_target_overlay_max_dist",
     "april_target_overlay_gear_size", "april_target_overlay_top",
     "april_crosshair_source",
-    "april_target_gear_source",
     "april_crosshair_enabled", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
     "april_crosshair_thickness", "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
     "april_crosshair_rainbow", "april_crosshair_rainbow_speed",
@@ -5191,8 +5142,7 @@ local MENU_KEYS = {
     "april_map_show_players", "april_map_show_npcs", "april_map_show_loot", "april_map_show_world",
     "april_map_show_base", "april_map_show_waypoints", "april_map_show_raids",
     "april_map_labels", "april_map_x", "april_map_y",
-    "april_noclip_enabled", "april_noclip_enabled_mode", "april_noclip_speed",
-    "april_slowfall_enabled", "april_slowfall_enabled_mode", "april_slowfall_speed",
+    "april_spider_enabled", "april_spider_enabled_mode", "april_spider_speed",
     "april_fling_enabled", "april_fling_enabled_mode", "april_fling_fov", "april_fling_duration",
     "april_desync_enabled", "april_desync_enabled_mode",
     "april_desync_visualizer",
@@ -5258,8 +5208,6 @@ local LEGACY_HOTKEY_TO_CHECKBOX = {
     april_base_enabled_key = "april_base_enabled",
     april_waypoints_enabled_key = "april_waypoints_enabled",
     april_map_enabled_key = "april_map_enabled",
-    april_noclip_enabled_key = "april_noclip_enabled",
-    april_slowfall_enabled_key = "april_slowfall_enabled",
     april_desync_enabled_key = "april_desync_enabled",
     april_mod_checker_enabled_key = "april_mod_checker_enabled",
 }
@@ -5274,8 +5222,7 @@ local HOTKEY_KEYS = {
     "april_base_enabled",
     "april_waypoints_enabled",
     "april_map_enabled",
-    "april_noclip_enabled",
-    "april_slowfall_enabled",
+    "april_spider_enabled",
     "april_fling_enabled",
     "april_desync_enabled",
     "april_antiaim_enabled",
@@ -5383,12 +5330,6 @@ local function collect_menu_keys()
         table.insert(out, id)
     end
     for _, id in ipairs(MENU_KEYS) do add(id) end
-    pcall(function()
-        local weapons = April.require("game.weapons")
-        for _, name in ipairs(weapons.recoil_weapon_names()) do
-            add(weapons.slug(name))
-        end
-    end)
     pcall(function()
         local fb = April.require("core.feature_bind")
         for _, entry in ipairs(fb.list_entries()) do
@@ -5519,6 +5460,7 @@ function M.load_slot(slot, opts)
     for i = M.SLOT_MIN, M.SLOT_MAX do
         cache.waypoints[i] = nil
     end
+    local loaded_keys = {}
     for line in f:lines() do
         if line:sub(1, 1) ~= "#" and line:find("=") then
             local key, val = line:match("^([^=]+)=(.+)$")
@@ -5548,9 +5490,16 @@ function M.load_slot(slot, opts)
                     read_waypoints(slot_id, field, val)
                 elseif not EXCLUDE[key] then
                     menu.set(key, parse_value(val))
+                    loaded_keys[key] = true
                 end
             end
         end
+    end
+    if loaded_keys.april_target_gear_source
+        and not loaded_keys.april_crosshair_source
+        and menu.get
+    then
+        menu.set("april_crosshair_source", menu.get("april_target_gear_source"))
     end
     f:close()
     April.require("core.settings").invalidate()

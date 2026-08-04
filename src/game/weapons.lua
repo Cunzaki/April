@@ -4,7 +4,6 @@ local env = April.require("core.env")
 local M = {}
 local loaded = false
 local toolinfo = {}
-local recoil_weapons = {}
 local weapon_names = {}
 
 local ROBLOX_GRAV = 196.2
@@ -70,10 +69,6 @@ local function rebuild_weapon_names()
             weapon_names[name] = true
         end
     end
-end
-
-function M.slug(name)
-    return "april_rc_" .. (name or ""):gsub("[^%w]", "_")
 end
 
 function M.is_weapon_name(name)
@@ -333,26 +328,14 @@ function M.load()
     end
 
     toolinfo = data
-    recoil_weapons = {}
-    for name, entry in pairs(data) do
-        if type(entry) == "table" and (entry.Bullet or entry.Recoil or entry.Weapon) then
-            table.insert(recoil_weapons, name)
-        end
-    end
-    table.sort(recoil_weapons)
     rebuild_weapon_names()
-    loaded = #recoil_weapons > 0
+    loaded = next(toolinfo) ~= nil
     return loaded
 end
 
 function M.get(name)
     if not loaded then M.load() end
     return toolinfo[name]
-end
-
-function M.recoil_weapon_names()
-    if not loaded then M.load() end
-    return recoil_weapons
 end
 
 function M.profile_weapon_names()

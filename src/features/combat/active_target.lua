@@ -8,7 +8,6 @@ local M = {}
 
 M.SOURCE_NAMES = { "Auto", "Silent Aim", "Aimbot" }
 M.SOURCE_CROSSHAIR = "april_crosshair_source"
-M.SOURCE_GEAR = "april_target_gear_source"
 
 local MODULES = {
     { id = "april_silent_aim", path = "features.combat.aimbot", prefix = "april_silent_" },

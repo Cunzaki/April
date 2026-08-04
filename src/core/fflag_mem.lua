@@ -9,12 +9,18 @@ local FLAG_DEFAULTS = {
     S2PhysicsSenderRate = 15,
 }
 
+local function fflag_api(snake, pascal)
+    if not fflag then return nil end
+    local fn = fflag[snake] or fflag[pascal]
+    return type(fn) == "function" and fn or nil
+end
+
 local function can_mem()
-    return memory and type(memory.write) == "function"
+    return memory and type(memory.write or memory.Write) == "function"
 end
 
 local function can_fflag()
-    return fflag and type(fflag.set_value) == "function"
+    return fflag_api("set_value", "SetValue") ~= nil
 end
 
 function M.available()
@@ -24,9 +30,13 @@ end
 function M.refresh()
     cache = {}
     ready = false
-    if not fflag or not fflag.is_scanned or not fflag.is_scanned() then return end
+    local is_scanned = fflag_api("is_scanned", "IsScanned")
+    local get_all = fflag_api("get_all", "GetAll")
+    if not is_scanned or not get_all then return end
+    local ok_scan, scanned = pcall(is_scanned)
+    if not ok_scan or scanned ~= true then return end
 
-    local ok, all = pcall(fflag.get_all)
+    local ok, all = pcall(get_all)
     if ok and type(all) == "table" then
         for i = 1, #all do
             local e = all[i]
@@ -43,10 +53,12 @@ end
 
 local function lookup(name)
     if cache[name] then return cache[name] end
-    if not fflag or not fflag.find then return nil end
-    local ok, hits = pcall(fflag.find, name)
-    if ok and type(hits) == "table" and hits[1] and hits[1].address then
-        local e = { addr = hits[1].address, original = hits[1].original or hits[1].value }
+    local find = fflag_api("find", "Find")
+    if not find then return nil end
+    local ok, hits = pcall(find, name)
+    if ok and type(hits) == "table" and hits[1] then
+        local hit = hits[1]
+        local e = { addr = hit.address, original = hit.original or hit.value }
         cache[name] = e
         return e
     end
@@ -62,14 +74,31 @@ function M.set_int(name, value)
 
     local e = lookup(name)
     if e and e.addr and can_mem() then
-        local ok = pcall(memory.write, e.addr, "int32", num)
-        if ok then return true end
+        local write = memory.write or memory.Write
+        local ok, result = pcall(write, e.addr, "int32", num)
+        if ok and result ~= false then return true end
     end
 
     if can_fflag() then
-        return pcall(fflag.set_value, name, num) == true
+        local ok, result = pcall(fflag_api("set_value", "SetValue"), name, num)
+        return ok and result == true
     end
     return false
+end
+
+function M.get_int(name)
+    if not name then return nil end
+    if not ready then M.refresh() end
+    local e = lookup(name)
+    local read = memory and (memory.read or memory.Read)
+    if e and e.addr and type(read) == "function" then
+        local ok, value = pcall(read, e.addr, "int32")
+        if ok and tonumber(value) ~= nil then return tonumber(value) end
+    end
+    local get_value = fflag_api("get_value", "GetValue")
+    if not get_value then return nil end
+    local ok, value = pcall(get_value, name)
+    return ok and tonumber(value) or nil
 end
 
 function M.reset(name)
@@ -77,8 +106,10 @@ function M.reset(name)
     local e = lookup(name)
     local orig = (e and e.original) or FLAG_DEFAULTS[name]
     if orig == nil then
-        if fflag and fflag.reset_value then
-            return pcall(fflag.reset_value, name)
+        local reset_value = fflag_api("reset_value", "ResetValue")
+        if reset_value then
+            local ok, result = pcall(reset_value, name)
+            return ok and result == true
         end
         return false
     end

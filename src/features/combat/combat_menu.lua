@@ -4,17 +4,6 @@ local combat_labels = April.require("ui.combat_labels")
 
 local M = {}
 
-M.TP_METHODS = {
-    "Center",
-    "Random Ring",
-    "Random Sphere",
-    "Offset Grid",
-    "Camera Face",
-    "Away From Cam",
-    "Shuffle Valid",
-    "Dense Shuffle",
-}
-
 M.SILENT_BONES = {
     "Head",
     "Torso",

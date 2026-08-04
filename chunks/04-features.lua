@@ -1,15 +1,5 @@
 April._mods["ui.combat_labels"] = (function()
 local M = {}
-M.TP_METHODS = {
-    "Center",
-    "Random Ring",
-    "Random Sphere",
-    "Offset Grid",
-    "Camera Face",
-    "Away From Cam",
-    "Shuffle Valid",
-    "Dense Shuffle",
-}
 M.SILENT_BONES = {
     "Head",
     "Torso",
@@ -652,16 +642,6 @@ local menu_util = April.require("core.menu_util")
 local settings = April.require("core.settings")
 local combat_labels = April.require("ui.combat_labels")
 local M = {}
-M.TP_METHODS = {
-    "Center",
-    "Random Ring",
-    "Random Sphere",
-    "Offset Grid",
-    "Camera Face",
-    "Away From Cam",
-    "Shuffle Valid",
-    "Dense Shuffle",
-}
 M.SILENT_BONES = {
     "Head",
     "Torso",
@@ -1410,7 +1390,6 @@ local esp_util = April.require("core.esp_util")
 local M = {}
 M.SOURCE_NAMES = { "Auto", "Silent Aim", "Aimbot" }
 M.SOURCE_CROSSHAIR = "april_crosshair_source"
-M.SOURCE_GEAR = "april_target_gear_source"
 local MODULES = {
     { id = "april_silent_aim", path = "features.combat.aimbot", prefix = "april_silent_" },
     { id = "april_aimbot", path = "features.combat.camera_aimbot", prefix = "april_aim_" },
@@ -2807,6 +2786,7 @@ local P_RESOURCES = P .. "_resources"
 local P_SEARCH = P .. "_search_range"
 local P_DEBUG = P .. "_debug_path"
 local VK = {
+LMB = 0x01,
 SHIFT = 0x10,
 SPACE = 0x20,
 W = 0x57,
@@ -2908,6 +2888,19 @@ if not a or not b then return math.huge end
 local dx, dy, dz = a.x - b.x, a.y - b.y, a.z - b.z
 return math.sqrt(dx * dx + dy * dy + dz * dz)
 end
+local function part_surface_distance3(point, part, center)
+if not point or not center then return math.huge end
+local size
+if part then
+pcall(function() size = part.Size or part.size end)
+end
+size = xyz(size)
+if not size then return distance3(point, center) end
+local dx = math.max(0, math.abs(point.x - center.x) - size.x * 0.5)
+local dy = math.max(0, math.abs(point.y - center.y) - size.y * 0.5)
+local dz = math.max(0, math.abs(point.z - center.z) - size.z * 0.5)
+return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
 local function movement_api(name, pascal)
 return utility and (utility[name] or utility[pascal]) or nil
 end
@@ -2937,6 +2930,11 @@ or injected[VK.C] == true or injected[VK.D] == true
 end
 local function stop_silent()
 silent_ray.stop()
+end
+local function track_silent_farm(camera_pos, aim_pos)
+local set_ok = silent_ray.set_target(camera_pos, aim_pos, aim_pos)
+local track_ok = silent_ray.track(camera_pos, aim_pos, VK.LMB, aim_pos)
+return set_ok or track_ok
 end
 local function reset_lock()
 target = nil
@@ -3040,6 +3038,10 @@ record.autofarm_locked_at = now
 record.autofarm_settle_until = 0
 record.autofarm_heading_x = nil
 record.autofarm_heading_z = nil
+record.autofarm_range_penalty = 0
+record.autofarm_body_retries = 0
+record.autofarm_prime_attempts = 0
+record.autofarm_prime_swing_at = 0
 recover_attempts = 0
 recover_until = 0
 align_since = 0
@@ -3142,6 +3144,11 @@ harvest_confirmed = true
 last_progress_at = now
 weak_mode_since = now
 weak_swings = 0
+if target then
+target.autofarm_range_penalty = 0
+target.autofarm_body_retries = 0
+target.autofarm_prime_attempts = 0
+end
 event("progress=" .. tostring(reason) .. " health=" .. tostring(target and target.health))
 end
 local function position_changed(a, b)
@@ -3300,9 +3307,12 @@ finish_target(now, "depleted_or_removed", false)
 return
 end
 refresh_progress(now)
-if target.weak_pos then
+if target.weak_pos and (not body_only or now >= weak_retry_at) then
 body_only = false
 weak_retry_at = 0
+end
+if phase == PHASE.PRIME and target_started and harvest_confirmed then
+set_phase(PHASE.HARVEST, "prime_confirmed")
 end
 if (target.autofarm_locked_at or 0) > 0
 and now - target.autofarm_locked_at >= 120000
@@ -3335,20 +3345,27 @@ cleanup("no_camera")
 return
 end
 local pursuing_weak = not body_only and target.weak_pos ~= nil
+local boulder = tool_name == "Boulder"
 local ray_budget = math.max(2, range - 0.55)
+local range_penalty = tonumber(target.autofarm_range_penalty) or 0
+local initial_close = harvest_confirmed and 0 or 0.3
 local enter_range
 local exit_range
 if pursuing_weak then
-enter_range = ray_budget
-exit_range = range + 0.15
+if boulder then
+enter_range = math.max(1.25, range - 0.2 - range_penalty - initial_close)
+exit_range = enter_range + 0.4
 distance = distance3(camera_pos, target.weak_pos)
 else
+enter_range = math.max(1.25, ray_budget - range_penalty - initial_close)
+exit_range = enter_range + 0.45
+distance = distance3(camera_pos, target.weak_pos)
+end
+else
 local range_aim = body_aim(target, camera_pos)
-local vertical = range_aim and math.abs(camera_pos.y - range_aim.y) or 0
-enter_range = math.max(1.25,
-math.sqrt(math.max(0, ray_budget * ray_budget - vertical * vertical)))
-exit_range = enter_range + 0.85
-distance = body_surface_distance
+enter_range = math.max(1.25, ray_budget - range_penalty - initial_close)
+exit_range = enter_range + 0.45
+distance = part_surface_distance3(camera_pos, target.body_part, range_aim)
 end
 if phase == PHASE.RECOVER then
 stop_silent()
@@ -3368,7 +3385,7 @@ release_movement_keys()
 stop_silent()
 align_since = 0
 target.autofarm_settle_until = target.kind == "Nodes" and now + 300 or now
-set_phase(target_started and PHASE.HARVEST or PHASE.PRIME, "in_range")
+set_phase(target_started and target.weak_pos and PHASE.HARVEST or PHASE.PRIME, "in_range")
 return
 else
 if not look_at(active_aim, 3) then
@@ -3396,8 +3413,23 @@ return
 end
 end
 if phase == PHASE.PRIME then
-stop_silent()
 if now < (target.autofarm_settle_until or 0) then return end
+if target_started and not target.weak_pos
+and (target.autofarm_prime_swing_at or 0) > 0
+then
+if now - target.autofarm_prime_swing_at < 350 then
+return
+end
+target.autofarm_prime_swing_at = 0
+target.autofarm_range_penalty = math.min(
+math.max(0, range - 1.25),
+(tonumber(target.autofarm_range_penalty) or 0) + 0.3
+)
+stop_silent()
+move_sample_at, move_sample_pos = now, origin
+set_phase(PHASE.APPROACH, "prime_no_marker_close")
+return
+end
 local prime_weak = target.weak_pos ~= nil
 active_aim = prime_weak and target.weak_pos or body_aim(target, camera_pos)
 local prime_view = prime_weak and target.kind == "Nodes"
@@ -3416,16 +3448,33 @@ end
 return
 end
 align_since = 0
-if not silent_ray.set_target(camera_pos, active_aim, active_aim) then
+if not track_silent_farm(camera_pos, active_aim) then
 finish_target(now, "silent_unavailable", true)
 return
 end
 if now >= next_swing then
 local clicked = swing(now, tool_name, prime_weak)
 if clicked and target then
-last_progress_at = now
 weak_mode_since = now
-set_phase(PHASE.HARVEST, prime_weak and "weak_primed" or "body_primed")
+if prime_weak then
+set_phase(PHASE.HARVEST, "weak_primed")
+else
+local attempts = (tonumber(target.autofarm_prime_attempts) or 0) + 1
+target.autofarm_prime_attempts = attempts
+target.autofarm_prime_swing_at = now
+if attempts >= 2 then
+target.autofarm_prime_attempts = 0
+target.autofarm_range_penalty = math.min(
+math.max(0, range - 1.25),
+(tonumber(target.autofarm_range_penalty) or 0) + 0.3
+)
+stop_silent()
+move_sample_at, move_sample_pos = now, origin
+set_phase(PHASE.APPROACH, "prime_unconfirmed_close")
+else
+set_phase(PHASE.PRIME, "body_prime_wait")
+end
+end
 end
 end
 return
@@ -3452,7 +3501,31 @@ weak_swings = 0
 weak_mode_since = now
 end
 local use_weak = not body_only and target.weak_pos ~= nil
-if use_weak and weak_swings >= 2 and now - weak_mode_since > 2500 then
+if not use_weak and total_swings >= 2
+and now - last_progress_at > (boulder and 2400 or 4000)
+then
+local retries = (tonumber(target.autofarm_body_retries) or 0) + 1
+target.autofarm_body_retries = retries
+if retries >= 4 then
+finish_target(now, "body_no_progress", true)
+return
+end
+local step = boulder and 0.55 or 0.35
+target.autofarm_range_penalty = math.min(
+math.max(0, range - 1.25),
+(tonumber(target.autofarm_range_penalty) or 0) + step
+)
+last_progress_at = now
+stop_silent()
+move_sample_at, move_sample_pos = now, origin
+set_phase(PHASE.APPROACH, "body_no_progress_close")
+return
+end
+local weak_fail_swings = boulder and 3 or 2
+local weak_fail_ms = boulder and 4000 or 2500
+if use_weak and weak_swings >= weak_fail_swings
+and now - weak_mode_since > weak_fail_ms
+then
 weak_swings = 0
 weak_mode_since = now
 begin_recovery(now, "weak_no_progress")
@@ -3485,7 +3558,7 @@ end
 return
 end
 align_since = 0
-if not silent_ray.set_target(camera_pos, active_aim, active_aim) then
+if not track_silent_farm(camera_pos, active_aim) then
 finish_target(now, "silent_unavailable", true)
 return
 end
@@ -7077,30 +7150,18 @@ function M.register_menu()
     local G = menu_util.G
     local T = menu_util.group(G.MISC)
     menu_util.section(T, G.MISC, "Movement")
-    menu_util.register_keybind(T, G.MISC, "april_noclip_enabled", "Fly", false)
+    menu_util.register_keybind(T, G.MISC, "april_spider_enabled", "Spider", false)
     menu.add_slider_int(
         T,
         G.MISC,
-        "april_noclip_speed",
-        "Fly Speed",
-        1,
-        20,
-        5,
-        menu_util.parent("april_noclip_enabled")
+        "april_spider_speed",
+        "Spider Speed",
+        18,
+        30,
+        18,
+        menu_util.parent("april_spider_enabled")
     )
-    menu_util.register_keybind(T, G.MISC, "april_slowfall_enabled", "Slowfall", false)
-    menu.add_slider_int(
-        T,
-        G.MISC,
-        "april_slowfall_speed",
-        "Fall Speed",
-        1,
-        50,
-        5,
-        menu_util.parent("april_slowfall_enabled")
-    )
-    menu_util.bind_children("april_noclip_enabled", { "april_noclip_speed" })
-    menu_util.bind_children("april_slowfall_enabled", { "april_slowfall_speed" })
+    menu_util.bind_children("april_spider_enabled", { "april_spider_speed" })
 end
 function M.update(_dt) end
 function M.draw() end

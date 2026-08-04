@@ -9,18 +9,25 @@ M.FILE_VERSION = 2
 local META_FILE = "April_meta.txt"
 
 local EXCLUDE = {
+    version = true,
     april_cfg_slot = true,
     april_cfg_profile_name = true,
     april_cfg_autoload = true,
     april_cfg_autoload_slot = true,
     april_cfg_autoload_profile = true,
-    april_debug_overlay = true,
+    april_ui_bg_dim = true,
+    april_noclip_enabled = true,
+    april_noclip_enabled_mode = true,
+    april_noclip_speed = true,
+    april_slowfall_enabled = true,
+    april_slowfall_enabled_mode = true,
+    april_slowfall_speed = true,
 }
 
 local MENU_KEYS = {
     "april_ui_theme_preset", "april_ui_window_opacity", "april_ui_panel_opacity",
     "april_ui_border_strength", "april_ui_corner_style", "april_ui_scale", "april_ui_density",
-    "april_ui_menu_overlay", "april_ui_overlay_strength", "april_ui_bg_dim",
+    "april_ui_menu_overlay", "april_ui_overlay_strength",
     "april_ui_snow", "april_ui_snow_amount", "april_ui_snow_speed",
     "april_ui_snow_size", "april_ui_snow_opacity",
     "april_ui_startup_intro", "april_ui_motion_profile", "april_ui_reduce_motion",
@@ -44,8 +51,6 @@ local MENU_KEYS = {
     "april_target_overlay", "april_target_overlay_fov", "april_target_overlay_max_dist",
     "april_target_overlay_gear_size", "april_target_overlay_top",
     "april_crosshair_source",
-    -- Legacy profile key retained for load compatibility.
-    "april_target_gear_source",
     "april_crosshair_enabled", "april_crosshair_type", "april_crosshair_size", "april_crosshair_gap",
     "april_crosshair_thickness", "april_crosshair_color", "april_crosshair_dot", "april_crosshair_outline",
     "april_crosshair_rainbow", "april_crosshair_rainbow_speed",
@@ -117,8 +122,7 @@ local MENU_KEYS = {
     "april_map_show_players", "april_map_show_npcs", "april_map_show_loot", "april_map_show_world",
     "april_map_show_base", "april_map_show_waypoints", "april_map_show_raids",
     "april_map_labels", "april_map_x", "april_map_y",
-    "april_noclip_enabled", "april_noclip_enabled_mode", "april_noclip_speed",
-    "april_slowfall_enabled", "april_slowfall_enabled_mode", "april_slowfall_speed",
+    "april_spider_enabled", "april_spider_enabled_mode", "april_spider_speed",
     "april_fling_enabled", "april_fling_enabled_mode", "april_fling_fov", "april_fling_duration",
     "april_desync_enabled", "april_desync_enabled_mode",
     "april_desync_visualizer",
@@ -186,8 +190,6 @@ local LEGACY_HOTKEY_TO_CHECKBOX = {
     april_base_enabled_key = "april_base_enabled",
     april_waypoints_enabled_key = "april_waypoints_enabled",
     april_map_enabled_key = "april_map_enabled",
-    april_noclip_enabled_key = "april_noclip_enabled",
-    april_slowfall_enabled_key = "april_slowfall_enabled",
     april_desync_enabled_key = "april_desync_enabled",
     april_mod_checker_enabled_key = "april_mod_checker_enabled",
 }
@@ -203,8 +205,7 @@ local HOTKEY_KEYS = {
     "april_base_enabled",
     "april_waypoints_enabled",
     "april_map_enabled",
-    "april_noclip_enabled",
-    "april_slowfall_enabled",
+    "april_spider_enabled",
     "april_fling_enabled",
     "april_desync_enabled",
     "april_antiaim_enabled",
@@ -322,13 +323,6 @@ local function collect_menu_keys()
     end
 
     for _, id in ipairs(MENU_KEYS) do add(id) end
-
-    pcall(function()
-        local weapons = April.require("game.weapons")
-        for _, name in ipairs(weapons.recoil_weapon_names()) do
-            add(weapons.slug(name))
-        end
-    end)
 
     pcall(function()
         local fb = April.require("core.feature_bind")
@@ -483,6 +477,7 @@ function M.load_slot(slot, opts)
         cache.waypoints[i] = nil
     end
 
+    local loaded_keys = {}
     for line in f:lines() do
         if line:sub(1, 1) ~= "#" and line:find("=") then
             local key, val = line:match("^([^=]+)=(.+)$")
@@ -512,9 +507,17 @@ function M.load_slot(slot, opts)
                     read_waypoints(slot_id, field, val)
                 elseif not EXCLUDE[key] then
                     menu.set(key, parse_value(val))
+                    loaded_keys[key] = true
                 end
             end
         end
+    end
+
+    if loaded_keys.april_target_gear_source
+        and not loaded_keys.april_crosshair_source
+        and menu.get
+    then
+        menu.set("april_crosshair_source", menu.get("april_target_gear_source"))
     end
 
     f:close()

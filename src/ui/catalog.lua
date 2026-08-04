@@ -467,10 +467,8 @@ local function build_misc()
         {
             title = "Movement",
             items = {
-                kb("april_noclip_enabled", "Fly", false),
-                sl("april_noclip_speed", "Fly Speed", 1, 20, 5, false, "april_noclip_enabled"),
-                kb("april_slowfall_enabled", "Slowfall", false),
-                sl("april_slowfall_speed", "Fall Speed", 1, 50, 5, false, "april_slowfall_enabled"),
+                kb("april_spider_enabled", "Spider", false),
+                sl("april_spider_speed", "Spider Speed", 18, 30, 18, false, "april_spider_enabled"),
                 sep(),
                 kb("april_desync_enabled", "Desync", false),
                 cb("april_desync_visualizer", "Desync Visualize", false, { 0.2, 0.85, 1, 0.9 }, "april_desync_enabled"),

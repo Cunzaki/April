@@ -14,9 +14,6 @@ local NOCLIP_PARTS = {
     "HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso", "Head",
 }
 
-local HIP_OFFSET = 3.0
-local DEFAULT_GRAVITY = 196.2
-
 -- Snapshot CanCollide before noclip so restore never force-enables Head/Torso
 -- collision (Fallen keeps those off — forcing true blocks crouch gaps).
 local collide_snap = {}
@@ -225,26 +222,6 @@ function M.set_part_collide(inst, collide)
     end
 end
 
-function M.set_noclip_parts(char, enabled)
-    if not char then return end
-    if enabled then
-        for i = 1, #NOCLIP_PARTS do
-            local p = M.find_part(char, NOCLIP_PARTS[i])
-            if p and M.is_base_part(p) then
-                snapshot_collide(p)
-                M.set_part_collide(p, false)
-            end
-        end
-        return
-    end
-    for i = 1, #NOCLIP_PARTS do
-        local p = M.find_part(char, NOCLIP_PARTS[i])
-        if p and M.is_base_part(p) then
-            restore_collide(p)
-        end
-    end
-end
-
 function M.humanoid_state(hum, state)
     if not hum or state == nil then return end
     pcall(function()
@@ -282,15 +259,6 @@ function M.zero_character(char, root)
     end
 end
 
-function M.workspace_gravity()
-    local ws = env.get_workspace and env.get_workspace() or (game and game.workspace)
-    if ws then
-        local g = ws.Gravity or ws.gravity
-        if type(g) == "number" and g > 0 then return g end
-    end
-    return DEFAULT_GRAVITY
-end
-
 function M.camera_flat_axes()
     if not camera or not camera.get_look_vector then return nil end
     local ok, look = pcall(camera.get_look_vector)
@@ -320,98 +288,53 @@ function M.read_flat_input()
     return mx / mag, mz / mag
 end
 
-function M.read_fly_input()
-    local mx, mz = M.read_flat_input()
-    local my = 0
-    if M.key_down(0x20) then my = 1 end
-    if M.key_down(0x11) then my = -1 end
-    return mx, my, mz
-end
-
-function M.ground_distance(x, y, z)
-    if not raycast or not raycast.cast then return nil end
-    if raycast.is_ready and not raycast.is_ready() then return nil end
-
-    local hit, _, dist = raycast.cast(x, y + 2, z, x, y - 512, z)
-    if not hit then return nil end
-    return dist
-end
-
-function M.floor_y_at(x, y, z)
-    local dist = M.ground_distance(x, y, z)
-    if not dist then return nil end
-    return y + 2 - dist + HIP_OFFSET
-end
-
-function M.clamp_above_floor(x, y, z)
-    local floor_y = M.floor_y_at(x, y, z)
-    if floor_y and y < floor_y then return floor_y end
-    return y
-end
-
--- Legacy position+velocity drive (teleports). Prefer drive_root_velocity.
-function M.drive_root(root, pos, dx, dy, dz, speed, dt)
-    if not root or not pos then return pos end
-
-    dt = dt or M.delta_time()
-    local mag = math.sqrt(dx * dx + dy * dy + dz * dz)
-
-    if mag < 0.001 then
-        M.set_velocity(root, 0, 0, 0)
-        return pos
-    end
-
-    dx, dy, dz = dx / mag, dy / mag, dz / mag
-    local step = speed * dt
-    local nx = pos.x + dx * step
-    local ny = pos.y + dy * step
-    local nz = pos.z + dz * step
-
-    M.set_position_only(root, nx, ny, nz)
-    M.set_velocity(root, dx * speed, dy * speed, dz * speed)
-
-    return { x = nx, y = ny, z = nz }
-end
-
--- Velocity-only HRP drive: no position writes. Smooth lerp toward target vel.
-function M.drive_root_velocity(root, dx, dy, dz, speed, dt, opts)
+function M.drive_velocity_target(root, tx, ty, tz, dt, opts)
     if not root then return end
     opts = opts or {}
     dt = dt or M.delta_time()
-
-    local mag = math.sqrt(dx * dx + dy * dy + dz * dz)
-    local tx, ty, tz = 0, 0, 0
-    if mag >= 0.001 then
-        dx, dy, dz = dx / mag, dy / mag, dz / mag
-        tx, ty, tz = dx * speed, dy * speed, dz * speed
-    end
-
-    -- Soft gravity cancel when hovering / moving so we don't need PlatformStand.
-    if opts.cancel_gravity ~= false and math.abs(ty) < 0.01 and mag < 0.001 then
-        -- idle hover: hold altitude with near-zero vertical (server still sees freefall-ish)
-        ty = 0
-    elseif opts.cancel_gravity ~= false and math.abs(dy) < 0.01 and mag >= 0.001 then
-        -- horizontal move: keep Y stable
-        ty = 0
-    end
+    tx, ty, tz = tx or 0, ty or 0, tz or 0
 
     local cx, cy, cz = M.read_velocity(root)
-    local blend = opts.blend or 0.35
+    local blend = opts.blend
+    if blend == nil then
+        local response = math.max(1, tonumber(opts.response) or 16)
+        blend = 1 - math.exp(-response * math.max(0.001, math.min(dt, 0.1)))
+    end
     blend = math.max(0.05, math.min(1, blend))
 
     local nx = cx + (tx - cx) * blend
-    local ny = cy + (ty - cy) * blend
+    local vertical_blend = tonumber(opts.vertical_blend) or blend
+    vertical_blend = math.max(0.05, math.min(1, vertical_blend))
+    local ny = cy + (ty - cy) * vertical_blend
     local nz = cz + (tz - cz) * blend
 
-    local max_speed = opts.max_speed or (speed * 1.15)
-    local sm = math.sqrt(nx * nx + ny * ny + nz * nz)
-    if sm > max_speed and sm > 0.001 then
-        local s = max_speed / sm
-        nx, ny, nz = nx * s, ny * s, nz * s
+    local max_speed = tonumber(opts.max_speed)
+    if max_speed and max_speed > 0 then
+        local sm = math.sqrt(nx * nx + ny * ny + nz * nz)
+        if sm > max_speed and sm > 0.001 then
+            local scale = max_speed / sm
+            nx, ny, nz = nx * scale, ny * scale, nz * scale
+        end
     end
 
     M.set_velocity(root, nx, ny, nz)
-    M.set_angular_velocity(root, 0, 0, 0)
+    if opts.zero_angular then
+        M.set_angular_velocity(root, 0, 0, 0)
+    end
+    return nx, ny, nz
+end
+
+function M.drive_root_velocity(root, dx, dy, dz, speed, dt, opts)
+    opts = opts or {}
+    local mag = math.sqrt(dx * dx + dy * dy + dz * dz)
+    local tx, ty, tz = 0, 0, 0
+    if mag >= 0.001 then
+        tx = dx / mag * speed
+        ty = dy / mag * speed
+        tz = dz / mag * speed
+    end
+    opts.max_speed = opts.max_speed or (speed * 1.15)
+    return M.drive_velocity_target(root, tx, ty, tz, dt, opts)
 end
 
 return M

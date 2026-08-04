@@ -23,8 +23,6 @@ M.SKIP_IDS = {
     april_silent_draw_fov = true,
     april_silent_fov_style = true,
     april_silent_target_line = true,
-    april_silent_tp_ray_vis = true,
-    april_silent_tp_method = true,
     april_silent_manip_status = true,
     april_silent_manip_peek_vis = true,
     april_desync_visualizer = true,
@@ -129,8 +127,7 @@ M.BY_ID = {
     april_gm_double_tap = "Forces a 2-round burst on your held gun. Patches ToolInfo directly — does not use GC mults.",
 
     -- Movement
-    april_noclip_enabled = "Lets you fly through the world.",
-    april_slowfall_enabled = "Slows your fall speed.",
+    april_spider_enabled = "Climbs upward while you press into a nearby wall. Uses two wall checks to avoid triggering on floors and ledges.",
     april_desync_enabled = "Desyncs your network position from where you appear.",
     april_antiaim_enabled = "Spoofs your look direction to other players.",
     april_fakeduck_enabled = "Rapidly ducks your hitbox height.",

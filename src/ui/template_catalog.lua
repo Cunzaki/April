@@ -208,7 +208,6 @@ local function build_config()
                 combo("april_ui_corner_style", "Control Corners", { "Sharp", "Soft", "Rounded" }, 2),
                 sl("april_ui_scale", "UI Scale %", 80, 125, 100),
                 combo("april_ui_density", "Density", { "Compact", "Balanced", "Comfortable" }, 1),
-                sl("april_ui_bg_dim", "Backdrop Dim", 0, 40, 0),
                 cb("april_ui_show_cursor_dot", "Show Cursor Dot", true),
             },
         },
