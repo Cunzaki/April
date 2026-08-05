@@ -17,8 +17,8 @@ local M = {}
 local P = "april_map_enabled"
 local X_ID = "april_map_x"
 local Y_ID = "april_map_y"
--- Compact chrome: map is nearly full-bleed; title/zoom overlay the top edge.
-local TITLE_H = 14
+-- Compact chrome: thin title band above the map (not over it).
+local TITLE_H = 16
 local EDGE = 2
 -- Studs visible across the radar diameter at zoom = 1 (north-up texture mode).
 local BASE_VISIBLE_STUDS = 3200
@@ -337,6 +337,7 @@ end
 
 local function draw_radar_base(layout, bg, opacity, has_map)
     local x, y, w, h = layout.x, layout.y, layout.w, layout.h
+    local map_rect = layout.map_rect
     opacity = opacity or 1
     -- Sharp corners so the frame matches the square map (no soft/notched edges).
     overlay_theme.draw_panel(x, y, w, h, nil, {
@@ -345,10 +346,10 @@ local function draw_radar_base(layout, bg, opacity, has_map)
         border = true,
         border_w = 1,
     })
-    if not has_map then
+    if not has_map and map_rect then
         local rect_f = draw_fn("rect_filled", "RectFilled")
         if rect_f then
-            pcall(rect_f, x + EDGE, y + EDGE, w - EDGE * 2, h - EDGE * 2,
+            pcall(rect_f, map_rect.x, map_rect.y, map_rect.w, map_rect.h,
                 fade_col(bg or theme.PANEL_DEEP, 0.55 * opacity), 0)
         end
     end
@@ -359,16 +360,16 @@ local function draw_radar_labels(layout, zoom, opacity)
     opacity = opacity or 1
     local rect_f = draw_fn("rect_filled", "RectFilled")
     if rect_f then
-        -- Flush to panel edges so the header doesn't notch the square corners.
-        pcall(rect_f, x + 1, y + 1, w - 2, TITLE_H,
-            fade_col(overlay_theme.panel_bg(), 0.70 * opacity), 0)
+        -- Solid title band above the map (does not cover map pixels).
+        pcall(rect_f, x + 1, y + 1, w - 2, TITLE_H - 1,
+            fade_col(overlay_theme.panel_bg(), opacity), 0)
     end
     local title_col = fade_col(overlay_theme.text(), opacity)
     local zoom_col = fade_col(theme.TEXT_DIM, opacity)
-    draw_util.text(x + EDGE + 4, y + 2, "RADAR", title_col, 10)
+    draw_util.text(x + EDGE + 4, y + 3, "RADAR", title_col, 10)
     local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
     local zoom_w = theme.text_w(zoom_text, 9)
-    draw_util.text(x + w - EDGE - 4 - zoom_w, y + 3, zoom_text, zoom_col, 9)
+    draw_util.text(x + w - EDGE - 4 - zoom_w, y + 4, zoom_text, zoom_col, 9)
 end
 
 -- Facing arrow. tip points along `ang` (0 = screen up / north).
@@ -581,13 +582,15 @@ function M.draw_inner()
     )
     x, y = panel_drag.clamp(x, y, size, size, sw, sh, X_ID, Y_ID)
     local w, h = size, size
-    -- Map uses almost the full panel; chrome is a 2px inset + overlay labels.
-    local inner = math.max(32, size - EDGE * 2)
+    -- Title band sits above the map so labels never cover terrain.
+    local map_y = y + TITLE_H
+    local map_w = math.max(32, size - EDGE * 2)
+    local map_h = math.max(32, size - TITLE_H - EDGE)
     local map_rect = {
         x = x + EDGE,
-        y = y + EDGE,
-        w = inner,
-        h = inner,
+        y = map_y,
+        w = map_w,
+        h = map_h,
     }
     local cx = map_rect.x + map_rect.w * 0.5
     local cy = map_rect.y + map_rect.h * 0.5
@@ -600,6 +603,7 @@ function M.draw_inner()
         x = x, y = y, w = w, h = h, cx = cx, cy = cy,
         radius = radius, label_radius = math.max(24, radius - 28), scale = scale,
         opacity = opacity,
+        map_rect = map_rect,
     }
 
     local bg = theme.MAP_BG or theme.PANEL_DEEP
