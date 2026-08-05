@@ -10266,6 +10266,7 @@ local BUBBLE_PAD = 14
 local BUBBLE_FONT = 14
 local BUBBLE_LINE_H = 18
 local BUBBLE_HEADER_H = 24
+local NEARBY_PLAYER_RANGE = 500
 local function now_ms()
 local fn = utility and (utility.get_tick_count or utility.GetTickCount)
 if type(fn) ~= "function" then return 0 end
@@ -10496,11 +10497,9 @@ if not me_pos then return staff, enemy end
 for _, player in ipairs(cache.players or {}) do
 if player and not ep.is_local(player) and player_state.is_combat_target(player) then
 local dist = ep.distance_to(player, me_pos)
-if dist and dist <= 90 then
+if dist and dist <= NEARBY_PLAYER_RANGE then
 if player_state.staff_tag(player) then staff = true end
-if not team_state.is_teammate(player) and dist <= 45 then
-enemy = true
-end
+if not team_state.is_teammate(player) then enemy = true end
 end
 if staff and enemy then break end
 end
