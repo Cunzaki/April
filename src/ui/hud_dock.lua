@@ -20,6 +20,7 @@ local PANELS = {
     { id = "april_mod_checker_enabled", icon = "staff", label = "Staff" },
     { id = "april_event_status_enabled", icon = "events", label = "Events" },
     { id = "april_map_enabled", icon = "map", label = "Map" },
+    { id = "april_anime_baddie_enabled", icon = "waifu", label = "April" },
 }
 
 local BIND_SETTINGS = {
@@ -73,7 +74,7 @@ local function build_visible_settings()
     if #out == 0 then
         out[1] = {
             type = "label",
-            label = "Enable Binds, Staff, Events, or Map above.",
+            label = "Enable Binds, Staff, Events, Map, or April above.",
             dim = true,
         }
     end
@@ -104,6 +105,7 @@ function M.init()
     state.define("april_event_status_enabled", false)
     state.define("april_event_status_active_only", false)
     state.define("april_map_enabled", false)
+    state.define("april_anime_baddie_enabled", false)
 end
 
 function M.begin_frame()

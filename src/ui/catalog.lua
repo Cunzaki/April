@@ -682,6 +682,7 @@ local function build_config()
         master = "april_anime_baddie_enabled",
         items = {
             cb("april_anime_baddie_enabled", "Anime Baddie", false),
+            label("Also toggled from the top dock.", true),
             combo("april_anime_baddie_character", "Character", { "April" }, 0,
                 "april_anime_baddie_enabled"),
             combo("april_anime_baddie_personality", "Personality", {

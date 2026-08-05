@@ -1660,6 +1660,21 @@ function M.draw(name, cx, cy, col)
         }, col, true)
         line(cx - 3, cy - 8, cx - 3, cy + 6, col, 1.2)
         line(cx + 3, cy - 6, cx + 3, cy + 8, col, 1.2)
+    elseif name == "waifu" then
+        circle(cx - 1.2, cy - 3.2, 3.1, col, false, 18)
+        ellipse_arc(cx - 1.2, cy - 4.6, 5.0, 3.2, math.pi * 0.9, math.pi * 2.1, col, 10)
+        line(cx - 5.4, cy - 2.4, cx - 6.3, cy + 2.0, col, 1.35)
+        line(cx + 2.8, cy - 2.2, cx + 4.0, cy + 1.8, col, 1.35)
+        ellipse_arc(cx - 1.2, cy + 7.4, 6.0, 5.0, math.pi * 1.08, math.pi * 1.92, col, 10)
+        path({
+            { cx + 3.8, cy - 7.8 },
+            { cx + 8.4, cy - 7.8 },
+            { cx + 8.4, cy - 4.2 },
+            { cx + 6.0, cy - 4.2 },
+            { cx + 5.0, cy - 2.7 },
+            { cx + 5.4, cy - 4.2 },
+            { cx + 3.8, cy - 4.2 },
+        }, col, true, 1.3)
     elseif name == "settings" then
         line(cx - 8, cy - 5, cx + 8, cy - 5, col)
         line(cx - 8, cy, cx + 8, cy, col)
@@ -3790,6 +3805,7 @@ title = "Anime Baddie",
 master = "april_anime_baddie_enabled",
 items = {
 cb("april_anime_baddie_enabled", "Anime Baddie", false),
+label("Also toggled from the top dock.", true),
 combo("april_anime_baddie_character", "Character", { "April" }, 0,
 "april_anime_baddie_enabled"),
 combo("april_anime_baddie_personality", "Personality", {
@@ -3868,6 +3884,7 @@ local PANELS = {
     { id = "april_mod_checker_enabled", icon = "staff", label = "Staff" },
     { id = "april_event_status_enabled", icon = "events", label = "Events" },
     { id = "april_map_enabled", icon = "map", label = "Map" },
+    { id = "april_anime_baddie_enabled", icon = "waifu", label = "April" },
 }
 local BIND_SETTINGS = {
     { type = "label", label = "KEYBINDS", dim = true },
@@ -3913,7 +3930,7 @@ local function build_visible_settings()
     if #out == 0 then
         out[1] = {
             type = "label",
-            label = "Enable Binds, Staff, Events, or Map above.",
+            label = "Enable Binds, Staff, Events, Map, or April above.",
             dim = true,
         }
     end
@@ -3941,6 +3958,7 @@ function M.init()
     state.define("april_event_status_enabled", false)
     state.define("april_event_status_active_only", false)
     state.define("april_map_enabled", false)
+    state.define("april_anime_baddie_enabled", false)
 end
 function M.begin_frame()
     if open_settings and popup_rect
