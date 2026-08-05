@@ -1369,13 +1369,13 @@ function M.for_item(item)
     end
     if not tip then return nil end
     if item.type == "keybind" then
-        return tip .. " Left-click the key chip to bind; right-click it for Always, Hold, or Toggle. Hold mode also requires the feature switch enabled. Escape cancels and Delete clears."
+        return tip .. " Left-click the key chip to bind; right-click it for Always, Hold, or Toggle. Hold mode also requires the feature switch enabled. Escape, Backspace, or Delete clears the bind."
     end
     if item.type == "aim_key" then
-        return tip .. " Left-click the key chip to bind; right-click it for Always, Hold, or Toggle. Escape cancels and Delete clears."
+        return tip .. " Left-click the key chip to bind; right-click it for Always, Hold, or Toggle. Escape, Backspace, or Delete clears the bind."
     end
     if item.type == "hotkey" then
-        return tip .. " Left-click the key chip to bind. Escape cancels and Delete clears."
+        return tip .. " Left-click the key chip to bind. Escape, Backspace, or Delete clears the bind."
     end
     return tip
 end
@@ -2317,11 +2317,10 @@ local function try_capture_modifier()
 end
 function M.tick_key_listen()
     if not M.listening_key then return end
-    if input.key_pressed(0x1B) then
-        M.listening_key = nil
-        return
-    end
-    if input.key_pressed(0x08) or input.key_pressed(0x2E) then
+    if input.key_pressed(0x1B)
+        or input.key_pressed(0x08)
+        or input.key_pressed(0x2E)
+    then
         state.set_key(M.listening_key, 0)
         M.listening_key = nil
         return

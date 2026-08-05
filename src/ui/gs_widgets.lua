@@ -699,11 +699,11 @@ end
 
 function M.tick_key_listen()
     if not M.listening_key then return end
-    if input.key_pressed(0x1B) then -- Escape cancels capture
-        M.listening_key = nil
-        return
-    end
-    if input.key_pressed(0x08) or input.key_pressed(0x2E) then -- Backspace/Delete clears
+    -- Escape / Backspace / Delete clear the bind so users can remove keys.
+    if input.key_pressed(0x1B)
+        or input.key_pressed(0x08)
+        or input.key_pressed(0x2E)
+    then
         state.set_key(M.listening_key, 0)
         M.listening_key = nil
         return

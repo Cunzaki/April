@@ -132,7 +132,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.1.18";
+const VERSION = "4.1.19";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector

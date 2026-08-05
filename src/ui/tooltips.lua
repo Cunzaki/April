@@ -356,13 +356,13 @@ function M.for_item(item)
     end
     if not tip then return nil end
     if item.type == "keybind" then
-        return tip .. " Left-click the key chip to bind; right-click it for Always, Hold, or Toggle. Hold mode also requires the feature switch enabled. Escape cancels and Delete clears."
+        return tip .. " Left-click the key chip to bind; right-click it for Always, Hold, or Toggle. Hold mode also requires the feature switch enabled. Escape, Backspace, or Delete clears the bind."
     end
     if item.type == "aim_key" then
-        return tip .. " Left-click the key chip to bind; right-click it for Always, Hold, or Toggle. Escape cancels and Delete clears."
+        return tip .. " Left-click the key chip to bind; right-click it for Always, Hold, or Toggle. Escape, Backspace, or Delete clears the bind."
     end
     if item.type == "hotkey" then
-        return tip .. " Left-click the key chip to bind. Escape cancels and Delete clears."
+        return tip .. " Left-click the key chip to bind. Escape, Backspace, or Delete clears the bind."
     end
     return tip
 end
