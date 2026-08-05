@@ -682,14 +682,15 @@ local function build_config()
         master = "april_anime_baddie_enabled",
         items = {
             cb("april_anime_baddie_enabled", "Anime Baddie", false),
-            combo("april_anime_baddie_character", "Character", { "Hiyori" }, 0,
+            combo("april_anime_baddie_character", "Character", { "April" }, 0,
                 "april_anime_baddie_enabled"),
             combo("april_anime_baddie_personality", "Personality", {
                 "Mixed", "Roasty", "Supportive",
             }, 0, "april_anime_baddie_enabled"),
             multi("april_anime_baddie_events", "React To", {
                 "Death / Respawn", "Downed / Revived", "Low Health", "Safe Zone",
-            }, { true, true, true, true }, "april_anime_baddie_enabled"),
+                "Combat / Bleed", "Survival Needs", "Nearby Threats", "World Events",
+            }, { true, true, true, true, true, true, true, true }, "april_anime_baddie_enabled"),
             sep("april_anime_baddie_enabled"),
             sl("april_anime_baddie_scale", "Scale", 60, 150, 100, false,
                 "april_anime_baddie_enabled"),

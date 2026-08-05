@@ -10090,6 +10090,8 @@ local cache = April.require("core.cache")
 local ep = April.require("core.entity_props")
 local env = April.require("core.env")
 local player_state = April.require("game.player_state")
+local team_state = April.require("game.team_state")
+local npcs = April.require("game.npcs")
 local data = April.require("game.anime_announcer_data")
 local image_cache = April.require("core.image_cache")
 local draw_util = April.require("core.draw_util")
@@ -10110,27 +10112,34 @@ local Y_ID = "april_anime_baddie_y"
 local PREVIEW_ID = "april_anime_baddie_preview"
 local RESET_ID = "april_anime_baddie_reset"
 local PERSONALITIES = { "Mixed", "Roasty", "Supportive" }
-local EVENT_LABELS = { "Death / Respawn", "Downed / Revived", "Low Health", "Safe Zone" }
+local EVENT_LABELS = {
+"Death / Respawn",
+"Downed / Revived",
+"Low Health",
+"Safe Zone",
+"Combat / Bleed",
+"Survival Needs",
+"Nearby Threats",
+"World Events",
+}
 local EVENT_SLOT = {
-death = 1,
-respawn = 1,
-downed = 2,
-revived = 2,
-low_health = 3,
-recovered = 3,
-safe_enter = 4,
-safe_leave = 4,
+death = 1, respawn = 1,
+downed = 2, revived = 2,
+low_health = 3, recovered = 3,
+safe_enter = 4, safe_leave = 4,
+combat_enter = 5, combat_leave = 5, bleeding = 5, bleed_stopped = 5,
+hunger_low = 6, thirst_low = 6, radiation = 6, cold = 6, hot = 6, drowning = 6,
+staff_nearby = 7, enemy_nearby = 7, reviving = 7, party_join = 7, party_leave = 7,
+boss_spawn = 8, timed_crate = 8,
 }
 local PRIORITY = {
-greeting = 100,
-death = 100,
-downed = 90,
-respawn = 80,
-low_health = 70,
-revived = 65,
-recovered = 55,
-safe_leave = 40,
-safe_enter = 35,
+greeting = 100, death = 100, drowning = 95, downed = 90,
+combat_enter = 85, bleeding = 82, respawn = 80, low_health = 75,
+radiation = 72, staff_nearby = 70, revived = 65, enemy_nearby = 62,
+hunger_low = 58, thirst_low = 58, recovered = 55, cold = 50, hot = 50,
+boss_spawn = 48, timed_crate = 46, reviving = 44, party_join = 42,
+party_leave = 40, combat_leave = 38, bleed_stopped = 36,
+safe_leave = 34, safe_enter = 32,
 }
 local installed = false
 local was_enabled = false
@@ -10145,6 +10154,8 @@ local last_line = {}
 local snapshot = {}
 local last_emit_ms = -100000
 local session_key = nil
+local last_scan_ms = -100000
+local nearby_cd = {}
 local function now_ms()
 local fn = utility and (utility.get_tick_count or utility.GetTickCount)
 if type(fn) ~= "function" then return 0 end
@@ -10179,6 +10190,8 @@ current = nil
 queued = nil
 visibility = 0
 last_emit_ms = -100000
+last_scan_ms = -100000
+nearby_cd = {}
 end
 local function event_enabled(event_name)
 local slot = EVENT_SLOT[event_name]
@@ -10245,6 +10258,115 @@ if not queued or entry.priority > (queued.priority or 0) then
 queued = entry
 end
 end
+local function emit_gated(event_name, gate_ms)
+local now = now_ms()
+local until_ms = nearby_cd[event_name] or 0
+if now < until_ms then return end
+nearby_cd[event_name] = now + (gate_ms or 20000)
+emit(event_name)
+end
+local function find_child(parent, name)
+if not parent or not name then return nil end
+return env.safe_call(function()
+if parent.FindFirstChild then return parent:FindFirstChild(name) end
+if parent.find_first_child then return parent:find_first_child(name) end
+return nil
+end)
+end
+local function read_attr(inst, key)
+if not inst or not key then return nil end
+local ok, value = pcall(function()
+if inst.get_attribute then return inst:get_attribute(key) end
+if inst.GetAttribute then return inst:GetAttribute(key) end
+return nil
+end)
+if ok then return value end
+return nil
+end
+local function status_active(stats, name)
+local child = find_child(stats, name)
+if not child then return false end
+local reach = tonumber(read_attr(child, "Reach"))
+if reach ~= nil then return reach > 0 end
+return true
+end
+local function parse_stat_value(stats, name)
+local root = find_child(stats, name)
+if not root then return nil end
+local bar = find_child(root, "Bar")
+local label = find_child(bar, "StatLabel") or find_child(root, "StatLabel")
+local text = label and env.safe_call(function()
+return label.Text or label.text
+end)
+if text == nil then return nil end
+return tonumber(tostring(text):match("(%d+)"))
+end
+local function local_stats()
+local player = cache.local_player or ep.get_local_player()
+if not player then return {} end
+local pgui = find_child(player, "PlayerGui")
+local main = find_child(pgui, "Main")
+local stats = find_child(main, "Stats")
+if not stats then return {} end
+local temp = find_child(stats, "Temperature")
+local temp_reach = temp and tonumber(read_attr(temp, "Reach")) or 0
+local hunger = parse_stat_value(stats, "Hunger")
+local thirst = parse_stat_value(stats, "Thirst")
+return {
+combat = status_active(stats, "InCombat"),
+bleed = status_active(stats, "Bleed"),
+radiation = status_active(stats, "Radiation"),
+drowning = status_active(stats, "Drowning"),
+cold = temp_reach <= -8 or status_active(stats, "Cold"),
+hot = temp_reach >= 29 or status_active(stats, "Hot"),
+hunger = hunger,
+thirst = thirst,
+hunger_low = hunger ~= nil and hunger <= 25,
+thirst_low = thirst ~= nil and thirst <= 25,
+}
+end
+local function boss_present()
+for _, entry in ipairs(cache.npcs or {}) do
+if entry and npcs.is_boss_kind(entry.kind) then
+return true
+end
+end
+return false
+end
+local function timed_crate_present()
+local folders = April.require("game.folders")
+local bucket = find_child(folders.from_key("loners"), "Timed Crate")
+if not bucket then return false end
+local kids = env.safe_call(function()
+if bucket.GetChildren then return bucket:GetChildren() end
+if bucket.get_children then return bucket:get_children() end
+return {}
+end) or {}
+for _, model in ipairs(kids) do
+local name = model and (model.Name or model.name)
+if name == "Timed Crate" then return true end
+end
+return false
+end
+local function nearby_flags(local_player)
+local me_pos = ep.position(local_player)
+local staff = false
+local enemy = false
+if not me_pos then return staff, enemy end
+for _, player in ipairs(cache.players or {}) do
+if player and not ep.is_local(player) and player_state.is_combat_target(player) then
+local dist = ep.distance_to(player, me_pos)
+if dist and dist <= 90 then
+if player_state.staff_tag(player) then staff = true end
+if not team_state.is_teammate(player) and dist <= 45 then
+enemy = true
+end
+end
+if staff and enemy then break end
+end
+end
+return staff, enemy
+end
 local function local_state()
 local local_player = cache.local_player or ep.get_local_player()
 if not local_player then return nil end
@@ -10259,6 +10381,16 @@ if hp and max_hp and max_hp > 0 then ratio = hp / max_hp end
 local downed = as_bool(player_state.humanoid_attr(local_player, "Downed"))
 local safe = as_bool(player_state.player_attr(local_player, "SafeZone"))
 or as_bool(player_state.player_attr(local_player, "InSafeZone"))
+local stats = local_stats()
+local now = now_ms()
+local staff, enemy = false, false
+if alive and now - last_scan_ms >= 450 then
+last_scan_ms = now
+staff, enemy = nearby_flags(local_player)
+else
+staff = snapshot.staff_nearby == true
+enemy = snapshot.enemy_nearby == true
+end
 return {
 alive = alive,
 hp = hp,
@@ -10267,12 +10399,35 @@ ratio = ratio,
 low = alive and ratio ~= nil and ratio <= 0.30,
 downed = alive and downed,
 safe = safe,
+combat = stats.combat == true,
+bleed = stats.bleed == true,
+radiation = stats.radiation == true,
+drowning = stats.drowning == true,
+cold = stats.cold == true,
+hot = stats.hot == true,
+hunger_low = alive and stats.hunger_low == true,
+thirst_low = alive and stats.thirst_low == true,
+party = team_state.in_party() == true,
+reviving = alive and not downed and player_state.is_reviving(local_player) == true,
+staff_nearby = alive and staff,
+enemy_nearby = alive and enemy,
+boss = boss_present(),
+timed_crate = timed_crate_present(),
 }
 end
 local function seed_state(state)
 snapshot = state
 seeded = true
 if state.alive then ever_alive = true end
+end
+local function edge_bool(prev, next_value, on_event, off_event)
+if prev ~= next_value then
+if next_value then
+if on_event then emit(on_event) end
+elseif off_event then
+emit(off_event)
+end
+end
 end
 local function detect_edges(state)
 if not seeded then
@@ -10300,6 +10455,28 @@ emit("recovered")
 end
 if snapshot.safe ~= state.safe then
 emit(state.safe and "safe_enter" or "safe_leave")
+end
+edge_bool(snapshot.combat, state.combat, "combat_enter", "combat_leave")
+edge_bool(snapshot.bleed, state.bleed, "bleeding", "bleed_stopped")
+edge_bool(snapshot.radiation, state.radiation, "radiation", nil)
+edge_bool(snapshot.drowning, state.drowning, "drowning", nil)
+edge_bool(snapshot.cold, state.cold, "cold", nil)
+edge_bool(snapshot.hot, state.hot, "hot", nil)
+edge_bool(snapshot.hunger_low, state.hunger_low, "hunger_low", nil)
+edge_bool(snapshot.thirst_low, state.thirst_low, "thirst_low", nil)
+edge_bool(snapshot.party, state.party, "party_join", "party_leave")
+edge_bool(snapshot.reviving, state.reviving, "reviving", nil)
+if not snapshot.staff_nearby and state.staff_nearby then
+emit_gated("staff_nearby", 45000)
+end
+if not snapshot.enemy_nearby and state.enemy_nearby then
+emit_gated("enemy_nearby", 18000)
+end
+if not snapshot.boss and state.boss then
+emit_gated("boss_spawn", 30000)
+end
+if not snapshot.timed_crate and state.timed_crate then
+emit_gated("timed_crate", 30000)
 end
 end
 snapshot = state
@@ -10337,13 +10514,13 @@ end
 local function draw_bubble(x, y, character_w, character_h, text, alpha, sw, sh, character)
 if not draw or not draw.rect_filled or alpha <= 0.01 then return end
 local font = 14
-local bubble_w = 286
+local bubble_w = 290
 local pad = 14
 local lines = wrap_text(text, bubble_w - pad * 2, font)
-local line_h = 17
+local line_h = 18
 local bubble_h = pad * 2 + #lines * line_h
 local mouth_x = x + character_w * (character.mouth_x or 0.56)
-local mouth_y = y + character_h * (character.mouth_y or 0.21)
+local mouth_y = y + character_h * (character.mouth_y or 0.30)
 local bx = mouth_x + 52
 local by = mouth_y - bubble_h * 0.45
 local tail_right = false
@@ -10353,35 +10530,36 @@ tail_right = true
 end
 bx = clamp(bx, 8, math.max(8, sw - bubble_w - 8))
 by = clamp(by, 8, math.max(8, (sh or sw) - bubble_h - 8))
+local fill_a = clamp(alpha * 1.08, 0, 1)
 local accent = overlay_theme.accent()
-draw.rect_filled(bx, by, bubble_w, bubble_h, { 0.055, 0.06, 0.075, 0.94 * alpha }, 9)
+draw.rect_filled(bx - 1, by - 1, bubble_w + 2, bubble_h + 2, { 0, 0, 0, 0.88 * fill_a }, 11)
+draw.rect_filled(bx, by, bubble_w, bubble_h, { 0.045, 0.04, 0.06, 0.99 * fill_a }, 10)
 if draw.rect then
 draw.rect(bx, by, bubble_w, bubble_h,
-{ accent[1] or 0.8, accent[2] or 0.3, accent[3] or 1, 0.72 * alpha }, 9, 1)
+{ accent[1] or 0.8, accent[2] or 0.3, accent[3] or 1, 0.92 * fill_a }, 10, 1.5)
 end
 if draw.poly_filled then
 local tail_y = clamp(mouth_y, by + 9, by + bubble_h - 9)
-local tail
-if tail_right then
-tail = {
-{ bx + bubble_w - 3, tail_y - 7 },
-{ mouth_x - 2, mouth_y },
-{ bx + bubble_w - 3, tail_y + 7 },
+local tip_x = mouth_x + (tail_right and -2 or 2)
+local base_x = tail_right and (bx + bubble_w - 2) or (bx + 2)
+local under = {
+{ base_x, tail_y - 9 },
+{ tip_x, mouth_y },
+{ base_x, tail_y + 9 },
 }
-else
-tail = {
-{ bx + 3, tail_y - 7 },
-{ mouth_x + 2, mouth_y },
-{ bx + 3, tail_y + 7 },
+local top = {
+{ base_x, tail_y - 7 },
+{ tip_x, mouth_y },
+{ base_x, tail_y + 7 },
 }
-end
-draw.poly_filled(tail, { 0.055, 0.06, 0.075, 0.94 * alpha })
+draw.poly_filled(under, { 0, 0, 0, 0.88 * fill_a })
+draw.poly_filled(top, { 0.045, 0.04, 0.06, 0.99 * fill_a })
 end
 for i = 1, #lines do
 local tx = bx + pad
 local ty = by + pad + (i - 1) * line_h
-draw_util.text(tx + 1, ty + 1, lines[i], { 0, 0, 0, alpha * 0.75 }, font)
-draw_util.text(tx, ty, lines[i], { 1, 1, 1, alpha }, font)
+draw_util.text(tx + 1, ty + 1, lines[i], { 0, 0, 0, fill_a }, font)
+draw_util.text(tx, ty, lines[i], { 1, 1, 1, fill_a }, font)
 end
 end
 function M.install()
@@ -10410,7 +10588,7 @@ menu.add_checkbox(T, G.CONFIG, P, "Anime Baddie", false)
 menu.add_combo(T, G.CONFIG, CHARACTER_ID, "Character", data.character_labels, 0, menu_util.parent(P))
 menu.add_combo(T, G.CONFIG, PERSONALITY_ID, "Personality", PERSONALITIES, 0, menu_util.parent(P))
 menu.add_multicombo(T, G.CONFIG, EVENTS_ID, "React To", EVENT_LABELS,
-{ true, true, true, true }, menu_util.parent(P))
+{ true, true, true, true, true, true, true, true }, menu_util.parent(P))
 menu.add_slider_int(T, G.CONFIG, SCALE_ID, "Scale", 60, 150, 100, menu_util.parent(P))
 menu.add_slider_int(T, G.CONFIG, OPACITY_ID, "Opacity", 30, 100, 100, menu_util.parent(P))
 menu.add_slider_int(T, G.CONFIG, DURATION_ID, "Bubble Duration", 2, 10, 5, menu_util.parent(P))
@@ -10509,7 +10687,7 @@ if alpha > 0.01 then
 image_cache.draw_fit(key, x, draw_y, character_w, character_h, { 1, 1, 1, alpha })
 end
 if current then
-local bubble_alpha = alpha
+local bubble_alpha = math.max(alpha, 0.96 * visibility)
 local remaining = current.expires - now
 if remaining < 350 then bubble_alpha = bubble_alpha * clamp(remaining / 350, 0, 1) end
 draw_bubble(x, draw_y, character_w, character_h, current.text, bubble_alpha, sw, sh, character)

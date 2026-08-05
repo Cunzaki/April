@@ -3726,8 +3726,7 @@ function H.sprite_file(expression)
 return (H.expressions[expression] or H.expressions.neutral) .. ".png"
 end
 function H.url(expression)
-local urls = H.urls(expression)
-return urls[1]
+return H.urls(expression)[1]
 end
 function H.urls(expression)
 return asset_urls.anime_sprite_urls("april", H.sprite_file(expression))
@@ -3751,6 +3750,35 @@ local FALLBACK = {
 "safe_enter|supportive|happy|Safe zone reached. Take a moment to reset.",
 "safe_leave|roasty|evil|Leaving safety? This should be entertaining.",
 "safe_leave|supportive|worried|Leaving the safe zone. Check your route.",
+"combat_enter|roasty|evil|Combat started. Try not to feed them.",
+"combat_enter|supportive|worried|You're in combat. Keep cover and track angles.",
+"combat_leave|roasty|smug|Combat over. Somehow you're still breathing.",
+"combat_leave|supportive|happy|Combat cleared. Reset and heal up.",
+"bleeding|roasty|disgusted|You're bleeding. Congrats on the leak.",
+"bleeding|supportive|worried|You're bleeding. Stop and bandage immediately.",
+"bleed_stopped|supportive|happy|Bleed stopped. Nice recovery.",
+"hunger_low|roasty|pout|You're starving. Eat something that isn't a bullet.",
+"hunger_low|supportive|worried|Hunger is low. Find food before you weaken.",
+"thirst_low|roasty|pout|Thirsty? Water exists. Shocking, I know.",
+"thirst_low|supportive|worried|Thirst is low. Get water soon.",
+"radiation|roasty|fear|Radiation. Glow-in-the-dark is not a flex.",
+"radiation|supportive|fear|Radiation detected. Exit the zone now.",
+"cold|supportive|worried|You're getting cold. Warm up soon.",
+"hot|supportive|worried|You're overheating. Cool off soon.",
+"drowning|roasty|fear|You're drowning. Surface. Now.",
+"drowning|supportive|fear|You're drowning! Get to the surface!",
+"staff_nearby|roasty|surprised|Staff nearby. Behave. Or at least pretend.",
+"staff_nearby|supportive|worried|Staff nearby. Stay clean and careful.",
+"enemy_nearby|roasty|evil|Hostile nearby. Smile for the crosshair.",
+"enemy_nearby|supportive|worried|Enemy nearby. Slow down and listen.",
+"party_join|supportive|happy|Party joined. Stick together and callouts help.",
+"party_leave|supportive|neutral|You left the party. Stay aware solo.",
+"reviving|roasty|smug|Look at you, being useful for once.",
+"reviving|supportive|smile|Nice revive. Watch your surroundings while you do it.",
+"boss_spawn|roasty|evil|Boss event up. Go be brave. Or loot later.",
+"boss_spawn|supportive|surprised|A boss event is active. Prepare before engaging.",
+"timed_crate|roasty|smug|Timed crate. Race for loot, or race for death.",
+"timed_crate|supportive|happy|Timed crate is up. Approach carefully.",
 }
 local function add_line(line)
 local event, tone, expression, text =
@@ -3769,12 +3797,20 @@ load_lines(table.concat(FALLBACK, "\n"))
 function M.load_remote()
 local fn = utility and (utility.http_get or utility.HttpGet)
 if type(fn) ~= "function" then return false end
-local ok, body, status = pcall(fn, DIALOGUE_ROOT .. "dialogue.txt")
-if not ok or type(body) ~= "string" or #body < 100 or tonumber(status) ~= 200 then
-return false
-end
+local urls = {
+DIALOGUE_ROOT .. "dialogue.txt",
+asset_urls.JSDELIVR_BASE .. "/anime/april/dialogue.txt",
+}
+for _, url in ipairs(urls) do
+local ok, body, status = pcall(fn, url)
+if ok and type(body) == "string" and #body >= 100 then
+if status == nil or tonumber(status) == 200 then
 load_lines(body)
 return true
+end
+end
+end
+return false
 end
 M.characters = { H }
 M.character_labels = { H.name }
