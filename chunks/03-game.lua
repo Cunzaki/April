@@ -3714,7 +3714,7 @@ id = "april",
 name = "April",
 aspect = 346 / 400,
 mouth_x = 0.56,
-mouth_y = 0.21,
+mouth_y = 0.30,
 expressions = {
 neutral = "normal", smile = "smile", happy = "happy", laugh = "hah",
 smug = "angrysmile", pout = "pout", worried = "worried", fear = "fear",
