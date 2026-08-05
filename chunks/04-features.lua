@@ -10690,11 +10690,12 @@ tail_right = true
 end
 bx = clamp(bx, 8, math.max(8, sw - bubble_w - 8))
 by = clamp(by, 8, math.max(8, (sh or sw) - bubble_h - 8))
-local fill_a = clamp(alpha, 0, 1)
+local fill_a = clamp(alpha * 0.55, 0, 0.55)
+local text_a = clamp(alpha * 0.92, 0, 0.92)
 local accent = overlay_theme.accent()
 local panel = { 0.035, 0.032, 0.045, fill_a }
 local accent_col = {
-accent[1] or 0.8, accent[2] or 0.3, accent[3] or 1, fill_a,
+accent[1] or 0.8, accent[2] or 0.3, accent[3] or 1, text_a,
 }
 draw.rect_filled(bx, by, bubble_w, bubble_h, panel, 8)
 draw.rect_filled(bx + 8, by, bubble_w - 16, 2, accent_col, 0)
@@ -10713,7 +10714,7 @@ draw_util.text(bx + BUBBLE_PAD, by + 7, "APRIL", accent_col, 11)
 for i = 1, #entry.lines do
 local tx = bx + BUBBLE_PAD
 local ty = by + BUBBLE_HEADER_H + (i - 1) * BUBBLE_LINE_H
-draw_util.text(tx, ty, entry.lines[i], { 1, 1, 1, fill_a }, BUBBLE_FONT)
+draw_util.text(tx, ty, entry.lines[i], { 1, 1, 1, text_a }, BUBBLE_FONT)
 end
 end
 function M.install()
@@ -10843,7 +10844,7 @@ if alpha > 0.01 then
 image_cache.draw_fit(key, x, draw_y, character_w, character_h, { 1, 1, 1, alpha })
 end
 if current then
-local bubble_alpha = math.max(alpha, 0.96 * visibility)
+local bubble_alpha = alpha
 local remaining = current.expires - now
 if remaining < 350 then bubble_alpha = bubble_alpha * clamp(remaining / 350, 0, 1) end
 draw_bubble(x, draw_y, character_w, character_h, current, bubble_alpha, sw, sh, character)
