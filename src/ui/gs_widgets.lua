@@ -47,6 +47,11 @@ M._tip_hover_ms = 0
 
 local LISTEN_SKIP = {
     [0x01] = true, -- LMB used for UI
+    -- Generic modifiers fire together with left/right variants (0xA0-0xA5).
+    -- Skip them so LALT/RALT, LCTL/RCTL, LSHI/RSHI bind as distinct keys.
+    [0x10] = true, -- VK_SHIFT
+    [0x11] = true, -- VK_CONTROL
+    [0x12] = true, -- VK_MENU (Alt)
 }
 
 local function listen_skip_vk(vk)
@@ -617,9 +622,79 @@ end
 -- Project Vector accepts Windows virtual-key integers directly. Poll the full
 -- valid byte range while listening so navigation, numpad, media, OEM,
 -- left/right modifiers, F13-F24, Insert, and mouse side buttons all bind.
+-- Left/right modifiers are scanned first so they win over any other edge case.
+local LISTEN_SIDE_MODS = { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5 } -- L/R Shift/Ctrl/Alt
 local LISTEN_VKS = {}
+for i = 1, #LISTEN_SIDE_MODS do
+    LISTEN_VKS[#LISTEN_VKS + 1] = LISTEN_SIDE_MODS[i]
+end
+local SIDE_MOD_SET = {
+    [0xA0] = true, [0xA1] = true, [0xA2] = true,
+    [0xA3] = true, [0xA4] = true, [0xA5] = true,
+}
 for vk = 0x01, 0xFE do
-    LISTEN_VKS[#LISTEN_VKS + 1] = vk
+    if not SIDE_MOD_SET[vk] then
+        LISTEN_VKS[#LISTEN_VKS + 1] = vk
+    end
+end
+
+local function assign_listen_key(vk)
+    local id = M.listening_key
+    state.set_key(id, vk)
+    -- A newly assigned feature/aim key must do something without requiring
+    -- users to discover the RMB mode menu. Preserve explicit Hold/
+    -- Toggle choices, but promote the default Always mode to Toggle.
+    local mode_id = id .. "_mode"
+    local mode = state.get(mode_id, nil)
+    if mode ~= nil and tonumber(mode) == 0 then
+        state.set(mode_id, 2)
+    end
+    M.listening_key = nil
+end
+
+-- Windows reports both the generic modifier (SHIFT/CONTROL/MENU) and the
+-- left/right code on the same press. Resolve to the side-specific VK so
+-- Left Alt and Right Alt (etc.) are distinct keybinds.
+local MODIFIER_PAIRS = {
+    { generic = 0x10, left = 0xA0, right = 0xA1 }, -- Shift
+    { generic = 0x11, left = 0xA2, right = 0xA3 }, -- Control
+    { generic = 0x12, left = 0xA4, right = 0xA5 }, -- Alt
+}
+
+local function try_capture_modifier()
+    for i = 1, #MODIFIER_PAIRS do
+        local p = MODIFIER_PAIRS[i]
+        local l_down = input.key_down(p.left)
+        local r_down = input.key_down(p.right)
+        local g_down = input.key_down(p.generic)
+        if l_down or r_down or g_down then
+            local edge = input.key_pressed(p.left)
+                or input.key_pressed(p.right)
+                or input.key_pressed(p.generic)
+            if edge then
+                if l_down and not r_down then
+                    assign_listen_key(p.left)
+                    return true
+                end
+                if r_down and not l_down then
+                    assign_listen_key(p.right)
+                    return true
+                end
+                if l_down then
+                    assign_listen_key(p.left)
+                    return true
+                end
+                if r_down then
+                    assign_listen_key(p.right)
+                    return true
+                end
+                -- API only exposed the generic code — keep it bindable as a last resort.
+                assign_listen_key(p.generic)
+                return true
+            end
+        end
+    end
+    return false
 end
 
 function M.tick_key_listen()
@@ -633,20 +708,13 @@ function M.tick_key_listen()
         M.listening_key = nil
         return
     end
+    if try_capture_modifier() then
+        return
+    end
     for i = 1, #LISTEN_VKS do
         local vk = LISTEN_VKS[i]
         if not listen_skip_vk(vk) and input.key_pressed(vk) then
-            local id = M.listening_key
-            state.set_key(id, vk)
-            -- A newly assigned feature/aim key must do something without requiring
-            -- users to discover the RMB mode menu. Preserve explicit Hold/
-            -- Toggle choices, but promote the default Always mode to Toggle.
-            local mode_id = id .. "_mode"
-            local mode = state.get(mode_id, nil)
-            if mode ~= nil and tonumber(mode) == 0 then
-                state.set(mode_id, 2)
-            end
-            M.listening_key = nil
+            assign_listen_key(vk)
             return
         end
     end

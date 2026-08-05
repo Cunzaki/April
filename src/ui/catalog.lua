@@ -376,6 +376,15 @@ local function build_world()
     })
     append(bases.items, mesh_chams_block("april_base", maps.BASE_TOGGLES, "april_base_enabled"))
 
+    local base_xray = {
+        title = "Base Xray",
+        master = "april_base_xray_enabled",
+        items = {
+            kb("april_base_xray_enabled", "Base Xray", false),
+            sl("april_base_xray_range", "Xray Range", 40, 500, 180),
+        },
+    }
+
     local npcs = {
         title = "NPCs",
         master = "april_npc_enabled",
@@ -428,7 +437,7 @@ local function build_world()
         },
     }
 
-    return { resources, loot, npcs, npc_colors, raids, bases }
+    return { resources, loot, npcs, npc_colors, raids, bases, base_xray }
 end
 
 local function build_guns()
@@ -668,6 +677,36 @@ local function build_config()
         },
     }
 
+    local anime_baddie = {
+        title = "Anime Baddie",
+        master = "april_anime_baddie_enabled",
+        items = {
+            cb("april_anime_baddie_enabled", "Anime Baddie", false),
+            combo("april_anime_baddie_character", "Character", { "Hiyori" }, 0,
+                "april_anime_baddie_enabled"),
+            combo("april_anime_baddie_personality", "Personality", {
+                "Mixed", "Roasty", "Supportive",
+            }, 0, "april_anime_baddie_enabled"),
+            multi("april_anime_baddie_events", "React To", {
+                "Death / Respawn", "Downed / Revived", "Low Health", "Safe Zone",
+            }, { true, true, true, true }, "april_anime_baddie_enabled"),
+            sep("april_anime_baddie_enabled"),
+            sl("april_anime_baddie_scale", "Scale", 60, 150, 100, false,
+                "april_anime_baddie_enabled"),
+            sl("april_anime_baddie_opacity", "Opacity", 30, 100, 100, false,
+                "april_anime_baddie_enabled"),
+            sl("april_anime_baddie_duration", "Bubble Duration", 2, 10, 5, false,
+                "april_anime_baddie_enabled"),
+            sl("april_anime_baddie_cooldown", "Chatter Cooldown", 2, 30, 8, false,
+                "april_anime_baddie_enabled"),
+            cb("april_anime_baddie_stay", "Stay Visible", true, nil,
+                "april_anime_baddie_enabled"),
+            sep("april_anime_baddie_enabled"),
+            btn("april_anime_baddie_preview", "Preview Line", "april_anime_baddie_enabled"),
+            btn("april_anime_baddie_reset", "Reset Position", "april_anime_baddie_enabled"),
+        },
+    }
+
     local config_group = {
         title = "Config",
         items = {
@@ -689,7 +728,7 @@ local function build_config()
         },
     }
 
-    return { appearance, motion, accent, config_group }
+    return { appearance, motion, accent, anime_baddie, config_group }
 end
 
 function M.groups_for(tab_id)

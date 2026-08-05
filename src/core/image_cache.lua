@@ -11,6 +11,14 @@ local debug = April.require("core.debug")
 local M = {}
 
 local keys = {}
+local RETRY_MS = 5000
+
+local function tick_ms()
+    local fn = utility and (utility.get_tick_count or utility.GetTickCount)
+    if type(fn) ~= "function" then return 0 end
+    local ok, value = pcall(fn)
+    return ok and (tonumber(value) or 0) or 0
+end
 
 local function url_for(asset_id_or_url)
     if type(asset_id_or_url) == "string" then
@@ -31,13 +39,28 @@ end
 
 function M.ensure(key, asset_id_or_url)
     if keys[key] then return keys[key] end
-    local url = url_for(asset_id_or_url)
+
+    local urls = nil
+    local url = nil
+    local asset_src = asset_id_or_url
+
+    if type(asset_id_or_url) == "table" then
+        urls = asset_id_or_url
+        url = urls[1]
+        asset_src = nil
+    else
+        url = url_for(asset_id_or_url)
+    end
     if not url then return nil end
+
     keys[key] = {
         url = url,
-        asset_id = asset_digits(asset_id_or_url),
+        urls = urls,
+        url_idx = 1,
+        asset_id = asset_digits(asset_src),
         handle = nil,
         failed = false,
+        retry_at = 0,
         fallback = false,
     }
     return keys[key]
@@ -48,6 +71,17 @@ function M.register(key, asset_id_or_url)
 end
 
 local function try_fallback(entry)
+    if entry.urls then
+        local idx = (entry.url_idx or 1) + 1
+        local next_url = entry.urls[idx]
+        if not next_url then return false end
+        entry.url_idx = idx
+        entry.url = next_url
+        entry.handle = nil
+        entry.failed = false
+        return true
+    end
+
     if not entry.asset_id then return false end
     entry.fallback_idx = (entry.fallback_idx or 0) + 1
     local chain = {
@@ -62,22 +96,47 @@ local function try_fallback(entry)
     return true
 end
 
+local function image_failed(handle)
+    if not handle or not draw then return false end
+    local fn = draw.image_failed or draw.ImageFailed
+    if not fn then return false end
+    local ok, yes = pcall(fn, handle)
+    return ok and yes == true
+end
+
 local function get_handle(key)
     local entry = keys[key]
-    if not entry or entry.failed or not draw or not draw.load_image then
+    if not entry or not draw or not draw.load_image then
         return nil
+    end
+    if entry.failed then
+        if tick_ms() < (entry.retry_at or 0) then return nil end
+        entry.failed = false
+        entry.handle = nil
+        entry.url_idx = 1
+        if entry.urls then entry.url = entry.urls[1] end
     end
 
     if not entry.handle then
-        entry.handle = draw.load_image(entry.url)
+        local ok, handle = pcall(draw.load_image, entry.url)
+        if ok and handle then
+            entry.handle = handle
+        else
+            if try_fallback(entry) then return nil end
+            debug.warn_once("img:" .. key, "load failed - " .. tostring(entry.url))
+            entry.failed = true
+            entry.retry_at = tick_ms() + RETRY_MS
+            return nil
+        end
     end
 
-    if draw.image_failed and draw.image_failed(entry.handle) then
+    if image_failed(entry.handle) then
         if try_fallback(entry) then
             return nil
         end
         debug.warn_once("img:" .. key, "load failed - " .. entry.url)
         entry.failed = true
+        entry.retry_at = tick_ms() + RETRY_MS
         entry.handle = nil
         return nil
     end
@@ -112,13 +171,23 @@ end
 function M.state(key)
     local entry = keys[key]
     if not entry then return "none" end
-    if entry.failed then return "failed" end
+    if entry.failed then
+        if tick_ms() >= (entry.retry_at or 0) then
+            entry.failed = false
+            entry.handle = nil
+            entry.url_idx = 1
+            if entry.urls then entry.url = entry.urls[1] end
+            return "loading"
+        end
+        return "failed"
+    end
     if not entry.handle then return "loading" end
-    if draw and draw.image_failed and draw.image_failed(entry.handle) then
+    if image_failed(entry.handle) then
         if try_fallback(entry) then
             return "loading"
         end
         entry.failed = true
+        entry.retry_at = tick_ms() + RETRY_MS
         entry.handle = nil
         return "failed"
     end

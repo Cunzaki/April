@@ -1193,10 +1193,23 @@ M.BY_ID = {
     april_base_chams = "GPU mesh chams on selected base structures (in-range only).",
     april_base_chams_mode = "Fill, Wireframe, Fill Glow, or Wireframe Glow.",
     april_base_chams_color = "Glow preset color (Fill Glow / Wireframe Glow only).",
+    april_base_xray_enabled = "Wireframe mesh chams on structural walls/floors/foundations (Detail meshes). ApplyChams only — no Material/Texture/Transparency writes, no new instances. Skips Base ESP targets (doors, boxes, turrets, cabinets).",
+    april_base_xray_range = "Only structural pieces within this distance get wireframe chams.",
     april_ui_startup_intro = "Plays the April.lua intro whenever the script executes. Save it in your autoload profile.",
     april_ui_menu_key = "Key used to open and close this menu.",
     april_ui_menu_overlay = "Darkens the whole screen behind the menu with a smooth fade. Does not cover menu controls.",
     april_ui_snow = "Soft falling snow behind the menu. Hidden when Reduce Motion is on.",
+    april_anime_baddie_enabled = "Shows a draggable transparent anime announcer that reacts to local survival events. Draw-only: it creates no Roblox instances and writes nothing to Workspace.",
+    april_anime_baddie_character = "Selects the announcer. More characters can be added through the character registry.",
+    april_anime_baddie_personality = "Mixed alternates between teasing and supportive lines; Roasty and Supportive lock the tone.",
+    april_anime_baddie_events = "Choose which read-only local state transitions can trigger dialogue.",
+    april_anime_baddie_scale = "Changes the waist-up character size.",
+    april_anime_baddie_opacity = "Changes character and speech-bubble transparency.",
+    april_anime_baddie_duration = "How long each speech bubble remains visible.",
+    april_anime_baddie_cooldown = "Minimum delay between non-urgent comments. Death, respawn, and downed reactions can interrupt.",
+    april_anime_baddie_stay = "Keeps the character visible between comments. Disable for event-only popups.",
+    april_anime_baddie_preview = "Plays a random greeting so you can test appearance and dialogue.",
+    april_anime_baddie_reset = "Moves the announcer back to the lower-left corner.",
     april_cfg_autoload = "Loads your saved profile automatically on inject.",
     april_aim_whitelist_clear = "Clears the aim whitelist player list.",
     april_silent_whitelist_clear = "Clears the silent aim whitelist player list.",
@@ -1706,6 +1719,9 @@ M._tip_hover_id = nil
 M._tip_hover_ms = 0
 local LISTEN_SKIP = {
     [0x01] = true,
+    [0x10] = true,
+    [0x11] = true,
+    [0x12] = true,
 }
 local function listen_skip_vk(vk)
     return LISTEN_SKIP[vk] == true
@@ -2213,9 +2229,68 @@ function M.group_box(x, y, w, h, title)
     M.rect(x, y, w, h, theme.BORDER, false)
     M.text(x + 12, y + 5, title, theme.TEXT_ACTIVE, theme.FONT_TITLE)
 end
+local LISTEN_SIDE_MODS = { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5 }
 local LISTEN_VKS = {}
+for i = 1, #LISTEN_SIDE_MODS do
+    LISTEN_VKS[#LISTEN_VKS + 1] = LISTEN_SIDE_MODS[i]
+end
+local SIDE_MOD_SET = {
+    [0xA0] = true, [0xA1] = true, [0xA2] = true,
+    [0xA3] = true, [0xA4] = true, [0xA5] = true,
+}
 for vk = 0x01, 0xFE do
-    LISTEN_VKS[#LISTEN_VKS + 1] = vk
+    if not SIDE_MOD_SET[vk] then
+        LISTEN_VKS[#LISTEN_VKS + 1] = vk
+    end
+end
+local function assign_listen_key(vk)
+    local id = M.listening_key
+    state.set_key(id, vk)
+    local mode_id = id .. "_mode"
+    local mode = state.get(mode_id, nil)
+    if mode ~= nil and tonumber(mode) == 0 then
+        state.set(mode_id, 2)
+    end
+    M.listening_key = nil
+end
+local MODIFIER_PAIRS = {
+    { generic = 0x10, left = 0xA0, right = 0xA1 },
+    { generic = 0x11, left = 0xA2, right = 0xA3 },
+    { generic = 0x12, left = 0xA4, right = 0xA5 },
+}
+local function try_capture_modifier()
+    for i = 1, #MODIFIER_PAIRS do
+        local p = MODIFIER_PAIRS[i]
+        local l_down = input.key_down(p.left)
+        local r_down = input.key_down(p.right)
+        local g_down = input.key_down(p.generic)
+        if l_down or r_down or g_down then
+            local edge = input.key_pressed(p.left)
+                or input.key_pressed(p.right)
+                or input.key_pressed(p.generic)
+            if edge then
+                if l_down and not r_down then
+                    assign_listen_key(p.left)
+                    return true
+                end
+                if r_down and not l_down then
+                    assign_listen_key(p.right)
+                    return true
+                end
+                if l_down then
+                    assign_listen_key(p.left)
+                    return true
+                end
+                if r_down then
+                    assign_listen_key(p.right)
+                    return true
+                end
+                assign_listen_key(p.generic)
+                return true
+            end
+        end
+    end
+    return false
 end
 function M.tick_key_listen()
     if not M.listening_key then return end
@@ -2228,17 +2303,13 @@ function M.tick_key_listen()
         M.listening_key = nil
         return
     end
+    if try_capture_modifier() then
+        return
+    end
     for i = 1, #LISTEN_VKS do
         local vk = LISTEN_VKS[i]
         if not listen_skip_vk(vk) and input.key_pressed(vk) then
-            local id = M.listening_key
-            state.set_key(id, vk)
-            local mode_id = id .. "_mode"
-            local mode = state.get(mode_id, nil)
-            if mode ~= nil and tonumber(mode) == 0 then
-                state.set(mode_id, 2)
-            end
-            M.listening_key = nil
+            assign_listen_key(vk)
             return
         end
     end
@@ -3425,6 +3496,14 @@ cb("april_base_show_distance", "Base Show Distance", false),
 sl("april_base_range", "Base Range", 50, 500, 150),
 })
 append(bases.items, mesh_chams_block("april_base", maps.BASE_TOGGLES, "april_base_enabled"))
+local base_xray = {
+title = "Base Xray",
+master = "april_base_xray_enabled",
+items = {
+kb("april_base_xray_enabled", "Base Xray", false),
+sl("april_base_xray_range", "Xray Range", 40, 500, 180),
+},
+}
 local npcs = {
 title = "NPCs",
 master = "april_npc_enabled",
@@ -3474,7 +3553,7 @@ cb("april_raid_notifications", "Raid Notifications", true),
 sl("april_raid_range", "Raid ESP Range", 50, 5000, 1000),
 },
 }
-return { resources, loot, npcs, npc_colors, raids, bases }
+return { resources, loot, npcs, npc_colors, raids, bases, base_xray }
 end
 local function build_guns()
 return {
@@ -3706,6 +3785,35 @@ color("april_ui_col_checkbox", "Switches", { 0.78, 0.20, 0.92, 1 }, COL, 6),
 color("april_ui_col_overlay", "Overlay Panels", { 0.78, 0.20, 0.92, 1 }, COL, 7),
 },
 }
+local anime_baddie = {
+title = "Anime Baddie",
+master = "april_anime_baddie_enabled",
+items = {
+cb("april_anime_baddie_enabled", "Anime Baddie", false),
+combo("april_anime_baddie_character", "Character", { "Hiyori" }, 0,
+"april_anime_baddie_enabled"),
+combo("april_anime_baddie_personality", "Personality", {
+"Mixed", "Roasty", "Supportive",
+}, 0, "april_anime_baddie_enabled"),
+multi("april_anime_baddie_events", "React To", {
+"Death / Respawn", "Downed / Revived", "Low Health", "Safe Zone",
+}, { true, true, true, true }, "april_anime_baddie_enabled"),
+sep("april_anime_baddie_enabled"),
+sl("april_anime_baddie_scale", "Scale", 60, 150, 100, false,
+"april_anime_baddie_enabled"),
+sl("april_anime_baddie_opacity", "Opacity", 30, 100, 100, false,
+"april_anime_baddie_enabled"),
+sl("april_anime_baddie_duration", "Bubble Duration", 2, 10, 5, false,
+"april_anime_baddie_enabled"),
+sl("april_anime_baddie_cooldown", "Chatter Cooldown", 2, 30, 8, false,
+"april_anime_baddie_enabled"),
+cb("april_anime_baddie_stay", "Stay Visible", true, nil,
+"april_anime_baddie_enabled"),
+sep("april_anime_baddie_enabled"),
+btn("april_anime_baddie_preview", "Preview Line", "april_anime_baddie_enabled"),
+btn("april_anime_baddie_reset", "Reset Position", "april_anime_baddie_enabled"),
+},
+}
 local config_group = {
 title = "Config",
 items = {
@@ -3726,7 +3834,7 @@ sl("april_esp_text_size", "ESP Text Size", 8, 24, 13),
 btn("april_reload_modules", "Reload Game Modules"),
 },
 }
-return { appearance, motion, accent, config_group }
+return { appearance, motion, accent, anime_baddie, config_group }
 end
 function M.groups_for(tab_id)
 if tab_id == "aim" then return build_aim() end
@@ -4732,6 +4840,9 @@ local function split_groups(groups, tab_id)
 if tab_id == "aim" and #groups >= 3 then
 return { groups[1] }, { groups[2], groups[3] }
 end
+if tab_id == "config" and #groups >= 5 then
+return { groups[1], groups[2], groups[3], groups[4] }, { groups[5] }
+end
 if tab_id == "config" and #groups >= 4 then
 return { groups[1], groups[2], groups[3] }, { groups[4] }
 end
@@ -4956,6 +5067,7 @@ M.FEATURE_ORDER = {
     "features.world.npc_esp",
     "features.world.raid_esp",
     "features.world.base_esp",
+    "features.world.base_xray",
     "features.radar.tactical_map",
     "features.radar.waypoints",
     "features.movement.exploits",
@@ -4970,6 +5082,7 @@ M.FEATURE_ORDER = {
     "features.utility.event_status",
     "features.utility.anti_afk",
     "features.utility.keybind_viewer",
+    "features.utility.anime_announcer",
     "features.utility.config",
 }
 function M.register_all()
@@ -5219,6 +5332,8 @@ local ok, err = pcall(function()
     April.require("features.movement.anti_aim").install()
     debug.step("boot.anti_fling.install")
     April.require("features.movement.anti_fling").install()
+    debug.step("boot.base_xray.install")
+    April.require("features.world.base_xray").install()
     debug.step("boot.fake_duck.install")
     April.require("features.movement.fake_duck").install()
 

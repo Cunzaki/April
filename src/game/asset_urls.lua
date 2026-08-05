@@ -3,6 +3,8 @@ local M = {}
 M.CDN_BASE = "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/assets"
 -- jsDelivr mirrors the same assets and is more reliable for LoadImage tile fetches.
 M.JSDELIVR_BASE = "https://cdn.jsdelivr.net/gh/Cunzaki/April@main/assets"
+-- Bump when anime sprites change so jsDelivr serves the new PNGs immediately.
+M.ANIME_SPRITE_REF = "69aff26"
 
 local function digits(id)
     return id and tostring(id):match("(%d+)")
@@ -119,6 +121,20 @@ end
 
 function M.author_profile_png()
     return M.CDN_BASE .. "/cunzaki.png"
+end
+
+-- Vector LoadImage is unreliable on raw GitHub; jsDelivr first (same as map tiles).
+function M.anime_sprite_urls(folder, filename)
+    local rel = "/anime/" .. folder .. "/" .. filename
+    local pinned = string.format(
+        "https://cdn.jsdelivr.net/gh/Cunzaki/April@%s/assets/anime/%s/%s",
+        M.ANIME_SPRITE_REF, folder, filename
+    )
+    return {
+        pinned,
+        M.JSDELIVR_BASE .. rel,
+        M.CDN_BASE .. rel,
+    }
 end
 
 return M

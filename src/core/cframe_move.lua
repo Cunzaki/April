@@ -241,6 +241,43 @@ function M.set_part_collide(inst, collide)
     end
 end
 
+function M.get_part_transparency(inst)
+    if not inst then return nil end
+    local ok, value = pcall(function()
+        if part and part.get_transparency then
+            return part.get_transparency(inst)
+        end
+        if part and part.GetTransparency then
+            return part.GetTransparency(inst)
+        end
+        local t = inst.Transparency
+        if t == nil then t = inst.transparency end
+        return t
+    end)
+    if not ok then return nil end
+    return tonumber(value)
+end
+
+function M.set_part_transparency(inst, transparency)
+    if not inst then return end
+    transparency = tonumber(transparency)
+    if transparency == nil then return end
+    if transparency < 0 then transparency = 0 end
+    if transparency > 1 then transparency = 1 end
+    local wrote = false
+    if part and part.set_transparency then
+        wrote = pcall(part.set_transparency, inst, transparency) or wrote
+    end
+    if part and part.SetTransparency then
+        wrote = pcall(part.SetTransparency, inst, transparency) or wrote
+    end
+    -- Field writes: Vector exposes CanCollide this way; Transparency/LTM follow
+    -- the same instance binding when the property is present.
+    wrote = pcall(function() inst.Transparency = transparency end) or wrote
+    wrote = pcall(function() inst.transparency = transparency end) or wrote
+    return wrote
+end
+
 function M.humanoid_state(hum, state)
     if not hum or state == nil then return end
     pcall(function()

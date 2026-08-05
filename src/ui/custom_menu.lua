@@ -460,6 +460,9 @@ local function split_groups(groups, tab_id)
     if tab_id == "aim" and #groups >= 3 then
         return { groups[1] }, { groups[2], groups[3] }
     end
+    if tab_id == "config" and #groups >= 5 then
+        return { groups[1], groups[2], groups[3], groups[4] }, { groups[5] }
+    end
     if tab_id == "config" and #groups >= 4 then
         return { groups[1], groups[2], groups[3] }, { groups[4] }
     end

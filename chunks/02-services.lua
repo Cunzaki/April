@@ -1436,12 +1436,13 @@ local function persist_num(id, value)
         April.require("ui.gs_state").set(id, value)
     end)
 end
-local function blocked(mx, my)
+local function blocked(mx, my, allow_menu)
     local ok_menu, custom_menu = pcall(function()
         return April.require("ui.custom_menu")
     end)
     if ok_menu and custom_menu and custom_menu.contains_point
         and custom_menu.contains_point(mx or 0, my or 0)
+        and not allow_menu
     then
         return true
     end
@@ -1465,7 +1466,7 @@ function M.clamp(x, y, w, panel_h, sw, sh, x_id, y_id)
     if y_id and y ~= old_y then persist_num(y_id, y) end
     return x, y, w
 end
-function M.update(id, x_id, y_id, title_w, title_h, sw, sh, default_x, default_y)
+function M.update(id, x_id, y_id, title_w, title_h, sw, sh, default_x, default_y, allow_menu)
     local st = state[id]
     if not st then
         st = { was_lmb = false, dragging = false, off_x = 0, off_y = 0 }
@@ -1477,7 +1478,7 @@ function M.update(id, x_id, y_id, title_w, title_h, sw, sh, default_x, default_y
     local lmb = lmb_down()
     local over_title = mx >= x and my >= y
         and mx <= x + title_w and my <= y + title_h
-    if lmb and not st.was_lmb and over_title and not blocked(mx, my) then
+    if lmb and not st.was_lmb and over_title and not blocked(mx, my, allow_menu) then
         st.dragging = true
         st.off_x = mx - x
         st.off_y = my - y
@@ -2012,6 +2013,7 @@ April._mods["game.asset_urls"] = (function()
 local M = {}
 M.CDN_BASE = "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/assets"
 M.JSDELIVR_BASE = "https://cdn.jsdelivr.net/gh/Cunzaki/April@main/assets"
+M.ANIME_SPRITE_REF = "69aff26"
 local function digits(id)
     return id and tostring(id):match("(%d+)")
 end
@@ -2109,6 +2111,18 @@ end
 function M.author_profile_png()
     return M.CDN_BASE .. "/cunzaki.png"
 end
+function M.anime_sprite_urls(folder, filename)
+    local rel = "/anime/" .. folder .. "/" .. filename
+    local pinned = string.format(
+        "https://cdn.jsdelivr.net/gh/Cunzaki/April@%s/assets/anime/%s/%s",
+        M.ANIME_SPRITE_REF, folder, filename
+    )
+    return {
+        pinned,
+        M.JSDELIVR_BASE .. rel,
+        M.CDN_BASE .. rel,
+    }
+end
 return M
 end)()
 
@@ -2117,6 +2131,13 @@ local asset_urls = April.require("game.asset_urls")
 local debug = April.require("core.debug")
 local M = {}
 local keys = {}
+local RETRY_MS = 5000
+local function tick_ms()
+    local fn = utility and (utility.get_tick_count or utility.GetTickCount)
+    if type(fn) ~= "function" then return 0 end
+    local ok, value = pcall(fn)
+    return ok and (tonumber(value) or 0) or 0
+end
 local function url_for(asset_id_or_url)
     if type(asset_id_or_url) == "string" then
         if asset_id_or_url:find("https://", 1, true)
@@ -2134,13 +2155,25 @@ local function asset_digits(asset_id_or_url)
 end
 function M.ensure(key, asset_id_or_url)
     if keys[key] then return keys[key] end
-    local url = url_for(asset_id_or_url)
+    local urls = nil
+    local url = nil
+    local asset_src = asset_id_or_url
+    if type(asset_id_or_url) == "table" then
+        urls = asset_id_or_url
+        url = urls[1]
+        asset_src = nil
+    else
+        url = url_for(asset_id_or_url)
+    end
     if not url then return nil end
     keys[key] = {
         url = url,
-        asset_id = asset_digits(asset_id_or_url),
+        urls = urls,
+        url_idx = 1,
+        asset_id = asset_digits(asset_src),
         handle = nil,
         failed = false,
+        retry_at = 0,
         fallback = false,
     }
     return keys[key]
@@ -2149,6 +2182,16 @@ function M.register(key, asset_id_or_url)
     return M.ensure(key, asset_id_or_url)
 end
 local function try_fallback(entry)
+    if entry.urls then
+        local idx = (entry.url_idx or 1) + 1
+        local next_url = entry.urls[idx]
+        if not next_url then return false end
+        entry.url_idx = idx
+        entry.url = next_url
+        entry.handle = nil
+        entry.failed = false
+        return true
+    end
     if not entry.asset_id then return false end
     entry.fallback_idx = (entry.fallback_idx or 0) + 1
     local chain = {
@@ -2162,20 +2205,44 @@ local function try_fallback(entry)
     entry.failed = false
     return true
 end
+local function image_failed(handle)
+    if not handle or not draw then return false end
+    local fn = draw.image_failed or draw.ImageFailed
+    if not fn then return false end
+    local ok, yes = pcall(fn, handle)
+    return ok and yes == true
+end
 local function get_handle(key)
     local entry = keys[key]
-    if not entry or entry.failed or not draw or not draw.load_image then
+    if not entry or not draw or not draw.load_image then
         return nil
     end
-    if not entry.handle then
-        entry.handle = draw.load_image(entry.url)
+    if entry.failed then
+        if tick_ms() < (entry.retry_at or 0) then return nil end
+        entry.failed = false
+        entry.handle = nil
+        entry.url_idx = 1
+        if entry.urls then entry.url = entry.urls[1] end
     end
-    if draw.image_failed and draw.image_failed(entry.handle) then
+    if not entry.handle then
+        local ok, handle = pcall(draw.load_image, entry.url)
+        if ok and handle then
+            entry.handle = handle
+        else
+            if try_fallback(entry) then return nil end
+            debug.warn_once("img:" .. key, "load failed - " .. tostring(entry.url))
+            entry.failed = true
+            entry.retry_at = tick_ms() + RETRY_MS
+            return nil
+        end
+    end
+    if image_failed(entry.handle) then
         if try_fallback(entry) then
             return nil
         end
         debug.warn_once("img:" .. key, "load failed - " .. entry.url)
         entry.failed = true
+        entry.retry_at = tick_ms() + RETRY_MS
         entry.handle = nil
         return nil
     end
@@ -2204,13 +2271,23 @@ end
 function M.state(key)
     local entry = keys[key]
     if not entry then return "none" end
-    if entry.failed then return "failed" end
+    if entry.failed then
+        if tick_ms() >= (entry.retry_at or 0) then
+            entry.failed = false
+            entry.handle = nil
+            entry.url_idx = 1
+            if entry.urls then entry.url = entry.urls[1] end
+            return "loading"
+        end
+        return "failed"
+    end
     if not entry.handle then return "loading" end
-    if draw and draw.image_failed and draw.image_failed(entry.handle) then
+    if image_failed(entry.handle) then
         if try_fallback(entry) then
             return "loading"
         end
         entry.failed = true
+        entry.retry_at = tick_ms() + RETRY_MS
         entry.handle = nil
         return "failed"
     end
@@ -4588,6 +4665,39 @@ function M.set_part_collide(inst, collide)
         pcall(function() inst.CanCollide = collide end)
     end
 end
+function M.get_part_transparency(inst)
+    if not inst then return nil end
+    local ok, value = pcall(function()
+        if part and part.get_transparency then
+            return part.get_transparency(inst)
+        end
+        if part and part.GetTransparency then
+            return part.GetTransparency(inst)
+        end
+        local t = inst.Transparency
+        if t == nil then t = inst.transparency end
+        return t
+    end)
+    if not ok then return nil end
+    return tonumber(value)
+end
+function M.set_part_transparency(inst, transparency)
+    if not inst then return end
+    transparency = tonumber(transparency)
+    if transparency == nil then return end
+    if transparency < 0 then transparency = 0 end
+    if transparency > 1 then transparency = 1 end
+    local wrote = false
+    if part and part.set_transparency then
+        wrote = pcall(part.set_transparency, inst, transparency) or wrote
+    end
+    if part and part.SetTransparency then
+        wrote = pcall(part.SetTransparency, inst, transparency) or wrote
+    end
+    wrote = pcall(function() inst.Transparency = transparency end) or wrote
+    wrote = pcall(function() inst.transparency = transparency end) or wrote
+    return wrote
+end
 function M.humanoid_state(hum, state)
     if not hum or state == nil then return end
     pcall(function()
@@ -5398,6 +5508,11 @@ local MENU_KEYS = {
     "april_ui_style_title", "april_ui_style_section", "april_ui_style_slider",
     "april_ui_style_scroll", "april_ui_style_sidebar", "april_ui_style_checkbox",
     "april_ui_style_overlay", "april_ui_window_x", "april_ui_window_y",
+    "april_anime_baddie_enabled", "april_anime_baddie_character",
+    "april_anime_baddie_personality", "april_anime_baddie_events",
+    "april_anime_baddie_scale", "april_anime_baddie_opacity",
+    "april_anime_baddie_duration", "april_anime_baddie_cooldown",
+    "april_anime_baddie_stay", "april_anime_baddie_x", "april_anime_baddie_y",
     "april_esp_text_size",
     "april_player_enabled", "april_player_enabled_mode",
     "april_player_box_mode", "april_player_box_color",
@@ -5476,6 +5591,7 @@ local MENU_KEYS = {
     "april_solar_panel", "april_windmill",
     "april_base_boxes", "april_base_show_name", "april_base_show_distance", "april_base_range",
     "april_base_chams", "april_base_chams_mode", "april_base_chams_color",
+    "april_base_xray_enabled", "april_base_xray_enabled_mode", "april_base_xray_range",
     "april_waypoints_enabled", "april_waypoints_enabled_mode", "april_wp_dist", "april_wp_beacon", "april_wp_beacon_h",
     "april_wp_draw", "april_wp_slot",
     "april_map_enabled", "april_map_enabled_mode", "april_map_zoom", "april_map_size", "april_map_icon_scale",
@@ -5562,6 +5678,7 @@ local HOTKEY_KEYS = {
     "april_npc_enabled",
     "april_raid_enabled",
     "april_base_enabled",
+    "april_base_xray_enabled",
     "april_waypoints_enabled",
     "april_map_enabled",
     "april_fly_enabled",

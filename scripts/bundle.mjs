@@ -68,6 +68,7 @@ const ORDER = [
   "game/combat_origin.lua",
   "game/team_state.lua",
   "game/player_state.lua",
+  "game/anime_announcer_data.lua",
   "game/farm_tools.lua",
   "game/farm_targets.lua",
   "game/inventory.lua",
@@ -99,6 +100,7 @@ const ORDER = [
   "features/world/world_esp.lua",
   "features/world/loot_esp.lua",
   "features/world/base_esp.lua",
+  "features/world/base_xray.lua",
   "features/world/npc_esp.lua",
   "features/world/raid_esp.lua",
   "features/movement/exploits.lua",
@@ -111,6 +113,7 @@ const ORDER = [
   "features/radar/tactical_map.lua",
   "features/utility/keybind_viewer.lua",
   "features/utility/anti_afk.lua",
+  "features/utility/anime_announcer.lua",
   "features/utility/config.lua",
   "ui/gs_theme.lua",
   "ui/gs_input.lua",
@@ -129,7 +132,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.0.99";
+const VERSION = "4.1.11";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector
@@ -208,6 +211,8 @@ local ok, err = pcall(function()
     April.require("features.movement.anti_aim").install()
     debug.step("boot.anti_fling.install")
     April.require("features.movement.anti_fling").install()
+    debug.step("boot.base_xray.install")
+    April.require("features.world.base_xray").install()
     debug.step("boot.fake_duck.install")
     April.require("features.movement.fake_duck").install()
 
@@ -266,7 +271,7 @@ function compactLuaSource(source, stripIndent = false) {
   return out.join("\n");
 }
 
-function buildModuleBody(files) {
+function buildModuleBody(files, fullBundle = false) {
   let body = "";
   for (const rel of files) {
     const full = path.join(SRC, rel);
@@ -276,6 +281,11 @@ function buildModuleBody(files) {
     }
     const modPath = rel.replace(/\.lua$/, "").replace(/\//g, ".");
     const stripIndent = rel === "features/utility/autofarm.lua"
+      || rel === "features/utility/anime_announcer.lua"
+      || rel === "game/anime_announcer_data.lua"
+      || (fullBundle && rel === "features/utility/config.lua")
+      || (fullBundle && rel === "features/utility/mod_checker.lua")
+      || (fullBundle && rel === "ui/gs_widgets.lua")
       || rel === "ui/custom_menu.lua"
       || rel === "ui/catalog.lua";
     const src = compactLuaSource(fs.readFileSync(full, "utf8"), stripIndent);
@@ -302,7 +312,7 @@ const CHUNKS = [
   { name: "Interface", file: "05-interface.lua", files: ORDER.slice(featuresEnd) },
 ];
 
-const fullBody = buildModuleBody(ORDER);
+const fullBody = buildModuleBody(ORDER, true);
 const fullBundle = stripLuaComments(header + fullBody + footer);
 fs.writeFileSync(SCRIPT1_OUT, fullBundle);
 const bundleBytes = Buffer.byteLength(fullBundle);

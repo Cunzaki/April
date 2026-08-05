@@ -30,6 +30,7 @@ M.FEATURE_ORDER = {
     "features.world.npc_esp",
     "features.world.raid_esp",
     "features.world.base_esp",
+    "features.world.base_xray",
     "features.radar.tactical_map",
     "features.radar.waypoints",
     "features.movement.exploits",
@@ -44,6 +45,7 @@ M.FEATURE_ORDER = {
     "features.utility.event_status",
     "features.utility.anti_afk",
     "features.utility.keybind_viewer",
+    "features.utility.anime_announcer",
     "features.utility.config",
 }
 
