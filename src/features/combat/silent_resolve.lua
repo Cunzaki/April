@@ -58,6 +58,10 @@ local function merge_info(base, manip_extra, flags)
         info.extend_active = manip_extra.extend_active
         info.scan_progress = manip_extra.scan_progress or info.scan_progress
         info.body_peek = manip_extra.body_peek
+        info.scan_cached = manip_extra.cached == true
+        info.scan_rays = manip_extra.rays
+        info.radius_idx = manip_extra.radius_idx
+        info.radii_total = manip_extra.radii_total
     else
         info.manip_state = info.manip_state or "off"
     end
@@ -105,6 +109,10 @@ local function resolve_manip(body, hitpart, muzzle, target)
     extra.base_radius = base_r
     extra.extend_active = ev.extend_active == true
     extra.scan_progress = ev.scan_progress or 0
+    extra.cached = ev.cached == true
+    extra.rays = ev.rays
+    extra.radius_idx = ev.radius_idx
+    extra.radii_total = ev.radii_total
 
     local max_r = extend_on and (base_r + ext_extra) or base_r
     local body_peek = body_peek_mod()
@@ -122,6 +130,8 @@ local function resolve_manip(body, hitpart, muzzle, target)
         return manip_math.peek_track_origin(peek, muzzle, body), extra
     end
 
+    -- Only ask body_peek to search after manip finished blocked — never while
+    -- the amortized scanner is still working (avoids a second full ray storm).
     if ev.state == "blocked" and use_body_peek and body_peek.try_peek then
         local peek = body_peek.try_peek(body, hitpart, max_r, target)
         if peek then

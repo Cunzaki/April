@@ -52,19 +52,17 @@ local function radar_opacity()
     return pct / 100
 end
 
--- Vector shadows every primitive. Dropping only alpha on dark fills looks milky
--- / white. Premultiply RGB so the whole radar fades through instead of washing out.
+-- Scale alpha only. Keep RGB intact — Vector shadows every primitive, and
+-- darkening RGB toward zero makes the auto-shadow read as a milky wash.
 local function fade_col(col, opacity)
     if type(col) ~= "table" then return col end
     opacity = tonumber(opacity) or 1
-    if opacity >= 0.999 then
-        return { col[1] or 1, col[2] or 1, col[3] or 1, col[4] or 1 }
-    end
     if opacity < 0 then opacity = 0 end
+    if opacity > 1 then opacity = 1 end
     return {
-        (col[1] or 1) * opacity,
-        (col[2] or 1) * opacity,
-        (col[3] or 1) * opacity,
+        col[1] or 1,
+        col[2] or 1,
+        col[3] or 1,
         (col[4] or 1) * opacity,
     }
 end
@@ -260,9 +258,12 @@ end
 local function draw_blip(mx, my, scale, col, clamped, shape)
     if type(col) ~= "table" then col = theme.CYAN end
     local alpha = clamped and 0.72 or 1
-    local c = fade_col(col, alpha)
+    local c = {
+        col[1] or 1, col[2] or 1, col[3] or 1,
+        (col[4] or 1) * alpha,
+    }
     local r = math.max(2, scale - (clamped and 1 or 0))
-    local edge = fade_col(theme.PANEL_DEEP, math.min(0.42, (c[4] or 1) * 0.55))
+    local edge = theme.alpha(theme.PANEL_DEEP, math.min(0.42, c[4] * 0.42))
     shape = shape or "circle"
 
     local rect_f = draw_fn("rect_filled", "RectFilled")
@@ -284,7 +285,7 @@ local function draw_blip(mx, my, scale, col, clamped, shape)
     elseif shape == "waypoint" and circ_f then
         pcall(circ_f, mx, my, r + 2, edge, 12)
         pcall(circ_f, mx, my, r + 1, c, 12)
-        pcall(circ_f, mx, my, math.max(1, r - 1), fade_col(theme.PANEL_DEEP, c[4] or 1), 10)
+        pcall(circ_f, mx, my, math.max(1, r - 1), theme.alpha(theme.PANEL_DEEP, c[4] or 1), 10)
     elseif circ_f then
         pcall(circ_f, mx, my, r + 1, edge, 10)
         pcall(circ_f, mx, my, r, c, 10)
@@ -332,16 +333,20 @@ local function draw_map_item(wx, wz, col, label, shape, view, scale, layout, siz
     end
 end
 
-local function draw_radar_frame(layout, bg, _grid, zoom, _north_up, opacity)
+local function draw_radar_frame(layout, bg, _grid, zoom, _north_up, opacity, has_map)
     local x, y, w, h = layout.x, layout.y, layout.w, layout.h
     opacity = opacity or 1
 
+    -- One panel surface only. Extra body fills stack Vector shadows and wash milky.
     overlay_theme.draw_panel(x, y, w, h, "RADAR", { opacity = opacity })
 
-    local rect_f = draw_fn("rect_filled", "RectFilled")
-    if rect_f then
-        pcall(rect_f, x + 7, y + TITLE_H + 3, w - 14, h - TITLE_H - 10,
-            fade_col(bg or theme.PANEL_DEEP, 0.36 * opacity), 7)
+    -- Only fill the body when there is no map texture underneath.
+    if not has_map then
+        local rect_f = draw_fn("rect_filled", "RectFilled")
+        if rect_f then
+            pcall(rect_f, x + 7, y + TITLE_H + 3, w - 14, h - TITLE_H - 10,
+                fade_col(bg or theme.PANEL_DEEP, 0.55 * opacity), 7)
+        end
     end
 
     local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
@@ -608,13 +613,18 @@ function M.draw_inner()
         view = build_yaw_view(cx, cy, zoom, yaw, view_x, view_z)
     end
 
-    draw_radar_frame(layout, bg, grid, zoom, north_up, opacity)
+    -- Will draw map after the single panel chrome. Skip the extra body fill
+    -- whenever a texture is available so Vector shadows don't stack milky.
+    local will_draw_map = north_up and map_image.ready()
+    draw_radar_frame(layout, bg, grid, zoom, north_up, opacity, will_draw_map)
 
     if north_up then
-        attach_map_texture(view, opacity)
-        if view.texture_mode then
-            -- Repaint panel padding/title over the map image.
-            cover_map_overflow(layout, map_rect, zoom, true, opacity)
+        if attach_map_texture(view, opacity) then
+            -- Title/zoom only — no extra full-width fills over the map.
+            draw_util.text(x + 12, y + 8, "RADAR", fade_col(overlay_theme.text(), opacity), 11)
+            local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
+            local zoom_w = theme.text_w(zoom_text, 9)
+            draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, fade_col(theme.TEXT_DIM, opacity), 9)
         end
     end
 

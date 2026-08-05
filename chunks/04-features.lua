@@ -1513,6 +1513,10 @@ local function merge_info(base, manip_extra, flags)
         info.extend_active = manip_extra.extend_active
         info.scan_progress = manip_extra.scan_progress or info.scan_progress
         info.body_peek = manip_extra.body_peek
+        info.scan_cached = manip_extra.cached == true
+        info.scan_rays = manip_extra.rays
+        info.radius_idx = manip_extra.radius_idx
+        info.radii_total = manip_extra.radii_total
     else
         info.manip_state = info.manip_state or "off"
     end
@@ -1554,6 +1558,10 @@ local function resolve_manip(body, hitpart, muzzle, target)
     extra.base_radius = base_r
     extra.extend_active = ev.extend_active == true
     extra.scan_progress = ev.scan_progress or 0
+    extra.cached = ev.cached == true
+    extra.rays = ev.rays
+    extra.radius_idx = ev.radius_idx
+    extra.radii_total = ev.radii_total
     local max_r = extend_on and (base_r + ext_extra) or base_r
     local body_peek = body_peek_mod()
     local use_body_peek = settings.bool("april_bullet_body_peek", false) and body_peek
@@ -1720,6 +1728,14 @@ local function row_color(active, ok, warn)
     if active then return theme.RED end
     return overlay_theme.text_muted()
 end
+local function fmt_radius(info)
+    local r = tonumber(info and info.radius) or 0
+    local base = tonumber(info and info.base_radius) or r
+    if info and info.extend_active and r > base + 0.04 then
+        return string.format("%.2f (ext)", r)
+    end
+    return string.format("%.2f", r)
+end
 local function draw_status_panel(cx, cy, fov, info)
     if not settings.bool(PREFIX .. "manip_status", false) then return end
     if not info then return end
@@ -1731,19 +1747,35 @@ local function draw_status_panel(cx, cy, fov, info)
     local fire_mode = info.state or "off"
     local fire_label = FIRE_LABELS[fire_mode] or fire_mode
     local manip_label = MANIP_LABELS[manip_state] or manip_state
+    if info.scan_cached and (manip_state == "ready" or manip_state == "blocked") then
+        manip_label = manip_label .. " *"
+    end
     local pad_x, pad_y = 10, 6
     local row_h = 14
     local bar_h = 5
     local title = "BULLET STATUS"
     local title_w = theme.text_w(title, 11)
+    local radius_text = fmt_radius(info)
+    local ring_text = "-"
+    if manip_on and info.radii_total and info.radius_idx then
+        ring_text = string.format("%d/%d", info.radius_idx, info.radii_total)
+    elseif manip_on and manip_state == "ready" then
+        ring_text = "hit"
+    elseif manip_on and manip_state == "direct" then
+        ring_text = "los"
+    end
     local w1 = theme.text_w("Hitscan", 10) + theme.text_w("ON", 10) + 24
     local w2 = theme.text_w("Bullet TP", 10) + theme.text_w("ON", 10) + 24
     local w3 = theme.text_w("Manip", 10) + theme.text_w(manip_label, 10) + 24
     local w4 = theme.text_w("Fire", 10) + theme.text_w(fire_label, 10) + 24
-    local panel_w = math.max(title_w, w1, w2, w3, w4) + pad_x * 2 + 8
-    panel_w = math.max(panel_w, 168)
-    local rows = 4
-    local has_bar = manip_on and (manip_state == "scanning" or manip_state == "ready" or manip_state == "direct")
+    local w5 = theme.text_w("Peek R", 10) + theme.text_w(radius_text, 10) + 24
+    local w6 = theme.text_w("Ring", 10) + theme.text_w(ring_text, 10) + 24
+    local panel_w = math.max(title_w, w1, w2, w3, w4, w5, w6) + pad_x * 2 + 8
+    panel_w = math.max(panel_w, 178)
+    local rows = manip_on and 6 or 4
+    local has_bar = manip_on and (
+        manip_state == "scanning" or manip_state == "ready" or manip_state == "direct"
+    )
     local panel_h = 22 + rows * row_h + pad_y + (has_bar and (bar_h + 6) or 0)
     local x = cx - panel_w * 0.5
     local y = cy + fov + 10
@@ -1773,6 +1805,10 @@ local function draw_status_panel(cx, cy, fov, info)
         fire_col = theme.ORANGE
     end
     draw_row("Fire", fire_label, fire_col)
+    if manip_on then
+        draw_row("Peek R", radius_text, overlay_theme.text())
+        draw_row("Ring", ring_text, overlay_theme.text())
+    end
     if has_bar then
         local bar_w = panel_w - pad_x * 2
         local bar_x = x + pad_x
@@ -1782,7 +1818,8 @@ local function draw_status_panel(cx, cy, fov, info)
         if ready then
             prog = 1
         elseif manip_state == "scanning" then
-            prog = 0.25 + scan_anim * 0.65
+            local real = math.max(0, math.min(1, info.scan_progress or 0))
+            prog = math.max(0.08, real * 0.85 + scan_anim * 0.12)
         else
             prog = math.max(0, math.min(1, info.scan_progress or 0))
         end
@@ -1802,12 +1839,21 @@ local function draw_status_panel(cx, cy, fov, info)
 end
 local function draw_peek_visual(info, track)
     if not settings.bool(PREFIX .. "manip_peek_vis", false) then return end
-    if not info or not info.peek then return end
-    if info.manip_state ~= "ready" and info.manip_state ~= "direct" and not info.body_peek then return end
+    if not info then return end
     local body = combat_origin.get_server_origin()
     if not body then return end
+    if info.manip_on and info.manip_state == "scanning" then
+        local r = tonumber(info.radius) or tonumber(info.base_radius) or 1
+        local col = { 1, 0.75, 0.2, 0.35 + scan_anim * 0.25 }
+        desync_vis.draw_cross(body.x, body.y + manip_math.eye_offset_y(), body.z, 0.45, col, 1)
+        desync_vis.draw_sphere_ring(body.x, body.y, body.z, r, col, 1)
+    end
+    if not info.peek then return end
+    if info.manip_state ~= "ready" and info.manip_state ~= "direct" and not info.body_peek then
+        return
+    end
     local peek = info.peek
-    local col_peek = { 1, 0.85, 0.2, 0.95 }
+    local col_peek = info.body_peek and { 0.45, 1, 0.55, 0.95 } or { 1, 0.85, 0.2, 0.95 }
     local eye_y = peek.y + manip_math.eye_offset_y()
     desync_vis.draw_cross(peek.x, eye_y, peek.z, 0.85, col_peek, 2)
     desync_vis.draw_link(body, peek, { col_peek[1], col_peek[2], col_peek[3], 0.35 }, 1)
@@ -9466,14 +9512,12 @@ end
 local function fade_col(col, opacity)
     if type(col) ~= "table" then return col end
     opacity = tonumber(opacity) or 1
-    if opacity >= 0.999 then
-        return { col[1] or 1, col[2] or 1, col[3] or 1, col[4] or 1 }
-    end
     if opacity < 0 then opacity = 0 end
+    if opacity > 1 then opacity = 1 end
     return {
-        (col[1] or 1) * opacity,
-        (col[2] or 1) * opacity,
-        (col[3] or 1) * opacity,
+        col[1] or 1,
+        col[2] or 1,
+        col[3] or 1,
         (col[4] or 1) * opacity,
     }
 end
@@ -9646,9 +9690,12 @@ end
 local function draw_blip(mx, my, scale, col, clamped, shape)
     if type(col) ~= "table" then col = theme.CYAN end
     local alpha = clamped and 0.72 or 1
-    local c = fade_col(col, alpha)
+    local c = {
+        col[1] or 1, col[2] or 1, col[3] or 1,
+        (col[4] or 1) * alpha,
+    }
     local r = math.max(2, scale - (clamped and 1 or 0))
-    local edge = fade_col(theme.PANEL_DEEP, math.min(0.42, (c[4] or 1) * 0.55))
+    local edge = theme.alpha(theme.PANEL_DEEP, math.min(0.42, c[4] * 0.42))
     shape = shape or "circle"
     local rect_f = draw_fn("rect_filled", "RectFilled")
     local poly = draw_fn("poly_filled", "PolyFilled")
@@ -9668,7 +9715,7 @@ local function draw_blip(mx, my, scale, col, clamped, shape)
     elseif shape == "waypoint" and circ_f then
         pcall(circ_f, mx, my, r + 2, edge, 12)
         pcall(circ_f, mx, my, r + 1, c, 12)
-        pcall(circ_f, mx, my, math.max(1, r - 1), fade_col(theme.PANEL_DEEP, c[4] or 1), 10)
+        pcall(circ_f, mx, my, math.max(1, r - 1), theme.alpha(theme.PANEL_DEEP, c[4] or 1), 10)
     elseif circ_f then
         pcall(circ_f, mx, my, r + 1, edge, 10)
         pcall(circ_f, mx, my, r, c, 10)
@@ -9709,14 +9756,16 @@ local function draw_map_item(wx, wz, col, label, shape, view, scale, layout, siz
         )
     end
 end
-local function draw_radar_frame(layout, bg, _grid, zoom, _north_up, opacity)
+local function draw_radar_frame(layout, bg, _grid, zoom, _north_up, opacity, has_map)
     local x, y, w, h = layout.x, layout.y, layout.w, layout.h
     opacity = opacity or 1
     overlay_theme.draw_panel(x, y, w, h, "RADAR", { opacity = opacity })
-    local rect_f = draw_fn("rect_filled", "RectFilled")
-    if rect_f then
-        pcall(rect_f, x + 7, y + TITLE_H + 3, w - 14, h - TITLE_H - 10,
-            fade_col(bg or theme.PANEL_DEEP, 0.36 * opacity), 7)
+    if not has_map then
+        local rect_f = draw_fn("rect_filled", "RectFilled")
+        if rect_f then
+            pcall(rect_f, x + 7, y + TITLE_H + 3, w - 14, h - TITLE_H - 10,
+                fade_col(bg or theme.PANEL_DEEP, 0.55 * opacity), 7)
+        end
     end
     local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
     local zoom_w = theme.text_w(zoom_text, 9)
@@ -9946,11 +9995,14 @@ function M.draw_inner()
     if not view then
         view = build_yaw_view(cx, cy, zoom, yaw, view_x, view_z)
     end
-    draw_radar_frame(layout, bg, grid, zoom, north_up, opacity)
+    local will_draw_map = north_up and map_image.ready()
+    draw_radar_frame(layout, bg, grid, zoom, north_up, opacity, will_draw_map)
     if north_up then
-        attach_map_texture(view, opacity)
-        if view.texture_mode then
-            cover_map_overflow(layout, map_rect, zoom, true, opacity)
+        if attach_map_texture(view, opacity) then
+            draw_util.text(x + 12, y + 8, "RADAR", fade_col(overlay_theme.text(), opacity), 11)
+            local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
+            local zoom_w = theme.text_w(zoom_text, 9)
+            draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, fade_col(theme.TEXT_DIM, opacity), 9)
         end
     end
     if settings.bool("april_map_show_world", false) then
