@@ -50,7 +50,7 @@ M.BY_ID = {
     april_silent_aim = "Redirects shots to your locked target without moving the camera.",
 
     -- Bullet
-    april_bullet_enabled = "Turns on advanced bullet routing for silent aim.",
+    april_bullet_enabled = "Master toggle for advanced bullet routing (hitscan, bullet TP, silent manip). Bind Always / Hold / Toggle from the key chip.",
     april_silent_hitscan = "Registers hits instantly on your locked target. Server may reject invalid shots.",
     april_silent_bullet_tp = "Scans the head for the closest visible point to your crosshair (manip-style math), spawns the ray on the target, and shoots through that point. Cycles offsets every frame.",
     april_silent_bullet_manip = "Finds a shootable angle around cover. Server may reject invalid shots.",

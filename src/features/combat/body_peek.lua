@@ -65,7 +65,7 @@ local function clamp_peek_to_body(peek, cur, max_radius)
 end
 
 function M.enabled()
-    return settings.bool("april_bullet_enabled", false)
+    return settings.enabled("april_bullet_enabled")
         and settings.bool("april_silent_bullet_manip", false)
         and settings.bool("april_bullet_body_peek", false)
 end

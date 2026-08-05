@@ -1099,7 +1099,7 @@ M.BY_ID = {
     april_aimbot = "Smooth camera aim assist on your current target.",
     april_aim_key = "Hold or toggle this key to activate aimbot.",
     april_silent_aim = "Redirects shots to your locked target without moving the camera.",
-    april_bullet_enabled = "Turns on advanced bullet routing for silent aim.",
+    april_bullet_enabled = "Master toggle for advanced bullet routing (hitscan, bullet TP, silent manip). Bind Always / Hold / Toggle from the key chip.",
     april_silent_hitscan = "Registers hits instantly on your locked target. Server may reject invalid shots.",
     april_silent_bullet_tp = "Scans the head for the closest visible point to your crosshair (manip-style math), spawns the ray on the target, and shoots through that point. Cycles offsets every frame.",
     april_silent_bullet_manip = "Finds a shootable angle around cover. Server may reject invalid shots.",
@@ -3409,7 +3409,7 @@ local bullet = {
 title = "Bullet",
 master = "april_bullet_enabled",
 items = {
-cb("april_bullet_enabled", "Enable Bullet", false),
+kb("april_bullet_enabled", "Enable Bullet", false),
 sep(),
 cb("april_silent_hitscan", "Hitscan", false),
 sep(),

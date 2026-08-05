@@ -521,8 +521,11 @@ local function image_draw(handle, x, y, w, h, alpha)
     if not handle or not draw then return false end
     local image_fn = draw.image or draw.Image
     if not image_fn then return false end
-    local a = math.floor(math.max(0, math.min(1, alpha or 1)) * 255)
-    return pcall(image_fn, handle, x, y, w, h, 255, 255, 255, a)
+    -- Premultiply RGB with alpha so faded map tiles don't wash white under Vector shadows.
+    local t = math.max(0, math.min(1, alpha or 1))
+    local c = math.floor(t * 255)
+    local a = math.floor(t * 255)
+    return pcall(image_fn, handle, x, y, w, h, c, c, c, a)
 end
 
 local function draw_fit(map_rect, alpha)

@@ -34,7 +34,7 @@ local MANIP_LABELS = {
 }
 
 local function bullet_flag(name, default)
-    if not settings.bool(P_BULLET, false) then
+    if not settings.enabled(P_BULLET) then
         return false
     end
     return settings.bool(PREFIX .. name, default == true)
@@ -171,7 +171,7 @@ local function draw_peek_visual(info, track)
 end
 
 function M.draw(cx, cy, fov, track)
-    if not settings.bool(P_BULLET, false) then return end
+    if not settings.enabled(P_BULLET) then return end
     if not draw then return end
 
     local info = track and track.manip

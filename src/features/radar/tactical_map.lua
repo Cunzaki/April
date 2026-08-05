@@ -52,9 +52,21 @@ local function radar_opacity()
     return pct / 100
 end
 
+-- Vector shadows every primitive. Dropping only alpha on dark fills looks milky
+-- / white. Premultiply RGB so the whole radar fades through instead of washing out.
 local function fade_col(col, opacity)
     if type(col) ~= "table" then return col end
-    return theme.alpha(col, (col[4] or 1) * (opacity or 1))
+    opacity = tonumber(opacity) or 1
+    if opacity >= 0.999 then
+        return { col[1] or 1, col[2] or 1, col[3] or 1, col[4] or 1 }
+    end
+    if opacity < 0 then opacity = 0 end
+    return {
+        (col[1] or 1) * opacity,
+        (col[2] or 1) * opacity,
+        (col[3] or 1) * opacity,
+        (col[4] or 1) * opacity,
+    }
 end
 
 -- Local atan2 so a missing math_util.atan2 never kills the radar frame.
@@ -248,9 +260,9 @@ end
 local function draw_blip(mx, my, scale, col, clamped, shape)
     if type(col) ~= "table" then col = theme.CYAN end
     local alpha = clamped and 0.72 or 1
-    local c = { col[1] or 1, col[2] or 1, col[3] or 1, (col[4] or 1) * alpha }
+    local c = fade_col(col, alpha)
     local r = math.max(2, scale - (clamped and 1 or 0))
-    local edge = theme.alpha(theme.PANEL_DEEP, math.min(0.42, c[4] * 0.42))
+    local edge = fade_col(theme.PANEL_DEEP, math.min(0.42, (c[4] or 1) * 0.55))
     shape = shape or "circle"
 
     local rect_f = draw_fn("rect_filled", "RectFilled")
@@ -272,7 +284,7 @@ local function draw_blip(mx, my, scale, col, clamped, shape)
     elseif shape == "waypoint" and circ_f then
         pcall(circ_f, mx, my, r + 2, edge, 12)
         pcall(circ_f, mx, my, r + 1, c, 12)
-        pcall(circ_f, mx, my, math.max(1, r - 1), theme.PANEL_DEEP, 10)
+        pcall(circ_f, mx, my, math.max(1, r - 1), fade_col(theme.PANEL_DEEP, c[4] or 1), 10)
     elseif circ_f then
         pcall(circ_f, mx, my, r + 1, edge, 10)
         pcall(circ_f, mx, my, r, c, 10)
@@ -306,6 +318,8 @@ local function draw_map_item(wx, wz, col, label, shape, view, scale, layout, siz
         mx, my, clamped = clamp_to_disc(mx, my, layout.cx, layout.cy, layout.radius)
     end
 
+    local opacity = layout and layout.opacity or 1
+    col = fade_col(col, opacity)
     local size = blip_scale(scale, size_kind)
     draw_blip(mx, my, size, col, clamped, shape)
 
@@ -327,7 +341,7 @@ local function draw_radar_frame(layout, bg, _grid, zoom, _north_up, opacity)
     local rect_f = draw_fn("rect_filled", "RectFilled")
     if rect_f then
         pcall(rect_f, x + 7, y + TITLE_H + 3, w - 14, h - TITLE_H - 10,
-            theme.alpha(bg or theme.PANEL_DEEP, 0.36 * opacity), 7)
+            fade_col(bg or theme.PANEL_DEEP, 0.36 * opacity), 7)
     end
 
     local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
@@ -336,8 +350,9 @@ local function draw_radar_frame(layout, bg, _grid, zoom, _north_up, opacity)
 end
 
 -- Facing arrow. tip points along `ang` (0 = screen up / north).
-local function draw_facing_arrow(mx, my, col, scale, ang)
+local function draw_facing_arrow(mx, my, col, scale, ang, opacity)
     if type(col) ~= "table" then col = theme.CYAN end
+    col = fade_col(col, opacity or 1)
     local r = (scale or 3) + 2
     ang = ang or 0
     local function pt(dist, offset)
@@ -357,7 +372,7 @@ local function draw_facing_arrow(mx, my, col, scale, ang)
         if ok then
             local circle = draw_fn("circle", "Circle")
             if circle then
-                pcall(circle, mx, my, r + 3, theme.alpha(col, 0.28), 20, 1)
+                pcall(circle, mx, my, r + 3, fade_col(col, 0.28), 20, 1)
             end
             return
         end
@@ -463,7 +478,7 @@ local function cover_map_overflow(layout, map_rect, zoom, _north_up, opacity)
     end
 
     -- Re-draw title / zoom on top of the covered strips.
-    draw_util.text(x + 12, y + 8, "RADAR", fade_col(overlay_theme.text(), math.max(0.55, opacity)), 11)
+    draw_util.text(x + 12, y + 8, "RADAR", fade_col(overlay_theme.text(), opacity), 11)
     local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
     local zoom_w = theme.text_w(zoom_text, 9)
     draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, fade_col(theme.TEXT_DIM, opacity), 9)
@@ -564,15 +579,16 @@ function M.draw_inner()
     local radius = math.min(map_rect.w, map_rect.h) * 0.5 - 4
     local zoom = settings.num("april_map_zoom", 1.0)
     local scale = settings.num("april_map_icon_scale", 3)
+    local opacity = radar_opacity()
 
     local layout = {
         x = x, y = y, w = w, h = h, cx = cx, cy = cy,
         radius = radius, label_radius = math.max(24, radius - 28), scale = scale,
+        opacity = opacity,
     }
 
     local bg = theme.MAP_BG or theme.PANEL_DEEP
     local grid = theme.MAP_GRID or theme.BORDER
-    local opacity = radar_opacity()
 
     local cam_x, _, cam_z, body_x, _, body_z = get_view_origin()
     local yaw = get_camera_yaw()
@@ -697,7 +713,10 @@ function M.draw_inner()
         end
     end
     local arrow_ang = north_up and facing or 0
-    draw_facing_arrow(arrow_x, arrow_y, overlay_theme.accent(), blip_scale(scale, "self"), arrow_ang)
+    draw_facing_arrow(
+        arrow_x, arrow_y, overlay_theme.accent(),
+        blip_scale(scale, "self"), arrow_ang, opacity
+    )
 end
 
 return M

@@ -1481,7 +1481,7 @@ local OFF_INFO = {
 }
 local BULLET_PREFIX = "april_silent_"
 function M.bullet_enabled()
-    return settings.bool("april_bullet_enabled", false)
+    return settings.enabled("april_bullet_enabled")
 end
 local function bullet_flag(name, default)
     if not M.bullet_enabled() then
@@ -1705,7 +1705,7 @@ local MANIP_LABELS = {
     off = "Off",
 }
 local function bullet_flag(name, default)
-    if not settings.bool(P_BULLET, false) then
+    if not settings.enabled(P_BULLET) then
         return false
     end
     return settings.bool(PREFIX .. name, default == true)
@@ -1819,7 +1819,7 @@ local function draw_peek_visual(info, track)
     end
 end
 function M.draw(cx, cy, fov, track)
-    if not settings.bool(P_BULLET, false) then return end
+    if not settings.enabled(P_BULLET) then return end
     if not draw then return end
     local info = track and track.manip
     if not info then return end
@@ -2180,7 +2180,7 @@ local function clamp_peek_to_body(peek, cur, max_radius)
     return peek
 end
 function M.enabled()
-    return settings.bool("april_bullet_enabled", false)
+    return settings.enabled("april_bullet_enabled")
         and settings.bool("april_silent_bullet_manip", false)
         and settings.bool("april_bullet_body_peek", false)
 end
@@ -2367,7 +2367,7 @@ function M.register_menu()
         fov_color = theme.CYAN,
         line_color = theme.RED,
     })
-    menu.add_checkbox(T, G.SILENT_AIM, P_BULLET, "Enable Bullet", false)
+    menu_util.register_keybind(T, G.SILENT_AIM, P_BULLET, "Enable Bullet", false)
     combat_menu.register_bullet(T, G.SILENT_AIM, PREFIX, P_BULLET)
     menu_util.bind_children(P_MASTER, {
         PREFIX .. "target_type", PREFIX .. "bone",
@@ -2399,7 +2399,7 @@ local function silent_active()
     return settings.enabled(P_MASTER) and silent_ray.available()
 end
 local function bullet_track_active()
-    return settings.bool(P_BULLET, false)
+    return settings.enabled(P_BULLET)
         and silent_resolve.any_bullet_feature()
         and silent_ray.available()
 end
@@ -2574,7 +2574,7 @@ function M.draw()
             draw_util.circle(cx, cy, fov, col, false)
         end
     end
-    if settings.bool(P_BULLET, false) then
+    if settings.enabled(P_BULLET) then
         bullet_hud.draw(cx, cy, fov, cached_track)
     end
     if silent_active() and locked_target and settings.bool(PREFIX .. "target_line", false) then
@@ -9465,7 +9465,17 @@ local function radar_opacity()
 end
 local function fade_col(col, opacity)
     if type(col) ~= "table" then return col end
-    return theme.alpha(col, (col[4] or 1) * (opacity or 1))
+    opacity = tonumber(opacity) or 1
+    if opacity >= 0.999 then
+        return { col[1] or 1, col[2] or 1, col[3] or 1, col[4] or 1 }
+    end
+    if opacity < 0 then opacity = 0 end
+    return {
+        (col[1] or 1) * opacity,
+        (col[2] or 1) * opacity,
+        (col[3] or 1) * opacity,
+        (col[4] or 1) * opacity,
+    }
 end
 local function atan2(y, x)
     if math_util and type(math_util.atan2) == "function" then
@@ -9636,9 +9646,9 @@ end
 local function draw_blip(mx, my, scale, col, clamped, shape)
     if type(col) ~= "table" then col = theme.CYAN end
     local alpha = clamped and 0.72 or 1
-    local c = { col[1] or 1, col[2] or 1, col[3] or 1, (col[4] or 1) * alpha }
+    local c = fade_col(col, alpha)
     local r = math.max(2, scale - (clamped and 1 or 0))
-    local edge = theme.alpha(theme.PANEL_DEEP, math.min(0.42, c[4] * 0.42))
+    local edge = fade_col(theme.PANEL_DEEP, math.min(0.42, (c[4] or 1) * 0.55))
     shape = shape or "circle"
     local rect_f = draw_fn("rect_filled", "RectFilled")
     local poly = draw_fn("poly_filled", "PolyFilled")
@@ -9658,7 +9668,7 @@ local function draw_blip(mx, my, scale, col, clamped, shape)
     elseif shape == "waypoint" and circ_f then
         pcall(circ_f, mx, my, r + 2, edge, 12)
         pcall(circ_f, mx, my, r + 1, c, 12)
-        pcall(circ_f, mx, my, math.max(1, r - 1), theme.PANEL_DEEP, 10)
+        pcall(circ_f, mx, my, math.max(1, r - 1), fade_col(theme.PANEL_DEEP, c[4] or 1), 10)
     elseif circ_f then
         pcall(circ_f, mx, my, r + 1, edge, 10)
         pcall(circ_f, mx, my, r, c, 10)
@@ -9687,6 +9697,8 @@ local function draw_map_item(wx, wz, col, label, shape, view, scale, layout, siz
     else
         mx, my, clamped = clamp_to_disc(mx, my, layout.cx, layout.cy, layout.radius)
     end
+    local opacity = layout and layout.opacity or 1
+    col = fade_col(col, opacity)
     local size = blip_scale(scale, size_kind)
     draw_blip(mx, my, size, col, clamped, shape)
     if settings.bool("april_map_labels", false) and not clamped then
@@ -9704,14 +9716,15 @@ local function draw_radar_frame(layout, bg, _grid, zoom, _north_up, opacity)
     local rect_f = draw_fn("rect_filled", "RectFilled")
     if rect_f then
         pcall(rect_f, x + 7, y + TITLE_H + 3, w - 14, h - TITLE_H - 10,
-            theme.alpha(bg or theme.PANEL_DEEP, 0.36 * opacity), 7)
+            fade_col(bg or theme.PANEL_DEEP, 0.36 * opacity), 7)
     end
     local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
     local zoom_w = theme.text_w(zoom_text, 9)
     draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, fade_col(theme.TEXT_DIM, opacity), 9)
 end
-local function draw_facing_arrow(mx, my, col, scale, ang)
+local function draw_facing_arrow(mx, my, col, scale, ang, opacity)
     if type(col) ~= "table" then col = theme.CYAN end
+    col = fade_col(col, opacity or 1)
     local r = (scale or 3) + 2
     ang = ang or 0
     local function pt(dist, offset)
@@ -9730,7 +9743,7 @@ local function draw_facing_arrow(mx, my, col, scale, ang)
         if ok then
             local circle = draw_fn("circle", "Circle")
             if circle then
-                pcall(circle, mx, my, r + 3, theme.alpha(col, 0.28), 20, 1)
+                pcall(circle, mx, my, r + 3, fade_col(col, 0.28), 20, 1)
             end
             return
         end
@@ -9821,7 +9834,7 @@ local function cover_map_overflow(layout, map_rect, zoom, _north_up, opacity)
     if bottom_h > 0 then
         pcall(rect_f, map_rect.x, bottom_y, map_rect.w, bottom_h, fill, 0)
     end
-    draw_util.text(x + 12, y + 8, "RADAR", fade_col(overlay_theme.text(), math.max(0.55, opacity)), 11)
+    draw_util.text(x + 12, y + 8, "RADAR", fade_col(overlay_theme.text(), opacity), 11)
     local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
     local zoom_w = theme.text_w(zoom_text, 9)
     draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, fade_col(theme.TEXT_DIM, opacity), 9)
@@ -9911,13 +9924,14 @@ function M.draw_inner()
     local radius = math.min(map_rect.w, map_rect.h) * 0.5 - 4
     local zoom = settings.num("april_map_zoom", 1.0)
     local scale = settings.num("april_map_icon_scale", 3)
+    local opacity = radar_opacity()
     local layout = {
         x = x, y = y, w = w, h = h, cx = cx, cy = cy,
         radius = radius, label_radius = math.max(24, radius - 28), scale = scale,
+        opacity = opacity,
     }
     local bg = theme.MAP_BG or theme.PANEL_DEEP
     local grid = theme.MAP_GRID or theme.BORDER
-    local opacity = radar_opacity()
     local cam_x, _, cam_z, body_x, _, body_z = get_view_origin()
     local yaw = get_camera_yaw()
     local facing = get_facing_angle()
@@ -10026,7 +10040,10 @@ function M.draw_inner()
         end
     end
     local arrow_ang = north_up and facing or 0
-    draw_facing_arrow(arrow_x, arrow_y, overlay_theme.accent(), blip_scale(scale, "self"), arrow_ang)
+    draw_facing_arrow(
+        arrow_x, arrow_y, overlay_theme.accent(),
+        blip_scale(scale, "self"), arrow_ang, opacity
+    )
 end
 return M
 end)()

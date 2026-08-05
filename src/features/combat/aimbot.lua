@@ -64,7 +64,7 @@ function M.register_menu()
         line_color = theme.RED,
     })
 
-    menu.add_checkbox(T, G.SILENT_AIM, P_BULLET, "Enable Bullet", false)
+    menu_util.register_keybind(T, G.SILENT_AIM, P_BULLET, "Enable Bullet", false)
     combat_menu.register_bullet(T, G.SILENT_AIM, PREFIX, P_BULLET)
 
     menu_util.bind_children(P_MASTER, {
@@ -103,7 +103,7 @@ local function silent_active()
 end
 
 local function bullet_track_active()
-    return settings.bool(P_BULLET, false)
+    return settings.enabled(P_BULLET)
         and silent_resolve.any_bullet_feature()
         and silent_ray.available()
 end
@@ -312,7 +312,7 @@ function M.draw()
         end
     end
 
-    if settings.bool(P_BULLET, false) then
+    if settings.enabled(P_BULLET) then
         bullet_hud.draw(cx, cy, fov, cached_track)
     end
 

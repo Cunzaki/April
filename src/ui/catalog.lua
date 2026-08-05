@@ -217,7 +217,7 @@ local function build_aim()
         title = "Bullet",
         master = "april_bullet_enabled",
         items = {
-            cb("april_bullet_enabled", "Enable Bullet", false),
+            kb("april_bullet_enabled", "Enable Bullet", false),
             sep(),
             cb("april_silent_hitscan", "Hitscan", false),
             sep(),

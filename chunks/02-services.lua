@@ -1897,10 +1897,16 @@ function M.draw_panel(x, y, w, h, title, opts)
     local opacity = tonumber(opts.opacity) or 1
     if opacity < 0 then opacity = 0 end
     if opacity > 1 then opacity = 1 end
-    local bg = M.panel_bg()
-    bg = ui_theme.alpha(bg, (bg[4] or 1) * opacity)
-    local title_col = M.text()
-    title_col = ui_theme.alpha(title_col, (title_col[4] or 1) * math.max(0.55, opacity))
+    local function fade(col)
+        return {
+            (col[1] or 1) * opacity,
+            (col[2] or 1) * opacity,
+            (col[3] or 1) * opacity,
+            (col[4] or 1) * opacity,
+        }
+    end
+    local bg = fade(M.panel_bg())
+    local title_col = fade(M.text())
     if type(fill) == "function" then
         pcall(fill, x, y, w, h, bg, rounding)
     end
@@ -5591,7 +5597,7 @@ local MENU_KEYS = {
     "april_silent_target_type", "april_silent_bone",
     "april_silent_filters", "april_silent_whitelist_ids",
     "april_silent_targets", "april_silent_options",
-    "april_bullet_enabled", "april_bullet_body_peek",
+    "april_bullet_enabled", "april_bullet_enabled_mode", "april_bullet_body_peek",
     "april_silent_bullet_tp",
     "april_silent_bullet_manip",
     "april_silent_manip_dist", "april_silent_manip_extend", "april_silent_manip_extend_dist",
@@ -5737,6 +5743,7 @@ local HOTKEY_KEYS = {
     "april_antiaim_enabled",
     "april_fakeduck_enabled",
     "april_silent_aim",
+    "april_bullet_enabled",
     "april_player_enabled",
     "april_aim_key",
     "april_ui_menu_key",

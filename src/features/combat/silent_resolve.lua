@@ -21,7 +21,7 @@ local OFF_INFO = {
 local BULLET_PREFIX = "april_silent_"
 
 function M.bullet_enabled()
-    return settings.bool("april_bullet_enabled", false)
+    return settings.enabled("april_bullet_enabled")
 end
 
 local function bullet_flag(name, default)
