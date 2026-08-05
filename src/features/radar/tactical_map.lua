@@ -45,6 +45,18 @@ local function ensure_draw_api()
     end)
 end
 
+local function radar_opacity()
+    local pct = tonumber(settings.num("april_map_opacity", 100)) or 100
+    if pct < 15 then pct = 15 end
+    if pct > 100 then pct = 100 end
+    return pct / 100
+end
+
+local function fade_col(col, opacity)
+    if type(col) ~= "table" then return col end
+    return theme.alpha(col, (col[4] or 1) * (opacity or 1))
+end
+
 -- Local atan2 so a missing math_util.atan2 never kills the radar frame.
 local function atan2(y, x)
     if math_util and type(math_util.atan2) == "function" then
@@ -306,20 +318,21 @@ local function draw_map_item(wx, wz, col, label, shape, view, scale, layout, siz
     end
 end
 
-local function draw_radar_frame(layout, bg, _grid, zoom, _north_up)
+local function draw_radar_frame(layout, bg, _grid, zoom, _north_up, opacity)
     local x, y, w, h = layout.x, layout.y, layout.w, layout.h
+    opacity = opacity or 1
 
-    overlay_theme.draw_panel(x, y, w, h, "RADAR")
+    overlay_theme.draw_panel(x, y, w, h, "RADAR", { opacity = opacity })
 
     local rect_f = draw_fn("rect_filled", "RectFilled")
     if rect_f then
         pcall(rect_f, x + 7, y + TITLE_H + 3, w - 14, h - TITLE_H - 10,
-            theme.alpha(bg or theme.PANEL_DEEP, 0.36), 7)
+            theme.alpha(bg or theme.PANEL_DEEP, 0.36 * opacity), 7)
     end
 
     local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
     local zoom_w = theme.text_w(zoom_text, 9)
-    draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, theme.TEXT_DIM, 9)
+    draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, fade_col(theme.TEXT_DIM, opacity), 9)
 end
 
 -- Facing arrow. tip points along `ang` (0 = screen up / north).
@@ -401,11 +414,12 @@ local function build_yaw_view(cx, cy, zoom, yaw, view_x, view_z)
     }
 end
 
-local function attach_map_texture(view)
+local function attach_map_texture(view, opacity)
     if not view or not view.map_rect then
         return false
     end
-    local ok, mode = pcall(map_image.draw_centered, view, view.map_rect, 0.92)
+    local map_a = 0.92 * (opacity or 1)
+    local ok, mode = pcall(map_image.draw_centered, view, view.map_rect, map_a)
     if not ok or not mode then
         return false
     end
@@ -422,11 +436,12 @@ end
 
 -- Repaint panel padding/title and map guides after the bounded image.
 -- Do NOT refill map_rect (draw_panel would wipe the map).
-local function cover_map_overflow(layout, map_rect, zoom, _north_up)
+local function cover_map_overflow(layout, map_rect, zoom, _north_up, opacity)
     local rect_f = draw_fn("rect_filled", "RectFilled")
     if not rect_f then return end
     local x, y, w, h = layout.x, layout.y, layout.w, layout.h
-    local fill = overlay_theme.panel_bg()
+    opacity = opacity or 1
+    local fill = fade_col(overlay_theme.panel_bg(), opacity)
 
     -- Title bar strip (includes top padding above map_rect)
     local title_h = math.max(TITLE_H + 3, map_rect.y - y)
@@ -448,10 +463,10 @@ local function cover_map_overflow(layout, map_rect, zoom, _north_up)
     end
 
     -- Re-draw title / zoom on top of the covered strips.
-    draw_util.text(x + 12, y + 8, "RADAR", overlay_theme.text(), 11)
+    draw_util.text(x + 12, y + 8, "RADAR", fade_col(overlay_theme.text(), math.max(0.55, opacity)), 11)
     local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
     local zoom_w = theme.text_w(zoom_text, 9)
-    draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, theme.TEXT_DIM, 9)
+    draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, fade_col(theme.TEXT_DIM, opacity), 9)
 end
 
 function M.register_menu()
@@ -482,6 +497,7 @@ function M.register_menu()
     menu_util.gap(T, G.RADAR)
     menu.add_slider_int(T, G.RADAR, "april_map_zoom", "Radar Zoom Level", 0.05, 5.0, 1.0, "%.2f", root)
     menu.add_slider_int(T, G.RADAR, "april_map_size", "Radar Size", 140, 420, 250, root)
+    menu.add_slider_int(T, G.RADAR, "april_map_opacity", "Radar Opacity", 15, 100, 100, root)
     menu.add_slider_int(T, G.RADAR, "april_map_icon_scale", "Radar Blip Size", 2, 6, 3, root)
     menu_util.button(T, G.RADAR, "april_map_reset_position", "Reset Radar Position", function()
         local sw = select(1, draw_util.screen_size())
@@ -505,7 +521,8 @@ function M.register_menu()
         "april_map_player_col", "april_map_npc_col",
         "april_map_loot_col", "april_map_world_col", "april_map_base_col",
         "april_map_wp_col", "april_map_raid_col",
-        "april_map_zoom", "april_map_size", "april_map_icon_scale", "april_map_reset_position",
+        "april_map_zoom", "april_map_size", "april_map_opacity",
+        "april_map_icon_scale", "april_map_reset_position",
     })
 end
 
@@ -555,6 +572,7 @@ function M.draw_inner()
 
     local bg = theme.MAP_BG or theme.PANEL_DEEP
     local grid = theme.MAP_GRID or theme.BORDER
+    local opacity = radar_opacity()
 
     local cam_x, _, cam_z, body_x, _, body_z = get_view_origin()
     local yaw = get_camera_yaw()
@@ -574,13 +592,13 @@ function M.draw_inner()
         view = build_yaw_view(cx, cy, zoom, yaw, view_x, view_z)
     end
 
-    draw_radar_frame(layout, bg, grid, zoom, north_up)
+    draw_radar_frame(layout, bg, grid, zoom, north_up, opacity)
 
     if north_up then
-        attach_map_texture(view)
+        attach_map_texture(view, opacity)
         if view.texture_mode then
             -- Repaint panel padding/title over the map image.
-            cover_map_overflow(layout, map_rect, zoom, true)
+            cover_map_overflow(layout, map_rect, zoom, true, opacity)
         end
     end
 

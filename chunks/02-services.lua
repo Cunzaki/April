@@ -1894,15 +1894,22 @@ function M.draw_panel(x, y, w, h, title, opts)
     local fill = draw and (draw.rect_filled or draw.RectFilled)
     local text = draw and (draw.text or draw.Text)
     local rounding = gs and gs.CORNER or 6
+    local opacity = tonumber(opts.opacity) or 1
+    if opacity < 0 then opacity = 0 end
+    if opacity > 1 then opacity = 1 end
+    local bg = M.panel_bg()
+    bg = ui_theme.alpha(bg, (bg[4] or 1) * opacity)
+    local title_col = M.text()
+    title_col = ui_theme.alpha(title_col, (title_col[4] or 1) * math.max(0.55, opacity))
     if type(fill) == "function" then
-        pcall(fill, x, y, w, h, M.panel_bg(), rounding)
+        pcall(fill, x, y, w, h, bg, rounding)
     end
     if title and type(text) == "function" then
         if opts.title_center then
             local tw = ui_theme.text_w(title, 11)
-            pcall(text, x + (w - tw) * 0.5, y + 8, title, M.text(), 11)
+            pcall(text, x + (w - tw) * 0.5, y + 8, title, title_col, 11)
         else
-            pcall(text, x + 12, y + 8, title, M.text(), 11)
+            pcall(text, x + 12, y + 8, title, title_col, 11)
         end
     end
 end
@@ -5634,7 +5641,8 @@ local MENU_KEYS = {
     "april_base_xray_enabled", "april_base_xray_enabled_mode", "april_base_xray_range",
     "april_waypoints_enabled", "april_waypoints_enabled_mode", "april_wp_dist", "april_wp_beacon", "april_wp_beacon_h",
     "april_wp_draw", "april_wp_slot",
-    "april_map_enabled", "april_map_enabled_mode", "april_map_zoom", "april_map_size", "april_map_icon_scale",
+    "april_map_enabled", "april_map_enabled_mode", "april_map_zoom", "april_map_size",
+    "april_map_opacity", "april_map_icon_scale",
     "april_map_show_players", "april_map_show_npcs", "april_map_show_loot", "april_map_show_world",
     "april_map_show_base", "april_map_show_waypoints", "april_map_show_raids",
     "april_map_labels", "april_map_x", "april_map_y",

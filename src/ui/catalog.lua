@@ -565,6 +565,7 @@ local function build_radar()
                 color("april_map_raid_col", "Radar Raids Color", { 1, 0.5, 0, 1 }),
                 sl("april_map_zoom", "Radar Zoom Level", 0.05, 5, 1, true),
                 sl("april_map_size", "Radar Size", 140, 420, 250),
+                sl("april_map_opacity", "Radar Opacity", 15, 100, 100),
                 sl("april_map_icon_scale", "Radar Blip Size", 2, 6, 3),
                 btn("april_map_reset_position", "Reset Radar Position"),
             },

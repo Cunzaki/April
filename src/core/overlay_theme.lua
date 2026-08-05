@@ -122,17 +122,24 @@ function M.draw_panel(x, y, w, h, title, opts)
     local fill = draw and (draw.rect_filled or draw.RectFilled)
     local text = draw and (draw.text or draw.Text)
     local rounding = gs and gs.CORNER or 6
+    local opacity = tonumber(opts.opacity) or 1
+    if opacity < 0 then opacity = 0 end
+    if opacity > 1 then opacity = 1 end
+    local bg = M.panel_bg()
+    bg = ui_theme.alpha(bg, (bg[4] or 1) * opacity)
+    local title_col = M.text()
+    title_col = ui_theme.alpha(title_col, (title_col[4] or 1) * math.max(0.55, opacity))
     if type(fill) == "function" then
         -- One surface only. Vector shadows every primitive, so layered headers
         -- and borders make these compact modules look embossed.
-        pcall(fill, x, y, w, h, M.panel_bg(), rounding)
+        pcall(fill, x, y, w, h, bg, rounding)
     end
     if title and type(text) == "function" then
         if opts.title_center then
             local tw = ui_theme.text_w(title, 11)
-            pcall(text, x + (w - tw) * 0.5, y + 8, title, M.text(), 11)
+            pcall(text, x + (w - tw) * 0.5, y + 8, title, title_col, 11)
         else
-            pcall(text, x + 12, y + 8, title, M.text(), 11)
+            pcall(text, x + 12, y + 8, title, title_col, 11)
         end
     end
 end

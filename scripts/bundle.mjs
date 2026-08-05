@@ -132,7 +132,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.1.19";
+const VERSION = "4.1.20";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector
@@ -293,8 +293,15 @@ function buildModuleBody(files, fullBundle = false) {
       || (fullBundle && rel === "game/player_state.lua")
       || (fullBundle && rel === "core/cache.lua")
       || (fullBundle && rel === "core/image_cache.lua")
+      || (fullBundle && rel === "core/overlay_theme.lua")
+      || (fullBundle && rel === "core/panel_drag.lua")
       || (fullBundle && rel === "ui/gs_widgets.lua")
       || (fullBundle && rel === "ui/tooltips.lua")
+      || (fullBundle && rel === "ui/hud_dock.lua")
+      || (fullBundle && rel === "ui/gs_icons.lua")
+      || (fullBundle && rel === "ui/gs_anim.lua")
+      || (fullBundle && rel === "ui/gs_input.lua")
+      || (fullBundle && rel === "ui/gs_state.lua")
       || rel === "ui/custom_menu.lua"
       || rel === "ui/catalog.lua";
     const src = compactLuaSource(fs.readFileSync(full, "utf8"), stripIndent);
@@ -321,19 +328,6 @@ const CHUNKS = [
   { name: "Interface", file: "05-interface.lua", files: ORDER.slice(featuresEnd) },
 ];
 
-const fullBody = buildModuleBody(ORDER, true);
-const fullBundle = stripLuaComments(header + fullBody + footer);
-fs.writeFileSync(SCRIPT1_OUT, fullBundle);
-const bundleBytes = Buffer.byteLength(fullBundle);
-const MAX_VECTOR_BUNDLE_BYTES = 1_050_000;
-if (bundleBytes > MAX_VECTOR_BUNDLE_BYTES) {
-  console.error(
-    `Bundle is ${bundleBytes} bytes; keep it below ${MAX_VECTOR_BUNDLE_BYTES} for Vector LoadUrl safety.`,
-  );
-  process.exit(1);
-}
-console.log("Built", path.relative(ROOT, SCRIPT1_OUT), `(${(bundleBytes / 1024).toFixed(1)} KB full local bundle)`);
-
 const CHUNK_DIR = path.join(ROOT, "chunks");
 fs.mkdirSync(CHUNK_DIR, { recursive: true });
 for (const old of fs.readdirSync(CHUNK_DIR)) {
@@ -345,6 +339,19 @@ for (let i = 0; i < CHUNKS.length; i++) {
   const contents = stripLuaComments(buildModuleBody(chunk.files) + chunkFooter);
   fs.writeFileSync(path.join(CHUNK_DIR, chunk.file), contents);
   console.log("Built", `chunks/${chunk.file}`, `(${(Buffer.byteLength(contents) / 1024).toFixed(1)} KB)`);
+}
+
+const fullBody = buildModuleBody(ORDER, true);
+const fullBundle = stripLuaComments(header + fullBody + footer);
+fs.writeFileSync(SCRIPT1_OUT, fullBundle);
+const bundleBytes = Buffer.byteLength(fullBundle);
+const MAX_VECTOR_BUNDLE_BYTES = 1_050_000;
+console.log("Built", path.relative(ROOT, SCRIPT1_OUT), `(${(bundleBytes / 1024).toFixed(1)} KB full local bundle)`);
+if (bundleBytes > MAX_VECTOR_BUNDLE_BYTES) {
+  console.error(
+    `Bundle is ${bundleBytes} bytes; keep it below ${MAX_VECTOR_BUNDLE_BYTES} for Vector LoadUrl safety.`,
+  );
+  process.exit(1);
 }
 
 const remoteBase = "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks";

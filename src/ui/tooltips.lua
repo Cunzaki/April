@@ -151,6 +151,7 @@ M.BY_ID = {
     -- Radar
     april_map_enabled = "Shows a draggable tactical minimap overlay.",
     april_ui_radar_layers = "Choose what appears on the tactical map.",
+    april_map_opacity = "Panel and map transparency for the tactical radar overlay.",
     april_waypoints_enabled = "Place and navigate to saved world waypoints.",
 
     -- GPU mesh chams (exploits preset indices — see docs/API.md §15)
@@ -356,13 +357,13 @@ function M.for_item(item)
     end
     if not tip then return nil end
     if item.type == "keybind" then
-        return tip .. " Left-click the key chip to bind; right-click it for Always, Hold, or Toggle. Hold mode also requires the feature switch enabled. Escape, Backspace, or Delete clears the bind."
+        return tip .. " Left-click the key chip to bind (Mouse 1 works after you release); right-click it for Always, Hold, or Toggle. Hold mode also requires the feature switch enabled. Escape, Backspace, or Delete clears the bind."
     end
     if item.type == "aim_key" then
-        return tip .. " Left-click the key chip to bind; right-click it for Always, Hold, or Toggle. Escape, Backspace, or Delete clears the bind."
+        return tip .. " Left-click the key chip to bind (Mouse 1 works after you release); right-click it for Always, Hold, or Toggle. Escape, Backspace, or Delete clears the bind."
     end
     if item.type == "hotkey" then
-        return tip .. " Left-click the key chip to bind. Escape, Backspace, or Delete clears the bind."
+        return tip .. " Left-click the key chip to bind (Mouse 1 works after you release). Escape, Backspace, or Delete clears the bind."
     end
     return tip
 end

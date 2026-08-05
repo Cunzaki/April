@@ -15,6 +15,7 @@ M.open_combo = nil
 M.open_multi = nil
 M.open_color = nil
 M.listening_key = nil
+M.listen_wait_lmb_up = false -- ignore M1 until the chip-click is released
 M.drag_offset_x = 0
 M.drag_offset_y = 0
 M.dragging_window = false
@@ -46,13 +47,24 @@ M._tip_hover_id = nil
 M._tip_hover_ms = 0
 
 local LISTEN_SKIP = {
-    [0x01] = true, -- LMB used for UI
     -- Generic modifiers fire together with left/right variants (0xA0-0xA5).
     -- Skip them so LALT/RALT, LCTL/RCTL, LSHI/RSHI bind as distinct keys.
+    -- Mouse 1 (0x01) is bindable after the chip-click is released.
     [0x10] = true, -- VK_SHIFT
     [0x11] = true, -- VK_CONTROL
     [0x12] = true, -- VK_MENU (Alt)
 }
+
+local function begin_key_listen(id)
+    M.listening_key = id
+    -- Chip was clicked with LMB; wait for release so that press isn't captured.
+    M.listen_wait_lmb_up = true
+end
+
+local function end_key_listen()
+    M.listening_key = nil
+    M.listen_wait_lmb_up = false
+end
 
 local function listen_skip_vk(vk)
     return LISTEN_SKIP[vk] == true
@@ -649,7 +661,7 @@ local function assign_listen_key(vk)
     if mode ~= nil and tonumber(mode) == 0 then
         state.set(mode_id, 2)
     end
-    M.listening_key = nil
+    end_key_listen()
 end
 
 -- Windows reports both the generic modifier (SHIFT/CONTROL/MENU) and the
@@ -698,15 +710,37 @@ local function try_capture_modifier()
 end
 
 function M.tick_key_listen()
-    if not M.listening_key then return end
+    if not M.listening_key then
+        M.listen_wait_lmb_up = false
+        return
+    end
     -- Escape / Backspace / Delete clear the bind so users can remove keys.
     if input.key_pressed(0x1B)
         or input.key_pressed(0x08)
         or input.key_pressed(0x2E)
     then
         state.set_key(M.listening_key, 0)
-        M.listening_key = nil
+        end_key_listen()
         return
+    end
+    -- After opening listen with LMB, wait for release before accepting Mouse 1.
+    if M.listen_wait_lmb_up then
+        if not (input.lmb or input.key_down(0x01)) then
+            M.listen_wait_lmb_up = false
+        else
+            -- Still allow non-mouse keys while holding the chip click.
+            if try_capture_modifier() then
+                return
+            end
+            for i = 1, #LISTEN_VKS do
+                local vk = LISTEN_VKS[i]
+                if vk ~= 0x01 and not listen_skip_vk(vk) and input.key_pressed(vk) then
+                    assign_listen_key(vk)
+                    return
+                end
+            end
+            return
+        end
     end
     if try_capture_modifier() then
         return
@@ -785,7 +819,7 @@ local function focus_input(id)
     M.open_multi = nil
     M.open_color = nil
     M.open_bind_mode = nil
-    M.listening_key = nil
+    end_key_listen()
     M._input_repeat_vk = nil
 end
 
@@ -853,7 +887,7 @@ function M.begin_slider_input(id, minv, maxv, is_float, val, fmt)
     M.open_multi = nil
     M.open_color = nil
     M.open_bind_mode = nil
-    M.listening_key = nil
+    end_key_listen()
     M._input_repeat_vk = nil
     fmt = fmt or (is_float and "%.2f" or "%d")
     M._slider_input_meta[id] = {
@@ -1364,13 +1398,17 @@ function M.keybind(x, y, w, id, label, default_on, opts)
 
     if ui_rmb_clicked(kx, ky, chip_w, 16) then
         mark_interacted()
-        M.listening_key = nil
+        end_key_listen()
         open_bind_mode_popup(id, kx, ky, chip_w)
     elseif ui_clicked(kx, ky, chip_w, 16) then
         mark_interacted()
         M.open_bind_mode = nil
         M._bind_mode_hit = nil
-        M.listening_key = listening and nil or id
+        if listening then
+            end_key_listen()
+        else
+            begin_key_listen(id)
+        end
     elseif mode_open then
         M._bind_mode_anchor = { id = id, x = kx, y = ky, w = chip_w }
     end
@@ -1402,13 +1440,17 @@ function M.aim_key_row(x, y, w, key_id, mode_id, label)
 
     if ui_rmb_clicked(kx, ky, chip_w, 16) then
         mark_interacted()
-        M.listening_key = nil
+        end_key_listen()
         open_bind_mode_popup(key_id, kx, ky, chip_w)
     elseif ui_clicked(kx, ky, chip_w, 16) then
         mark_interacted()
         M.open_bind_mode = nil
         M._bind_mode_hit = nil
-        M.listening_key = listening and nil or key_id
+        if listening then
+            end_key_listen()
+        else
+            begin_key_listen(key_id)
+        end
     elseif mode_open then
         M._bind_mode_anchor = { id = key_id, x = kx, y = ky, w = chip_w }
     end
@@ -1442,7 +1484,11 @@ function M.hotkey_row(x, y, w, id, label, default_vk)
         mark_interacted()
         M.open_bind_mode = nil
         M._bind_mode_hit = nil
-        M.listening_key = listening and nil or id
+        if listening then
+            end_key_listen()
+        else
+            begin_key_listen(id)
+        end
     end
 
     return h

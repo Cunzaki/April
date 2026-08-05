@@ -1183,6 +1183,7 @@ M.BY_ID = {
     april_event_status_active_only = "Hides inactive event rows from the event status panel.",
     april_map_enabled = "Shows a draggable tactical minimap overlay.",
     april_ui_radar_layers = "Choose what appears on the tactical map.",
+    april_map_opacity = "Panel and map transparency for the tactical radar overlay.",
     april_waypoints_enabled = "Place and navigate to saved world waypoints.",
     april_world_chams = "GPU mesh chams on selected resource types (in-range only).",
     april_world_chams_mode = "Fill, Wireframe, Fill Glow, or Wireframe Glow.",
@@ -1369,13 +1370,13 @@ function M.for_item(item)
     end
     if not tip then return nil end
     if item.type == "keybind" then
-        return tip .. " Left-click the key chip to bind; right-click it for Always, Hold, or Toggle. Hold mode also requires the feature switch enabled. Escape, Backspace, or Delete clears the bind."
+        return tip .. " Left-click the key chip to bind (Mouse 1 works after you release); right-click it for Always, Hold, or Toggle. Hold mode also requires the feature switch enabled. Escape, Backspace, or Delete clears the bind."
     end
     if item.type == "aim_key" then
-        return tip .. " Left-click the key chip to bind; right-click it for Always, Hold, or Toggle. Escape, Backspace, or Delete clears the bind."
+        return tip .. " Left-click the key chip to bind (Mouse 1 works after you release); right-click it for Always, Hold, or Toggle. Escape, Backspace, or Delete clears the bind."
     end
     if item.type == "hotkey" then
-        return tip .. " Left-click the key chip to bind. Escape, Backspace, or Delete clears the bind."
+        return tip .. " Left-click the key chip to bind (Mouse 1 works after you release). Escape, Backspace, or Delete clears the bind."
     end
     return tip
 end
@@ -1712,6 +1713,7 @@ M.open_combo = nil
 M.open_multi = nil
 M.open_color = nil
 M.listening_key = nil
+M.listen_wait_lmb_up = false
 M.drag_offset_x = 0
 M.drag_offset_y = 0
 M.dragging_window = false
@@ -1741,11 +1743,18 @@ M._tip_candidate = nil
 M._tip_hover_id = nil
 M._tip_hover_ms = 0
 local LISTEN_SKIP = {
-    [0x01] = true,
     [0x10] = true,
     [0x11] = true,
     [0x12] = true,
 }
+local function begin_key_listen(id)
+    M.listening_key = id
+    M.listen_wait_lmb_up = true
+end
+local function end_key_listen()
+    M.listening_key = nil
+    M.listen_wait_lmb_up = false
+end
 local function listen_skip_vk(vk)
     return LISTEN_SKIP[vk] == true
 end
@@ -2274,7 +2283,7 @@ local function assign_listen_key(vk)
     if mode ~= nil and tonumber(mode) == 0 then
         state.set(mode_id, 2)
     end
-    M.listening_key = nil
+    end_key_listen()
 end
 local MODIFIER_PAIRS = {
     { generic = 0x10, left = 0xA0, right = 0xA1 },
@@ -2316,14 +2325,34 @@ local function try_capture_modifier()
     return false
 end
 function M.tick_key_listen()
-    if not M.listening_key then return end
+    if not M.listening_key then
+        M.listen_wait_lmb_up = false
+        return
+    end
     if input.key_pressed(0x1B)
         or input.key_pressed(0x08)
         or input.key_pressed(0x2E)
     then
         state.set_key(M.listening_key, 0)
-        M.listening_key = nil
+        end_key_listen()
         return
+    end
+    if M.listen_wait_lmb_up then
+        if not (input.lmb or input.key_down(0x01)) then
+            M.listen_wait_lmb_up = false
+        else
+            if try_capture_modifier() then
+                return
+            end
+            for i = 1, #LISTEN_VKS do
+                local vk = LISTEN_VKS[i]
+                if vk ~= 0x01 and not listen_skip_vk(vk) and input.key_pressed(vk) then
+                    assign_listen_key(vk)
+                    return
+                end
+            end
+            return
+        end
     end
     if try_capture_modifier() then
         return
@@ -2395,7 +2424,7 @@ local function focus_input(id)
     M.open_multi = nil
     M.open_color = nil
     M.open_bind_mode = nil
-    M.listening_key = nil
+    end_key_listen()
     M._input_repeat_vk = nil
 end
 local SLIDER_INPUT_VKS = {
@@ -2456,7 +2485,7 @@ function M.begin_slider_input(id, minv, maxv, is_float, val, fmt)
     M.open_multi = nil
     M.open_color = nil
     M.open_bind_mode = nil
-    M.listening_key = nil
+    end_key_listen()
     M._input_repeat_vk = nil
     fmt = fmt or (is_float and "%.2f" or "%d")
     M._slider_input_meta[id] = {
@@ -2915,13 +2944,17 @@ function M.keybind(x, y, w, id, label, default_on, opts)
     M.text(kx + (chip_w - tw) * 0.5, ky + 1, klabel, theme.TEXT_ACTIVE, theme.FONT_SMALL)
     if ui_rmb_clicked(kx, ky, chip_w, 16) then
         mark_interacted()
-        M.listening_key = nil
+        end_key_listen()
         open_bind_mode_popup(id, kx, ky, chip_w)
     elseif ui_clicked(kx, ky, chip_w, 16) then
         mark_interacted()
         M.open_bind_mode = nil
         M._bind_mode_hit = nil
-        M.listening_key = listening and nil or id
+        if listening then
+            end_key_listen()
+        else
+            begin_key_listen(id)
+        end
     elseif mode_open then
         M._bind_mode_anchor = { id = id, x = kx, y = ky, w = chip_w }
     end
@@ -2947,13 +2980,17 @@ function M.aim_key_row(x, y, w, key_id, mode_id, label)
     M.text(kx + (chip_w - tw) * 0.5, ky + 1, klabel, theme.TEXT_ACTIVE, theme.FONT_SMALL)
     if ui_rmb_clicked(kx, ky, chip_w, 16) then
         mark_interacted()
-        M.listening_key = nil
+        end_key_listen()
         open_bind_mode_popup(key_id, kx, ky, chip_w)
     elseif ui_clicked(kx, ky, chip_w, 16) then
         mark_interacted()
         M.open_bind_mode = nil
         M._bind_mode_hit = nil
-        M.listening_key = listening and nil or key_id
+        if listening then
+            end_key_listen()
+        else
+            begin_key_listen(key_id)
+        end
     elseif mode_open then
         M._bind_mode_anchor = { id = key_id, x = kx, y = ky, w = chip_w }
     end
@@ -2981,7 +3018,11 @@ function M.hotkey_row(x, y, w, id, label, default_vk)
         mark_interacted()
         M.open_bind_mode = nil
         M._bind_mode_hit = nil
-        M.listening_key = listening and nil or id
+        if listening then
+            end_key_listen()
+        else
+            begin_key_listen(id)
+        end
     end
     return h
 end
@@ -3700,6 +3741,7 @@ color("april_map_wp_col", "Radar Waypoints Color", { 0.3, 0.9, 1, 1 }),
 color("april_map_raid_col", "Radar Raids Color", { 1, 0.5, 0, 1 }),
 sl("april_map_zoom", "Radar Zoom Level", 0.05, 5, 1, true),
 sl("april_map_size", "Radar Size", 140, 420, 250),
+sl("april_map_opacity", "Radar Opacity", 15, 100, 100),
 sl("april_map_icon_scale", "Radar Blip Size", 2, 6, 3),
 btn("april_map_reset_position", "Reset Radar Position"),
 },
