@@ -9481,7 +9481,8 @@ local M = {}
 local P = "april_map_enabled"
 local X_ID = "april_map_x"
 local Y_ID = "april_map_y"
-local TITLE_H = 24
+local TITLE_H = 14
+local EDGE = 2
 local BASE_VISIBLE_STUDS = 3200
 local SIZE_MULT = {
     player = 1.65,
@@ -9756,20 +9757,32 @@ local function draw_map_item(wx, wz, col, label, shape, view, scale, layout, siz
         )
     end
 end
-local function draw_radar_frame(layout, bg, _grid, zoom, _north_up, opacity, has_map)
+local function draw_radar_base(layout, bg, opacity, has_map)
     local x, y, w, h = layout.x, layout.y, layout.w, layout.h
     opacity = opacity or 1
-    overlay_theme.draw_panel(x, y, w, h, "RADAR", { opacity = opacity })
+    overlay_theme.draw_panel(x, y, w, h, nil, { opacity = opacity })
     if not has_map then
         local rect_f = draw_fn("rect_filled", "RectFilled")
         if rect_f then
-            pcall(rect_f, x + 7, y + TITLE_H + 3, w - 14, h - TITLE_H - 10,
-                fade_col(bg or theme.PANEL_DEEP, 0.55 * opacity), 7)
+            pcall(rect_f, x + EDGE, y + EDGE, w - EDGE * 2, h - EDGE * 2,
+                fade_col(bg or theme.PANEL_DEEP, 0.55 * opacity), 4)
         end
     end
+end
+local function draw_radar_labels(layout, zoom, opacity)
+    local x, y, w = layout.x, layout.y, layout.w
+    opacity = opacity or 1
+    local rect_f = draw_fn("rect_filled", "RectFilled")
+    if rect_f then
+        pcall(rect_f, x + EDGE, y + EDGE, w - EDGE * 2, TITLE_H,
+            fade_col(overlay_theme.panel_bg(), 0.70 * opacity), 0)
+    end
+    local title_col = fade_col(overlay_theme.text(), opacity)
+    local zoom_col = fade_col(theme.TEXT_DIM, opacity)
+    draw_util.text(x + EDGE + 4, y + EDGE + 1, "RADAR", title_col, 10)
     local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
     local zoom_w = theme.text_w(zoom_text, 9)
-    draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, fade_col(theme.TEXT_DIM, opacity), 9)
+    draw_util.text(x + w - EDGE - 4 - zoom_w, y + EDGE + 2, zoom_text, zoom_col, 9)
 end
 local function draw_facing_arrow(mx, my, col, scale, ang, opacity)
     if type(col) ~= "table" then col = theme.CYAN end
@@ -9955,18 +9968,12 @@ function M.draw_inner()
     )
     x, y = panel_drag.clamp(x, y, size, size, sw, sh, X_ID, Y_ID)
     local w, h = size, size
-    local body = {
-        x = x + 7,
-        y = y + TITLE_H + 3,
-        w = w - 14,
-        h = h - TITLE_H - 10,
-    }
-    local map_span = math.max(32, math.min(body.w, body.h))
+    local inner = math.max(32, size - EDGE * 2)
     local map_rect = {
-        x = body.x + (body.w - map_span) * 0.5,
-        y = body.y + (body.h - map_span) * 0.5,
-        w = map_span,
-        h = map_span,
+        x = x + EDGE,
+        y = y + EDGE,
+        w = inner,
+        h = inner,
     }
     local cx = map_rect.x + map_rect.w * 0.5
     local cy = map_rect.y + map_rect.h * 0.5
@@ -9996,15 +10003,11 @@ function M.draw_inner()
         view = build_yaw_view(cx, cy, zoom, yaw, view_x, view_z)
     end
     local will_draw_map = north_up and map_image.ready()
-    draw_radar_frame(layout, bg, grid, zoom, north_up, opacity, will_draw_map)
+    draw_radar_base(layout, bg, opacity, will_draw_map)
     if north_up then
-        if attach_map_texture(view, opacity) then
-            draw_util.text(x + 12, y + 8, "RADAR", fade_col(overlay_theme.text(), opacity), 11)
-            local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
-            local zoom_w = theme.text_w(zoom_text, 9)
-            draw_util.text(x + w - zoom_w - 11, y + 8, zoom_text, fade_col(theme.TEXT_DIM, opacity), 9)
-        end
+        attach_map_texture(view, opacity)
     end
+    draw_radar_labels(layout, zoom, opacity)
     if settings.bool("april_map_show_world", false) then
         local col = settings.color("april_map_world_col", theme.GREEN)
         local items = cache.spatial.world and cache.spatial.world.all or cache.world or {}
