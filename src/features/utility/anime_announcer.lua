@@ -704,12 +704,22 @@ function M.draw()
         reset_pending = false
     end
 
+    -- Y default -1 is a "flush to bottom" sentinel. Resolve it before drag
+    -- hit-testing or the grab box sits at the top while she draws at the bottom.
+    local stored_y = settings.num(Y_ID, -1)
+    if stored_y < 0 then
+        persist_num(Y_ID, default_y)
+    end
+
     local x, y = panel_drag.update(
         "anime_baddie", X_ID, Y_ID,
         character_w, character_h, sw, sh,
         16, default_y, true
     )
-    if y < 0 then y = default_y end
+    if y < 0 then
+        y = default_y
+        persist_num(Y_ID, y)
+    end
     x, y = panel_drag.clamp(x, y, character_w, character_h, sw, sh, X_ID, Y_ID)
 
     local now = now_ms()

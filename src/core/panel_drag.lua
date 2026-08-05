@@ -57,7 +57,8 @@ local function blocked(mx, my, allow_menu)
     if widgets then
         if widgets.listening_key then return true end
         if widgets.dragging_window then return true end
-        if widgets.interacted then return true end
+        -- Do not gate on widgets.interacted: features draw before the menu
+        -- clears that flag, so a prior-frame click would lock every overlay.
     end
     return false
 end

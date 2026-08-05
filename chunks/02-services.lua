@@ -1460,7 +1460,6 @@ local function blocked(mx, my, allow_menu)
     if widgets then
         if widgets.listening_key then return true end
         if widgets.dragging_window then return true end
-        if widgets.interacted then return true end
     end
     return false
 end
