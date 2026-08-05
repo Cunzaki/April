@@ -8,6 +8,7 @@ local env = April.require("core.env")
 local player_state = April.require("game.player_state")
 local team_state = April.require("game.team_state")
 local npcs = April.require("game.npcs")
+local folders = April.require("game.folders")
 local data = April.require("game.anime_announcer_data")
 local image_cache = April.require("core.image_cache")
 local draw_util = April.require("core.draw_util")
@@ -76,6 +77,19 @@ local last_emit_ms = -100000
 local session_key = nil
 local last_scan_ms = -100000
 local nearby_cd = {}
+local layout_entry
+local stats_root = nil
+local stats_refs = {}
+local last_stats_root_ms = -100000
+local last_stats_ms = -100000
+local last_world_ms = -100000
+local sensed = {}
+
+local BUBBLE_W = 304
+local BUBBLE_PAD = 14
+local BUBBLE_FONT = 14
+local BUBBLE_LINE_H = 18
+local BUBBLE_HEADER_H = 24
 
 local function now_ms()
     local fn = utility and (utility.get_tick_count or utility.GetTickCount)
@@ -117,7 +131,13 @@ local function reset_runtime()
     visibility = 0
     last_emit_ms = -100000
     last_scan_ms = -100000
+    last_stats_ms = -100000
+    last_world_ms = -100000
     nearby_cd = {}
+    stats_root = nil
+    stats_refs = {}
+    last_stats_root_ms = -100000
+    sensed = {}
 end
 
 local function event_enabled(event_name)
@@ -164,6 +184,7 @@ end
 local function activate(entry, now)
     if not entry then return end
     local duration = clamp(settings.num(DURATION_ID, 5), 2, 10) * 1000
+    if layout_entry then layout_entry(entry) end
     entry.started = now
     entry.expires = now + duration
     current = entry
@@ -223,7 +244,11 @@ local function read_attr(inst, key)
 end
 
 local function status_active(stats, name)
-    local child = find_child(stats, name)
+    local child = stats_refs[name]
+    if not child then
+        child = find_child(stats, name)
+        stats_refs[name] = child
+    end
     if not child then return false end
     local reach = tonumber(read_attr(child, "Reach"))
     if reach ~= nil then return reach > 0 end
@@ -231,10 +256,20 @@ local function status_active(stats, name)
 end
 
 local function parse_stat_value(stats, name)
-    local root = find_child(stats, name)
+    local root_key = name .. ":root"
+    local root = stats_refs[root_key]
+    if not root then
+        root = find_child(stats, name)
+        stats_refs[root_key] = root
+    end
     if not root then return nil end
-    local bar = find_child(root, "Bar")
-    local label = find_child(bar, "StatLabel") or find_child(root, "StatLabel")
+    local label_key = name .. ":label"
+    local label = stats_refs[label_key]
+    if not label then
+        local bar = find_child(root, "Bar")
+        label = find_child(bar, "StatLabel") or find_child(root, "StatLabel")
+        stats_refs[label_key] = label
+    end
     local text = label and env.safe_call(function()
         return label.Text or label.text
     end)
@@ -245,9 +280,19 @@ end
 local function local_stats()
     local player = cache.local_player or ep.get_local_player()
     if not player then return {} end
-    local pgui = find_child(player, "PlayerGui")
-    local main = find_child(pgui, "Main")
-    local stats = find_child(main, "Stats")
+    local stats = stats_root
+    local now = now_ms()
+    if not stats or now - last_stats_root_ms >= 1000 then
+        last_stats_root_ms = now
+        local pgui = find_child(player, "PlayerGui")
+        local main = find_child(pgui, "Main")
+        local resolved = find_child(main, "Stats")
+        if resolved ~= stats_root then
+            stats_root = resolved
+            stats_refs = {}
+        end
+        stats = stats_root
+    end
     if not stats then return {} end
 
     local temp = find_child(stats, "Temperature")
@@ -279,7 +324,6 @@ local function boss_present()
 end
 
 local function timed_crate_present()
-    local folders = April.require("game.folders")
     local bucket = find_child(folders.from_key("loners"), "Timed Crate")
     if not bucket then return false end
     local kids = env.safe_call(function()
@@ -329,17 +373,33 @@ local function local_state()
     if hp and max_hp and max_hp > 0 then ratio = hp / max_hp end
 
     local downed = as_bool(player_state.humanoid_attr(local_player, "Downed"))
-    local safe = as_bool(player_state.player_attr(local_player, "SafeZone"))
-        or as_bool(player_state.player_attr(local_player, "InSafeZone"))
-    local stats = local_stats()
     local now = now_ms()
-    local staff, enemy = false, false
+    if now - last_stats_ms >= 180 then
+        last_stats_ms = now
+        local stats = local_stats()
+        sensed.combat = stats.combat == true
+        sensed.bleed = stats.bleed == true
+        sensed.radiation = stats.radiation == true
+        sensed.drowning = stats.drowning == true
+        sensed.cold = stats.cold == true
+        sensed.hot = stats.hot == true
+        sensed.hunger_low = stats.hunger_low == true
+        sensed.thirst_low = stats.thirst_low == true
+        sensed.safe = as_bool(player_state.player_attr(local_player, "SafeZone"))
+            or as_bool(player_state.player_attr(local_player, "InSafeZone"))
+    end
+
     if alive and now - last_scan_ms >= 450 then
         last_scan_ms = now
-        staff, enemy = nearby_flags(local_player)
-    else
-        staff = snapshot.staff_nearby == true
-        enemy = snapshot.enemy_nearby == true
+        sensed.staff_nearby, sensed.enemy_nearby = nearby_flags(local_player)
+        sensed.party = team_state.in_party() == true
+        sensed.reviving = not downed and player_state.is_reviving(local_player) == true
+    end
+
+    if now - last_world_ms >= 900 then
+        last_world_ms = now
+        sensed.boss = boss_present()
+        sensed.timed_crate = timed_crate_present()
     end
 
     return {
@@ -349,21 +409,21 @@ local function local_state()
         ratio = ratio,
         low = alive and ratio ~= nil and ratio <= 0.30,
         downed = alive and downed,
-        safe = safe,
-        combat = stats.combat == true,
-        bleed = stats.bleed == true,
-        radiation = stats.radiation == true,
-        drowning = stats.drowning == true,
-        cold = stats.cold == true,
-        hot = stats.hot == true,
-        hunger_low = alive and stats.hunger_low == true,
-        thirst_low = alive and stats.thirst_low == true,
-        party = team_state.in_party() == true,
-        reviving = alive and not downed and player_state.is_reviving(local_player) == true,
-        staff_nearby = alive and staff,
-        enemy_nearby = alive and enemy,
-        boss = boss_present(),
-        timed_crate = timed_crate_present(),
+        safe = sensed.safe == true,
+        combat = sensed.combat == true,
+        bleed = sensed.bleed == true,
+        radiation = sensed.radiation == true,
+        drowning = sensed.drowning == true,
+        cold = sensed.cold == true,
+        hot = sensed.hot == true,
+        hunger_low = alive and sensed.hunger_low == true,
+        thirst_low = alive and sensed.thirst_low == true,
+        party = sensed.party == true,
+        reviving = alive and sensed.reviving == true,
+        staff_nearby = alive and sensed.staff_nearby == true,
+        enemy_nearby = alive and sensed.enemy_nearby == true,
+        boss = sensed.boss == true,
+        timed_crate = sensed.timed_crate == true,
     }
 end
 
@@ -476,61 +536,65 @@ local function wrap_text(text, max_width, size)
     return lines
 end
 
-local function draw_bubble(x, y, character_w, character_h, text, alpha, sw, sh, character)
+layout_entry = function(entry)
+    entry.lines = wrap_text(
+        entry.text,
+        BUBBLE_W - BUBBLE_PAD * 2,
+        BUBBLE_FONT
+    )
+    entry.bubble_w = BUBBLE_W
+    entry.bubble_h = BUBBLE_HEADER_H + BUBBLE_PAD
+        + #entry.lines * BUBBLE_LINE_H
+end
+
+local function draw_bubble(x, y, character_w, character_h, entry, alpha, sw, sh, character)
     if not draw or not draw.rect_filled or alpha <= 0.01 then return end
-    local font = 14
-    local bubble_w = 290
-    local pad = 14
-    local lines = wrap_text(text, bubble_w - pad * 2, font)
-    local line_h = 18
-    local bubble_h = pad * 2 + #lines * line_h
+    if not entry.lines then layout_entry(entry) end
+    local bubble_w = entry.bubble_w
+    local bubble_h = entry.bubble_h
 
     local mouth_x = x + character_w * (character.mouth_x or 0.56)
     local mouth_y = y + character_h * (character.mouth_y or 0.30)
 
-    local bx = mouth_x + 52
-    local by = mouth_y - bubble_h * 0.45
+    -- Keep the panel entirely outside April's body; only the tail reaches her.
+    local bx = x + character_w + 18
+    local by = mouth_y - BUBBLE_HEADER_H
     local tail_right = false
     if bx + bubble_w > sw - 8 then
-        bx = mouth_x - bubble_w - 28
+        bx = x - bubble_w - 18
         tail_right = true
     end
     bx = clamp(bx, 8, math.max(8, sw - bubble_w - 8))
     by = clamp(by, 8, math.max(8, (sh or sw) - bubble_h - 8))
 
-    local fill_a = clamp(alpha * 1.08, 0, 1)
+    local fill_a = clamp(alpha, 0, 1)
     local accent = overlay_theme.accent()
-    -- Solid underlay so world/UI never bleeds through the bubble.
-    draw.rect_filled(bx - 1, by - 1, bubble_w + 2, bubble_h + 2, { 0, 0, 0, 0.88 * fill_a }, 11)
-    draw.rect_filled(bx, by, bubble_w, bubble_h, { 0.045, 0.04, 0.06, 0.99 * fill_a }, 10)
-    if draw.rect then
-        draw.rect(bx, by, bubble_w, bubble_h,
-            { accent[1] or 0.8, accent[2] or 0.3, accent[3] or 1, 0.92 * fill_a }, 10, 1.5)
-    end
+    local panel = { 0.035, 0.032, 0.045, fill_a }
+    local accent_col = {
+        accent[1] or 0.8, accent[2] or 0.3, accent[3] or 1, fill_a,
+    }
+
+    -- Vector shadows primitives itself; one opaque surface stays crisp.
+    draw.rect_filled(bx, by, bubble_w, bubble_h, panel, 8)
+    draw.rect_filled(bx + 8, by, bubble_w - 16, 2, accent_col, 0)
 
     if draw.poly_filled then
         local tail_y = clamp(mouth_y, by + 9, by + bubble_h - 9)
         local tip_x = mouth_x + (tail_right and -2 or 2)
         local base_x = tail_right and (bx + bubble_w - 2) or (bx + 2)
-        local under = {
-            { base_x, tail_y - 9 },
-            { tip_x, mouth_y },
-            { base_x, tail_y + 9 },
-        }
-        local top = {
+        local tail = {
             { base_x, tail_y - 7 },
             { tip_x, mouth_y },
             { base_x, tail_y + 7 },
         }
-        draw.poly_filled(under, { 0, 0, 0, 0.88 * fill_a })
-        draw.poly_filled(top, { 0.045, 0.04, 0.06, 0.99 * fill_a })
+        draw.poly_filled(tail, panel)
     end
 
-    for i = 1, #lines do
-        local tx = bx + pad
-        local ty = by + pad + (i - 1) * line_h
-        draw_util.text(tx + 1, ty + 1, lines[i], { 0, 0, 0, fill_a }, font)
-        draw_util.text(tx, ty, lines[i], { 1, 1, 1, fill_a }, font)
+    draw_util.text(bx + BUBBLE_PAD, by + 7, "APRIL", accent_col, 11)
+    for i = 1, #entry.lines do
+        local tx = bx + BUBBLE_PAD
+        local ty = by + BUBBLE_HEADER_H + (i - 1) * BUBBLE_LINE_H
+        draw_util.text(tx, ty, entry.lines[i], { 1, 1, 1, fill_a }, BUBBLE_FONT)
     end
 end
 
@@ -540,11 +604,7 @@ function M.install()
     session_key = session_id()
     pcall(data.load_remote)
     for _, character in ipairs(data.characters) do
-        local expressions = {}
-        for expression in pairs(character.expressions) do
-            expressions[#expressions + 1] = expression
-        end
-        for _, expression in ipairs(expressions) do
+        for _, expression in ipairs({ "neutral", "smile" }) do
             image_cache.preload(
                 "anime_baddie:" .. character.id .. ":" .. expression,
                 character.urls(expression)
@@ -631,8 +691,6 @@ end
 
 function M.draw()
     if visibility <= 0.01 or not draw or not draw.image then return end
-    overlay_theme.sync()
-
     local character = active_character()
     local scale = clamp(settings.num(SCALE_ID, 100), 60, 150) / 100
     local opacity = clamp(settings.num(OPACITY_ID, 100), 30, 100) / 100
@@ -677,7 +735,7 @@ function M.draw()
         local bubble_alpha = math.max(alpha, 0.96 * visibility)
         local remaining = current.expires - now
         if remaining < 350 then bubble_alpha = bubble_alpha * clamp(remaining / 350, 0, 1) end
-        draw_bubble(x, draw_y, character_w, character_h, current.text, bubble_alpha, sw, sh, character)
+        draw_bubble(x, draw_y, character_w, character_h, current, bubble_alpha, sw, sh, character)
     end
 end
 

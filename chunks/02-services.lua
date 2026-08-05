@@ -1412,6 +1412,20 @@ April._mods["core.panel_drag"] = (function()
 local settings = April.require("core.settings")
 local M = {}
 local state = {}
+local custom_menu = nil
+local widgets = nil
+local gs_state = nil
+local function resolve_ui_modules()
+    if not custom_menu then
+        pcall(function() custom_menu = April.require("ui.custom_menu") end)
+    end
+    if not widgets then
+        pcall(function() widgets = April.require("ui.gs_widgets") end)
+    end
+    if not gs_state then
+        pcall(function() gs_state = April.require("ui.gs_state") end)
+    end
+end
 local function mouse_pos()
     local mx, my = 0, 0
     local util_mouse = utility and (utility.get_mouse_pos or utility.GetMousePos)
@@ -1432,24 +1446,18 @@ local function persist_num(id, value)
     if menu and menu.set then
         pcall(menu.set, id, value)
     end
-    pcall(function()
-        April.require("ui.gs_state").set(id, value)
-    end)
+    resolve_ui_modules()
+    if gs_state and gs_state.set then pcall(gs_state.set, id, value) end
 end
 local function blocked(mx, my, allow_menu)
-    local ok_menu, custom_menu = pcall(function()
-        return April.require("ui.custom_menu")
-    end)
-    if ok_menu and custom_menu and custom_menu.contains_point
+    resolve_ui_modules()
+    if custom_menu and custom_menu.contains_point
         and custom_menu.contains_point(mx or 0, my or 0)
         and not allow_menu
     then
         return true
     end
-    local ok, widgets = pcall(function()
-        return April.require("ui.gs_widgets")
-    end)
-    if ok and widgets then
+    if widgets then
         if widgets.listening_key then return true end
         if widgets.dragging_window then return true end
         if widgets.interacted then return true end
@@ -1958,7 +1966,6 @@ function M.info(msg, duration_ms)
 end
 function M.draw()
     if #queue == 0 or not draw then return end
-    overlay_theme.sync()
     local now = tick()
     local font = 13
     local pad = 12
@@ -2132,6 +2139,8 @@ local debug = April.require("core.debug")
 local M = {}
 local keys = {}
 local RETRY_MS = 5000
+local MAX_ENTRIES = 384
+local key_count = 0
 local function tick_ms()
     local fn = utility and (utility.get_tick_count or utility.GetTickCount)
     if type(fn) ~= "function" then return 0 end
@@ -2153,8 +2162,36 @@ local function asset_digits(asset_id_or_url)
     if type(asset_id_or_url) == "number" then return tostring(asset_id_or_url) end
     return tostring(asset_id_or_url):match("(%d+)$") or tostring(asset_id_or_url):match("^(%d+)$")
 end
+local function is_pinned(key)
+    return key == "startup_author_profile"
+        or tostring(key):find("^anime_baddie:") ~= nil
+end
+local function free_handle(entry)
+    if not entry or not entry.handle then return end
+    local fn = draw and (draw.free_image or draw.FreeImage)
+    if type(fn) == "function" then pcall(fn, entry.handle) end
+    entry.handle = nil
+end
+local function evict_cold()
+    while key_count >= MAX_ENTRIES do
+        local oldest_key, oldest_at = nil, math.huge
+        for key, entry in pairs(keys) do
+            if not is_pinned(key) and (entry.last_used or 0) < oldest_at then
+                oldest_key = key
+                oldest_at = entry.last_used or 0
+            end
+        end
+        if not oldest_key then return end
+        free_handle(keys[oldest_key])
+        keys[oldest_key] = nil
+        key_count = key_count - 1
+    end
+end
 function M.ensure(key, asset_id_or_url)
-    if keys[key] then return keys[key] end
+    if keys[key] then
+        keys[key].last_used = tick_ms()
+        return keys[key]
+    end
     local urls = nil
     local url = nil
     local asset_src = asset_id_or_url
@@ -2166,6 +2203,7 @@ function M.ensure(key, asset_id_or_url)
         url = url_for(asset_id_or_url)
     end
     if not url then return nil end
+    evict_cold()
     keys[key] = {
         url = url,
         urls = urls,
@@ -2175,7 +2213,9 @@ function M.ensure(key, asset_id_or_url)
         failed = false,
         retry_at = 0,
         fallback = false,
+        last_used = tick_ms(),
     }
+    key_count = key_count + 1
     return keys[key]
 end
 function M.register(key, asset_id_or_url)
@@ -2188,7 +2228,7 @@ local function try_fallback(entry)
         if not next_url then return false end
         entry.url_idx = idx
         entry.url = next_url
-        entry.handle = nil
+        free_handle(entry)
         entry.failed = false
         return true
     end
@@ -2201,7 +2241,7 @@ local function try_fallback(entry)
     local fb = chain[entry.fallback_idx]
     if not fb or fb == entry.url then return false end
     entry.url = fb
-    entry.handle = nil
+    free_handle(entry)
     entry.failed = false
     return true
 end
@@ -2217,10 +2257,11 @@ local function get_handle(key)
     if not entry or not draw or not draw.load_image then
         return nil
     end
+    entry.last_used = tick_ms()
     if entry.failed then
         if tick_ms() < (entry.retry_at or 0) then return nil end
         entry.failed = false
-        entry.handle = nil
+        free_handle(entry)
         entry.url_idx = 1
         if entry.urls then entry.url = entry.urls[1] end
     end
@@ -2243,7 +2284,7 @@ local function get_handle(key)
         debug.warn_once("img:" .. key, "load failed - " .. entry.url)
         entry.failed = true
         entry.retry_at = tick_ms() + RETRY_MS
-        entry.handle = nil
+        free_handle(entry)
         return nil
     end
     return entry.handle
@@ -2274,7 +2315,7 @@ function M.state(key)
     if entry.failed then
         if tick_ms() >= (entry.retry_at or 0) then
             entry.failed = false
-            entry.handle = nil
+            free_handle(entry)
             entry.url_idx = 1
             if entry.urls then entry.url = entry.urls[1] end
             return "loading"
@@ -2288,7 +2329,7 @@ function M.state(key)
         end
         entry.failed = true
         entry.retry_at = tick_ms() + RETRY_MS
-        entry.handle = nil
+        free_handle(entry)
         return "failed"
     end
     return "ready"

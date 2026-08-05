@@ -350,7 +350,6 @@ function M.draw()
     if not settings.enabled(P) then return end
     if not draw or not draw.text then return end
 
-    overlay_theme.sync()
     local sw, sh = draw_util.screen_size()
     local count = math.max(#rows, 1)
     local height = TITLE_H + count * ROW_H + 8

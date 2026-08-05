@@ -17,12 +17,26 @@ local CHAMS_COLOR = "april_loot_chams_color"
 
 M._static = {}
 M._drops = {}
+M._unlimited = {}
+local draw_candidates = {}
+local chams_candidates = {}
+local candidate_seen = {}
 
 local UNLIMITED_RANGE = {
     april_timed_crate = true,
     april_care_package = true,
     april_btr_crate = true,
 }
+
+local function nearby_with_unlimited(me_pos, range, out)
+    cache.query_spatial(cache.spatial.loot, me_pos.x, me_pos.z, range, out)
+    for key in pairs(candidate_seen) do candidate_seen[key] = nil end
+    for i = 1, #out do candidate_seen[out[i]] = true end
+    for _, entry in ipairs(M._unlimited) do
+        if not candidate_seen[entry] then out[#out + 1] = entry end
+    end
+    return out
+end
 
 local function loot_chams_labels()
     local labels = {}
@@ -59,7 +73,8 @@ local function collect_loot_chams(applied)
     local range = settings.num("april_loot_range", 300)
     local range_sq = range * range
 
-    for _, entry in ipairs(cache.loot) do
+    local entries = nearby_with_unlimited(me_pos, range, chams_candidates)
+    for _, entry in ipairs(entries) do
         if not env.is_valid(entry.inst) then goto continue end
         local idx = loot_chams_index_for(entry.toggle_id)
         if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
@@ -96,6 +111,13 @@ local function rebuild_cache()
     for _, entry in ipairs(M._drops) do
         table.insert(cache.loot, entry)
     end
+    M._unlimited = {}
+    for _, entry in ipairs(cache.loot) do
+        if UNLIMITED_RANGE[entry.toggle_id] then
+            M._unlimited[#M._unlimited + 1] = entry
+        end
+    end
+    cache.spatial.loot = cache.build_spatial(cache.loot)
 end
 
 local function refresh_dynamic_positions(list)
@@ -353,6 +375,7 @@ function M.update(_dt)
         if cache.should_refresh_positions() then
             if #M._drops > 0 then
                 refresh_dynamic_positions(M._drops)
+                rebuild_cache()
             end
         end
     end
@@ -378,7 +401,11 @@ function M.draw()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
 
-    for _, entry in ipairs(cache.loot) do
+    local entries = cache.loot
+    if me_pos then
+        entries = nearby_with_unlimited(me_pos, range, draw_candidates)
+    end
+    for _, entry in ipairs(entries) do
         if not settings.enabled(entry.toggle_id) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
 

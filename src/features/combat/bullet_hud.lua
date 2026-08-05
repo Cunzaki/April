@@ -56,7 +56,6 @@ local function draw_status_panel(cx, cy, fov, info)
     if not settings.bool(PREFIX .. "manip_status", false) then return end
     if not info then return end
 
-    overlay_theme.sync()
 
     local hitscan_on = info.hitscan_on == true
     local tp_on = info.tp_on == true

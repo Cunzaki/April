@@ -230,6 +230,18 @@ function M.guard(key, fn, ...)
     return a, b, c
 end
 
+-- Production frame dispatch: preserve feature-level fault isolation without
+-- building a traceback for every successful update and draw.
+function M.guard_fast(key, fn, ...)
+    if type(fn) ~= "function" then return nil end
+    local ok, a, b, c = pcall(fn, ...)
+    if not ok then
+        M.error_once(key, a)
+        return nil
+    end
+    return a, b, c
+end
+
 function M.guard_bool(key, fn, ...)
     if type(fn) ~= "function" then return false end
     local dense = dense_trace()

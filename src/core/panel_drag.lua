@@ -4,6 +4,21 @@ local settings = April.require("core.settings")
 local M = {}
 
 local state = {}
+local custom_menu = nil
+local widgets = nil
+local gs_state = nil
+
+local function resolve_ui_modules()
+    if not custom_menu then
+        pcall(function() custom_menu = April.require("ui.custom_menu") end)
+    end
+    if not widgets then
+        pcall(function() widgets = April.require("ui.gs_widgets") end)
+    end
+    if not gs_state then
+        pcall(function() gs_state = April.require("ui.gs_state") end)
+    end
+end
 
 local function mouse_pos()
     local mx, my = 0, 0
@@ -27,25 +42,19 @@ local function persist_num(id, value)
     if menu and menu.set then
         pcall(menu.set, id, value)
     end
-    pcall(function()
-        April.require("ui.gs_state").set(id, value)
-    end)
+    resolve_ui_modules()
+    if gs_state and gs_state.set then pcall(gs_state.set, id, value) end
 end
 
 local function blocked(mx, my, allow_menu)
-    local ok_menu, custom_menu = pcall(function()
-        return April.require("ui.custom_menu")
-    end)
-    if ok_menu and custom_menu and custom_menu.contains_point
+    resolve_ui_modules()
+    if custom_menu and custom_menu.contains_point
         and custom_menu.contains_point(mx or 0, my or 0)
         and not allow_menu
     then
         return true
     end
-    local ok, widgets = pcall(function()
-        return April.require("ui.gs_widgets")
-    end)
-    if ok and widgets then
+    if widgets then
         if widgets.listening_key then return true end
         if widgets.dragging_window then return true end
         if widgets.interacted then return true end

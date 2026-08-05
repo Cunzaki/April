@@ -446,6 +446,7 @@ M.base = {}
 M.npcs = {}
 M.raids = {}
 M.waypoints = {}
+M.spatial = { world = nil, loot = nil, base = nil }
 M.stats = {
     last_player_scan = 0,
     last_world_scan = 0,
@@ -568,6 +569,48 @@ function M.prune_distance(list, origin, max_dist)
         list[i] = nil
     end
     return write - 1
+end
+local SPATIAL_CELL = 128
+local function spatial_key(cx, cz)
+    return tostring(cx) .. ":" .. tostring(cz)
+end
+function M.build_spatial(list)
+    local index = { cells = {}, all = list or {}, cell = SPATIAL_CELL }
+    local esp_scan = April.require("game.esp_scan")
+    for _, entry in ipairs(list or {}) do
+        local x, _, z = esp_scan.entry_coords(entry)
+        if x and z then
+            local cx = math.floor(x / SPATIAL_CELL)
+            local cz = math.floor(z / SPATIAL_CELL)
+            local key = spatial_key(cx, cz)
+            local bucket = index.cells[key]
+            if not bucket then
+                bucket = {}
+                index.cells[key] = bucket
+            end
+            bucket[#bucket + 1] = entry
+        end
+    end
+    return index
+end
+function M.query_spatial(index, x, z, radius, out)
+    out = out or {}
+    for i = #out, 1, -1 do out[i] = nil end
+    if not index or not x or not z or not radius then return out end
+    local cell = index.cell or SPATIAL_CELL
+    local min_x = math.floor((x - radius) / cell)
+    local max_x = math.floor((x + radius) / cell)
+    local min_z = math.floor((z - radius) / cell)
+    local max_z = math.floor((z + radius) / cell)
+    for cx = min_x, max_x do
+        for cz = min_z, max_z do
+            local bucket = index.cells[spatial_key(cx, cz)]
+            if bucket then
+                for i = 1, #bucket do out[#out + 1] = bucket[i] end
+            end
+        end
+    end
+    return out
 end
 return M
 end)()
@@ -809,6 +852,15 @@ function M.guard(key, fn, ...)
         return nil
     end
     if dense then M.step_done(key) end
+    return a, b, c
+end
+function M.guard_fast(key, fn, ...)
+    if type(fn) ~= "function" then return nil end
+    local ok, a, b, c = pcall(fn, ...)
+    if not ok then
+        M.error_once(key, a)
+        return nil
+    end
     return a, b, c
 end
 function M.guard_bool(key, fn, ...)

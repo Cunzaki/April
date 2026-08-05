@@ -27,6 +27,8 @@ local DEFAULT_MAX_DIST = 500
 
 local gear_cache = {}
 local last_poll_ms = 0
+local last_cache_prune_ms = 0
+local CACHE_PRUNE_MS = 2000
 
 M._target = nil
 M._layout = nil
@@ -458,6 +460,17 @@ function M.update(_dt)
     if now - last_poll_ms < TARGET_POLL_MS then return end
     last_poll_ms = now
 
+    if now - last_cache_prune_ms >= CACHE_PRUNE_MS then
+        last_cache_prune_ms = now
+        local live = {}
+        for _, player in ipairs(cache.players or {}) do
+            live[player_key(player)] = true
+        end
+        for uid in pairs(gear_cache) do
+            if not live[uid] then gear_cache[uid] = nil end
+        end
+    end
+
     M.refresh_target()
 end
 
@@ -465,7 +478,6 @@ function M.draw()
     if not settings.enabled(P) then return end
     if not draw or not draw.text or not draw.rect_filled then return end
 
-    overlay_theme.sync()
     local target = M._target
     local layout = M._layout
     if not target or not layout then return end

@@ -12,6 +12,8 @@ local M = {}
 
 local keys = {}
 local RETRY_MS = 5000
+local MAX_ENTRIES = 384
+local key_count = 0
 
 local function tick_ms()
     local fn = utility and (utility.get_tick_count or utility.GetTickCount)
@@ -37,8 +39,39 @@ local function asset_digits(asset_id_or_url)
     return tostring(asset_id_or_url):match("(%d+)$") or tostring(asset_id_or_url):match("^(%d+)$")
 end
 
+local function is_pinned(key)
+    return key == "startup_author_profile"
+        or tostring(key):find("^anime_baddie:") ~= nil
+end
+
+local function free_handle(entry)
+    if not entry or not entry.handle then return end
+    local fn = draw and (draw.free_image or draw.FreeImage)
+    if type(fn) == "function" then pcall(fn, entry.handle) end
+    entry.handle = nil
+end
+
+local function evict_cold()
+    while key_count >= MAX_ENTRIES do
+        local oldest_key, oldest_at = nil, math.huge
+        for key, entry in pairs(keys) do
+            if not is_pinned(key) and (entry.last_used or 0) < oldest_at then
+                oldest_key = key
+                oldest_at = entry.last_used or 0
+            end
+        end
+        if not oldest_key then return end
+        free_handle(keys[oldest_key])
+        keys[oldest_key] = nil
+        key_count = key_count - 1
+    end
+end
+
 function M.ensure(key, asset_id_or_url)
-    if keys[key] then return keys[key] end
+    if keys[key] then
+        keys[key].last_used = tick_ms()
+        return keys[key]
+    end
 
     local urls = nil
     local url = nil
@@ -53,6 +86,7 @@ function M.ensure(key, asset_id_or_url)
     end
     if not url then return nil end
 
+    evict_cold()
     keys[key] = {
         url = url,
         urls = urls,
@@ -62,7 +96,9 @@ function M.ensure(key, asset_id_or_url)
         failed = false,
         retry_at = 0,
         fallback = false,
+        last_used = tick_ms(),
     }
+    key_count = key_count + 1
     return keys[key]
 end
 
@@ -77,7 +113,7 @@ local function try_fallback(entry)
         if not next_url then return false end
         entry.url_idx = idx
         entry.url = next_url
-        entry.handle = nil
+        free_handle(entry)
         entry.failed = false
         return true
     end
@@ -91,7 +127,7 @@ local function try_fallback(entry)
     local fb = chain[entry.fallback_idx]
     if not fb or fb == entry.url then return false end
     entry.url = fb
-    entry.handle = nil
+    free_handle(entry)
     entry.failed = false
     return true
 end
@@ -109,10 +145,11 @@ local function get_handle(key)
     if not entry or not draw or not draw.load_image then
         return nil
     end
+    entry.last_used = tick_ms()
     if entry.failed then
         if tick_ms() < (entry.retry_at or 0) then return nil end
         entry.failed = false
-        entry.handle = nil
+        free_handle(entry)
         entry.url_idx = 1
         if entry.urls then entry.url = entry.urls[1] end
     end
@@ -137,7 +174,7 @@ local function get_handle(key)
         debug.warn_once("img:" .. key, "load failed - " .. entry.url)
         entry.failed = true
         entry.retry_at = tick_ms() + RETRY_MS
-        entry.handle = nil
+        free_handle(entry)
         return nil
     end
 
@@ -174,7 +211,7 @@ function M.state(key)
     if entry.failed then
         if tick_ms() >= (entry.retry_at or 0) then
             entry.failed = false
-            entry.handle = nil
+            free_handle(entry)
             entry.url_idx = 1
             if entry.urls then entry.url = entry.urls[1] end
             return "loading"
@@ -188,7 +225,7 @@ function M.state(key)
         end
         entry.failed = true
         entry.retry_at = tick_ms() + RETRY_MS
-        entry.handle = nil
+        free_handle(entry)
         return "failed"
     end
     return "ready"

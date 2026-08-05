@@ -27,6 +27,8 @@ local CHAMS_MODE = "april_base_chams_mode"
 local CHAMS_COLOR = "april_base_chams_color"
 
 M._static = {}
+local draw_candidates = {}
+local chams_candidates = {}
 
 local function base_chams_labels()
     local labels = {}
@@ -62,7 +64,10 @@ local function collect_base_chams(applied)
     local range = settings.num("april_base_range", 150)
     local range_sq = range * range
 
-    for _, entry in ipairs(cache.base) do
+    local entries = cache.query_spatial(
+        cache.spatial.base, me_pos.x, me_pos.z, range, chams_candidates
+    )
+    for _, entry in ipairs(entries) do
         if not env.is_valid(entry.inst) then goto continue end
         local idx = base_chams_index_for(entry.toggle_id)
         if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
@@ -85,6 +90,7 @@ local function rebuild_cache()
     for _, entry in ipairs(M._static) do
         table.insert(cache.base, entry)
     end
+    cache.spatial.base = cache.build_spatial(cache.base)
 end
 
 local function append_base_model(out, model, type_name, toggle_id)
@@ -343,7 +349,13 @@ function M.draw()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
 
-    for _, entry in ipairs(cache.base) do
+    local entries = cache.base
+    if me_pos then
+        entries = cache.query_spatial(
+            cache.spatial.base, me_pos.x, me_pos.z, range, draw_candidates
+        )
+    end
+    for _, entry in ipairs(entries) do
         if not settings.enabled(entry.toggle_id) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
 

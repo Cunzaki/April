@@ -18,6 +18,8 @@ local REFRESH_PER_FRAME = 2
 local snaps = {}
 local pl_cache = {}
 local refresh_index = 0
+local last_cleanup_ms = 0
+local CLEANUP_MS = 2000
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -585,12 +587,28 @@ end
 -- Vector geometry every frame; only metadata is throttled here.
 function M.tick(players)
     local n = #(players or {})
+    local now = tick_ms()
+    if now - last_cleanup_ms >= CLEANUP_MS then
+        last_cleanup_ms = now
+        local live = {}
+        for i = 1, n do
+            if players[i] then live[cache_key(players[i])] = true end
+        end
+        local local_player = ep.get_local_player()
+        if local_player then live[cache_key(local_player)] = true end
+        for key in pairs(snaps) do
+            if not live[key] then snaps[key] = nil end
+        end
+        for key in pairs(pl_cache) do
+            if not live[key] then pl_cache[key] = nil end
+        end
+    end
+
     if n == 0 then
         refresh_index = 0
         return
     end
 
-    local now = tick_ms()
     for _ = 1, math.min(REFRESH_PER_FRAME, n) do
         refresh_index = (refresh_index % n) + 1
         local player = players[refresh_index]

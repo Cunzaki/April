@@ -26,6 +26,7 @@ local function menu_toggle_vk()
     return vk
 end
 local open = true
+local settled_closed = false
 local tab_index = 1
 local win_x, win_y = 80, 80
 local scroll = { left = 0, right = 0 }
@@ -555,15 +556,24 @@ function M.draw()
     if not draw then return end
 
     gin.begin_frame()
-    anim.sync_theme()
-    widgets.begin_popups()
-    hud_dock.begin_frame()
 
     if gin.key_pressed(menu_toggle_vk()) and not widgets.listening_key
         and not widgets.active_input and not widgets.active_slider_input then
         open = not open
+        if open then settled_closed = false end
         gin.set_menu_open(open)
     end
+
+    if not open and settled_closed then
+        if gin._menu_open or gin._game_cursor_hidden then
+            gin.set_menu_open(false)
+        end
+        return
+    end
+
+    anim.sync_theme()
+    widgets.begin_popups()
+    hud_dock.begin_frame()
 
     widgets.tick_key_listen()
     widgets.tick_slider_input()
@@ -571,11 +581,13 @@ function M.draw()
 
     local open_progress = anim.menu_open_progress(open)
     if not open and open_progress <= 0.015 then
+        settled_closed = true
         if gin._menu_open or gin._game_cursor_hidden then
             gin.set_menu_open(false)
         end
         return
     end
+    settled_closed = false
     if not open then
         widgets.block_under = true
     end

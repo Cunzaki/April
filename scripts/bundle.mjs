@@ -132,7 +132,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.1.13";
+const VERSION = "4.1.14";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector
@@ -291,6 +291,8 @@ function buildModuleBody(files, fullBundle = false) {
       || (fullBundle && rel === "features/world/world_esp.lua")
       || (fullBundle && rel === "features/radar/tactical_map.lua")
       || (fullBundle && rel === "game/player_state.lua")
+      || (fullBundle && rel === "core/cache.lua")
+      || (fullBundle && rel === "core/image_cache.lua")
       || (fullBundle && rel === "ui/gs_widgets.lua")
       || (fullBundle && rel === "ui/tooltips.lua")
       || rel === "ui/custom_menu.lua"

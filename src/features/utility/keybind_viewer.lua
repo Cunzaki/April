@@ -84,7 +84,6 @@ function M.draw()
     if not settings.enabled(P) then return end
     if not draw or not draw.text then return end
 
-    overlay_theme.sync()
     local accent = overlay_theme.accent()
 
     local sw, sh = draw_util.screen_size()

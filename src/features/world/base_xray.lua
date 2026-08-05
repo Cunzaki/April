@@ -102,10 +102,22 @@ local function is_visual_part(inst)
     return name == "Main" and (cn == "UnionOperation" or cn == "MeshPart")
 end
 
-local function collect_visual_parts(model, out)
+local function part_key(inst)
+    return tostring(inst and (inst.Address or inst.address or inst))
+end
+
+local function append_unique(out, seen, part)
+    local key = part_key(part)
+    if not seen[key] then
+        seen[key] = true
+        out[#out + 1] = part
+    end
+end
+
+local function collect_visual_parts(model, out, seen)
     if not model or not env.is_valid(model) then return end
     if is_visual_part(model) then
-        out[#out + 1] = model
+        append_unique(out, seen, model)
         return
     end
     local kids = children_of(model)
@@ -117,11 +129,11 @@ local function collect_visual_parts(model, out)
             goto cont
         end
         if is_visual_part(child) then
-            out[#out + 1] = child
+            append_unique(out, seen, child)
         else
             local cn = child.ClassName or child.class_name
             if cn == "Folder" or cn == "Model" then
-                collect_visual_parts(child, out)
+                collect_visual_parts(child, out, seen)
             end
         end
         ::cont::
@@ -158,6 +170,7 @@ local function begin_scan()
         models = nil,
         mi = 1,
         parts = {},
+        parts_seen = {},
     }
 end
 
@@ -226,7 +239,7 @@ local function step_scan(state, origin, range_sq, batch)
                 local dy = y - origin.y
                 local dz = z - origin.z
                 if (dx * dx + dy * dy + dz * dz) <= range_sq then
-                    collect_visual_parts(model, state.parts)
+                    collect_visual_parts(model, state.parts, state.parts_seen)
                 end
             end
         end
@@ -244,20 +257,7 @@ local function collect_xray(applied)
     if not origin then return end
     local range = math.max(40, settings.num(P_RANGE, 180))
     local range_sq = range * range
-    local now = now_ms()
-
-    if not scan or (scan.done and now - last_scan_done >= RESCAN_MS) then
-        scan = begin_scan()
-    end
-
-    if scan and not scan.done then
-        if step_scan(scan, origin, range_sq, BATCH) then
-            scan.done = true
-            last_scan_done = now
-            cached_parts = scan.parts
-        end
-    end
-
+    -- Scanning belongs exclusively to update(); the chams collector only reads.
     for i = 1, #cached_parts do
         local part = cached_parts[i]
         if part and env.is_valid(part) then

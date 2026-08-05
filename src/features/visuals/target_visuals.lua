@@ -238,7 +238,6 @@ function M.update(dt)
 end
 
 function M.draw()
-    overlay_theme.sync()
 
     local cx, cy = screen_center()
     if settings.bool("april_crosshair_follow", false) and follow.ready then

@@ -20,9 +20,11 @@ local TITLE_H = 30
 local SCAN_MS = 2500
 local META_REFRESH_MS = 1000
 local LOOKUP_BUDGET = 2
+local ROLE_MISS_TTL_MS = 3000
 
 local seen = {}
 local active = {}
+local role_misses = {}
 local panel_rows = {}
 local last_scan = -1
 local last_meta_refresh = 0
@@ -52,6 +54,7 @@ end
 function M.reset_state()
     seen = {}
     active = {}
+    role_misses = {}
     panel_rows = {}
     last_scan = -1
     last_meta_refresh = 0
@@ -286,6 +289,7 @@ function M.on_player_removed(p)
     if uid and uid ~= "" then
         seen[uid] = nil
         active[uid] = nil
+        role_misses[uid] = nil
         mod_ids.invalidate_player(p)
         rebuild_panel_rows(tick_ms())
     end
@@ -297,7 +301,11 @@ function M.staff_role(player)
     if uid and active[uid] then
         return active[uid].role
     end
-    return mod_ids.role_for_player(player, { live_lookup = true })
+    local now = tick_ms()
+    if uid and now < (role_misses[uid] or 0) then return nil end
+    local role = mod_ids.role_for_player(player, { live_lookup = true })
+    if uid and not role then role_misses[uid] = now + ROLE_MISS_TTL_MS end
+    return role
 end
 
 function M.is_staff(player)
@@ -358,7 +366,6 @@ end
 local function draw_staff_panel(x, y, width, rows)
     if not draw or not draw.text then return end
 
-    overlay_theme.sync()
     local pad = 12
     local row_h = 38
     local count = math.max(#rows, 1)

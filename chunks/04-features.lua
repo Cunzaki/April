@@ -1723,7 +1723,6 @@ end
 local function draw_status_panel(cx, cy, fov, info)
     if not settings.bool(PREFIX .. "manip_status", false) then return end
     if not info then return end
-    overlay_theme.sync()
     local hitscan_on = info.hitscan_on == true
     local tp_on = info.tp_on == true
     local manip_on = info.manip_on == true
@@ -4316,8 +4315,10 @@ local TITLE_H = 30
 local SCAN_MS = 2500
 local META_REFRESH_MS = 1000
 local LOOKUP_BUDGET = 2
+local ROLE_MISS_TTL_MS = 3000
 local seen = {}
 local active = {}
+local role_misses = {}
 local panel_rows = {}
 local last_scan = -1
 local last_meta_refresh = 0
@@ -4343,6 +4344,7 @@ end
 function M.reset_state()
     seen = {}
     active = {}
+    role_misses = {}
     panel_rows = {}
     last_scan = -1
     last_meta_refresh = 0
@@ -4534,6 +4536,7 @@ function M.on_player_removed(p)
     if uid and uid ~= "" then
         seen[uid] = nil
         active[uid] = nil
+        role_misses[uid] = nil
         mod_ids.invalidate_player(p)
         rebuild_panel_rows(tick_ms())
     end
@@ -4544,7 +4547,11 @@ function M.staff_role(player)
     if uid and active[uid] then
         return active[uid].role
     end
-    return mod_ids.role_for_player(player, { live_lookup = true })
+    local now = tick_ms()
+    if uid and now < (role_misses[uid] or 0) then return nil end
+    local role = mod_ids.role_for_player(player, { live_lookup = true })
+    if uid and not role then role_misses[uid] = now + ROLE_MISS_TTL_MS end
+    return role
 end
 function M.is_staff(player)
     return M.staff_role(player) ~= nil
@@ -4591,7 +4598,6 @@ function M.draw_mod_markers()
 end
 local function draw_staff_panel(x, y, width, rows)
     if not draw or not draw.text then return end
-    overlay_theme.sync()
     local pad = 12
     local row_h = 38
     local count = math.max(#rows, 1)
@@ -4960,7 +4966,6 @@ function M.draw()
     tick_session()
     if not settings.enabled(P) then return end
     if not draw or not draw.text then return end
-    overlay_theme.sync()
     local sw, sh = draw_util.screen_size()
     local count = math.max(#rows, 1)
     local height = TITLE_H + count * ROW_H + 8
@@ -5004,6 +5009,7 @@ local player_state = April.require("game.player_state")
 local player_gear = April.require("game.player_gear")
 local mod_checker = April.require("features.utility.mod_checker")
 local mod_ids = April.require("game.mod_ids")
+local ep = April.require("core.entity_props")
 local M = {}
 local P = "april_player_enabled"
 local FILTERS = "april_player_esp_filters"
@@ -5039,6 +5045,13 @@ local DEFAULT_FLAG = {
     MOVE = { 0.75, 0.85, 1, 1 },
     VIP = { 1, 0.82, 0.2, 1 },
 }
+local held_cache = {}
+local last_held_prune_ms = 0
+local HELD_TTL_MS = 300
+local HELD_PRUNE_MS = 2000
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
 local function set_multi_defaults(id, values)
     if menu and menu.set then
         pcall(menu.set, id, values)
@@ -5114,11 +5127,26 @@ function M.register_menu()
     })
 end
 local function held_label(player)
+    local uid = ep.user_id(player)
+    local key = uid and uid ~= 0 and tostring(uid)
+        or tostring(player.Address or player.address or player.name or player)
+    local now = tick_ms()
+    local cached = held_cache[key]
+    if cached and now - cached.t < HELD_TTL_MS then
+        return cached.value or nil
+    end
     local name = player_gear.held_name(player)
-    if not name or player_gear.is_empty_held_name(name) then return nil end
+    if not name or player_gear.is_empty_held_name(name) then
+        held_cache[key] = { t = now, value = false }
+        return nil
+    end
     local base = name:match("^([^/]+)") or name
     base = text_util.sanitize(base)
-    if base == "" then return nil end
+    if base == "" then
+        held_cache[key] = { t = now, value = false }
+        return nil
+    end
+    held_cache[key] = { t = now, value = base }
     return base
 end
 local function horizontal_speed(p)
@@ -5187,6 +5215,13 @@ function M.draw()
         migrate_flags_table()
     end
     if not settings.enabled(P) then return end
+    local now = tick_ms()
+    if now - last_held_prune_ms >= HELD_PRUNE_MS then
+        last_held_prune_ms = now
+        for key, entry in pairs(held_cache) do
+            if now - (entry.t or 0) > HELD_PRUNE_MS then held_cache[key] = nil end
+        end
+    end
     local players = cache.players
     if type(players) ~= "table" or #players == 0 then return end
     local range = settings.num(ID_RANGE, 500)
@@ -5335,6 +5370,8 @@ local DEFAULT_FOV = 100
 local DEFAULT_MAX_DIST = 500
 local gear_cache = {}
 local last_poll_ms = 0
+local last_cache_prune_ms = 0
+local CACHE_PRUNE_MS = 2000
 M._target = nil
 M._layout = nil
 local function tick_ms()
@@ -5706,12 +5743,21 @@ function M.update(_dt)
     local now = tick_ms()
     if now - last_poll_ms < TARGET_POLL_MS then return end
     last_poll_ms = now
+    if now - last_cache_prune_ms >= CACHE_PRUNE_MS then
+        last_cache_prune_ms = now
+        local live = {}
+        for _, player in ipairs(cache.players or {}) do
+            live[player_key(player)] = true
+        end
+        for uid in pairs(gear_cache) do
+            if not live[uid] then gear_cache[uid] = nil end
+        end
+    end
     M.refresh_target()
 end
 function M.draw()
     if not settings.enabled(P) then return end
     if not draw or not draw.text or not draw.rect_filled then return end
-    overlay_theme.sync()
     local target = M._target
     local layout = M._layout
     if not target or not layout then return end
@@ -5970,7 +6016,6 @@ function M.update(dt)
     follow.y = lerp(follow.y, goal_y, alpha)
 end
 function M.draw()
-    overlay_theme.sync()
     local cx, cy = screen_center()
     if settings.bool("april_crosshair_follow", false) and follow.ready then
         cx, cy = follow.x, follow.y
@@ -6001,6 +6046,8 @@ local P = "april_world_enabled"
 local CHAMS_ID = "april_world_chams"
 local CHAMS_MODE = "april_world_chams_mode"
 local CHAMS_COLOR = "april_world_chams_color"
+local draw_candidates = {}
+local chams_candidates = {}
 local function world_chams_labels()
     local labels = {}
     for i, t in ipairs(maps.WORLD_TOGGLES) do
@@ -6030,7 +6077,13 @@ local function collect_world_chams(applied)
     if not me_pos then return end
     local range = settings.num("april_world_range", 500)
     local range_sq = range * range
-    for _, entry in ipairs(cache.world) do
+    local entries = cache.world
+    if me_pos then
+        entries = cache.query_spatial(
+            cache.spatial.world, me_pos.x, me_pos.z, range, chams_candidates
+        )
+    end
+    for _, entry in ipairs(entries) do
         if not env.is_valid(entry.inst) then goto continue end
         local idx = world_chams_index_for(entry.toggle_id)
         if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
@@ -6055,6 +6108,7 @@ local function rebuild_cache()
     for _, entry in ipairs(M._dynamic) do
         table.insert(cache.world, entry)
     end
+    cache.spatial.world = cache.build_spatial(cache.world)
 end
 local function refresh_dynamic_positions(list)
     if not list or #list == 0 then return end
@@ -6161,6 +6215,7 @@ function M.update(_dt)
         if cache.should_refresh_positions() then
             if #M._dynamic > 0 then
                 refresh_dynamic_positions(M._dynamic)
+                rebuild_cache()
             end
         end
     end
@@ -6181,7 +6236,13 @@ function M.draw()
     local me = env.get_local_player()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
-    for _, entry in ipairs(cache.world) do
+    local entries = cache.world
+    if me_pos then
+        entries = cache.query_spatial(
+            cache.spatial.world, me_pos.x, me_pos.z, range, draw_candidates
+        )
+    end
+    for _, entry in ipairs(entries) do
         if not settings.enabled(entry.toggle_id) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
         local lx, ly, lz = esp_scan.entry_coords(entry)
@@ -6239,11 +6300,24 @@ local CHAMS_MODE = "april_loot_chams_mode"
 local CHAMS_COLOR = "april_loot_chams_color"
 M._static = {}
 M._drops = {}
+M._unlimited = {}
+local draw_candidates = {}
+local chams_candidates = {}
+local candidate_seen = {}
 local UNLIMITED_RANGE = {
     april_timed_crate = true,
     april_care_package = true,
     april_btr_crate = true,
 }
+local function nearby_with_unlimited(me_pos, range, out)
+    cache.query_spatial(cache.spatial.loot, me_pos.x, me_pos.z, range, out)
+    for key in pairs(candidate_seen) do candidate_seen[key] = nil end
+    for i = 1, #out do candidate_seen[out[i]] = true end
+    for _, entry in ipairs(M._unlimited) do
+        if not candidate_seen[entry] then out[#out + 1] = entry end
+    end
+    return out
+end
 local function loot_chams_labels()
     local labels = {}
     for i, t in ipairs(maps.LOOT_TOGGLES) do
@@ -6273,7 +6347,8 @@ local function collect_loot_chams(applied)
     if not me_pos then return end
     local range = settings.num("april_loot_range", 300)
     local range_sq = range * range
-    for _, entry in ipairs(cache.loot) do
+    local entries = nearby_with_unlimited(me_pos, range, chams_candidates)
+    for _, entry in ipairs(entries) do
         if not env.is_valid(entry.inst) then goto continue end
         local idx = loot_chams_index_for(entry.toggle_id)
         if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
@@ -6305,6 +6380,13 @@ local function rebuild_cache()
     for _, entry in ipairs(M._drops) do
         table.insert(cache.loot, entry)
     end
+    M._unlimited = {}
+    for _, entry in ipairs(cache.loot) do
+        if UNLIMITED_RANGE[entry.toggle_id] then
+            M._unlimited[#M._unlimited + 1] = entry
+        end
+    end
+    cache.spatial.loot = cache.build_spatial(cache.loot)
 end
 local function refresh_dynamic_positions(list)
     if not list or #list == 0 then return end
@@ -6529,6 +6611,7 @@ function M.update(_dt)
         if cache.should_refresh_positions() then
             if #M._drops > 0 then
                 refresh_dynamic_positions(M._drops)
+                rebuild_cache()
             end
         end
     end
@@ -6549,7 +6632,11 @@ function M.draw()
     local me = env.get_local_player()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
-    for _, entry in ipairs(cache.loot) do
+    local entries = cache.loot
+    if me_pos then
+        entries = nearby_with_unlimited(me_pos, range, draw_candidates)
+    end
+    for _, entry in ipairs(entries) do
         if not settings.enabled(entry.toggle_id) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
         local lx, ly, lz = esp_scan.entry_coords(entry)
@@ -6608,6 +6695,8 @@ local CHAMS_ID = "april_base_chams"
 local CHAMS_MODE = "april_base_chams_mode"
 local CHAMS_COLOR = "april_base_chams_color"
 M._static = {}
+local draw_candidates = {}
+local chams_candidates = {}
 local function base_chams_labels()
     local labels = {}
     for i, t in ipairs(maps.BASE_TOGGLES) do
@@ -6637,7 +6726,10 @@ local function collect_base_chams(applied)
     if not me_pos then return end
     local range = settings.num("april_base_range", 150)
     local range_sq = range * range
-    for _, entry in ipairs(cache.base) do
+    local entries = cache.query_spatial(
+        cache.spatial.base, me_pos.x, me_pos.z, range, chams_candidates
+    )
+    for _, entry in ipairs(entries) do
         if not env.is_valid(entry.inst) then goto continue end
         local idx = base_chams_index_for(entry.toggle_id)
         if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
@@ -6657,6 +6749,7 @@ local function rebuild_cache()
     for _, entry in ipairs(M._static) do
         table.insert(cache.base, entry)
     end
+    cache.spatial.base = cache.build_spatial(cache.base)
 end
 local function append_base_model(out, model, type_name, toggle_id)
     if not env.is_valid(model) then return end
@@ -6877,7 +6970,13 @@ function M.draw()
     local me = env.get_local_player()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
-    for _, entry in ipairs(cache.base) do
+    local entries = cache.base
+    if me_pos then
+        entries = cache.query_spatial(
+            cache.spatial.base, me_pos.x, me_pos.z, range, draw_candidates
+        )
+    end
+    for _, entry in ipairs(entries) do
         if not settings.enabled(entry.toggle_id) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
         local lx, ly, lz = esp_scan.entry_coords(entry)
@@ -7008,10 +7107,20 @@ local function is_visual_part(inst)
     local cn = inst.ClassName or inst.class_name
     return name == "Main" and (cn == "UnionOperation" or cn == "MeshPart")
 end
-local function collect_visual_parts(model, out)
+local function part_key(inst)
+    return tostring(inst and (inst.Address or inst.address or inst))
+end
+local function append_unique(out, seen, part)
+    local key = part_key(part)
+    if not seen[key] then
+        seen[key] = true
+        out[#out + 1] = part
+    end
+end
+local function collect_visual_parts(model, out, seen)
     if not model or not env.is_valid(model) then return end
     if is_visual_part(model) then
-        out[#out + 1] = model
+        append_unique(out, seen, model)
         return
     end
     local kids = children_of(model)
@@ -7023,11 +7132,11 @@ local function collect_visual_parts(model, out)
             goto cont
         end
         if is_visual_part(child) then
-            out[#out + 1] = child
+            append_unique(out, seen, child)
         else
             local cn = child.ClassName or child.class_name
             if cn == "Folder" or cn == "Model" then
-                collect_visual_parts(child, out)
+                collect_visual_parts(child, out, seen)
             end
         end
         ::cont::
@@ -7062,6 +7171,7 @@ local function begin_scan()
         models = nil,
         mi = 1,
         parts = {},
+        parts_seen = {},
     }
 end
 local function step_scan(state, origin, range_sq, batch)
@@ -7129,7 +7239,7 @@ local function step_scan(state, origin, range_sq, batch)
                 local dy = y - origin.y
                 local dz = z - origin.z
                 if (dx * dx + dy * dy + dz * dz) <= range_sq then
-                    collect_visual_parts(model, state.parts)
+                    collect_visual_parts(model, state.parts, state.parts_seen)
                 end
             end
         end
@@ -7145,17 +7255,6 @@ local function collect_xray(applied)
     if not origin then return end
     local range = math.max(40, settings.num(P_RANGE, 180))
     local range_sq = range * range
-    local now = now_ms()
-    if not scan or (scan.done and now - last_scan_done >= RESCAN_MS) then
-        scan = begin_scan()
-    end
-    if scan and not scan.done then
-        if step_scan(scan, origin, range_sq, BATCH) then
-            scan.done = true
-            last_scan_done = now
-            cached_parts = scan.parts
-        end
-    end
     for i = 1, #cached_parts do
         local part = cached_parts[i]
         if part and env.is_valid(part) then
@@ -7663,8 +7762,6 @@ local function process_raid(display, x, y, z, weight)
         best.z = best.sum_z / best.count
         best.last_type = display
         best.last_update = now
-        best.items = best.items or {}
-        best.items[#best.items + 1] = { x = x, y = y, z = z, type = display }
     else
         raids[#raids + 1] = {
             x = x, y = y, z = z,
@@ -7673,7 +7770,6 @@ local function process_raid(display, x, y, z, weight)
             weight = weight,
             last_type = display,
             last_update = now,
-            items = { { x = x, y = y, z = z, type = display } },
         }
     end
     if settings.enabled(P) and settings.bool(ID_NOTIFY, true) and weight >= 2 then
@@ -9774,7 +9870,6 @@ function M.draw()
 end
 function M.draw_inner()
     ensure_draw_api()
-    overlay_theme.sync()
     local sw, sh = draw_util.screen_size()
     local size = settings.num("april_map_size", 250)
     local default_x, default_y = sw - size - 16, 16
@@ -9830,7 +9925,8 @@ function M.draw_inner()
     end
     if settings.bool("april_map_show_world", false) then
         local col = settings.color("april_map_world_col", theme.GREEN)
-        for _, item in ipairs(cache.world or {}) do
+        local items = cache.spatial.world and cache.spatial.world.all or cache.world or {}
+        for _, item in ipairs(items) do
             if env.is_valid(item.inst) then
                 local wx, wz = entry_world_xz(item)
                 if wx then
@@ -9841,7 +9937,8 @@ function M.draw_inner()
     end
     if settings.bool("april_map_show_loot", false) then
         local col = settings.color("april_map_loot_col", { 1, 0.85, 0.35, 1 })
-        for _, item in ipairs(cache.loot or {}) do
+        local items = cache.spatial.loot and cache.spatial.loot.all or cache.loot or {}
+        for _, item in ipairs(items) do
             if env.is_valid(item.inst) then
                 local wx, wz = entry_world_xz(item)
                 if wx then
@@ -9852,7 +9949,8 @@ function M.draw_inner()
     end
     if settings.bool("april_map_show_base", false) then
         local col = settings.color("april_map_base_col", { 0.55, 0.55, 1, 1 })
-        for _, item in ipairs(cache.base or {}) do
+        local items = cache.spatial.base and cache.spatial.base.all or cache.base or {}
+        for _, item in ipairs(items) do
             if env.is_valid(item.inst) then
                 local wx, wz = entry_world_xz(item)
                 if wx then
@@ -9988,7 +10086,6 @@ function M.update(_dt) end
 function M.draw()
     if not settings.enabled(P) then return end
     if not draw or not draw.text then return end
-    overlay_theme.sync()
     local accent = overlay_theme.accent()
     local sw, sh = draw_util.screen_size()
     local rows = collect_rows()
@@ -10092,6 +10189,7 @@ local env = April.require("core.env")
 local player_state = April.require("game.player_state")
 local team_state = April.require("game.team_state")
 local npcs = April.require("game.npcs")
+local folders = April.require("game.folders")
 local data = April.require("game.anime_announcer_data")
 local image_cache = April.require("core.image_cache")
 local draw_util = April.require("core.draw_util")
@@ -10156,6 +10254,18 @@ local last_emit_ms = -100000
 local session_key = nil
 local last_scan_ms = -100000
 local nearby_cd = {}
+local layout_entry
+local stats_root = nil
+local stats_refs = {}
+local last_stats_root_ms = -100000
+local last_stats_ms = -100000
+local last_world_ms = -100000
+local sensed = {}
+local BUBBLE_W = 304
+local BUBBLE_PAD = 14
+local BUBBLE_FONT = 14
+local BUBBLE_LINE_H = 18
+local BUBBLE_HEADER_H = 24
 local function now_ms()
 local fn = utility and (utility.get_tick_count or utility.GetTickCount)
 if type(fn) ~= "function" then return 0 end
@@ -10191,7 +10301,13 @@ queued = nil
 visibility = 0
 last_emit_ms = -100000
 last_scan_ms = -100000
+last_stats_ms = -100000
+last_world_ms = -100000
 nearby_cd = {}
+stats_root = nil
+stats_refs = {}
+last_stats_root_ms = -100000
+sensed = {}
 end
 local function event_enabled(event_name)
 local slot = EVENT_SLOT[event_name]
@@ -10232,6 +10348,7 @@ end
 local function activate(entry, now)
 if not entry then return end
 local duration = clamp(settings.num(DURATION_ID, 5), 2, 10) * 1000
+if layout_entry then layout_entry(entry) end
 entry.started = now
 entry.expires = now + duration
 current = entry
@@ -10284,17 +10401,31 @@ if ok then return value end
 return nil
 end
 local function status_active(stats, name)
-local child = find_child(stats, name)
+local child = stats_refs[name]
+if not child then
+child = find_child(stats, name)
+stats_refs[name] = child
+end
 if not child then return false end
 local reach = tonumber(read_attr(child, "Reach"))
 if reach ~= nil then return reach > 0 end
 return true
 end
 local function parse_stat_value(stats, name)
-local root = find_child(stats, name)
+local root_key = name .. ":root"
+local root = stats_refs[root_key]
+if not root then
+root = find_child(stats, name)
+stats_refs[root_key] = root
+end
 if not root then return nil end
+local label_key = name .. ":label"
+local label = stats_refs[label_key]
+if not label then
 local bar = find_child(root, "Bar")
-local label = find_child(bar, "StatLabel") or find_child(root, "StatLabel")
+label = find_child(bar, "StatLabel") or find_child(root, "StatLabel")
+stats_refs[label_key] = label
+end
 local text = label and env.safe_call(function()
 return label.Text or label.text
 end)
@@ -10304,9 +10435,19 @@ end
 local function local_stats()
 local player = cache.local_player or ep.get_local_player()
 if not player then return {} end
+local stats = stats_root
+local now = now_ms()
+if not stats or now - last_stats_root_ms >= 1000 then
+last_stats_root_ms = now
 local pgui = find_child(player, "PlayerGui")
 local main = find_child(pgui, "Main")
-local stats = find_child(main, "Stats")
+local resolved = find_child(main, "Stats")
+if resolved ~= stats_root then
+stats_root = resolved
+stats_refs = {}
+end
+stats = stats_root
+end
 if not stats then return {} end
 local temp = find_child(stats, "Temperature")
 local temp_reach = temp and tonumber(read_attr(temp, "Reach")) or 0
@@ -10334,7 +10475,6 @@ end
 return false
 end
 local function timed_crate_present()
-local folders = April.require("game.folders")
 local bucket = find_child(folders.from_key("loners"), "Timed Crate")
 if not bucket then return false end
 local kids = env.safe_call(function()
@@ -10379,17 +10519,31 @@ local alive = valid_character and alive_flag ~= false and (hp == nil or hp > 0)
 local ratio = nil
 if hp and max_hp and max_hp > 0 then ratio = hp / max_hp end
 local downed = as_bool(player_state.humanoid_attr(local_player, "Downed"))
-local safe = as_bool(player_state.player_attr(local_player, "SafeZone"))
-or as_bool(player_state.player_attr(local_player, "InSafeZone"))
-local stats = local_stats()
 local now = now_ms()
-local staff, enemy = false, false
+if now - last_stats_ms >= 180 then
+last_stats_ms = now
+local stats = local_stats()
+sensed.combat = stats.combat == true
+sensed.bleed = stats.bleed == true
+sensed.radiation = stats.radiation == true
+sensed.drowning = stats.drowning == true
+sensed.cold = stats.cold == true
+sensed.hot = stats.hot == true
+sensed.hunger_low = stats.hunger_low == true
+sensed.thirst_low = stats.thirst_low == true
+sensed.safe = as_bool(player_state.player_attr(local_player, "SafeZone"))
+or as_bool(player_state.player_attr(local_player, "InSafeZone"))
+end
 if alive and now - last_scan_ms >= 450 then
 last_scan_ms = now
-staff, enemy = nearby_flags(local_player)
-else
-staff = snapshot.staff_nearby == true
-enemy = snapshot.enemy_nearby == true
+sensed.staff_nearby, sensed.enemy_nearby = nearby_flags(local_player)
+sensed.party = team_state.in_party() == true
+sensed.reviving = not downed and player_state.is_reviving(local_player) == true
+end
+if now - last_world_ms >= 900 then
+last_world_ms = now
+sensed.boss = boss_present()
+sensed.timed_crate = timed_crate_present()
 end
 return {
 alive = alive,
@@ -10398,21 +10552,21 @@ max_hp = max_hp,
 ratio = ratio,
 low = alive and ratio ~= nil and ratio <= 0.30,
 downed = alive and downed,
-safe = safe,
-combat = stats.combat == true,
-bleed = stats.bleed == true,
-radiation = stats.radiation == true,
-drowning = stats.drowning == true,
-cold = stats.cold == true,
-hot = stats.hot == true,
-hunger_low = alive and stats.hunger_low == true,
-thirst_low = alive and stats.thirst_low == true,
-party = team_state.in_party() == true,
-reviving = alive and not downed and player_state.is_reviving(local_player) == true,
-staff_nearby = alive and staff,
-enemy_nearby = alive and enemy,
-boss = boss_present(),
-timed_crate = timed_crate_present(),
+safe = sensed.safe == true,
+combat = sensed.combat == true,
+bleed = sensed.bleed == true,
+radiation = sensed.radiation == true,
+drowning = sensed.drowning == true,
+cold = sensed.cold == true,
+hot = sensed.hot == true,
+hunger_low = alive and sensed.hunger_low == true,
+thirst_low = alive and sensed.thirst_low == true,
+party = sensed.party == true,
+reviving = alive and sensed.reviving == true,
+staff_nearby = alive and sensed.staff_nearby == true,
+enemy_nearby = alive and sensed.enemy_nearby == true,
+boss = sensed.boss == true,
+timed_crate = sensed.timed_crate == true,
 }
 end
 local function seed_state(state)
@@ -10511,55 +10665,56 @@ if line ~= "" then lines[#lines + 1] = line end
 if #lines == 0 then lines[1] = "" end
 return lines
 end
-local function draw_bubble(x, y, character_w, character_h, text, alpha, sw, sh, character)
+layout_entry = function(entry)
+entry.lines = wrap_text(
+entry.text,
+BUBBLE_W - BUBBLE_PAD * 2,
+BUBBLE_FONT
+)
+entry.bubble_w = BUBBLE_W
+entry.bubble_h = BUBBLE_HEADER_H + BUBBLE_PAD
++ #entry.lines * BUBBLE_LINE_H
+end
+local function draw_bubble(x, y, character_w, character_h, entry, alpha, sw, sh, character)
 if not draw or not draw.rect_filled or alpha <= 0.01 then return end
-local font = 14
-local bubble_w = 290
-local pad = 14
-local lines = wrap_text(text, bubble_w - pad * 2, font)
-local line_h = 18
-local bubble_h = pad * 2 + #lines * line_h
+if not entry.lines then layout_entry(entry) end
+local bubble_w = entry.bubble_w
+local bubble_h = entry.bubble_h
 local mouth_x = x + character_w * (character.mouth_x or 0.56)
 local mouth_y = y + character_h * (character.mouth_y or 0.30)
-local bx = mouth_x + 52
-local by = mouth_y - bubble_h * 0.45
+local bx = x + character_w + 18
+local by = mouth_y - BUBBLE_HEADER_H
 local tail_right = false
 if bx + bubble_w > sw - 8 then
-bx = mouth_x - bubble_w - 28
+bx = x - bubble_w - 18
 tail_right = true
 end
 bx = clamp(bx, 8, math.max(8, sw - bubble_w - 8))
 by = clamp(by, 8, math.max(8, (sh or sw) - bubble_h - 8))
-local fill_a = clamp(alpha * 1.08, 0, 1)
+local fill_a = clamp(alpha, 0, 1)
 local accent = overlay_theme.accent()
-draw.rect_filled(bx - 1, by - 1, bubble_w + 2, bubble_h + 2, { 0, 0, 0, 0.88 * fill_a }, 11)
-draw.rect_filled(bx, by, bubble_w, bubble_h, { 0.045, 0.04, 0.06, 0.99 * fill_a }, 10)
-if draw.rect then
-draw.rect(bx, by, bubble_w, bubble_h,
-{ accent[1] or 0.8, accent[2] or 0.3, accent[3] or 1, 0.92 * fill_a }, 10, 1.5)
-end
+local panel = { 0.035, 0.032, 0.045, fill_a }
+local accent_col = {
+accent[1] or 0.8, accent[2] or 0.3, accent[3] or 1, fill_a,
+}
+draw.rect_filled(bx, by, bubble_w, bubble_h, panel, 8)
+draw.rect_filled(bx + 8, by, bubble_w - 16, 2, accent_col, 0)
 if draw.poly_filled then
 local tail_y = clamp(mouth_y, by + 9, by + bubble_h - 9)
 local tip_x = mouth_x + (tail_right and -2 or 2)
 local base_x = tail_right and (bx + bubble_w - 2) or (bx + 2)
-local under = {
-{ base_x, tail_y - 9 },
-{ tip_x, mouth_y },
-{ base_x, tail_y + 9 },
-}
-local top = {
+local tail = {
 { base_x, tail_y - 7 },
 { tip_x, mouth_y },
 { base_x, tail_y + 7 },
 }
-draw.poly_filled(under, { 0, 0, 0, 0.88 * fill_a })
-draw.poly_filled(top, { 0.045, 0.04, 0.06, 0.99 * fill_a })
+draw.poly_filled(tail, panel)
 end
-for i = 1, #lines do
-local tx = bx + pad
-local ty = by + pad + (i - 1) * line_h
-draw_util.text(tx + 1, ty + 1, lines[i], { 0, 0, 0, fill_a }, font)
-draw_util.text(tx, ty, lines[i], { 1, 1, 1, fill_a }, font)
+draw_util.text(bx + BUBBLE_PAD, by + 7, "APRIL", accent_col, 11)
+for i = 1, #entry.lines do
+local tx = bx + BUBBLE_PAD
+local ty = by + BUBBLE_HEADER_H + (i - 1) * BUBBLE_LINE_H
+draw_util.text(tx, ty, entry.lines[i], { 1, 1, 1, fill_a }, BUBBLE_FONT)
 end
 end
 function M.install()
@@ -10568,11 +10723,7 @@ installed = true
 session_key = session_id()
 pcall(data.load_remote)
 for _, character in ipairs(data.characters) do
-local expressions = {}
-for expression in pairs(character.expressions) do
-expressions[#expressions + 1] = expression
-end
-for _, expression in ipairs(expressions) do
+for _, expression in ipairs({ "neutral", "smile" }) do
 image_cache.preload(
 "anime_baddie:" .. character.id .. ":" .. expression,
 character.urls(expression)
@@ -10651,7 +10802,6 @@ end
 end
 function M.draw()
 if visibility <= 0.01 or not draw or not draw.image then return end
-overlay_theme.sync()
 local character = active_character()
 local scale = clamp(settings.num(SCALE_ID, 100), 60, 150) / 100
 local opacity = clamp(settings.num(OPACITY_ID, 100), 30, 100) / 100
@@ -10690,7 +10840,7 @@ if current then
 local bubble_alpha = math.max(alpha, 0.96 * visibility)
 local remaining = current.expires - now
 if remaining < 350 then bubble_alpha = bubble_alpha * clamp(remaining / 350, 0, 1) end
-draw_bubble(x, draw_y, character_w, character_h, current.text, bubble_alpha, sw, sh, character)
+draw_bubble(x, draw_y, character_w, character_h, current, bubble_alpha, sw, sh, character)
 end
 end
 return M

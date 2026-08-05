@@ -519,7 +519,6 @@ end
 function M.draw_inner()
     ensure_draw_api()
 
-    overlay_theme.sync()
     local sw, sh = draw_util.screen_size()
     local size = settings.num("april_map_size", 250)
     local default_x, default_y = sw - size - 16, 16
@@ -587,7 +586,8 @@ function M.draw_inner()
 
     if settings.bool("april_map_show_world", false) then
         local col = settings.color("april_map_world_col", theme.GREEN)
-        for _, item in ipairs(cache.world or {}) do
+        local items = cache.spatial.world and cache.spatial.world.all or cache.world or {}
+        for _, item in ipairs(items) do
             if env.is_valid(item.inst) then
                 local wx, wz = entry_world_xz(item)
                 if wx then
@@ -599,7 +599,8 @@ function M.draw_inner()
 
     if settings.bool("april_map_show_loot", false) then
         local col = settings.color("april_map_loot_col", { 1, 0.85, 0.35, 1 })
-        for _, item in ipairs(cache.loot or {}) do
+        local items = cache.spatial.loot and cache.spatial.loot.all or cache.loot or {}
+        for _, item in ipairs(items) do
             if env.is_valid(item.inst) then
                 local wx, wz = entry_world_xz(item)
                 if wx then
@@ -611,7 +612,8 @@ function M.draw_inner()
 
     if settings.bool("april_map_show_base", false) then
         local col = settings.color("april_map_base_col", { 0.55, 0.55, 1, 1 })
-        for _, item in ipairs(cache.base or {}) do
+        local items = cache.spatial.base and cache.spatial.base.all or cache.base or {}
+        for _, item in ipairs(items) do
             if env.is_valid(item.inst) then
                 local wx, wz = entry_world_xz(item)
                 if wx then

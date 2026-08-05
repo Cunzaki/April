@@ -13,6 +13,8 @@ local P = "april_world_enabled"
 local CHAMS_ID = "april_world_chams"
 local CHAMS_MODE = "april_world_chams_mode"
 local CHAMS_COLOR = "april_world_chams_color"
+local draw_candidates = {}
+local chams_candidates = {}
 
 local function world_chams_labels()
     local labels = {}
@@ -48,7 +50,13 @@ local function collect_world_chams(applied)
     local range = settings.num("april_world_range", 500)
     local range_sq = range * range
 
-    for _, entry in ipairs(cache.world) do
+    local entries = cache.world
+    if me_pos then
+        entries = cache.query_spatial(
+            cache.spatial.world, me_pos.x, me_pos.z, range, chams_candidates
+        )
+    end
+    for _, entry in ipairs(entries) do
         if not env.is_valid(entry.inst) then goto continue end
         local idx = world_chams_index_for(entry.toggle_id)
         if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
@@ -77,6 +85,7 @@ local function rebuild_cache()
     for _, entry in ipairs(M._dynamic) do
         table.insert(cache.world, entry)
     end
+    cache.spatial.world = cache.build_spatial(cache.world)
 end
 
 local function refresh_dynamic_positions(list)
@@ -197,6 +206,7 @@ function M.update(_dt)
         if cache.should_refresh_positions() then
             if #M._dynamic > 0 then
                 refresh_dynamic_positions(M._dynamic)
+                rebuild_cache()
             end
         end
     end
@@ -221,7 +231,13 @@ function M.draw()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
 
-    for _, entry in ipairs(cache.world) do
+    local entries = cache.world
+    if me_pos then
+        entries = cache.query_spatial(
+            cache.spatial.world, me_pos.x, me_pos.z, range, draw_candidates
+        )
+    end
+    for _, entry in ipairs(entries) do
         if not settings.enabled(entry.toggle_id) then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
 

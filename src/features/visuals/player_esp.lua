@@ -8,6 +8,7 @@ local player_state = April.require("game.player_state")
 local player_gear = April.require("game.player_gear")
 local mod_checker = April.require("features.utility.mod_checker")
 local mod_ids = April.require("game.mod_ids")
+local ep = April.require("core.entity_props")
 
 local M = {}
 local P = "april_player_enabled"
@@ -47,6 +48,14 @@ local DEFAULT_FLAG = {
     MOVE = { 0.75, 0.85, 1, 1 },
     VIP = { 1, 0.82, 0.2, 1 },
 }
+local held_cache = {}
+local last_held_prune_ms = 0
+local HELD_TTL_MS = 300
+local HELD_PRUNE_MS = 2000
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
 
 local function set_multi_defaults(id, values)
     if menu and menu.set then
@@ -136,12 +145,27 @@ function M.register_menu()
 end
 
 local function held_label(player)
+    local uid = ep.user_id(player)
+    local key = uid and uid ~= 0 and tostring(uid)
+        or tostring(player.Address or player.address or player.name or player)
+    local now = tick_ms()
+    local cached = held_cache[key]
+    if cached and now - cached.t < HELD_TTL_MS then
+        return cached.value or nil
+    end
     local name = player_gear.held_name(player)
-    if not name or player_gear.is_empty_held_name(name) then return nil end
+    if not name or player_gear.is_empty_held_name(name) then
+        held_cache[key] = { t = now, value = false }
+        return nil
+    end
     -- Match target gear display: drop skin/variant suffix after '/'.
     local base = name:match("^([^/]+)") or name
     base = text_util.sanitize(base)
-    if base == "" then return nil end
+    if base == "" then
+        held_cache[key] = { t = now, value = false }
+        return nil
+    end
+    held_cache[key] = { t = now, value = base }
     return base
 end
 
@@ -220,6 +244,14 @@ function M.draw()
     end
 
     if not settings.enabled(P) then return end
+
+    local now = tick_ms()
+    if now - last_held_prune_ms >= HELD_PRUNE_MS then
+        last_held_prune_ms = now
+        for key, entry in pairs(held_cache) do
+            if now - (entry.t or 0) > HELD_PRUNE_MS then held_cache[key] = nil end
+        end
+    end
 
     local players = cache.players
     if type(players) ~= "table" or #players == 0 then return end

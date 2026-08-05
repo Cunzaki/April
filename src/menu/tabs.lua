@@ -151,19 +151,23 @@ function M.update(dt)
 
     mark(dense, "tabs.update.incremental_scan")
     incremental_scan.tick()
+    local guard = (April and (April.debug == true or April.crash_trace == true))
+        and debug.guard or debug.guard_fast
     for i, feat in ipairs(M.features) do
         if feat.update then
             local name = M.FEATURE_ORDER[i] or ("#" .. i)
-            debug.guard("update:" .. name, feat.update, dt)
+            guard("update:" .. name, feat.update, dt)
         end
     end
 end
 
 function M.draw()
+    local guard = (April and (April.debug == true or April.crash_trace == true))
+        and debug.guard or debug.guard_fast
     for i, feat in ipairs(M.features) do
         if feat.draw then
             local name = M.FEATURE_ORDER[i] or ("#" .. i)
-            debug.guard("draw:" .. name, feat.draw)
+            guard("draw:" .. name, feat.draw)
         end
     end
 end

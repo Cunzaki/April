@@ -245,8 +245,6 @@ local function process_raid(display, x, y, z, weight)
         best.z = best.sum_z / best.count
         best.last_type = display
         best.last_update = now
-        best.items = best.items or {}
-        best.items[#best.items + 1] = { x = x, y = y, z = z, type = display }
     else
         raids[#raids + 1] = {
             x = x, y = y, z = z,
@@ -255,7 +253,6 @@ local function process_raid(display, x, y, z, weight)
             weight = weight,
             last_type = display,
             last_update = now,
-            items = { { x = x, y = y, z = z, type = display } },
         }
     end
 

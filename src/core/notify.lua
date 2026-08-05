@@ -68,7 +68,6 @@ end
 function M.draw()
     if #queue == 0 or not draw then return end
 
-    overlay_theme.sync()
     local now = tick()
     local font = 13
     local pad = 12
