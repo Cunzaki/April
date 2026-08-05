@@ -9760,12 +9760,17 @@ end
 local function draw_radar_base(layout, bg, opacity, has_map)
     local x, y, w, h = layout.x, layout.y, layout.w, layout.h
     opacity = opacity or 1
-    overlay_theme.draw_panel(x, y, w, h, nil, { opacity = opacity })
+    overlay_theme.draw_panel(x, y, w, h, nil, {
+        opacity = opacity,
+        rounding = 0,
+        border = true,
+        border_w = 1,
+    })
     if not has_map then
         local rect_f = draw_fn("rect_filled", "RectFilled")
         if rect_f then
             pcall(rect_f, x + EDGE, y + EDGE, w - EDGE * 2, h - EDGE * 2,
-                fade_col(bg or theme.PANEL_DEEP, 0.55 * opacity), 4)
+                fade_col(bg or theme.PANEL_DEEP, 0.55 * opacity), 0)
         end
     end
 end
@@ -9774,15 +9779,15 @@ local function draw_radar_labels(layout, zoom, opacity)
     opacity = opacity or 1
     local rect_f = draw_fn("rect_filled", "RectFilled")
     if rect_f then
-        pcall(rect_f, x + EDGE, y + EDGE, w - EDGE * 2, TITLE_H,
+        pcall(rect_f, x + 1, y + 1, w - 2, TITLE_H,
             fade_col(overlay_theme.panel_bg(), 0.70 * opacity), 0)
     end
     local title_col = fade_col(overlay_theme.text(), opacity)
     local zoom_col = fade_col(theme.TEXT_DIM, opacity)
-    draw_util.text(x + EDGE + 4, y + EDGE + 1, "RADAR", title_col, 10)
+    draw_util.text(x + EDGE + 4, y + 2, "RADAR", title_col, 10)
     local zoom_text = string.format("x%.2f", tonumber(zoom) or 1)
     local zoom_w = theme.text_w(zoom_text, 9)
-    draw_util.text(x + w - EDGE - 4 - zoom_w, y + EDGE + 2, zoom_text, zoom_col, 9)
+    draw_util.text(x + w - EDGE - 4 - zoom_w, y + 3, zoom_text, zoom_col, 9)
 end
 local function draw_facing_arrow(mx, my, col, scale, ang, opacity)
     if type(col) ~= "table" then col = theme.CYAN end
