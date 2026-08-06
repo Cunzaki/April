@@ -1108,6 +1108,7 @@ M.BY_ID = {
     april_aim_targets = "Choose whether aimbot targets players, NPCs, or both.",
     april_aim_filters = "Filters which targets aimbot will consider.",
     april_aim_options = "Extra aimbot behavior options.",
+    april_aim_auto_pred = "Leads moving targets using weapon bullet speed and drop. Off = aim the bone only. Also skips prediction when you are not holding a gun.",
     april_aim_smooth = "Higher values move the camera slower toward the target.",
     april_aim_smooth_type = "How smoothing accelerates: Linear, Ease Out, Ease In-Out, Exponential, or Adaptive.",
     april_aim_humanize = "Adds light drift and overshoot so mouse aim feels less robotic.",
@@ -1121,7 +1122,7 @@ M.BY_ID = {
     april_ui_player_elements = "Choose which info to show on player ESP.",
     april_player_show_held = "Shows the item a player is holding (same read path as Target Gear).",
     april_player_esp_filters = "Filter which players appear on ESP.",
-    april_player_esp_flags = "Show status flags (downed, SZ, staff, revive, movement state, VIP).",
+    april_player_esp_flags = "Show status flags (downed, SZ, staff, revive, movement state, VIP, cheater).",
     april_target_overlay = "Shows held weapon and gear for the player closest to your crosshair.",
     april_target_overlay_fov = "Independent FOV (pixels from crosshair) used only by Target Gear Overlay.",
     april_target_overlay_max_dist = "Maximum world distance (studs) for Target Gear Overlay selection.",
@@ -3366,6 +3367,7 @@ btn("april_aim_whitelist_clear", "Clear Whitelist"),
 sl("april_aim_max_dist", "Max Distance (m)", 50, 2000, 500),
 sep(),
 multi("april_aim_options", "Options", { "Sticky Target" }, { false }),
+cb("april_aim_auto_pred", "Auto Prediction", true),
 sl("april_aim_smooth", "Smoothness", 1, 25, 10),
 combo("april_aim_smooth_type", "Smooth Type", {
 "Linear", "Ease Out", "Ease In-Out", "Exponential", "Adaptive",
@@ -3446,8 +3448,8 @@ multi("april_player_esp_filters", "ESP Filters", {
 "Team Check", "Skip Safezone", "Skip Downed",
 }, { true, false, false }),
 multi("april_player_esp_flags", "ESP Flags", {
-"Downed", "Safezone", "Staff", "Reviving", "Movement", "VIP",
-}, { true, true, true, true, false, true }),
+"Downed", "Safezone", "Staff", "Reviving", "Movement", "VIP", "Cheater",
+}, { true, true, true, true, false, true, true }),
 sl("april_player_range", "Player Range", 50, 2000, 500),
 },
 }
@@ -3509,6 +3511,7 @@ color("april_player_flag_staff", "Staff", { 1, 0.33, 0.33, 1 }),
 color("april_player_flag_reviving", "Reviving", { 0.45, 1, 0.55, 1 }),
 color("april_player_flag_movement", "Movement", { 0.75, 0.85, 1, 1 }),
 color("april_player_flag_vip", "VIP", { 1, 0.82, 0.2, 1 }),
+color("april_player_flag_cheater", "Cheater", { 1, 0.05, 0.05, 1 }),
 },
 }
 return { left, gear, target_vis, colors }

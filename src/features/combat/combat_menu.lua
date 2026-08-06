@@ -223,6 +223,7 @@ function M.register_aimbot(T, G, prefix, parent_id, opts)
     menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, { parent = parent_id })
 
     menu_util.section(T, G, "Aim")
+    menu.add_checkbox(T, G, p .. "auto_pred", "Auto Prediction", true, { parent = parent_id })
     menu.add_multicombo(T, G, p .. "options", "Options", {
         "Sticky Target",
     }, { false }, { parent = parent_id })

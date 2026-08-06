@@ -809,6 +809,108 @@ end
 return M
 end)()
 
+April._mods["game.cheater_detect"] = (function()
+local ep = April.require("core.entity_props")
+local env = April.require("core.env")
+local M = {}
+local AGE_THRESHOLD_DAYS = 60
+local VERT_SPEED_ABS = 1000
+local RESCAN_MS = 3000
+local cache = {}
+local last_scan_ms = 0
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+local function cache_key(player)
+    local uid = ep.user_id(player)
+    if uid and uid ~= 0 then
+        return "u:" .. tostring(uid)
+    end
+    local name = ep.name(player)
+    if name and name ~= "" then
+        return "n:" .. name
+    end
+    return nil
+end
+local function read_account_age(player)
+    local age = tonumber(ep.get(player, "AccountAge", "account_age"))
+    if age then return age end
+    local pl = ep.player_inst(player)
+    if not pl then return nil end
+    local ok, v = pcall(function()
+        return pl.AccountAge or pl.account_age
+    end)
+    if ok then
+        return tonumber(v)
+    end
+    return nil
+end
+local function vertical_speed(player)
+    local vel = ep.velocity(player)
+    if vel then
+        local y = tonumber(vel.Y or vel.y)
+        if y then return y end
+    end
+    local char = ep.character(player)
+    if not char or not env.is_valid(char) then return nil end
+    local root = env.safe_call(function()
+        return char:FindFirstChild("HumanoidRootPart")
+            or char:find_first_child("HumanoidRootPart")
+    end)
+    if not root or not env.is_valid(root) then return nil end
+    local v = root.AssemblyLinearVelocity or root.Velocity or root.velocity
+    if not v then return nil end
+    return tonumber(v.Y or v.y)
+end
+local function evaluate(player)
+    local age = read_account_age(player)
+    if age ~= nil and age <= AGE_THRESHOLD_DAYS then
+        return true
+    end
+    local vy = vertical_speed(player)
+    if vy ~= nil and (vy <= -VERT_SPEED_ABS or vy >= VERT_SPEED_ABS) then
+        return true
+    end
+    return false
+end
+function M.is_cheater(player)
+    if not player or ep.is_local(player) then return false end
+    local key = cache_key(player)
+    if not key then return false end
+    local now = tick_ms()
+    local entry = cache[key]
+    if entry and entry.flagged then
+        return true
+    end
+    if entry and now - (entry.at or 0) < RESCAN_MS then
+        return entry.flagged == true
+    end
+    local flagged = evaluate(player)
+    cache[key] = { flagged = flagged, at = now }
+    return flagged
+end
+function M.tick()
+    local now = tick_ms()
+    if now - last_scan_ms < RESCAN_MS then return end
+    last_scan_ms = now
+    local players = entity and (entity.get_players or entity.GetPlayers)
+    if not players then return end
+    local ok, list = pcall(players)
+    if not ok or type(list) ~= "table" then return end
+    for i = 1, #list do
+        local p = list[i]
+        if p and not ep.is_local(p) then
+            M.is_cheater(p)
+        end
+    end
+end
+function M.clear()
+    cache = {}
+    last_scan_ms = 0
+end
+return M
+end)()
+
 April._mods["core.settings"] = (function()
 local M = {}
 local _callbacks = {}
@@ -1892,8 +1994,12 @@ function M.draw_panel(x, y, w, h, title, opts)
     opts = opts or {}
     local gs = gs_theme()
     local fill = draw and (draw.rect_filled or draw.RectFilled)
+    local outline = draw and (draw.rect or draw.Rect)
     local text = draw and (draw.text or draw.Text)
-    local rounding = gs and gs.CORNER or 6
+    local rounding = opts.rounding
+    if rounding == nil then
+        rounding = gs and gs.CORNER or 6
+    end
     local opacity = tonumber(opts.opacity) or 1
     if opacity < 0 then opacity = 0 end
     if opacity > 1 then opacity = 1 end
@@ -1903,6 +2009,11 @@ function M.draw_panel(x, y, w, h, title, opts)
     title_col = ui_theme.alpha(title_col, (title_col[4] or 1) * opacity)
     if type(fill) == "function" then
         pcall(fill, x, y, w, h, bg, rounding)
+    end
+    if opts.border and type(outline) == "function" then
+        local border = opts.border_col or M.border()
+        border = ui_theme.alpha(border, (border[4] or 1) * opacity)
+        pcall(outline, x, y, w, h, border, rounding, opts.border_w or 1)
     end
     if title and type(text) == "function" then
         if opts.title_center then
@@ -3551,6 +3662,7 @@ April._mods["core.ballistic"] = (function()
 local math_util = April.require("core.math_util")
 local M = {}
 local ROBLOX_GRAV = 196.2
+local PRED_G = 195
 local function vec3(v)
     if not v then return 0, 0, 0 end
     return v.x or v.X or 0, v.y or v.Y or 0, v.z or v.Z or 0
@@ -3573,13 +3685,21 @@ function M.calculate_drop(bullet_speed, bullet_gravity, position, origin)
     local speed = math.max(bullet_speed or 950, 1)
     local dist = math_util.distance3(px - ox, py - oy, pz - oz)
     local time = dist / speed
-    local g = M.gravity_accel(bullet_gravity)
-    return 0.5 * g * time * time
+    local grav = bullet_gravity or 0.55
+    local drop = 0.5 * grav * PRED_G * time * time
+    if drop ~= drop then
+        return 0
+    end
+    return drop
 end
-function M.calculate_target_position(bullet_speed, bullet_gravity, velocity, position, origin)
+function M.calculate_target_position(bullet_speed, bullet_gravity, velocity, position, origin, opts)
+    opts = opts or {}
     local px, py, pz = vec3(position)
     local ox, oy, oz = vec3(origin)
     local vx, vy, vz = vec3(velocity)
+    if opts.no_y_vel then
+        vy = 0
+    end
     local speed = math.max(bullet_speed or 950, 1)
     local dist = math_util.distance3(ox - px, oy - py, oz - pz)
     local time = dist / speed
@@ -3590,9 +3710,13 @@ function M.calculate_target_position(bullet_speed, bullet_gravity, velocity, pos
         z = pz + vz * time,
     }
 end
-function M.predict_for_weapon(origin, position, velocity, weapon_name)
+function M.predict_for_weapon(origin, position, velocity, weapon_name, opts)
     local stats = combat_stats_mod().get_effective_stats(weapon_name)
-    return M.calculate_target_position(stats.speed, stats.gravity, velocity, position, origin)
+    opts = opts or {}
+    if opts.no_y_vel == nil and stats.is_bow then
+        opts = { no_y_vel = true }
+    end
+    return M.calculate_target_position(stats.speed, stats.gravity, velocity, position, origin, opts)
 end
 local function solve_flight_time(dx, dy, dz, speed, g)
     local dist = math_util.distance3(dx, dy, dz)
@@ -5727,6 +5851,7 @@ local MENU_KEYS = {
     "april_player_flag_downed", "april_player_flag_safezone",
     "april_player_flag_staff", "april_player_flag_reviving",
     "april_player_flag_movement", "april_player_flag_vip",
+    "april_player_flag_cheater",
     "april_player_esp_filters", "april_player_esp_flags",
     "april_player_range",
     "april_target_overlay", "april_target_overlay_fov", "april_target_overlay_max_dist",
@@ -5742,6 +5867,7 @@ local MENU_KEYS = {
     "april_aim_target_type", "april_aim_bone",
     "april_aim_filters", "april_aim_whitelist_ids",
     "april_aim_targets", "april_aim_options",
+    "april_aim_auto_pred",
     "april_aim_draw_fov", "april_aim_fov_style", "april_aim_target_line",
     "april_aim_max_dist", "april_aim_fov", "april_aim_smooth",
     "april_aim_smooth_type", "april_aim_humanize", "april_aim_humanize_str",
@@ -5838,6 +5964,7 @@ local COLOR_KEYS = {
     "april_player_flag_downed", "april_player_flag_safezone",
     "april_player_flag_staff", "april_player_flag_reviving",
     "april_player_flag_movement", "april_player_flag_vip",
+    "april_player_flag_cheater",
     "april_player_box_color",
     "april_raid_enabled",
     "april_stone_node", "april_metal_node", "april_phosphate_node", "april_corn_plant", "april_tomato_plant",

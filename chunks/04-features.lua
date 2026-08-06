@@ -831,6 +831,7 @@ function M.register_aimbot(T, G, prefix, parent_id, opts)
     end)
     menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, { parent = parent_id })
     menu_util.section(T, G, "Aim")
+    menu.add_checkbox(T, G, p .. "auto_pred", "Auto Prediction", true, { parent = parent_id })
     menu.add_multicombo(T, G, p .. "options", "Options", {
         "Sticky Target",
     }, { false }, { parent = parent_id })
@@ -1176,16 +1177,22 @@ function M.closest_bone_world(target, cx, cy)
     end
     return M.bone_world(target, "Head")
 end
-local function target_velocity(target)
+local function target_velocity(target, opts)
+    opts = opts or {}
+    local clamp_y = opts.clamp_y
+    if clamp_y == nil then clamp_y = true end
+    local function pack(vx, vy, vz)
+        vy = vy or 0
+        if clamp_y then
+            vy = math.max(-100, math.min(100, vy))
+        end
+        return { x = vx or 0, y = vy, z = vz or 0 }
+    end
     if M.is_npc_target(target) and target.entity then
         local vel = target.entity.Velocity or target.entity.velocity
         local vx, vy, vz = esp_util.vec3_pos(vel)
         if vx then
-            return {
-                x = vx,
-                y = math.max(-100, math.min(100, vy or 0)),
-                z = vz,
-            }
+            return pack(vx, vy, vz)
         end
     end
     if M.is_npc_target(target) and target.inst and env.is_valid(target.inst) then
@@ -1196,11 +1203,7 @@ local function target_velocity(target)
         if root and env.is_valid(root) then
             local vel = root.AssemblyLinearVelocity or root.Velocity or root.velocity
             if vel and vel.x then
-                return {
-                    x = vel.x,
-                    y = math.max(-100, math.min(100, vel.y or 0)),
-                    z = vel.z,
-                }
+                return pack(vel.x, vel.y, vel.z)
             end
         end
         return { x = 0, y = 0, z = 0 }
@@ -1208,11 +1211,7 @@ local function target_velocity(target)
     if target.velocity then
         local v = target.velocity
         if v.x ~= nil then
-            return {
-                x = v.x,
-                y = math.max(-100, math.min(100, v.y or 0)),
-                z = v.z,
-            }
+            return pack(v.x, v.y, v.z)
         end
     end
     if target.character then
@@ -1223,11 +1222,7 @@ local function target_velocity(target)
         if root and env.is_valid(root) then
             local vel = root.AssemblyLinearVelocity or root.Velocity or root.velocity
             if vel and vel.x then
-                return {
-                    x = vel.x,
-                    y = math.max(-100, math.min(100, vel.y or 0)),
-                    z = vel.z,
-                }
+                return pack(vel.x, vel.y, vel.z)
             end
         end
     end
@@ -1235,8 +1230,8 @@ local function target_velocity(target)
 end
 function M.predict_point(origin, point, target, weapon_name)
     if not origin or not point then return point end
-    local vel = target_velocity(target)
-    weapon_name = weapon_name or weapons.cached_held_ranged()
+    if not weapon_name then return point end
+    local vel = target_velocity(target, { clamp_y = false })
     return ballistic.predict_for_weapon(origin, point, vel, weapon_name)
 end
 function M.resolve_bone_world(target, bone, cx, cy)
@@ -1248,7 +1243,7 @@ function M.resolve_bone_world(target, bone, cx, cy)
 end
 function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
     bone = bone or M.bone_name(prefix)
-    local weapon = weapons.cached_held_ranged()
+    local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
     if M.uses_bow_torso_aim(prefix) then
         bone = M.effective_aim_bone(bone, weapon)
     end
@@ -1258,6 +1253,9 @@ function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
         base = M.bow_aim_nudge(base, weapon)
     end
     if use_prediction == false then
+        return base
+    end
+    if not weapon or not weapons.is_ranged_weapon_name(weapon) then
         return base
     end
     origin = origin or combat_origin.get_fire_origin()
@@ -2038,10 +2036,13 @@ local function update_target(cx, cy, fov)
     locked_target = targeting.find_target(cx, cy, fov, PREFIX)
 end
 local function resolve_aim_point(target, cx, cy)
-    local predict_origin = combat_origin.get_muzzle_origin()
+    local auto_pred = settings.bool(PREFIX .. "auto_pred", true)
+    local holding = holding_weapon()
+    local predict_origin = combat_origin.get_camera_origin()
+        or combat_origin.get_muzzle_origin()
         or combat_origin.get_fire_origin()
-        or combat_origin.get_camera_origin()
-    return targeting.get_aim_point(target, PREFIX, nil, predict_origin, cx, cy, true)
+    local use_pred = auto_pred and holding
+    return targeting.get_aim_point(target, PREFIX, nil, predict_origin, cx, cy, use_pred)
 end
 function M.register_menu()
     local G = menu_util.G
@@ -2066,6 +2067,7 @@ function M.register_menu()
         PREFIX .. "filters",
         PREFIX .. "whitelist_ids", PREFIX .. "whitelist_clear",
         PREFIX .. "targets", PREFIX .. "options",
+        PREFIX .. "auto_pred",
         PREFIX .. "smooth", PREFIX .. "smooth_type",
         PREFIX .. "humanize", PREFIX .. "humanize_str",
         PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
@@ -2092,12 +2094,12 @@ function M.update(_dt)
     update_target(cx, cy, fov)
     if holding_weapon() then
         combat_origin.sync_weapon(weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name())
-        local wl_target = locked_target
-        if not wl_target or not targeting.is_aim_target(wl_target) then
-            wl_target = targeting.find_target(cx, cy, fov, PREFIX, { ignore_whitelist = true })
-        end
-        silent_whitelist.tick(wl_target, PREFIX)
     end
+    local wl_target = locked_target
+    if not wl_target or not targeting.is_aim_target(wl_target) then
+        wl_target = targeting.find_target(cx, cy, fov, PREFIX, { ignore_whitelist = true })
+    end
+    silent_whitelist.tick(wl_target, PREFIX)
     if not locked_target or not targeting.is_aim_target(locked_target) then
         smoothed_aim = nil
         reset_humanize()
@@ -2109,7 +2111,7 @@ function M.update(_dt)
         reset_humanize()
         return
     end
-    if aiming() and holding_weapon() then
+    if aiming() then
         smoothed_aim = blend_aim(smoothed_aim, aim)
         cached_aim = smoothed_aim
         if camera and camera.look_at then
@@ -5056,6 +5058,7 @@ local player_gear = April.require("game.player_gear")
 local mod_checker = April.require("features.utility.mod_checker")
 local mod_ids = April.require("game.mod_ids")
 local ep = April.require("core.entity_props")
+local cheater_detect = April.require("game.cheater_detect")
 local M = {}
 local P = "april_player_enabled"
 local FILTERS = "april_player_esp_filters"
@@ -5075,9 +5078,10 @@ local ID_FLAG_STAFF = "april_player_flag_staff"
 local ID_FLAG_REVIVE = "april_player_flag_reviving"
 local ID_FLAG_MOVE = "april_player_flag_movement"
 local ID_FLAG_VIP = "april_player_flag_vip"
+local ID_FLAG_CHEATER = "april_player_flag_cheater"
 local F_TEAM, F_SAFEZONE, F_SKIP_DOWNED = 1, 2, 3
 local FL_DOWNED, FL_SAFEZONE, FL_STAFF, FL_REVIVING = 1, 2, 3, 4
-local FL_MOVEMENT, FL_VIP = 5, 6
+local FL_MOVEMENT, FL_VIP, FL_CHEATER = 5, 6, 7
 local DEFAULT_BOX = { 1, 0.35, 0.35, 1 }
 local DEFAULT_TEXT = { 1, 0.35, 0.35, 1 }
 local DEFAULT_CLAN = { 0.84, 0.31, 0.80, 1 }
@@ -5090,6 +5094,7 @@ local DEFAULT_FLAG = {
     REVIVE = { 0.45, 1, 0.55, 1 },
     MOVE = { 0.75, 0.85, 1, 1 },
     VIP = { 1, 0.82, 0.2, 1 },
+    CHEATER = { 1, 0.05, 0.05, 1 },
 }
 local held_cache = {}
 local last_held_prune_ms = 0
@@ -5114,18 +5119,23 @@ local function migrate_flags_table()
     if n <= 4 then
         pcall(menu.set, FLAGS, {
             cur[1] == true, cur[2] == true, cur[3] == true, cur[4] == true,
-            false, false,
+            false, false, false,
+        })
+    elseif n == 6 then
+        pcall(menu.set, FLAGS, {
+            cur[1] == true, cur[2] == true, cur[3] == true, cur[4] == true,
+            cur[5] == true, cur[6] == true, false,
         })
     elseif n >= 8 then
         local move = cur[5] == true or cur[6] == true or cur[7] == true
         pcall(menu.set, FLAGS, {
             cur[1] == true, cur[2] == true, cur[3] == true, cur[4] == true,
-            move, cur[8] == true,
+            move, cur[8] == true, false,
         })
-    elseif n ~= 6 then
+    elseif n ~= 7 then
         pcall(menu.set, FLAGS, {
             cur[1] == true, cur[2] == true, cur[3] == true, cur[4] == true,
-            cur[5] == true, cur[6] == true,
+            cur[5] == true, cur[6] == true, cur[7] == true,
         })
     end
 end
@@ -5152,15 +5162,16 @@ function M.register_menu()
     }, { false, false, false }, { parent = P })
     set_multi_defaults(FILTERS, { true, false, false })
     menu.add_multicombo(T, G.VISUALS, FLAGS, "ESP Flags", {
-        "Downed", "Safezone", "Staff", "Reviving", "Movement", "VIP",
-    }, { false, false, false, false, false, false }, { parent = P })
-    set_multi_defaults(FLAGS, { true, true, true, true, false, true })
+        "Downed", "Safezone", "Staff", "Reviving", "Movement", "VIP", "Cheater",
+    }, { false, false, false, false, false, false, false }, { parent = P })
+    set_multi_defaults(FLAGS, { true, true, true, true, false, true, true })
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_DOWN, "Flag Downed Color", DEFAULT_FLAG.DOWN, { parent = P })
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_SZ, "Flag Safezone Color", DEFAULT_FLAG.SZ, { parent = P })
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_STAFF, "Flag Staff Color", DEFAULT_FLAG.STAFF, { parent = P })
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_REVIVE, "Flag Reviving Color", DEFAULT_FLAG.REVIVE, { parent = P })
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_MOVE, "Flag Movement Color", DEFAULT_FLAG.MOVE, { parent = P })
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_VIP, "Flag VIP Color", DEFAULT_FLAG.VIP, { parent = P })
+    menu.add_colorpicker(T, G.VISUALS, ID_FLAG_CHEATER, "Flag Cheater Color", DEFAULT_FLAG.CHEATER, { parent = P })
     menu.add_slider_int(T, G.VISUALS, ID_RANGE, "Player Range", 50, 2000, 500, { parent = P })
     menu_util.gap(T, G.VISUALS)
     menu_util.bind_children(P, {
@@ -5168,7 +5179,7 @@ function M.register_menu()
         ID_NAME, ID_CLAN, ID_HELD, ID_DIST,
         FILTERS, FLAGS,
         ID_FLAG_DOWN, ID_FLAG_SZ, ID_FLAG_STAFF, ID_FLAG_REVIVE,
-        ID_FLAG_MOVE, ID_FLAG_VIP,
+        ID_FLAG_MOVE, ID_FLAG_VIP, ID_FLAG_CHEATER,
         ID_RANGE,
     })
 end
@@ -5228,6 +5239,9 @@ local function draw_side_tags(p, snap, show_clan, clan_menu_col, flag_cols, flag
     if show_clan and snap and snap.clan_tag then
         local cc = snap.clan_color
         row = emit_side_tag(x, y, ts, row, "[" .. snap.clan_tag .. "]", (cc and cc[1]) and cc or clan_menu_col)
+    end
+    if flags[FL_CHEATER] and cheater_detect.is_cheater(p) then
+        row = emit_side_tag(x, y, ts, row, "[CHEATER]", flag_cols.cheater)
     end
     if flags[FL_SAFEZONE] and snap and snap.safezone then
         row = emit_side_tag(x, y, ts, row, "[SZ]", flag_cols.sz)
@@ -5289,11 +5303,15 @@ function M.draw()
         [FL_REVIVING] = settings.multi(FLAGS, FL_REVIVING, false),
         [FL_MOVEMENT] = settings.multi(FLAGS, FL_MOVEMENT, false),
         [FL_VIP] = settings.multi(FLAGS, FL_VIP, false),
+        [FL_CHEATER] = settings.multi(FLAGS, FL_CHEATER, false),
     }
+    if flags[FL_CHEATER] then
+        cheater_detect.tick()
+    end
     local need_snap = show_clan or filter_sz or skip_downed
         or flags[FL_DOWNED] or flags[FL_SAFEZONE]
         or flags[FL_STAFF] or flags[FL_REVIVING] or flags[FL_VIP]
-    local need_side = need_snap or flags[FL_MOVEMENT]
+    local need_side = need_snap or flags[FL_MOVEMENT] or flags[FL_CHEATER]
     local skel_col = settings.color(ID_SKELETON, { 1, 1, 1, 0.92 })
     local name_col = settings.color(ID_NAME, DEFAULT_TEXT)
     local clan_menu_col = settings.color(ID_CLAN, DEFAULT_CLAN)
@@ -5307,6 +5325,7 @@ function M.draw()
         revive = settings.color(ID_FLAG_REVIVE, DEFAULT_FLAG.REVIVE),
         move = settings.color(ID_FLAG_MOVE, DEFAULT_FLAG.MOVE),
         vip = settings.color(ID_FLAG_VIP, DEFAULT_FLAG.VIP),
+        cheater = settings.color(ID_FLAG_CHEATER, DEFAULT_FLAG.CHEATER),
     }
     local base_ts = esp_util.text_size()
     local me = cache.local_player

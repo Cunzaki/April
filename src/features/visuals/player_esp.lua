@@ -9,6 +9,7 @@ local player_gear = April.require("game.player_gear")
 local mod_checker = April.require("features.utility.mod_checker")
 local mod_ids = April.require("game.mod_ids")
 local ep = April.require("core.entity_props")
+local cheater_detect = April.require("game.cheater_detect")
 
 local M = {}
 local P = "april_player_enabled"
@@ -30,10 +31,11 @@ local ID_FLAG_STAFF = "april_player_flag_staff"
 local ID_FLAG_REVIVE = "april_player_flag_reviving"
 local ID_FLAG_MOVE = "april_player_flag_movement"
 local ID_FLAG_VIP = "april_player_flag_vip"
+local ID_FLAG_CHEATER = "april_player_flag_cheater"
 
 local F_TEAM, F_SAFEZONE, F_SKIP_DOWNED = 1, 2, 3
 local FL_DOWNED, FL_SAFEZONE, FL_STAFF, FL_REVIVING = 1, 2, 3, 4
-local FL_MOVEMENT, FL_VIP = 5, 6
+local FL_MOVEMENT, FL_VIP, FL_CHEATER = 5, 6, 7
 
 local DEFAULT_BOX = { 1, 0.35, 0.35, 1 }
 local DEFAULT_TEXT = { 1, 0.35, 0.35, 1 }
@@ -47,6 +49,7 @@ local DEFAULT_FLAG = {
     REVIVE = { 0.45, 1, 0.55, 1 },
     MOVE = { 0.75, 0.85, 1, 1 },
     VIP = { 1, 0.82, 0.2, 1 },
+    CHEATER = { 1, 0.05, 0.05, 1 },
 }
 local held_cache = {}
 local last_held_prune_ms = 0
@@ -72,22 +75,28 @@ local function migrate_flags_table()
         if cur[i] ~= nil then n = i end
     end
     if n <= 4 then
-        -- Old 4-flag configs: keep first four, Movement/VIP off until chosen.
+        -- Old 4-flag configs: keep first four, Movement/VIP/Cheater off until chosen.
         pcall(menu.set, FLAGS, {
             cur[1] == true, cur[2] == true, cur[3] == true, cur[4] == true,
-            false, false,
+            false, false, false,
+        })
+    elseif n == 6 then
+        -- Pre-cheater 6-flag layout → append Cheater off.
+        pcall(menu.set, FLAGS, {
+            cur[1] == true, cur[2] == true, cur[3] == true, cur[4] == true,
+            cur[5] == true, cur[6] == true, false,
         })
     elseif n >= 8 then
-        -- Old Idle/Walk/Sprint/VIP layout → single Movement + VIP.
+        -- Old Idle/Walk/Sprint/VIP layout → single Movement + VIP + Cheater.
         local move = cur[5] == true or cur[6] == true or cur[7] == true
         pcall(menu.set, FLAGS, {
             cur[1] == true, cur[2] == true, cur[3] == true, cur[4] == true,
-            move, cur[8] == true,
+            move, cur[8] == true, false,
         })
-    elseif n ~= 6 then
+    elseif n ~= 7 then
         pcall(menu.set, FLAGS, {
             cur[1] == true, cur[2] == true, cur[3] == true, cur[4] == true,
-            cur[5] == true, cur[6] == true,
+            cur[5] == true, cur[6] == true, cur[7] == true,
         })
     end
 end
@@ -120,9 +129,9 @@ function M.register_menu()
     set_multi_defaults(FILTERS, { true, false, false })
 
     menu.add_multicombo(T, G.VISUALS, FLAGS, "ESP Flags", {
-        "Downed", "Safezone", "Staff", "Reviving", "Movement", "VIP",
-    }, { false, false, false, false, false, false }, { parent = P })
-    set_multi_defaults(FLAGS, { true, true, true, true, false, true })
+        "Downed", "Safezone", "Staff", "Reviving", "Movement", "VIP", "Cheater",
+    }, { false, false, false, false, false, false, false }, { parent = P })
+    set_multi_defaults(FLAGS, { true, true, true, true, false, true, true })
 
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_DOWN, "Flag Downed Color", DEFAULT_FLAG.DOWN, { parent = P })
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_SZ, "Flag Safezone Color", DEFAULT_FLAG.SZ, { parent = P })
@@ -130,6 +139,7 @@ function M.register_menu()
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_REVIVE, "Flag Reviving Color", DEFAULT_FLAG.REVIVE, { parent = P })
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_MOVE, "Flag Movement Color", DEFAULT_FLAG.MOVE, { parent = P })
     menu.add_colorpicker(T, G.VISUALS, ID_FLAG_VIP, "Flag VIP Color", DEFAULT_FLAG.VIP, { parent = P })
+    menu.add_colorpicker(T, G.VISUALS, ID_FLAG_CHEATER, "Flag Cheater Color", DEFAULT_FLAG.CHEATER, { parent = P })
 
     menu.add_slider_int(T, G.VISUALS, ID_RANGE, "Player Range", 50, 2000, 500, { parent = P })
     menu_util.gap(T, G.VISUALS)
@@ -139,7 +149,7 @@ function M.register_menu()
         ID_NAME, ID_CLAN, ID_HELD, ID_DIST,
         FILTERS, FLAGS,
         ID_FLAG_DOWN, ID_FLAG_SZ, ID_FLAG_STAFF, ID_FLAG_REVIVE,
-        ID_FLAG_MOVE, ID_FLAG_VIP,
+        ID_FLAG_MOVE, ID_FLAG_VIP, ID_FLAG_CHEATER,
         ID_RANGE,
     })
 end
@@ -210,6 +220,9 @@ local function draw_side_tags(p, snap, show_clan, clan_menu_col, flag_cols, flag
         row = emit_side_tag(x, y, ts, row, "[" .. snap.clan_tag .. "]", (cc and cc[1]) and cc or clan_menu_col)
     end
 
+    if flags[FL_CHEATER] and cheater_detect.is_cheater(p) then
+        row = emit_side_tag(x, y, ts, row, "[CHEATER]", flag_cols.cheater)
+    end
     if flags[FL_SAFEZONE] and snap and snap.safezone then
         row = emit_side_tag(x, y, ts, row, "[SZ]", flag_cols.sz)
     end
@@ -278,12 +291,17 @@ function M.draw()
         [FL_REVIVING] = settings.multi(FLAGS, FL_REVIVING, false),
         [FL_MOVEMENT] = settings.multi(FLAGS, FL_MOVEMENT, false),
         [FL_VIP] = settings.multi(FLAGS, FL_VIP, false),
+        [FL_CHEATER] = settings.multi(FLAGS, FL_CHEATER, false),
     }
+
+    if flags[FL_CHEATER] then
+        cheater_detect.tick()
+    end
 
     local need_snap = show_clan or filter_sz or skip_downed
         or flags[FL_DOWNED] or flags[FL_SAFEZONE]
         or flags[FL_STAFF] or flags[FL_REVIVING] or flags[FL_VIP]
-    local need_side = need_snap or flags[FL_MOVEMENT]
+    local need_side = need_snap or flags[FL_MOVEMENT] or flags[FL_CHEATER]
 
     local skel_col = settings.color(ID_SKELETON, { 1, 1, 1, 0.92 })
     local name_col = settings.color(ID_NAME, DEFAULT_TEXT)
@@ -298,6 +316,7 @@ function M.draw()
         revive = settings.color(ID_FLAG_REVIVE, DEFAULT_FLAG.REVIVE),
         move = settings.color(ID_FLAG_MOVE, DEFAULT_FLAG.MOVE),
         vip = settings.color(ID_FLAG_VIP, DEFAULT_FLAG.VIP),
+        cheater = settings.color(ID_FLAG_CHEATER, DEFAULT_FLAG.CHEATER),
     }
     local base_ts = esp_util.text_size()
 

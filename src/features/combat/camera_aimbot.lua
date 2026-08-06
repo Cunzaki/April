@@ -193,10 +193,14 @@ local function update_target(cx, cy, fov)
 end
 
 local function resolve_aim_point(target, cx, cy)
-    local predict_origin = combat_origin.get_muzzle_origin()
+    local auto_pred = settings.bool(PREFIX .. "auto_pred", true)
+    local holding = holding_weapon()
+    -- Lead from camera when predicting so look_at matches flight time.
+    local predict_origin = combat_origin.get_camera_origin()
+        or combat_origin.get_muzzle_origin()
         or combat_origin.get_fire_origin()
-        or combat_origin.get_camera_origin()
-    return targeting.get_aim_point(target, PREFIX, nil, predict_origin, cx, cy, true)
+    local use_pred = auto_pred and holding
+    return targeting.get_aim_point(target, PREFIX, nil, predict_origin, cx, cy, use_pred)
 end
 
 function M.register_menu()
@@ -226,6 +230,7 @@ function M.register_menu()
         PREFIX .. "filters",
         PREFIX .. "whitelist_ids", PREFIX .. "whitelist_clear",
         PREFIX .. "targets", PREFIX .. "options",
+        PREFIX .. "auto_pred",
         PREFIX .. "smooth", PREFIX .. "smooth_type",
         PREFIX .. "humanize", PREFIX .. "humanize_str",
         PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
@@ -259,13 +264,13 @@ function M.update(_dt)
 
     if holding_weapon() then
         combat_origin.sync_weapon(weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name())
-
-        local wl_target = locked_target
-        if not wl_target or not targeting.is_aim_target(wl_target) then
-            wl_target = targeting.find_target(cx, cy, fov, PREFIX, { ignore_whitelist = true })
-        end
-        silent_whitelist.tick(wl_target, PREFIX)
     end
+
+    local wl_target = locked_target
+    if not wl_target or not targeting.is_aim_target(wl_target) then
+        wl_target = targeting.find_target(cx, cy, fov, PREFIX, { ignore_whitelist = true })
+    end
+    silent_whitelist.tick(wl_target, PREFIX)
 
     if not locked_target or not targeting.is_aim_target(locked_target) then
         smoothed_aim = nil
@@ -280,7 +285,8 @@ function M.update(_dt)
         return
     end
 
-    if aiming() and holding_weapon() then
+    -- Aimbot works with any held item (or empty hands); prediction only when armed.
+    if aiming() then
         smoothed_aim = blend_aim(smoothed_aim, aim)
         cached_aim = smoothed_aim
 

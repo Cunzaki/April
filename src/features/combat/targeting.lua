@@ -374,16 +374,24 @@ function M.closest_bone_world(target, cx, cy)
     return M.bone_world(target, "Head")
 end
 
-local function target_velocity(target)
+local function target_velocity(target, opts)
+    opts = opts or {}
+    local clamp_y = opts.clamp_y
+    if clamp_y == nil then clamp_y = true end
+
+    local function pack(vx, vy, vz)
+        vy = vy or 0
+        if clamp_y then
+            vy = math.max(-100, math.min(100, vy))
+        end
+        return { x = vx or 0, y = vy, z = vz or 0 }
+    end
+
     if M.is_npc_target(target) and target.entity then
         local vel = target.entity.Velocity or target.entity.velocity
         local vx, vy, vz = esp_util.vec3_pos(vel)
         if vx then
-            return {
-                x = vx,
-                y = math.max(-100, math.min(100, vy or 0)),
-                z = vz,
-            }
+            return pack(vx, vy, vz)
         end
     end
     if M.is_npc_target(target) and target.inst and env.is_valid(target.inst) then
@@ -394,11 +402,7 @@ local function target_velocity(target)
         if root and env.is_valid(root) then
             local vel = root.AssemblyLinearVelocity or root.Velocity or root.velocity
             if vel and vel.x then
-                return {
-                    x = vel.x,
-                    y = math.max(-100, math.min(100, vel.y or 0)),
-                    z = vel.z,
-                }
+                return pack(vel.x, vel.y, vel.z)
             end
         end
         return { x = 0, y = 0, z = 0 }
@@ -407,11 +411,7 @@ local function target_velocity(target)
     if target.velocity then
         local v = target.velocity
         if v.x ~= nil then
-            return {
-                x = v.x,
-                y = math.max(-100, math.min(100, v.y or 0)),
-                z = v.z,
-            }
+            return pack(v.x, v.y, v.z)
         end
     end
 
@@ -423,11 +423,7 @@ local function target_velocity(target)
         if root and env.is_valid(root) then
             local vel = root.AssemblyLinearVelocity or root.Velocity or root.velocity
             if vel and vel.x then
-                return {
-                    x = vel.x,
-                    y = math.max(-100, math.min(100, vel.y or 0)),
-                    z = vel.z,
-                }
+                return pack(vel.x, vel.y, vel.z)
             end
         end
     end
@@ -437,8 +433,8 @@ end
 
 function M.predict_point(origin, point, target, weapon_name)
     if not origin or not point then return point end
-    local vel = target_velocity(target)
-    weapon_name = weapon_name or weapons.cached_held_ranged()
+    if not weapon_name then return point end
+    local vel = target_velocity(target, { clamp_y = false })
     return ballistic.predict_for_weapon(origin, point, vel, weapon_name)
 end
 
@@ -452,7 +448,7 @@ end
 
 function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
     bone = bone or M.bone_name(prefix)
-    local weapon = weapons.cached_held_ranged()
+    local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
     if M.uses_bow_torso_aim(prefix) then
         bone = M.effective_aim_bone(bone, weapon)
     end
@@ -463,6 +459,10 @@ function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
     end
 
     if use_prediction == false then
+        return base
+    end
+    -- No ranged weapon / no ballistics → aim the bone directly.
+    if not weapon or not weapons.is_ranged_weapon_name(weapon) then
         return base
     end
 

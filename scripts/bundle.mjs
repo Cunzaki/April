@@ -25,6 +25,7 @@ const ORDER = [
   "core/debug.lua",
   "game/mod_ids.lua",
   "game/mod_group.lua",
+  "game/cheater_detect.lua",
   "core/settings.lua",
   "core/feature_bind.lua",
   "core/aim_key.lua",
@@ -132,7 +133,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.1.25";
+const VERSION = "4.1.26";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector

@@ -172,6 +172,7 @@ local function build_aim()
             sl("april_aim_max_dist", "Max Distance (m)", 50, 2000, 500),
             sep(),
             multi("april_aim_options", "Options", { "Sticky Target" }, { false }),
+            cb("april_aim_auto_pred", "Auto Prediction", true),
             sl("april_aim_smooth", "Smoothness", 1, 25, 10),
             combo("april_aim_smooth_type", "Smooth Type", {
                 "Linear", "Ease Out", "Ease In-Out", "Exponential", "Adaptive",
@@ -256,8 +257,8 @@ local function build_visuals()
                 "Team Check", "Skip Safezone", "Skip Downed",
             }, { true, false, false }),
             multi("april_player_esp_flags", "ESP Flags", {
-                "Downed", "Safezone", "Staff", "Reviving", "Movement", "VIP",
-            }, { true, true, true, true, false, true }),
+                "Downed", "Safezone", "Staff", "Reviving", "Movement", "VIP", "Cheater",
+            }, { true, true, true, true, false, true, true }),
             sl("april_player_range", "Player Range", 50, 2000, 500),
         },
     }
@@ -322,6 +323,7 @@ local function build_visuals()
             color("april_player_flag_reviving", "Reviving", { 0.45, 1, 0.55, 1 }),
             color("april_player_flag_movement", "Movement", { 0.75, 0.85, 1, 1 }),
             color("april_player_flag_vip", "VIP", { 1, 0.82, 0.2, 1 }),
+            color("april_player_flag_cheater", "Cheater", { 1, 0.05, 0.05, 1 }),
         },
     }
     return { left, gear, target_vis, colors }

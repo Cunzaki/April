@@ -3,6 +3,8 @@ local math_util = April.require("core.math_util")
 local M = {}
 
 local ROBLOX_GRAV = 196.2
+-- Simple aim lead uses this scale (Gravity * PRED_G → drop).
+local PRED_G = 195
 
 local function vec3(v)
     if not v then return 0, 0, 0 end
@@ -30,17 +32,26 @@ function M.calculate_drop(bullet_speed, bullet_gravity, position, origin)
     local speed = math.max(bullet_speed or 950, 1)
     local dist = math_util.distance3(px - ox, py - oy, pz - oz)
     local time = dist / speed
-    local g = M.gravity_accel(bullet_gravity)
-    return 0.5 * g * time * time
+    local grav = bullet_gravity or 0.55
+    -- Drop = -0.5 * (Gravity * -PRED_G) * t^2  →  0.5 * Gravity * PRED_G * t^2
+    local drop = 0.5 * grav * PRED_G * time * time
+    if drop ~= drop then -- nan
+        return 0
+    end
+    return drop
 end
 
--- Movement lead + bullet drop (Fallen / legacy aimbot formula).
+-- Movement lead + bullet drop.
 -- MovePred = Velocity * (|Origin - Position| / BulletSpeed)
--- Drop = 0.5 * g * t^2 on Y only (automatic from weapon stats).
-function M.calculate_target_position(bullet_speed, bullet_gravity, velocity, position, origin)
+-- opts.no_y_vel: lead on XZ only (bows / crossbows).
+function M.calculate_target_position(bullet_speed, bullet_gravity, velocity, position, origin, opts)
+    opts = opts or {}
     local px, py, pz = vec3(position)
     local ox, oy, oz = vec3(origin)
     local vx, vy, vz = vec3(velocity)
+    if opts.no_y_vel then
+        vy = 0
+    end
 
     local speed = math.max(bullet_speed or 950, 1)
     local dist = math_util.distance3(ox - px, oy - py, oz - pz)
@@ -55,9 +66,13 @@ function M.calculate_target_position(bullet_speed, bullet_gravity, velocity, pos
     }
 end
 
-function M.predict_for_weapon(origin, position, velocity, weapon_name)
+function M.predict_for_weapon(origin, position, velocity, weapon_name, opts)
     local stats = combat_stats_mod().get_effective_stats(weapon_name)
-    return M.calculate_target_position(stats.speed, stats.gravity, velocity, position, origin)
+    opts = opts or {}
+    if opts.no_y_vel == nil and stats.is_bow then
+        opts = { no_y_vel = true }
+    end
+    return M.calculate_target_position(stats.speed, stats.gravity, velocity, position, origin, opts)
 end
 
 -- Solve flight time so |v0| == speed with v0 = (hit - origin + 0.5*g*t^2*up) / t.
