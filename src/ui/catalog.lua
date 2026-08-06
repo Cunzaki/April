@@ -611,6 +611,8 @@ local function build_config()
             hk("april_ui_menu_key", "Menu Toggle Key"),
             combo("april_ui_theme_preset", "Theme Preset", {
                 "Violet Glass", "Midnight Blue", "Graphite", "Emerald Glass",
+                "Crimson Ember", "Arctic Frost", "Amber Noir", "Sakura Night",
+                "Ocean Abyss", "Copper Dust", "Neon Lime", "Royal Indigo",
             }, 0),
             sep(),
             sl("april_ui_window_opacity", "Window Opacity %", 45, 100, 86),

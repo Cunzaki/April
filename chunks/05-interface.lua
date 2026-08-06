@@ -1,26 +1,85 @@
 April._mods["ui.gs_theme"] = (function()
 local M = {}
-M.PRESET_NAMES = { "Violet Glass", "Midnight Blue", "Graphite", "Emerald Glass" }
 M.DENSITY_NAMES = { "Compact", "Balanced", "Comfortable" }
 M.CORNER_NAMES = { "Sharp", "Soft", "Rounded" }
 local PRESETS = {
     {
-        bg = { 0.030, 0.032, 0.045 }, panel = { 0.070, 0.065, 0.095 },
-        raised = { 0.105, 0.090, 0.135 }, accent = { 0.78, 0.20, 0.92 },
+        name = "Violet Glass",
+        bg = { 0.028, 0.026, 0.042 }, panel = { 0.068, 0.058, 0.098 },
+        raised = { 0.108, 0.088, 0.148 }, accent = { 0.76, 0.28, 0.98 },
+        text = { 0.86, 0.82, 0.96 }, text_dim = { 0.52, 0.48, 0.62 },
     },
     {
-        bg = { 0.025, 0.040, 0.060 }, panel = { 0.055, 0.085, 0.120 },
-        raised = { 0.075, 0.120, 0.165 }, accent = { 0.20, 0.68, 1.00 },
+        name = "Midnight Blue",
+        bg = { 0.018, 0.032, 0.058 }, panel = { 0.042, 0.072, 0.118 },
+        raised = { 0.062, 0.108, 0.168 }, accent = { 0.28, 0.72, 1.00 },
+        text = { 0.78, 0.88, 0.98 }, text_dim = { 0.42, 0.54, 0.68 },
     },
     {
-        bg = { 0.035, 0.037, 0.043 }, panel = { 0.075, 0.078, 0.088 },
-        raised = { 0.115, 0.118, 0.130 }, accent = { 0.73, 0.76, 0.84 },
+        name = "Graphite",
+        bg = { 0.032, 0.033, 0.038 }, panel = { 0.072, 0.074, 0.082 },
+        raised = { 0.112, 0.116, 0.126 }, accent = { 0.78, 0.80, 0.86 },
+        text = { 0.90, 0.91, 0.93 }, text_dim = { 0.50, 0.52, 0.56 },
     },
     {
-        bg = { 0.020, 0.045, 0.040 }, panel = { 0.045, 0.095, 0.080 },
-        raised = { 0.065, 0.135, 0.110 }, accent = { 0.20, 0.92, 0.62 },
+        name = "Emerald Glass",
+        bg = { 0.016, 0.038, 0.034 }, panel = { 0.038, 0.088, 0.072 },
+        raised = { 0.055, 0.128, 0.102 }, accent = { 0.22, 0.94, 0.64 },
+        text = { 0.78, 0.96, 0.88 }, text_dim = { 0.40, 0.58, 0.50 },
+    },
+    {
+        name = "Crimson Ember",
+        bg = { 0.048, 0.018, 0.020 }, panel = { 0.095, 0.040, 0.042 },
+        raised = { 0.145, 0.062, 0.055 }, accent = { 1.00, 0.32, 0.28 },
+        text = { 0.98, 0.84, 0.82 }, text_dim = { 0.62, 0.42, 0.40 },
+    },
+    {
+        name = "Arctic Frost",
+        bg = { 0.020, 0.028, 0.040 }, panel = { 0.048, 0.062, 0.082 },
+        raised = { 0.078, 0.098, 0.122 }, accent = { 0.55, 0.88, 1.00 },
+        text = { 0.88, 0.94, 1.00 }, text_dim = { 0.48, 0.58, 0.68 },
+    },
+    {
+        name = "Amber Noir",
+        bg = { 0.042, 0.028, 0.016 }, panel = { 0.088, 0.062, 0.036 },
+        raised = { 0.132, 0.098, 0.055 }, accent = { 1.00, 0.72, 0.28 },
+        text = { 0.98, 0.92, 0.78 }, text_dim = { 0.62, 0.52, 0.34 },
+    },
+    {
+        name = "Sakura Night",
+        bg = { 0.036, 0.020, 0.036 }, panel = { 0.082, 0.048, 0.078 },
+        raised = { 0.128, 0.078, 0.118 }, accent = { 1.00, 0.48, 0.72 },
+        text = { 0.98, 0.86, 0.92 }, text_dim = { 0.62, 0.46, 0.56 },
+    },
+    {
+        name = "Ocean Abyss",
+        bg = { 0.012, 0.036, 0.048 }, panel = { 0.032, 0.078, 0.098 },
+        raised = { 0.048, 0.118, 0.142 }, accent = { 0.18, 0.92, 0.88 },
+        text = { 0.76, 0.96, 0.96 }, text_dim = { 0.36, 0.58, 0.60 },
+    },
+    {
+        name = "Copper Dust",
+        bg = { 0.038, 0.030, 0.026 }, panel = { 0.082, 0.066, 0.054 },
+        raised = { 0.124, 0.100, 0.078 }, accent = { 0.92, 0.55, 0.32 },
+        text = { 0.96, 0.88, 0.78 }, text_dim = { 0.58, 0.48, 0.38 },
+    },
+    {
+        name = "Neon Lime",
+        bg = { 0.018, 0.028, 0.016 }, panel = { 0.040, 0.068, 0.038 },
+        raised = { 0.062, 0.105, 0.055 }, accent = { 0.62, 1.00, 0.18 },
+        text = { 0.88, 0.98, 0.78 }, text_dim = { 0.46, 0.60, 0.36 },
+    },
+    {
+        name = "Royal Indigo",
+        bg = { 0.022, 0.022, 0.055 }, panel = { 0.050, 0.052, 0.112 },
+        raised = { 0.078, 0.080, 0.165 }, accent = { 0.48, 0.52, 1.00 },
+        text = { 0.84, 0.86, 1.00 }, text_dim = { 0.46, 0.48, 0.68 },
     },
 }
+M.PRESET_NAMES = {}
+for i = 1, #PRESETS do
+    M.PRESET_NAMES[i] = PRESETS[i].name
+end
 local function clamp(v, a, b)
     v = tonumber(v) or a
     if v < a then return a end
@@ -81,8 +140,8 @@ function M.sync()
     M.SHADOW = { 0, 0, 0, 0 }
     M.SHADOW_DEEP = { 0, 0, 0, 0 }
     M.GLASS_HIGHLIGHT = { 1, 1, 1, 0 }
-    M.BORDER = { 0.34, 0.35, 0.42, 0.36 * border_alpha }
-    M.BORDER_SOFT = { 0.28, 0.29, 0.36, 0.24 * border_alpha }
+    M.BORDER = mix_rgb(p.raised, p.accent, 0.12, 0.36 * border_alpha)
+    M.BORDER_SOFT = mix_rgb(p.panel, p.raised, 0.40, 0.24 * border_alpha)
     M.BORDER_HOT = mix_rgb(p.raised, p.accent, 0.55, 0.72 * border_alpha)
     M.SIDEBAR = mix_rgb(p.bg, p.panel, 0.18, math.min(1, window_alpha + 0.02))
     M.SIDEBAR_ACTIVE = mix_rgb(p.panel, p.accent, 0.20, math.min(1, panel_alpha + 0.08))
@@ -97,10 +156,12 @@ function M.sync()
     M.DOCK_ACTIVE = mix_rgb(p.panel, p.accent, 0.22, math.min(1, panel_alpha + 0.14))
     M.DOCK_BORDER = mix_rgb(p.raised, p.accent, 0.18, 0.56 * border_alpha)
     M.DOCK_BADGE = rgb(p.accent, 1)
-    M.TEXT = { 0.78, 0.80, 0.87, 1 }
-    M.TEXT_DIM = { 0.47, 0.49, 0.57, 1 }
-    M.TEXT_ACTIVE = { 0.96, 0.97, 1.00, 1 }
-    M.TEXT_TITLE = { 0.84, 0.86, 0.92, 1 }
+    local text = p.text or { 0.78, 0.80, 0.87 }
+    local text_dim = p.text_dim or { 0.47, 0.49, 0.57 }
+    M.TEXT = rgb(text, 1)
+    M.TEXT_DIM = rgb(text_dim, 1)
+    M.TEXT_ACTIVE = mix_rgb(text, { 1, 1, 1 }, 0.55, 1)
+    M.TEXT_TITLE = mix_rgb(text, { 1, 1, 1 }, 0.28, 1)
     M.ACCENT = M.ACCENT or rgb(p.accent, 1)
     M.ACCENT_DIM = mix_rgb(p.bg, p.accent, 0.42, 0.85)
     M.CHECK_OFF = mix_rgb(p.bg, p.panel, 0.55, math.min(1, panel_alpha + 0.10))
@@ -3789,6 +3850,8 @@ label("Look", true),
 hk("april_ui_menu_key", "Menu Toggle Key"),
 combo("april_ui_theme_preset", "Theme Preset", {
 "Violet Glass", "Midnight Blue", "Graphite", "Emerald Glass",
+"Crimson Ember", "Arctic Frost", "Amber Noir", "Sakura Night",
+"Ocean Abyss", "Copper Dust", "Neon Lime", "Royal Indigo",
 }, 0),
 sep(),
 sl("april_ui_window_opacity", "Window Opacity %", 45, 100, 86),
