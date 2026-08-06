@@ -231,9 +231,6 @@ local function build_aim()
             cb("april_bullet_body_peek", "Body Peek (desync)", false, nil, "april_silent_bullet_manip"),
             sep("april_bullet_enabled"),
             cb("april_thick_bullet", "Hitbox Override", false),
-            combo("april_thick_bullet_part", "Override Part", {
-                "Head", "Torso", "HumanoidRootPart", "Left Arm", "Right Arm", "Left Leg", "Right Leg",
-            }, 0, "april_thick_bullet"),
             sl("april_thick_bullet_mult", "Override Size", 1, 4, 2, true, "april_thick_bullet"),
             sep("april_bullet_enabled"),
             cb("april_silent_manip_status", "Status HUD", false, nil, "april_bullet_enabled"),

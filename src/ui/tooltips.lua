@@ -56,9 +56,8 @@ M.BY_ID = {
     april_silent_bullet_manip = "Finds a shootable angle around cover. Server may reject invalid shots.",
     april_silent_manip_extend = "Searches farther from your body when no close peek is found.",
     april_bullet_body_peek = "Moves you to the peek with desync for server-valid shots. Can cause invalids or kicks.",
-    april_thick_bullet = "Expands a chosen body part hitbox on other players (client-side) and fades it. Helps local hit tests; the server can still reject shots that only clip the inflated shell.",
-    april_thick_bullet_part = "Which body part to resize on other players.",
-    april_thick_bullet_mult = "How large the selected part becomes (1x = normal size, up to 4x).",
+    april_thick_bullet = "Expands other players' head hitboxes on your client and fades them. Helps local hit tests; the server can still reject shots that only clip the inflated shell.",
+    april_thick_bullet_mult = "How large enemy heads become (1x = normal size, up to 4x).",
 
     -- Aimbot options
     april_aim_targets = "Choose whether aimbot targets players, NPCs, or both.",

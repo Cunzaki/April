@@ -183,9 +183,6 @@ function M.register_bullet(T, G, prefix, parent_id)
     menu.add_checkbox(T, G, "april_bullet_body_peek", "Body Peek (desync)", false, manip_root)
 
     menu.add_checkbox(T, G, "april_thick_bullet", "Hitbox Override", false, { parent = parent_id })
-    local thick = April.require("features.combat.thick_bullet")
-    menu.add_combo(T, G, "april_thick_bullet_part", "Override Part", thick.PART_OPTIONS, 0,
-        menu_util.parent("april_thick_bullet"))
     menu.add_slider_float(T, G, "april_thick_bullet_mult", "Override Size", 1, 4, 2, "%.1f",
         menu_util.parent("april_thick_bullet"))
 
