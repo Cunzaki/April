@@ -56,6 +56,8 @@ M.BY_ID = {
     april_silent_bullet_manip = "Finds a shootable angle around cover. Server may reject invalid shots.",
     april_silent_manip_extend = "Searches farther from your body when no close peek is found.",
     april_bullet_body_peek = "Moves you to the peek with desync for server-valid shots. Can cause invalids or kicks.",
+    april_thick_bullet = "Expands other players' head hitboxes on your client and fades them so the grow is less obvious. Client-side only — helps local hit tests; the server can still reject shots that only clip the inflated shell.",
+    april_thick_bullet_mult = "How large enemy heads become (1x = normal size, up to 4x).",
 
     -- Aimbot options
     april_aim_targets = "Choose whether aimbot targets players, NPCs, or both.",
@@ -131,6 +133,7 @@ M.BY_ID = {
     april_fly_enabled = "Camera-relative HRP velocity fly (WASD + Space/Ctrl). Built-in duck (HipHeight 0.01) and jump state while airborne — does not toggle Fake Duck. Never changes WalkSpeed or JumpPower.",
     april_fly_noclip = "Disables collision on your key character parts while flying. Collision is restored when you land or turn Fly off.",
     april_spider_enabled = "Climbs upward while you press into a nearby wall. It pulses the jump state only after multi-height wall checks, reducing wall snap-back.",
+    april_bhop_enabled = "Auto-jumps while you hold Space on the ground for smoother bunny hops.",
     april_antifling_enabled = "Makes other players' character parts non-collidable on your client. Their original collision values are restored when disabled.",
     april_desync_enabled = "Desyncs your network position from where you appear.",
     april_antiaim_enabled = "Spoofs your look direction to other players.",

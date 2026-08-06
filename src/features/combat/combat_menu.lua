@@ -182,6 +182,10 @@ function M.register_bullet(T, G, prefix, parent_id)
         menu_util.parent(p .. "manip_extend"))
     menu.add_checkbox(T, G, "april_bullet_body_peek", "Body Peek (desync)", false, manip_root)
 
+    menu.add_checkbox(T, G, "april_thick_bullet", "Thick Bullet", false, { parent = parent_id })
+    menu.add_slider_float(T, G, "april_thick_bullet_mult", "Thickness", 1, 4, 2, "%.1f",
+        menu_util.parent("april_thick_bullet"))
+
     local vis_root = menu_util.parent(parent_id)
     menu.add_checkbox(T, G, p .. "manip_status", "Status HUD", false, vis_root)
     menu.add_checkbox(T, G, p .. "manip_peek_vis", "Peek Visual", false, vis_root)

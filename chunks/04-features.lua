@@ -794,6 +794,9 @@ function M.register_bullet(T, G, prefix, parent_id)
     menu.add_slider_float(T, G, p .. "manip_extend_dist", "Extend Distance", 1, 7, 7, "%.1f",
         menu_util.parent(p .. "manip_extend"))
     menu.add_checkbox(T, G, "april_bullet_body_peek", "Body Peek (desync)", false, manip_root)
+    menu.add_checkbox(T, G, "april_thick_bullet", "Thick Bullet", false, { parent = parent_id })
+    menu.add_slider_float(T, G, "april_thick_bullet_mult", "Thickness", 1, 4, 2, "%.1f",
+        menu_util.parent("april_thick_bullet"))
     local vis_root = menu_util.parent(parent_id)
     menu.add_checkbox(T, G, p .. "manip_status", "Status HUD", false, vis_root)
     menu.add_checkbox(T, G, p .. "manip_peek_vis", "Peek Visual", false, vis_root)
@@ -2358,6 +2361,150 @@ end
 return M
 end)()
 
+April._mods["features.combat.thick_bullet"] = (function()
+local settings = April.require("core.settings")
+local env = April.require("core.env")
+local cache = April.require("core.cache")
+local move = April.require("core.cframe_move")
+local ep = April.require("core.entity_props")
+local M = {}
+local P = "april_thick_bullet"
+local P_MULT = "april_thick_bullet_mult"
+local P_BULLET = "april_bullet_enabled"
+local BASE = { x = 1.15, y = 1.16, z = 1.16 }
+local TRANSP = 0.99
+local tracked = {}
+local was_on = false
+local function vec3(x, y, z)
+    if Vector3 then
+        local ctor = Vector3.new or Vector3.New
+        if type(ctor) == "function" then
+            local ok, v = pcall(ctor, x, y, z)
+            if ok then return v end
+        end
+    end
+    return nil
+end
+local function head_key(head)
+    return head.Address or head.address or tostring(head)
+end
+local function read_size(head)
+    local ok, s = pcall(function()
+        return head.Size or head.size
+    end)
+    if not ok or not s then return nil end
+    local x = tonumber(s.X or s.x)
+    local y = tonumber(s.Y or s.y)
+    local z = tonumber(s.Z or s.z)
+    if not x or not y or not z then return nil end
+    return x, y, z
+end
+local function write_size(head, x, y, z)
+    local v = vec3(x, y, z)
+    if not v then return false end
+    return pcall(function()
+        head.Size = v
+    end)
+end
+local function restore_one(head, entry)
+    if not head or not env.is_valid(head) or not entry then return end
+    write_size(head, entry.sx, entry.sy, entry.sz)
+    if entry.transp ~= nil then
+        move.set_part_transparency(head, entry.transp)
+    end
+end
+local function restore_all()
+    for _, player in ipairs(cache.players or {}) do
+        local char = ep.character(player)
+        if char and env.is_valid(char) then
+            local head = env.safe_call(function()
+                return char:FindFirstChild("Head") or char:find_first_child("Head")
+            end)
+            if head and env.is_valid(head) then
+                local key = head_key(head)
+                local entry = tracked[key]
+                if entry then
+                    restore_one(head, entry)
+                else
+                    write_size(head, BASE.x, BASE.y, BASE.z)
+                end
+            end
+        end
+    end
+    tracked = {}
+end
+local function active()
+    return settings.enabled(P_BULLET) and settings.bool(P, false)
+end
+local function thickness()
+    local t = tonumber(settings.num(P_MULT, 2)) or 2
+    if t < 1 then t = 1 end
+    if t > 4 then t = 4 end
+    return t
+end
+function M.update(_dt)
+    local on = active()
+    if not on then
+        if was_on then
+            restore_all()
+            was_on = false
+        end
+        return
+    end
+    was_on = true
+    local mult = thickness()
+    local players = cache.players
+    if type(players) ~= "table" then return end
+    local seen = {}
+    for i = 1, #players do
+        local p = players[i]
+        if not p or ep.is_local(p) then goto continue end
+        if p.IsAlive == false or p.is_alive == false then goto continue end
+        local char = ep.character(p)
+        if not char or not env.is_valid(char) then goto continue end
+        local head = env.safe_call(function()
+            return char:FindFirstChild("Head") or char:find_first_child("Head")
+        end)
+        if not head or not env.is_valid(head) then goto continue end
+        local hum = ep.humanoid(p) or env.safe_call(function()
+            return char:FindFirstChildOfClass("Humanoid") or char:find_first_child_of_class("Humanoid")
+        end)
+        local hp = hum and tonumber(hum.Health or hum.health)
+        local dead = hp ~= nil and hp <= 0
+        local key = head_key(head)
+        seen[key] = true
+        local entry = tracked[key]
+        if not entry then
+            local sx, sy, sz = read_size(head)
+            if not sx then
+                sx, sy, sz = BASE.x, BASE.y, BASE.z
+            end
+            entry = {
+                sx = sx,
+                sy = sy,
+                sz = sz,
+                transp = move.get_part_transparency(head),
+            }
+            tracked[key] = entry
+        end
+        if dead then
+            write_size(head, entry.sx, entry.sy, entry.sz)
+        else
+            write_size(head, entry.sx * mult, entry.sy * mult, entry.sz * mult)
+            move.set_part_transparency(head, TRANSP)
+        end
+        ::continue::
+    end
+    for key, entry in pairs(tracked) do
+        if not seen[key] then
+            tracked[key] = nil
+        end
+    end
+end
+function M.draw() end
+return M
+end)()
+
 April._mods["features.combat.aimbot"] = (function()
 local settings = April.require("core.settings")
 local targeting = April.require("features.combat.targeting")
@@ -2430,11 +2577,15 @@ function M.register_menu()
         PREFIX .. "bullet_tp",
         PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_extend", PREFIX .. "manip_extend_dist",
         "april_bullet_body_peek",
+        "april_thick_bullet", "april_thick_bullet_mult",
         PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
     })
     menu_util.bind_children(PREFIX .. "bullet_manip", {
         PREFIX .. "manip_dist", PREFIX .. "manip_extend", PREFIX .. "manip_extend_dist",
         "april_bullet_body_peek",
+    })
+    menu_util.bind_children("april_thick_bullet", {
+        "april_thick_bullet_mult",
     })
     menu_util.bind_children(PREFIX .. "manip_extend", {
         PREFIX .. "manip_extend_dist",
@@ -8040,12 +8191,107 @@ function M.register_menu()
         18,
         menu_util.parent("april_spider_enabled")
     )
+    menu_util.register_keybind(T, G.MISC, "april_bhop_enabled", "Bunny Hop", false)
     menu_util.section(T, G.MISC, "Utility")
     menu_util.register_keybind(T, G.MISC, "april_antifling_enabled", "Anti Fling", false)
     menu_util.bind_children("april_fly_enabled", { "april_fly_speed", "april_fly_noclip" })
     menu_util.bind_children("april_spider_enabled", { "april_spider_speed" })
 end
 function M.update(_dt) end
+function M.draw() end
+return M
+end)()
+
+April._mods["features.movement.bhop"] = (function()
+local settings = April.require("core.settings")
+local env = April.require("core.env")
+local move = April.require("core.cframe_move")
+local misc_gate = April.require("core.misc_gate")
+local ep = April.require("core.entity_props")
+local M = {}
+local P = "april_bhop_enabled"
+local SPACE = 0x20
+local GROUND_DIST = 4.0
+local JUMP_COOLDOWN_MS = 45
+local last_jump_ms = 0
+local function tick_ms()
+    local fn = utility and (utility.get_tick_count or utility.GetTickCount)
+    if type(fn) ~= "function" then return 0 end
+    local ok, v = pcall(fn)
+    return ok and (tonumber(v) or 0) or 0
+end
+local function menu_open()
+    local ok, ui = pcall(function()
+        return April.require("ui.custom_menu")
+    end)
+    if ok and ui and ui.is_open then
+        return ui.is_open() == true
+    end
+    return false
+end
+local function on_ground(root, hum)
+    if root then
+        local pos = move.read_pos(root)
+        if pos then
+            local dist = move.ground_distance(pos.x, pos.y, pos.z)
+            if dist ~= nil then
+                return dist <= GROUND_DIST
+            end
+        end
+    end
+    if hum then
+        local mat = hum.FloorMaterial or hum.floor_material
+        if mat ~= nil then
+            local n = tonumber(mat)
+            if type(mat) == "string" and mat:lower() == "air" then
+                return false
+            end
+            if n == 1792 or n == 2561 or n == 0 then
+                return false
+            end
+            return true
+        end
+    end
+    return false
+end
+local function pulse_jump(lp, hum)
+    if lp then
+        pcall(function() lp.Jump = true end)
+        pcall(function() lp.IsJumping = true end)
+    end
+    if hum then
+        pcall(function() hum.Jump = true end)
+        move.humanoid_state(hum, 3)
+    end
+end
+function M.update(_dt)
+    if not settings.enabled(P) then return end
+    if not misc_gate.movement_allowed() then return end
+    if menu_open() then return end
+    if not move.key_down(SPACE) then return end
+    local lp = ep.get_local_player() or env.get_local_player()
+    if not lp then return end
+    local char = ep.character(lp)
+    if not char or not env.is_valid(char) then
+        local game_lp = game and (game.LocalPlayer or game.local_player)
+        char = game_lp and (game_lp.Character or game_lp.character)
+    end
+    if not char or not env.is_valid(char) then return end
+    local hum = ep.humanoid(lp) or env.safe_call(function()
+        return char:FindFirstChildOfClass("Humanoid") or char:find_first_child_of_class("Humanoid")
+    end)
+    if not hum or not env.is_valid(hum) then return end
+    local hp = tonumber(hum.Health or hum.health)
+    if hp ~= nil and hp <= 0 then return end
+    local root = env.safe_call(function()
+        return char:FindFirstChild("HumanoidRootPart") or char:find_first_child("HumanoidRootPart")
+    end)
+    if not on_ground(root, hum) then return end
+    local now = tick_ms()
+    if now - last_jump_ms < JUMP_COOLDOWN_MS then return end
+    last_jump_ms = now
+    pulse_jump(lp, hum)
+end
 function M.draw() end
 return M
 end)()

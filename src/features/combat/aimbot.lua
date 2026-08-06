@@ -81,12 +81,17 @@ function M.register_menu()
         PREFIX .. "bullet_tp",
         PREFIX .. "bullet_manip", PREFIX .. "manip_dist", PREFIX .. "manip_extend", PREFIX .. "manip_extend_dist",
         "april_bullet_body_peek",
+        "april_thick_bullet", "april_thick_bullet_mult",
         PREFIX .. "manip_status", PREFIX .. "manip_peek_vis",
     })
 
     menu_util.bind_children(PREFIX .. "bullet_manip", {
         PREFIX .. "manip_dist", PREFIX .. "manip_extend", PREFIX .. "manip_extend_dist",
         "april_bullet_body_peek",
+    })
+
+    menu_util.bind_children("april_thick_bullet", {
+        "april_thick_bullet_mult",
     })
 
     menu_util.bind_children(PREFIX .. "manip_extend", {
