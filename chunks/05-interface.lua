@@ -1105,8 +1105,9 @@ M.BY_ID = {
     april_silent_bullet_manip = "Finds a shootable angle around cover. Server may reject invalid shots.",
     april_silent_manip_extend = "Searches farther from your body when no close peek is found.",
     april_bullet_body_peek = "Moves you to the peek with desync for server-valid shots. Can cause invalids or kicks.",
-    april_thick_bullet = "Expands other players' head hitboxes on your client and fades them so the grow is less obvious. Client-side only — helps local hit tests; the server can still reject shots that only clip the inflated shell.",
-    april_thick_bullet_mult = "How large enemy heads become (1x = normal size, up to 4x).",
+    april_thick_bullet = "Expands a chosen body part hitbox on other players (client-side) and fades it. Helps local hit tests; the server can still reject shots that only clip the inflated shell.",
+    april_thick_bullet_part = "Which body part to resize on other players.",
+    april_thick_bullet_mult = "How large the selected part becomes (1x = normal size, up to 4x).",
     april_aim_targets = "Choose whether aimbot targets players, NPCs, or both.",
     april_aim_filters = "Filters which targets aimbot will consider.",
     april_aim_options = "Extra aimbot behavior options.",
@@ -3426,8 +3427,11 @@ cb("april_silent_manip_extend", "Extend", false, nil, "april_silent_bullet_manip
 sl("april_silent_manip_extend_dist", "Extend Distance", 1, 7, 7, true, "april_silent_manip_extend"),
 cb("april_bullet_body_peek", "Body Peek (desync)", false, nil, "april_silent_bullet_manip"),
 sep("april_bullet_enabled"),
-cb("april_thick_bullet", "Thick Bullet", false),
-sl("april_thick_bullet_mult", "Thickness", 1, 4, 2, true, "april_thick_bullet"),
+cb("april_thick_bullet", "Hitbox Override", false),
+combo("april_thick_bullet_part", "Override Part", {
+"Head", "Torso", "HumanoidRootPart", "Left Arm", "Right Arm", "Left Leg", "Right Leg",
+}, 0, "april_thick_bullet"),
+sl("april_thick_bullet_mult", "Override Size", 1, 4, 2, true, "april_thick_bullet"),
 sep("april_bullet_enabled"),
 cb("april_silent_manip_status", "Status HUD", false, nil, "april_bullet_enabled"),
 cb("april_silent_manip_peek_vis", "Peek Visual", false, nil, "april_bullet_enabled"),
@@ -5140,9 +5144,6 @@ local incremental_scan = April.require("core.incremental_scan")
 local M = {}
 M.features = {}
 M._menu_registered = false
-local function mark(dense, name)
-    if dense then debug.step(name) end
-end
 M.FEATURE_ORDER = {
     "features.combat.camera_aimbot",
     "features.combat.aimbot",
@@ -5185,18 +5186,13 @@ function M.register_all()
         local feat = April.require(path)
         table.insert(M.features, feat)
         if feat.register_menu then
-            local ok, err = pcall(feat.register_menu)
+            local ok = pcall(feat.register_menu)
             if ok then
                 registered = registered + 1
-            else
-                debug.error_once("menu:" .. path, err)
             end
         end
     end
     M._menu_registered = true
-    if April and April.debug then
-        debug.log("Menu: " .. registered .. " sections")
-    end
     pcall(function()
         local mod = April.require("features.utility.mod_checker")
         if mod.init then mod.init() end
@@ -5241,72 +5237,52 @@ function M.setup_scans()
     end, base_esp.begin_static_scan, base_esp.step_static_scan, base_esp.complete_static_scan, 480)
 end
 function M.update(dt)
-    local dense = (April and April.crash_trace == true) or (debug.frame_count() <= 45)
-    mark(dense, "tabs.update.cache")
     cache.refresh_entities()
-    mark(dense, "tabs.update.npcs")
     npcs.refresh_cache(cache.workspace_entities)
-    mark(dense, "tabs.update.player_state")
     player_state.tick(cache.players)
-    mark(dense, "tabs.update.bootstrap")
     bootstrap.tick()
-    mark(dense, "tabs.update.weapons")
     weapons.tick()
-    mark(dense, "tabs.update.runservice")
     runservice.dispatch(dt)
-    mark(dense, "tabs.update.incremental_scan")
     incremental_scan.tick()
-    local guard = (April and (April.debug == true or April.crash_trace == true))
-        and debug.guard or debug.guard_fast
     for i, feat in ipairs(M.features) do
         if feat.update then
             local name = M.FEATURE_ORDER[i] or ("#" .. i)
-            guard("update:" .. name, feat.update, dt)
+            debug.guard_fast("update:" .. name, feat.update, dt)
         end
     end
 end
 function M.draw()
-    local guard = (April and (April.debug == true or April.crash_trace == true))
-        and debug.guard or debug.guard_fast
     for i, feat in ipairs(M.features) do
         if feat.draw then
             local name = M.FEATURE_ORDER[i] or ("#" .. i)
-            guard("draw:" .. name, feat.draw)
+            debug.guard_fast("draw:" .. name, feat.draw)
         end
     end
 end
 function M.init()
-    debug.step("tabs.init")
     local env = April.require("core.env")
-    local ok, missing = env.require_apis({ "draw", "utility", "entity", "game" })
+    local ok = env.require_apis({ "draw", "utility", "entity", "game" })
     if not ok then
-        debug.error_once("init:apis", "Missing required API: " .. tostring(missing))
         return false
     end
-    debug.step("tabs.init.menu_shim")
     pcall(function()
         April.require("ui.menu_shim").install()
     end)
-    debug.step("tabs.init.register_all")
     M.register_all()
-    debug.step("tabs.init.setup_scans")
     M.setup_scans()
-    debug.step("tabs.init.setup_player_hooks")
     M.setup_player_hooks()
-    debug.step("tabs.init.try_autoload")
     pcall(function()
         April.require("features.utility.config").try_autoload()
     end)
-    debug.step_done("tabs.init")
     return true
 end
 function M.setup_player_hooks()
     local mod = April.require("features.utility.mod_checker")
     _G.on_player_added = function(p)
-        debug.guard("on_player_added", mod.on_player_added, p)
+        debug.guard_fast("on_player_added", mod.on_player_added, p)
     end
     _G.on_player_removed = function(p)
-        debug.guard("on_player_removed", mod.on_player_removed, p)
+        debug.guard_fast("on_player_removed", mod.on_player_removed, p)
     end
 end
 return M
@@ -5324,50 +5300,33 @@ local aim_key = April.require("core.aim_key")
 local overlay_theme = April.require("core.overlay_theme")
 local M = {}
 local initialized = false
-local first_post_intro = true
 local alias_refresh_elapsed = 0
 function M.init()
-    debug.step("app.init")
     if initialized then return true end
     pcall(function()
         April.require("core.entity_props").ensure_api_aliases()
     end)
-    debug.step("app.init.tabs")
     initialized = tabs.init()
     if initialized then
-        debug.step("app.init.custom_menu")
         pcall(custom_menu.init)
-        debug.step("app.init.startup_intro")
         pcall(startup_intro.init)
     end
-    debug.file("app.init done ok=" .. tostring(initialized))
     return initialized
 end
 function M.on_frame()
     if not initialized then return end
     debug.tick_frame()
-    local fc = debug.frame_count()
-    local dense = fc <= 8 or first_post_intro
-    if dense then
-        debug.step("frame:" .. tostring(fc) .. ".begin")
-    end
     pcall(feature_bind.tick)
     pcall(aim_key.tick, "april_aim_key", "april_aim_key_mode")
     if startup_intro.is_active() then
-        if dense then debug.step("frame.intro.active") end
         if startup_intro.should_reveal_menu() then
-            debug.guard("custom_menu.draw:intro", custom_menu.draw)
+            debug.guard_fast("custom_menu.draw:intro", custom_menu.draw)
         end
-        local ok, err = pcall(startup_intro.draw)
+        local ok = pcall(startup_intro.draw)
         if ok then
-            if dense then debug.step_done("frame.intro") end
             return
         end
         startup_intro.cancel()
-        debug.error_once("startup_intro", err)
-    elseif first_post_intro then
-        first_post_intro = false
-        debug.file("POST_INTRO first normal frame fc=" .. tostring(fc))
     end
     local dt = 0.016
     if utility and utility.get_delta_time then
@@ -5379,26 +5338,18 @@ function M.on_frame()
         alias_refresh_elapsed = 0
         pcall(api_aliases.apply)
     end
-    debug.guard("tabs.update", tabs.update, dt)
-    debug.guard("overlay_theme.sync", overlay_theme.sync)
-    debug.guard("tabs.draw", tabs.draw)
-    debug.guard("notify.draw", notify.draw)
-    debug.guard("custom_menu.draw", custom_menu.draw)
-    if dense then
-        debug.step_done("frame:" .. tostring(fc))
-    end
+    debug.guard_fast("tabs.update", tabs.update, dt)
+    debug.guard_fast("overlay_theme.sync", overlay_theme.sync)
+    debug.guard_fast("tabs.draw", tabs.draw)
+    debug.guard_fast("notify.draw", notify.draw)
+    debug.guard_fast("custom_menu.draw", custom_menu.draw)
 end
 return M
 end)()
 
 do
-    local dbg = April.require("core.debug")
-    dbg.begin_session("bundle_boot")
-    dbg.step("boot.menu_shim")
     April.require("ui.menu_shim").install()
-    dbg.step("boot.register_all")
     April.require("menu.tabs").register_all()
-    dbg.step_done("boot.register_all")
 end
 
 April._init_ok = false
@@ -5408,54 +5359,31 @@ local ok, err = pcall(function()
     local caps = April.require("core.capabilities")
     local app = April.require("app")
 
-    debug.step("boot.app.init")
     if not app.init() then
-        debug.error_once("init", "app.init() returned false - features disabled")
         return
     end
-    debug.step_done("boot.app.init")
 
-    debug.step("boot.api_aliases")
     April.require("core.api_aliases").apply()
-    debug.step("boot.movement_ctrl.install")
     April.require("core.movement_ctrl").install()
-    debug.step("boot.spider_ctrl.install")
     April.require("core.spider_ctrl").install()
-    debug.step("boot.fling.install")
     April.require("features.movement.fling").install()
-    debug.step("boot.anti_aim.install")
     April.require("features.movement.anti_aim").install()
-    debug.step("boot.anti_fling.install")
     April.require("features.movement.anti_fling").install()
-    debug.step("boot.base_xray.install")
     April.require("features.world.base_xray").install()
-    debug.step("boot.fake_duck.install")
     April.require("features.movement.fake_duck").install()
 
     April._init_ok = true
-    print("[April] v" .. tostring(April.version) .. " - custom UI (INSERT to toggle)")
 
-    debug.step("boot.caps.probe")
     local c = caps.probe()
     if c.fallen_gc then
-        local gc = April.require("game.gc_weapon_mods")
-        debug.step("boot.gc.probe_on_load")
-        gc.probe_on_load()
+        April.require("game.gc_weapon_mods").probe_on_load()
     end
 
-    debug.step("boot.register_frame_hook")
-    if not debug.register_frame_hook(function()
+    debug.register_frame_hook(function()
         app.on_frame()
-    end) then
-        debug.error_once("init", "Failed to register on_frame")
-    end
+    end)
 end)
 
 if not ok then
     print("[April] Fatal: " .. tostring(err))
-    pcall(function()
-        local debug = April.require("core.debug")
-        debug.file("FATAL " .. tostring(err))
-    end)
-    if debug and debug.traceback then print(debug.traceback(err)) end
 end

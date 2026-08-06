@@ -13,10 +13,6 @@ local M = {}
 M.features = {}
 M._menu_registered = false
 
-local function mark(dense, name)
-    if dense then debug.step(name) end
-end
-
 M.FEATURE_ORDER = {
     "features.combat.camera_aimbot",
     "features.combat.aimbot",
@@ -63,20 +59,14 @@ function M.register_all()
         local feat = April.require(path)
         table.insert(M.features, feat)
         if feat.register_menu then
-            local ok, err = pcall(feat.register_menu)
+            local ok = pcall(feat.register_menu)
             if ok then
                 registered = registered + 1
-            else
-                debug.error_once("menu:" .. path, err)
             end
         end
     end
 
     M._menu_registered = true
-    if April and April.debug then
-        debug.log("Menu: " .. registered .. " sections")
-    end
-
     pcall(function()
         local mod = April.require("features.utility.mod_checker")
         if mod.init then mod.init() end
@@ -133,74 +123,48 @@ function M.setup_scans()
 end
 
 function M.update(dt)
-    local dense = (April and April.crash_trace == true) or (debug.frame_count() <= 45)
-
-    mark(dense, "tabs.update.cache")
     cache.refresh_entities()
-    mark(dense, "tabs.update.npcs")
     npcs.refresh_cache(cache.workspace_entities)
-    mark(dense, "tabs.update.player_state")
     player_state.tick(cache.players)
-
-    mark(dense, "tabs.update.bootstrap")
     bootstrap.tick()
-
-    mark(dense, "tabs.update.weapons")
     weapons.tick()
-
-    mark(dense, "tabs.update.runservice")
     runservice.dispatch(dt)
-
-    mark(dense, "tabs.update.incremental_scan")
     incremental_scan.tick()
-    local guard = (April and (April.debug == true or April.crash_trace == true))
-        and debug.guard or debug.guard_fast
     for i, feat in ipairs(M.features) do
         if feat.update then
             local name = M.FEATURE_ORDER[i] or ("#" .. i)
-            guard("update:" .. name, feat.update, dt)
+            debug.guard_fast("update:" .. name, feat.update, dt)
         end
     end
 end
 
 function M.draw()
-    local guard = (April and (April.debug == true or April.crash_trace == true))
-        and debug.guard or debug.guard_fast
     for i, feat in ipairs(M.features) do
         if feat.draw then
             local name = M.FEATURE_ORDER[i] or ("#" .. i)
-            guard("draw:" .. name, feat.draw)
+            debug.guard_fast("draw:" .. name, feat.draw)
         end
     end
 end
 
 function M.init()
-    debug.step("tabs.init")
     local env = April.require("core.env")
-    local ok, missing = env.require_apis({ "draw", "utility", "entity", "game" })
+    local ok = env.require_apis({ "draw", "utility", "entity", "game" })
     if not ok then
-        debug.error_once("init:apis", "Missing required API: " .. tostring(missing))
         return false
     end
 
-    -- Custom UI backend: feature register_menu() writes into gs_state, not Vector menu.
-    debug.step("tabs.init.menu_shim")
     pcall(function()
         April.require("ui.menu_shim").install()
     end)
 
-    debug.step("tabs.init.register_all")
     M.register_all()
-    debug.step("tabs.init.setup_scans")
     M.setup_scans()
-    debug.step("tabs.init.setup_player_hooks")
     M.setup_player_hooks()
 
-    debug.step("tabs.init.try_autoload")
     pcall(function()
         April.require("features.utility.config").try_autoload()
     end)
-    debug.step_done("tabs.init")
 
     return true
 end
@@ -209,11 +173,11 @@ function M.setup_player_hooks()
     local mod = April.require("features.utility.mod_checker")
 
     _G.on_player_added = function(p)
-        debug.guard("on_player_added", mod.on_player_added, p)
+        debug.guard_fast("on_player_added", mod.on_player_added, p)
     end
 
     _G.on_player_removed = function(p)
-        debug.guard("on_player_removed", mod.on_player_removed, p)
+        debug.guard_fast("on_player_removed", mod.on_player_removed, p)
     end
 end
 

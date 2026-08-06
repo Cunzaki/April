@@ -5876,7 +5876,7 @@ local MENU_KEYS = {
     "april_silent_filters", "april_silent_whitelist_ids",
     "april_silent_targets", "april_silent_options",
     "april_bullet_enabled", "april_bullet_enabled_mode", "april_bullet_body_peek",
-    "april_thick_bullet", "april_thick_bullet_mult",
+    "april_thick_bullet", "april_thick_bullet_part", "april_thick_bullet_mult",
     "april_silent_bullet_tp",
     "april_silent_bullet_manip",
     "april_silent_manip_dist", "april_silent_manip_extend", "april_silent_manip_extend_dist",

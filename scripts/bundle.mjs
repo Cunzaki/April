@@ -135,7 +135,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.1.28";
+const VERSION = "4.1.29";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector
@@ -148,9 +148,7 @@ April = {
     version = "${VERSION}",
     debug = false,
     crash_logging = false,
-    -- Set true only while hunting native crashes (writes dense STEP breadcrumbs).
     crash_trace = false,
-    -- Targeted file trace for Autofarm native-crash diagnosis.
     autofarm_trace = false,
     _mods = {},
     load_status = {
@@ -177,15 +175,9 @@ end
 `;
 
 const footer = `
--- Install custom UI menu backend before any register_menu() calls.
 do
-    local dbg = April.require("core.debug")
-    dbg.begin_session("bundle_boot")
-    dbg.step("boot.menu_shim")
     April.require("ui.menu_shim").install()
-    dbg.step("boot.register_all")
     April.require("menu.tabs").register_all()
-    dbg.step_done("boot.register_all")
 end
 
 April._init_ok = false
@@ -195,56 +187,33 @@ local ok, err = pcall(function()
     local caps = April.require("core.capabilities")
     local app = April.require("app")
 
-    debug.step("boot.app.init")
     if not app.init() then
-        debug.error_once("init", "app.init() returned false - features disabled")
         return
     end
-    debug.step_done("boot.app.init")
 
-    debug.step("boot.api_aliases")
     April.require("core.api_aliases").apply()
-    debug.step("boot.movement_ctrl.install")
     April.require("core.movement_ctrl").install()
-    debug.step("boot.spider_ctrl.install")
     April.require("core.spider_ctrl").install()
-    debug.step("boot.fling.install")
     April.require("features.movement.fling").install()
-    debug.step("boot.anti_aim.install")
     April.require("features.movement.anti_aim").install()
-    debug.step("boot.anti_fling.install")
     April.require("features.movement.anti_fling").install()
-    debug.step("boot.base_xray.install")
     April.require("features.world.base_xray").install()
-    debug.step("boot.fake_duck.install")
     April.require("features.movement.fake_duck").install()
 
     April._init_ok = true
-    print("[April] v" .. tostring(April.version) .. " - custom UI (INSERT to toggle)")
 
-    debug.step("boot.caps.probe")
     local c = caps.probe()
     if c.fallen_gc then
-        local gc = April.require("game.gc_weapon_mods")
-        debug.step("boot.gc.probe_on_load")
-        gc.probe_on_load()
+        April.require("game.gc_weapon_mods").probe_on_load()
     end
 
-    debug.step("boot.register_frame_hook")
-    if not debug.register_frame_hook(function()
+    debug.register_frame_hook(function()
         app.on_frame()
-    end) then
-        debug.error_once("init", "Failed to register on_frame")
-    end
+    end)
 end)
 
 if not ok then
     print("[April] Fatal: " .. tostring(err))
-    pcall(function()
-        local debug = April.require("core.debug")
-        debug.file("FATAL " .. tostring(err))
-    end)
-    if debug and debug.traceback then print(debug.traceback(err)) end
 end
 `;
 
