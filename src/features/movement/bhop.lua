@@ -1,4 +1,6 @@
 -- Auto-jump while Space is held on the ground (bunny hop).
+-- Pulse Humanoid/entity Jump every frame while grounded — same idea as a
+-- Jump-request write each Heartbeat, not ChangeState spam.
 local settings = April.require("core.settings")
 local env = April.require("core.env")
 local move = April.require("core.cframe_move")
@@ -9,17 +11,9 @@ local M = {}
 
 local P = "april_bhop_enabled"
 local SPACE = 0x20
-local GROUND_DIST = 4.0
-local JUMP_COOLDOWN_MS = 45
-
-local last_jump_ms = 0
-
-local function tick_ms()
-    local fn = utility and (utility.get_tick_count or utility.GetTickCount)
-    if type(fn) ~= "function" then return 0 end
-    local ok, v = pcall(fn)
-    return ok and (tonumber(v) or 0) or 0
-end
+-- ground_distance casts from (y + 2); height above floor ≈ dist - 2.
+local MAX_GROUND_HEIGHT = 3.5
+local RAY_ORIGIN_LIFT = 2
 
 local function menu_open()
     local ok, ui = pcall(function()
@@ -31,41 +25,98 @@ local function menu_open()
     return false
 end
 
-local function on_ground(root, hum)
+local function read_vy(root, lp)
+    if root then
+        local _, vy = move.read_velocity(root)
+        if vy ~= nil then return vy end
+    end
+    if lp then
+        local vel = lp.Velocity or lp.velocity
+        if vel then
+            return tonumber(vel.Y or vel.y)
+        end
+    end
+    return nil
+end
+
+local function floor_is_air(hum)
+    if not hum then return nil end
+    local ok, mat = pcall(function()
+        return hum.FloorMaterial or hum.floor_material
+    end)
+    if not ok or mat == nil then return nil end
+    if type(mat) == "string" then
+        local lower = mat:lower()
+        if lower == "air" or lower == "enum.material.air" then
+            return true
+        end
+        return false
+    end
+    local n = tonumber(mat)
+    -- Common Air enum ints seen across Roblox / external dumps.
+    if n == 1792 or n == 2561 or n == 0 then
+        return true
+    end
+    return false
+end
+
+local function on_ground(root, hum, lp)
+    local air = floor_is_air(hum)
+    if air == true then return false end
+    if air == false then return true end
+
+    local vy = read_vy(root, lp)
+
+    -- Rising hard or freefalling → air.
+    if vy ~= nil then
+        if vy > 12 then return false end
+        if vy < -35 then return false end
+    end
+
     if root then
         local pos = move.read_pos(root)
         if pos then
             local dist = move.ground_distance(pos.x, pos.y, pos.z)
             if dist ~= nil then
-                return dist <= GROUND_DIST
+                local height = dist - RAY_ORIGIN_LIFT
+                if height <= MAX_GROUND_HEIGHT then
+                    return true
+                end
+                if height > MAX_GROUND_HEIGHT + 2 then
+                    return false
+                end
             end
         end
     end
-    if hum then
-        local mat = hum.FloorMaterial or hum.floor_material
-        if mat ~= nil then
-            local n = tonumber(mat)
-            -- Air material enum commonly 1792 / 2561 depending on build; treat nil-ish air as airborne.
-            if type(mat) == "string" and mat:lower() == "air" then
-                return false
-            end
-            if n == 1792 or n == 2561 or n == 0 then
-                return false
-            end
-            return true
-        end
+
+    -- Soft fallback when raycast is unavailable: near-zero vertical speed.
+    if vy ~= nil and math.abs(vy) <= 4 then
+        return true
     end
     return false
 end
 
-local function pulse_jump(lp, hum)
+local function request_jump(lp, hum)
+    -- Vector docs: entity local player Jump is writable.
     if lp then
         pcall(function() lp.Jump = true end)
-        pcall(function() lp.IsJumping = true end)
+    end
+    local elp_fn = entity and (entity.get_local_player or entity.GetLocalPlayer)
+    if type(elp_fn) == "function" then
+        local ok, elp = pcall(elp_fn)
+        if ok and elp then
+            pcall(function() elp.Jump = true end)
+        end
     end
     if hum then
         pcall(function() hum.Jump = true end)
-        move.humanoid_state(hum, 3)
+        pcall(function()
+            if hum.ChangeState then
+                hum:ChangeState(3)
+            elseif hum.change_state then
+                hum:change_state(3)
+            end
+        end)
     end
 end
 
@@ -85,9 +136,12 @@ function M.update(_dt)
     end
     if not char or not env.is_valid(char) then return end
 
-    local hum = ep.humanoid(lp) or env.safe_call(function()
-        return char:FindFirstChildOfClass("Humanoid") or char:find_first_child_of_class("Humanoid")
-    end)
+    local hum = ep.humanoid(lp)
+    if not hum or not env.is_valid(hum) then
+        hum = env.safe_call(function()
+            return char:FindFirstChildOfClass("Humanoid") or char:find_first_child_of_class("Humanoid")
+        end)
+    end
     if not hum or not env.is_valid(hum) then return end
 
     local hp = tonumber(hum.Health or hum.health)
@@ -96,12 +150,10 @@ function M.update(_dt)
     local root = env.safe_call(function()
         return char:FindFirstChild("HumanoidRootPart") or char:find_first_child("HumanoidRootPart")
     end)
-    if not on_ground(root, hum) then return end
 
-    local now = tick_ms()
-    if now - last_jump_ms < JUMP_COOLDOWN_MS then return end
-    last_jump_ms = now
-    pulse_jump(lp, hum)
+    -- Only request jump while grounded so we don't fight mid-air state.
+    if not on_ground(root, hum, lp) then return end
+    request_jump(lp, hum)
 end
 
 function M.draw() end
