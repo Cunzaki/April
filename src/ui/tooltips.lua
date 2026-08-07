@@ -56,13 +56,13 @@ M.BY_ID = {
     april_silent_bullet_manip = "Finds a shootable angle around cover. Server may reject invalid shots.",
     april_silent_manip_extend = "Searches farther from your body when no close peek is found.",
     april_bullet_body_peek = "Moves you to the peek with desync for server-valid shots. Can cause invalids or kicks.",
-    april_thick_bullet = "Expands other players' head hitboxes on your client and fades them. Helps local hit tests; the server can still reject shots that only clip the inflated shell.",
-    april_thick_bullet_mult = "How large enemy heads become (1x = normal size, up to 4x).",
+    april_thick_bullet = "Expands other players' head hitboxes on your client and fades them. Player ESP boxes still use natural head size so Override Size stays hidden. Helps local hit tests; the server can still reject shots that only clip the inflated shell.",
+    april_thick_bullet_mult = "How large enemy head hitboxes become (1x = normal, up to 4x). ESP boxes stay normal-sized.",
 
     -- Aimbot options
     april_aim_targets = "Choose whether aimbot targets players, NPCs, or both.",
     april_aim_filters = "Filters which targets aimbot will consider.",
-    april_aim_options = "Extra aimbot behavior options.",
+    april_aim_sticky = "While your aim key is held, stays on the first target even if they leave FOV. Releases and forgets the target when you let go of the bind.",
     april_aim_auto_pred = "Leads moving targets using weapon bullet speed and drop. Off = aim the bone only. Also skips prediction when you are not holding a gun.",
     april_aim_smooth = "Higher values move the camera slower toward the target.",
     april_aim_smooth_type = "How smoothing accelerates: Linear, Ease Out, Ease In-Out, Exponential, or Adaptive.",
@@ -73,8 +73,11 @@ M.BY_ID = {
     -- Silent aim options
     april_silent_targets = "Choose whether silent aim targets players, NPCs, or both.",
     april_silent_filters = "Filters which targets silent aim will consider.",
-    april_silent_options = "Extra silent aim behavior options.",
+    april_silent_sticky = "Locks onto the first valid target and stays on them until they leave your FOV or become invalid.",
     april_silent_whitelist_ids = "Comma-separated Roblox user IDs that Silent Aim must ignore. Enable Whitelist inside Filters first. You can also middle-click the current player target to add or remove them.",
+    april_silent_bone = "Which body part silent aim tracks. Randomized Part re-rolls every shot while holding Mouse 1.",
+    april_silent_hit_chance = "Chance each shot applies silent aim while holding Mouse 1. Rolls independently per shot using your gun's fire rate (not once for the whole spray).",
+    april_aim_bone = "Which body part the aimbot tracks. Randomized Part re-rolls every shot while holding Mouse 1.",
 
     -- Visuals
     april_player_enabled = "Shows boxes and info on other players.",
@@ -229,15 +232,12 @@ local HITBOX_TIPS = {
     "Aims at the target's left leg.",
     "Aims at the target's right leg.",
     "Automatically uses the valid body part closest to your crosshair.",
+    "Picks a random body part (head, torso, arms, or legs). Re-rolls every shot while Mouse 1 is held.",
 }
 
 local TARGET_TYPE_TIPS = {
     "Prefers the valid target closest to the center of your screen.",
     "Prefers the valid target closest to your character in world distance.",
-}
-
-local STICKY_TIPS = {
-    "Keeps the current valid target instead of constantly switching to a slightly better one. The lock is released when that target becomes invalid.",
 }
 
 local SMOOTH_TIPS = {
@@ -257,8 +257,6 @@ M.OPTION_TIPS = {
     april_silent_targets = TARGET_TIPS,
     april_aim_filters = FILTER_TIPS,
     april_silent_filters = FILTER_TIPS,
-    april_aim_options = STICKY_TIPS,
-    april_silent_options = STICKY_TIPS,
     april_aim_smooth_type = SMOOTH_TIPS,
     april_crosshair_source = {
         "Uses the first enabled combat system with a valid target.",
@@ -282,7 +280,10 @@ M.OPTION_BY_LABEL = {
     ["Visible Only"] = FILTER_TIPS[2],
     ["Health Check"] = FILTER_TIPS[1],
     ["Whitelist"] = FILTER_TIPS[5],
-    ["Sticky Target"] = STICKY_TIPS[1],
+    ["Sticky Aim"] = "Keeps the current target locked according to that aim system's sticky rules.",
+    ["Sticky Target"] = "Keeps the current target locked according to that aim system's sticky rules.",
+    ["Randomized Part"] = "Picks a random body part from head, torso, arms, and legs. Re-rolls every shot while Mouse 1 is held.",
+    ["Closest"] = "Automatically uses the valid body part closest to your crosshair.",
     ["None"] = "Disables this visual or selection.",
     ["Health Bar"] = "Shows the target's current health as a bar.",
     ["Skeleton"] = "Draws lines between the target's body joints.",

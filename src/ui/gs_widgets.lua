@@ -34,6 +34,10 @@ M._color_hit = nil -- { x, y, w, h } last drawn picker rect
 M.open_bind_mode = nil -- keybind id whose Always/Hold/Toggle menu is open
 M._bind_mode_anchor = nil -- { id, x, y, w }
 M._bind_mode_hit = nil
+M.open_color_ctx = nil -- color id whose Copy/Paste menu is open
+M._color_ctx_anchor = nil -- { id, x, y, w }
+M._color_ctx_hit = nil
+M._color_clipboard = nil -- shared { r, g, b, a } across all pickers
 M._active_input_rect = nil -- { x, y, w, h } for click-outside blur
 M._active_slider_input_rect = nil
 M._slider_input_meta = {} -- id -> { min, max, float, fmt }
@@ -168,6 +172,7 @@ function M.begin_popups()
     M.wheel_consumed = false
     M._color_anchor = nil
     M._bind_mode_anchor = nil
+    M._color_ctx_anchor = nil
     M._active_input_rect = nil
     M._active_slider_input_rect = nil
     M._tip_candidate = nil
@@ -195,11 +200,48 @@ function M.begin_popups()
             end
         end
     end
+    if M.open_color_ctx and M._color_ctx_hit then
+        local r = M._color_ctx_hit
+        if input.hover(r.x, r.y, r.w, r.h) then
+            M.block_under = true
+            if input.lmb or input.lmb_click or input.rmb or input.rmb_click then
+                M.interacted = true
+                M.popup_used_click = true
+            end
+        end
+    end
 end
 
 local function mark_interacted()
     M.interacted = true
     M.popup_used_click = true
+end
+
+local function close_color_ctx()
+    M.open_color_ctx = nil
+    M._color_ctx_anchor = nil
+    M._color_ctx_hit = nil
+end
+
+local function copy_color_value(col)
+    if type(col) ~= "table" then
+        return { 1, 1, 1, 1 }
+    end
+    return {
+        tonumber(col[1]) or 1,
+        tonumber(col[2]) or 1,
+        tonumber(col[3]) or 1,
+        tonumber(col[4]) or 1,
+    }
+end
+
+local function apply_copied_color(id, col)
+    local next_col = copy_color_value(col)
+    state.set_color(id, next_col)
+    M._hue_cache[id] = select(1, rgb_to_hsv(next_col[1], next_col[2], next_col[3]))
+    if id == "april_ui_accent" then
+        anim.sync_theme()
+    end
 end
 
 local function open_color_popup(id, anchor_x, anchor_y, row_w)
@@ -213,6 +255,7 @@ local function open_color_popup(id, anchor_x, anchor_y, row_w)
         M.open_multi = nil
         M.open_bind_mode = nil
         M._bind_mode_hit = nil
+        close_color_ctx()
         M._color_anchor = { id = id, x = anchor_x, y = anchor_y, w = row_w or 160 }
     end
 end
@@ -228,8 +271,49 @@ local function open_bind_mode_popup(id, anchor_x, anchor_y, chip_w)
         M.open_multi = nil
         M.open_color = nil
         M._color_hit = nil
+        close_color_ctx()
         M._bind_mode_anchor = { id = id, x = anchor_x, y = anchor_y, w = chip_w or 56 }
     end
+end
+
+local function open_color_ctx_popup(id, anchor_x, anchor_y, swatch_w)
+    if M.open_color_ctx == id then
+        close_color_ctx()
+    else
+        M.open_color_ctx = id
+        M.open_combo = nil
+        M.open_multi = nil
+        M.open_color = nil
+        M._color_hit = nil
+        M.open_bind_mode = nil
+        M._bind_mode_hit = nil
+        M._color_ctx_anchor = { id = id, x = anchor_x, y = anchor_y, w = swatch_w or 16 }
+    end
+end
+
+--- Shared LMB/RMB handling for checkbox + standalone color swatches.
+local function handle_color_swatch(id, swatch_x, swatch_y, swatch_w, swatch_h, row_x, row_y, row_w, col)
+    local hit_x, hit_y, hit_w, hit_h = swatch_x - 2, swatch_y - 2, swatch_w + 4, swatch_h + 4
+    if ui_rmb_clicked(hit_x, hit_y, hit_w, hit_h) then
+        mark_interacted()
+        open_color_ctx_popup(id, swatch_x, swatch_y, swatch_w)
+        return true
+    end
+    if ui_clicked(hit_x, hit_y, hit_w, hit_h) then
+        mark_interacted()
+        close_color_ctx()
+        local hh = rgb_to_hsv(col[1] or 1, col[2] or 1, col[3] or 1)
+        M._hue_cache[id] = hh
+        open_color_popup(id, row_x, row_y, row_w)
+        return true
+    end
+    if M.open_color == id then
+        M._color_anchor = { id = id, x = row_x, y = row_y, w = row_w }
+    end
+    if M.open_color_ctx == id then
+        M._color_ctx_anchor = { id = id, x = swatch_x, y = swatch_y, w = swatch_w }
+    end
+    return false
 end
 
 local function list_scroll_for(id, count, max_vis)
@@ -405,15 +489,18 @@ function M.end_popups()
     end
 
     if (input.lmb_click or input.rmb_click) and not M.popup_used_click then
-        if M.open_combo or M.open_multi or M.open_color or M.open_bind_mode then
+        if M.open_combo or M.open_multi or M.open_color or M.open_bind_mode or M.open_color_ctx then
             M.open_combo = nil
             M.open_multi = nil
             M.open_color = nil
             M.open_bind_mode = nil
+            M.open_color_ctx = nil
             M._color_anchor = nil
             M._color_hit = nil
             M._bind_mode_anchor = nil
             M._bind_mode_hit = nil
+            M._color_ctx_anchor = nil
+            M._color_ctx_hit = nil
         end
     end
 end
@@ -557,6 +644,83 @@ function M.draw_bind_mode_overlay()
         if input.clicked(px, hide_y, pw, hide_h) then
             mark_interacted()
             state.set(hide_id, not hidden)
+        end
+    end
+
+    if input.hover(px, py, pw, ph) and (input.lmb_click or input.rmb_click) then
+        mark_interacted()
+    end
+end
+
+--- Right-click color swatch: copy / paste between pickers.
+function M.draw_color_ctx_overlay()
+    if not M.open_color_ctx then
+        M._color_ctx_hit = nil
+        return
+    end
+    local id = M.open_color_ctx
+    local has_clip = type(M._color_clipboard) == "table"
+    local items = {
+        { id = "copy", label = "Copy Color", enabled = true },
+        { id = "paste", label = "Paste Color", enabled = has_clip },
+    }
+
+    local pw = 118
+    local header_h = 24
+    local row_h = 22
+    local ph = header_h + #items * row_h + 5
+    local ax = M._color_ctx_anchor
+    local px, py
+    if ax and ax.id == id then
+        px = ax.x + (ax.w or 12) - pw
+        py = ax.y + 14
+    else
+        px = input.mx
+        py = input.my + 8
+    end
+    local sw, sh = 1920, 1080
+    if draw and draw.get_screen_size then
+        sw, sh = draw.get_screen_size()
+    end
+    if px < 4 then px = 4 end
+    if py < 4 then py = 4 end
+    if px + pw > sw - 4 then px = sw - pw - 4 end
+    if py + ph > sh - 4 then py = sh - ph - 4 end
+
+    M._color_ctx_hit = { x = px, y = py, w = pw, h = ph }
+
+    M.rect(px, py, pw, ph, theme.OVERLAY, true, theme.CORNER_SMALL)
+    M.rect(px, py, pw, ph, theme.BORDER_SOFT, false, theme.CORNER_SMALL)
+
+    M.text(px + 9, py + 6, "COLOR", theme.TEXT_TITLE, theme.FONT_CAPTION)
+    M.rect(px + 8, py + header_h - 1, pw - 16, 1, theme.BORDER_SOFT, true)
+
+    -- Clipboard preview chip
+    if has_clip then
+        local clip = M._color_clipboard
+        local chip = 10
+        local cx = px + pw - chip - 10
+        local cy = py + 7
+        M.rect(cx, cy, chip, chip, clip, true, 2)
+        M.rect(cx, cy, chip, chip, theme.BORDER, false, 2)
+    end
+
+    for i, item in ipairs(items) do
+        local iy = py + header_h + (i - 1) * row_h
+        local hot = item.enabled and input.hover(px, iy, pw, row_h)
+        if hot then
+            M.rect(px + 5, iy + 2, pw - 10, row_h - 4, theme.HOVER, true, theme.CORNER_SMALL)
+        end
+        local label_col = item.enabled and (hot and theme.TEXT_ACTIVE or theme.TEXT) or theme.TEXT_DIM
+        M.text(px + 13, iy + 4, item.label, label_col, theme.FONT_SMALL)
+        if item.enabled and input.clicked(px, iy, pw, row_h) then
+            mark_interacted()
+            if item.id == "copy" then
+                M._color_clipboard = copy_color_value(state.get_color(id, { 1, 1, 1, 1 }))
+            elseif item.id == "paste" and has_clip then
+                apply_copied_color(id, M._color_clipboard)
+            end
+            close_color_ctx()
         end
     end
 
@@ -1028,16 +1192,7 @@ function M.checkbox(x, y, w, id, label, opts)
         local swatch_y = y + (h - 12) * 0.5
         M.rect(cx, swatch_y, 12, 12, col, true, 4)
         M.rect(cx, swatch_y, 12, 12, theme.BORDER, false, 4)
-        if ui_clicked(cx - 2, swatch_y - 2, 16, 16) then
-            swatch_clicked = true
-            mark_interacted()
-            local hh = rgb_to_hsv(col[1] or 1, col[2] or 1, col[3] or 1)
-            M._hue_cache[id] = hh
-            open_color_popup(id, x, y, w)
-        elseif M.open_color == id then
-            -- Keep anchor updated while open so overlay tracks scroll
-            M._color_anchor = { id = id, x = x, y = y, w = w }
-        end
+        swatch_clicked = handle_color_swatch(id, cx, swatch_y, 12, 12, x, y, w, col)
     end
 
     if not swatch_clicked and interactive(x, y, w, h) and ui_clicked(x, y, w - (has_color and 22 or 0), h) then
@@ -1506,13 +1661,7 @@ function M.color_row(x, y, w, id, label, default_col)
     M.rect(cx, y + 4, 12, 12, col, true, 3)
     M.rect(cx, y + 4, 12, 12, theme.BORDER, false, 3)
 
-    if ui_clicked(cx - 2, y + 2, 16, 16) then
-        mark_interacted()
-        M._hue_cache[id] = select(1, rgb_to_hsv(col[1] or 1, col[2] or 1, col[3] or 1))
-        open_color_popup(id, x, y, w)
-    elseif M.open_color == id then
-        M._color_anchor = { id = id, x = x, y = y, w = w }
-    end
+    handle_color_swatch(id, cx, y + 4, 12, 12, x, y, w, col)
     return h
 end
 

@@ -17,11 +17,15 @@ local PREFIX = "april_aim_"
 local P_MASTER = "april_aimbot"
 local P_AIM_KEY = "april_aim_key"
 local P_AIM_KEY_MODE = "april_aim_key_mode"
+local SHOOT_VK = 0x01
 local TARGET_SCAN_MS = 33
 
 local cached_aim = nil
 local smoothed_aim = nil
 local last_target_scan = 0
+local was_aiming = false
+local fire_was_down = false
+local last_random_shot_ms = 0
 local human_phase = 0
 local human_drift = { x = 0, y = 0, z = 0 }
 local overshoot = { x = 0, y = 0, z = 0 }
@@ -35,6 +39,33 @@ local SMOOTH_ADAPTIVE = 4
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function shot_roll_interval_ms()
+    local interval = weapons.shot_interval_ms()
+    if settings.enabled("april_gm_fire_rate") then
+        local mult = tonumber(settings.num("april_gm_fire_rate_mult", 1.5)) or 1.5
+        if mult > 0.01 then
+            interval = math.max(16, math.floor(interval / mult + 0.5))
+        end
+    end
+    return interval
+end
+
+-- Re-roll Randomized Part once per actual shot while MB1 is held.
+local function tick_random_bone_while_firing(target)
+    local key_down = input and (input.is_key_down or input.IsKeyDown)
+    local firing = key_down and key_down(SHOOT_VK) == true
+    if targeting.bone_name(PREFIX) == "Random" and target and firing then
+        local now = tick_ms()
+        if (not fire_was_down) or (now - last_random_shot_ms >= shot_roll_interval_ms()) then
+            last_random_shot_ms = now
+            targeting.pick_random_bone(target, PREFIX, true)
+        end
+    elseif not firing then
+        last_random_shot_ms = 0
+    end
+    fire_was_down = firing and true or false
 end
 
 local function w2s(x, y, z)
@@ -165,31 +196,75 @@ local function blend_aim(prev, nxt)
 end
 
 local function update_target(cx, cy, fov)
-    local sticky = settings.multi(PREFIX .. "options", combat_menu.OPT_STICKY, false)
+    local sticky = combat_menu.sticky_enabled(PREFIX)
+    local holding = aiming()
     local now = tick_ms()
+
+    if sticky then
+        if was_aiming and not holding then
+            -- Bind released: drop sticky lock completely.
+            locked_target = nil
+            smoothed_aim = nil
+            reset_humanize()
+            targeting.clear_random_bone(PREFIX)
+        end
+        was_aiming = holding
+
+        if not holding then
+            -- Soft FOV pick for overlays while unbound (not a sticky lock).
+            locked_target = targeting.find_target(cx, cy, fov, PREFIX)
+            return
+        end
+
+        -- Holding with sticky: refresh NPC, keep lock outside FOV.
+        if locked_target and targeting.is_npc_target(locked_target) then
+            locked_target = targeting.refresh_npc_target(locked_target)
+        end
+
+        if locked_target then
+            if not targeting.is_target_valid(locked_target, PREFIX, cx, cy, fov, { ignore_fov = true }) then
+                locked_target = nil
+                smoothed_aim = nil
+                reset_humanize()
+                targeting.clear_random_bone(PREFIX)
+            else
+                return
+            end
+        end
+
+        if now - last_target_scan < TARGET_SCAN_MS then
+            return
+        end
+        last_target_scan = now
+        local next_target = targeting.find_target(cx, cy, fov, PREFIX)
+        if not targeting.same_target(next_target, locked_target) then
+            targeting.clear_random_bone(PREFIX)
+        end
+        locked_target = next_target
+        return
+    end
+
+    was_aiming = holding
 
     -- NPCs: refresh live head every frame (stale lx/ly/lz + look_at = glued lock).
     if locked_target and targeting.is_npc_target(locked_target) then
         locked_target = targeting.refresh_npc_target(locked_target)
     end
 
-    -- Always drop invalid locks (silent parity). Sticky only skips reacquire.
+    -- Non-sticky: drop invalid FOV locks and rescan every frame.
     if locked_target and not targeting.is_target_valid(locked_target, PREFIX, cx, cy, fov) then
         locked_target = nil
         smoothed_aim = nil
         reset_humanize()
+        targeting.clear_random_bone(PREFIX)
     end
 
-    if locked_target and sticky then
-        return
-    end
-
-    -- Non-sticky: rescan every frame so FOV pick matches where you look (like silent).
-    if sticky and now - last_target_scan < TARGET_SCAN_MS then
-        return
-    end
     last_target_scan = now
-    locked_target = targeting.find_target(cx, cy, fov, PREFIX)
+    local next_target = targeting.find_target(cx, cy, fov, PREFIX)
+    if not targeting.same_target(next_target, locked_target) then
+        targeting.clear_random_bone(PREFIX)
+    end
+    locked_target = next_target
 end
 
 local function resolve_aim_point(target, cx, cy)
@@ -229,7 +304,7 @@ function M.register_menu()
         PREFIX .. "target_type", PREFIX .. "bone",
         PREFIX .. "filters",
         PREFIX .. "whitelist_ids", PREFIX .. "whitelist_clear",
-        PREFIX .. "targets", PREFIX .. "options",
+        PREFIX .. "targets", PREFIX .. "sticky",
         PREFIX .. "auto_pred",
         PREFIX .. "smooth", PREFIX .. "smooth_type",
         PREFIX .. "humanize", PREFIX .. "humanize_str",
@@ -252,7 +327,11 @@ function M.update(_dt)
     if not enabled() then
         locked_target = nil
         smoothed_aim = nil
+        was_aiming = false
+        fire_was_down = false
+        last_random_shot_ms = 0
         reset_humanize()
+        targeting.clear_random_bone(PREFIX)
         return
     end
 
@@ -275,8 +354,12 @@ function M.update(_dt)
     if not locked_target or not targeting.is_aim_target(locked_target) then
         smoothed_aim = nil
         reset_humanize()
+        fire_was_down = false
+        last_random_shot_ms = 0
         return
     end
+
+    tick_random_bone_while_firing(locked_target)
 
     local aim = resolve_aim_point(locked_target, cx, cy)
     if not aim then

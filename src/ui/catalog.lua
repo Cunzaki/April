@@ -171,7 +171,7 @@ local function build_aim()
             btn("april_aim_whitelist_clear", "Clear Whitelist"),
             sl("april_aim_max_dist", "Max Distance (m)", 50, 2000, 500),
             sep(),
-            multi("april_aim_options", "Options", { "Sticky Target" }, { false }),
+            cb("april_aim_sticky", "Sticky Aim", false),
             cb("april_aim_auto_pred", "Auto Prediction", true),
             sl("april_aim_smooth", "Smoothness", 1, 25, 10),
             combo("april_aim_smooth_type", "Smooth Type", {
@@ -204,7 +204,7 @@ local function build_aim()
             btn("april_silent_whitelist_clear", "Clear Whitelist"),
             sl("april_silent_max_dist", "Max Distance (m)", 50, 2000, 500),
             sep(),
-            multi("april_silent_options", "Options", { "Sticky Target" }, { false }),
+            cb("april_silent_sticky", "Sticky Aim", false),
             sl("april_silent_hit_chance", "Hit Chance %", 1, 100, 100),
             sl("april_silent_fov", "FOV Radius (px)", 5, 600, 150),
             sep(),

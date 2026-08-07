@@ -24,18 +24,34 @@ function M.is_npc_target(target)
     return target and target.is_npc == true
 end
 
-local function npc_enabled(entry, prefix)
-    if not entry then return false end
-    local kind = entry.kind or npcs.kind(entry.name or entry.raw_name)
-    return combat_menu.npc_kind_enabled(kind, prefix)
-end
-
 local function same_npc_inst(a, b)
     if not a or not b then return false end
     if a == b then return true end
     local aa = a.Address or a.address
     local ba = b.Address or b.address
     return aa ~= nil and aa == ba
+end
+
+function M.same_target(a, b)
+    if a == nil or b == nil then return a == b end
+    if a == b then return true end
+    if M.is_npc_target(a) or M.is_npc_target(b) then
+        if not (M.is_npc_target(a) and M.is_npc_target(b)) then return false end
+        if a.entity and b.entity and a.entity == b.entity then return true end
+        return same_npc_inst(a.inst, b.inst)
+    end
+    local au = a.UserId or a.user_id or a.userid
+    local bu = b.UserId or b.user_id or b.userid
+    if au and bu then return tostring(au) == tostring(bu) end
+    local aa = a.Address or a.address
+    local ba = b.Address or b.address
+    return aa ~= nil and aa == ba
+end
+
+local function npc_enabled(entry, prefix)
+    if not entry then return false end
+    local kind = entry.kind or npcs.kind(entry.name or entry.raw_name)
+    return combat_menu.npc_kind_enabled(kind, prefix)
 end
 
 function M.is_npc_alive(entry)
@@ -195,6 +211,57 @@ end
 function M.bone_name(prefix)
     local idx = settings.num(prefix .. "bone", 0)
     return combat_menu.bone_from_index(idx)
+end
+
+local random_bone_cache = { key = nil, bone = nil }
+
+local function target_cache_key(target)
+    if not target then return nil end
+    if M.is_npc_target(target) then
+        local addr = target.entity and (target.entity.Address or target.entity.address)
+        if not addr and target.inst then
+            addr = target.inst.Address or target.inst.address or tostring(target.inst)
+        end
+        return "npc:" .. tostring(addr or target.name or target)
+    end
+    local uid = target.UserId or target.user_id or target.userid
+    if uid then return "p:" .. tostring(uid) end
+    local addr = target.Address or target.address
+    if addr then return "p:" .. tostring(addr) end
+    return "p:" .. tostring(target)
+end
+
+function M.clear_random_bone(prefix)
+    if random_bone_cache.prefix == prefix or prefix == nil then
+        random_bone_cache.key = nil
+        random_bone_cache.bone = nil
+        random_bone_cache.prefix = nil
+    end
+end
+
+function M.pick_random_bone(target, prefix, force_reroll)
+    local pool = combat_menu.RANDOM_BONE_POOL
+    if type(pool) ~= "table" or #pool == 0 then
+        return "Head"
+    end
+    local key = tostring(prefix or "") .. "|" .. tostring(target_cache_key(target) or "")
+    if not force_reroll and random_bone_cache.key == key and random_bone_cache.bone then
+        return random_bone_cache.bone
+    end
+    local bone = pool[math.random(1, #pool)] or "Head"
+    random_bone_cache.key = key
+    random_bone_cache.bone = bone
+    random_bone_cache.prefix = prefix
+    return bone
+end
+
+-- Resolve combo bone to a concrete part name (Closest stays; Random picks from pool).
+function M.resolve_aim_bone(target, bone, prefix, cx, cy, force_reroll)
+    bone = bone or "Head"
+    if bone == "Random" then
+        return M.pick_random_bone(target, prefix, force_reroll == true)
+    end
+    return bone
 end
 
 -- Camera aimbot only: bows use torso for prediction (head aim shoots too high).
@@ -438,21 +505,27 @@ function M.predict_point(origin, point, target, weapon_name)
     return ballistic.predict_for_weapon(origin, point, vel, weapon_name)
 end
 
-function M.resolve_bone_world(target, bone, cx, cy)
+function M.resolve_bone_world(target, bone, cx, cy, opts)
+    opts = opts or {}
     bone = bone or "Head"
+    if bone == "Random" then
+        bone = M.pick_random_bone(target, opts.prefix, opts.reroll_random == true)
+    end
     if bone == "Closest" then
         return M.closest_bone_world(target, cx, cy)
     end
     return M.bone_world(target, bone, cx, cy)
 end
 
-function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction)
+function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction, opts)
+    opts = opts or {}
     bone = bone or M.bone_name(prefix)
+    bone = M.resolve_aim_bone(target, bone, prefix, cx, cy, opts.reroll_random)
     local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
     if M.uses_bow_torso_aim(prefix) then
         bone = M.effective_aim_bone(bone, weapon)
     end
-    local base = M.resolve_bone_world(target, bone, cx, cy)
+    local base = M.resolve_bone_world(target, bone, cx, cy, { prefix = prefix })
     if not base then return nil end
     if M.uses_bow_torso_aim(prefix) then
         base = M.bow_aim_nudge(base, weapon)
@@ -485,11 +558,11 @@ function M.is_target_valid(target, prefix, cx, cy, fov_px, opts)
     if not M.within_max_distance(target, origin, prefix) then return false end
 
     local bone = M.bone_name(prefix)
-    if bone == "Closest" then bone = "Head" end
+    if bone == "Closest" or bone == "Random" then bone = "Head" end
     if M.uses_bow_torso_aim(prefix) then
         bone = M.effective_aim_bone(bone, weapons.cached_held_ranged())
     end
-    local base = M.resolve_bone_world(target, bone, cx, cy)
+    local base = M.resolve_bone_world(target, bone, cx, cy, { prefix = prefix })
     if not base then return false end
 
     if not M.passes_filters(target, prefix, base, origin, opts) then return false end
@@ -557,7 +630,7 @@ end
 function M.find_target(cx, cy, fov_px, prefix, opts)
     opts = opts or {}
     local bone = M.bone_name(prefix)
-    local screen_bone = bone == "Closest" and "Head" or bone
+    local screen_bone = (bone == "Closest" or bone == "Random") and "Head" or bone
     if M.uses_bow_torso_aim(prefix) then
         screen_bone = M.effective_aim_bone(screen_bone, weapons.cached_held_ranged())
     end

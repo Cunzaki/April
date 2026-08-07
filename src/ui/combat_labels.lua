@@ -9,6 +9,7 @@ M.SILENT_BONES = {
     "Left Leg",
     "Right Leg",
     "Closest",
+    "Randomized Part",
 }
 
 -- Aim At multicombo: Players + per-NPC kinds (matches NPC ESP type list).

@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env node
 /**
- * Builds the remote chunk loader plus a full local Vector test bundle.
+ * Builds the single-file April runtime (april.lua + Script 1.lua) and load.lua.
  */
 
 import fs from "fs";
@@ -135,7 +135,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.1.31";
+const VERSION = "4.1.34";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector
@@ -297,151 +297,25 @@ function buildModuleBody(files, fullBundle = false) {
   return body;
 }
 
-function through(file) {
-  const index = ORDER.indexOf(file);
-  if (index < 0) throw new Error(`Unknown chunk boundary: ${file}`);
-  return index + 1;
-}
-
-const coreEnd = through("core/debug.lua");
-const servicesEnd = through("core/config_store.lua");
-const gameEnd = through("game/toolinfo_weapon_mods.lua");
-const featuresEnd = through("features/utility/config.lua");
-const CHUNKS = [
-  { name: "Core", file: "01-core.lua", files: ORDER.slice(0, coreEnd) },
-  { name: "Services", file: "02-services.lua", files: ORDER.slice(coreEnd, servicesEnd) },
-  { name: "Game Data", file: "03-game.lua", files: ORDER.slice(servicesEnd, gameEnd) },
-  { name: "Features", file: "04-features.lua", files: ORDER.slice(gameEnd, featuresEnd) },
-  { name: "Interface", file: "05-interface.lua", files: ORDER.slice(featuresEnd) },
-];
-
-const CHUNK_DIR = path.join(ROOT, "chunks");
-fs.mkdirSync(CHUNK_DIR, { recursive: true });
-for (const old of fs.readdirSync(CHUNK_DIR)) {
-  if (old.endsWith(".lua")) fs.unlinkSync(path.join(CHUNK_DIR, old));
-}
-for (let i = 0; i < CHUNKS.length; i++) {
-  const chunk = CHUNKS[i];
-  const chunkFooter = i === CHUNKS.length - 1 ? footer : "";
-  const contents = stripLuaComments(buildModuleBody(chunk.files) + chunkFooter);
-  fs.writeFileSync(path.join(CHUNK_DIR, chunk.file), contents);
-  console.log("Built", `chunks/${chunk.file}`, `(${(Buffer.byteLength(contents) / 1024).toFixed(1)} KB)`);
-}
-
+// Single-file runtime: april.lua (remote) and Script 1.lua (local test) are identical.
 const fullBody = buildModuleBody(ORDER, true);
 const fullBundle = stripLuaComments(header + fullBody + footer);
-fs.writeFileSync(SCRIPT1_OUT, fullBundle);
 const bundleBytes = Buffer.byteLength(fullBundle);
-const MAX_VECTOR_BUNDLE_BYTES = 1_050_000;
-console.log("Built", path.relative(ROOT, SCRIPT1_OUT), `(${(bundleBytes / 1024).toFixed(1)} KB full local bundle)`);
-if (bundleBytes > MAX_VECTOR_BUNDLE_BYTES) {
-  console.error(
-    `Bundle is ${bundleBytes} bytes; keep it below ${MAX_VECTOR_BUNDLE_BYTES} for Vector LoadUrl safety.`,
-  );
-  process.exit(1);
+fs.writeFileSync(OUT, fullBundle);
+fs.writeFileSync(SCRIPT1_OUT, fullBundle);
+console.log("Built", path.relative(ROOT, OUT), `(${(bundleBytes / 1024).toFixed(1)} KB single-file runtime)`);
+console.log("Built", path.relative(ROOT, SCRIPT1_OUT), `(${(bundleBytes / 1024).toFixed(1)} KB local test copy)`);
+
+// Remove legacy split chunks so they are never loaded by mistake.
+const CHUNK_DIR = path.join(ROOT, "chunks");
+if (fs.existsSync(CHUNK_DIR)) {
+  for (const old of fs.readdirSync(CHUNK_DIR)) {
+    if (old.endsWith(".lua")) fs.unlinkSync(path.join(CHUNK_DIR, old));
+  }
+  console.log("Cleared chunks/ (split loading retired)");
 }
 
-const remoteBase = "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/chunks";
-const remoteLoader = stripLuaComments(`${header}
-April.bundled = false
-April.load_status = {
-${CHUNKS.map((chunk) => `    { name = "${chunk.name}", state = "pending" },`).join("\n")}
-}
-
-local chunks = {
-${CHUNKS.map((chunk) => `    "${remoteBase}/${chunk.file}?v=${VERSION}",`).join("\n")}
-}
-
-local loader_index = 1
-local loader_failed = false
-
-local function loader_screen()
-    local fn = draw and (draw.GetScreenSize or draw.get_screen_size)
-    if type(fn) == "function" then
-        local ok, width, height = pcall(fn)
-        if ok and width and height then return width, height end
-    end
-    return 1920, 1080
-end
-
-local function loader_text_width(text, size)
-    local fn = draw and (draw.GetTextSize or draw.get_text_size)
-    if type(fn) == "function" then
-        local ok, width = pcall(fn, text, size)
-        if ok and type(width) == "number" then return width end
-    end
-    return #text * size * 0.56
-end
-
-local function loader_draw()
-    if not draw then return end
-    local fill = draw.RectFilled or draw.rect_filled
-    local text = draw.Text or draw.text
-    local line = draw.Line or draw.line
-    if not fill or not text or not line then return end
-    local width, height = loader_screen()
-    local center_x, center_y = width * 0.5, height * 0.5
-    fill(-1, -1, width + 2, height + 2, { 0, 0, 0, 1 }, 0)
-
-    local title = "April.lua"
-    local author = "Made by Cunzaki"
-    local heading = "Loading modules"
-    text(center_x - loader_text_width(title, 52) * 0.5, center_y - 72,
-        title, { 0.83, 0.47, 1, 1 }, 52)
-    text(center_x - loader_text_width(author, 18) * 0.5, center_y - 8,
-        author, { 0.92, 0.92, 0.96, 0.9 }, 18)
-    text(center_x - loader_text_width(heading, 13) * 0.5, center_y + 34,
-        heading, { 0.72, 0.72, 0.78, 0.72 }, 13)
-
-    for index, status in ipairs(April.load_status) do
-        local label = status.state == "loaded" and status.name
-            or status.state == "failed" and ("Failed: " .. status.name)
-            or status.state == "loading" and ("Loading " .. status.name .. "...")
-            or status.name
-        local size = 13
-        local label_width = loader_text_width(label, size)
-        local x = center_x - (label_width + 24) * 0.5
-        local y = center_y + 59 + (index - 1) * 20
-        local color = status.state == "failed" and { 1, 0.28, 0.28, 1 }
-            or { 0.88, 0.88, 0.92, status.state == "pending" and 0.38 or 0.88 }
-        if status.state == "loaded" then
-            line(x, y + 7, x + 3, y + 11, { 0.55, 0.92, 0.68, 1 }, 1.8)
-            line(x + 3, y + 11, x + 10, y + 2, { 0.55, 0.92, 0.68, 1 }, 1.8)
-        elseif status.state == "failed" then
-            line(x, y + 3, x + 9, y + 11, color, 1.6)
-            line(x + 9, y + 3, x, y + 11, color, 1.6)
-        else
-            local pulse = 0.35 + (math.sin((utility.GetTime and utility.GetTime() or 0) * 5) + 1) * 0.2
-            line(x, y + 7, x + 8, y + 7, { 0.83, 0.47, 1, pulse }, 1.7)
-        end
-        text(x + 18, y, label, color, size)
-    end
-end
-
-OnFrame = function()
-    loader_draw()
-    if loader_failed or loader_index > #chunks then return end
-    local status = April.load_status[loader_index]
-    if status.state == "pending" then
-        status.state = "loading"
-        return
-    end
-    local ok, err = utility.LoadUrl(chunks[loader_index])
-    if not ok then
-        status.state = "failed"
-        status.error = tostring(err)
-        loader_failed = true
-        print("[April] Failed to load " .. status.name .. ": " .. tostring(err))
-        return
-    end
-    status.state = "loaded"
-    loader_index = loader_index + 1
-end
-`);
-fs.writeFileSync(OUT, remoteLoader);
-console.log("Built", path.relative(ROOT, OUT), `(${(Buffer.byteLength(remoteLoader) / 1024).toFixed(1)} KB remote loader)`);
-
-// Keep the user-facing loader as one LoadUrl call; april.lua handles chunks.
+// Public one-liner: static april.lua URL (no version query — load.lua never needs updating).
 const loader = `utility.LoadUrl("https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/april.lua")\n`;
 fs.writeFileSync(LOAD_OUT, loader);
 console.log("Built", path.relative(ROOT, LOAD_OUT));

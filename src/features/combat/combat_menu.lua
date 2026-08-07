@@ -12,6 +12,7 @@ M.SILENT_BONES = {
     "Left Leg",
     "Right Leg",
     "Closest",
+    "Randomized Part",
 }
 
 M.BONE_MAP = {
@@ -22,6 +23,17 @@ M.BONE_MAP = {
     ["Left Leg"] = "LeftUpperLeg",
     ["Right Leg"] = "RightUpperLeg",
     ["Closest"] = "Closest",
+    ["Randomized Part"] = "Random",
+}
+
+-- Pool for Randomized Part (R15 part names).
+M.RANDOM_BONE_POOL = {
+    "Head",
+    "UpperTorso",
+    "LeftUpperArm",
+    "RightUpperArm",
+    "LeftUpperLeg",
+    "RightUpperLeg",
 }
 
 -- april_silent_filters indices (1-based)
@@ -49,12 +61,37 @@ M.AIM_AT_KIND_INDEX = {
     pilot_pete = 9,
 }
 
--- april_silent_options / april_aim_options indices (1-based)
+-- Legacy april_*_options multicombo slot (kept for old configs).
 M.OPT_STICKY = 1
 
 function M.bone_from_index(idx)
     local label = M.SILENT_BONES[(idx or 0) + 1] or "Head"
     return M.BONE_MAP[label] or label
+end
+
+-- Sticky Target checkbox (+ legacy Options multi slot 1).
+function M.sticky_enabled(prefix)
+    prefix = prefix or "april_silent_"
+    if settings.bool(prefix .. "sticky", false) then
+        return true
+    end
+    return settings.multi(prefix .. "options", M.OPT_STICKY, false)
+end
+
+local function migrate_sticky_checkbox(prefix)
+    local sticky_id = prefix .. "sticky"
+    if settings.get(sticky_id) ~= nil then
+        return
+    end
+    if not settings.multi(prefix .. "options", M.OPT_STICKY, false) then
+        return
+    end
+    if menu and menu.set then
+        pcall(menu.set, sticky_id, true)
+    end
+    pcall(function()
+        April.require("ui.gs_state").set(sticky_id, true)
+    end)
 end
 
 function M.downed_mode_from_filters(prefix)
@@ -152,9 +189,8 @@ function M.register_silent_aim(T, G, prefix, parent_id, opts)
     menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, { parent = parent_id })
 
     menu_util.section(T, G, "Aim")
-    menu.add_multicombo(T, G, p .. "options", "Options", {
-        "Sticky Target",
-    }, { false }, { parent = parent_id })
+    migrate_sticky_checkbox(p)
+    menu.add_checkbox(T, G, p .. "sticky", "Sticky Aim", false, { parent = parent_id })
     menu.add_slider_int(T, G, p .. "hit_chance", "Hit Chance %", 1, 100, 100, { parent = parent_id })
     menu.add_slider_int(T, G, p .. "fov", "FOV Radius (px)", 5, 600, opts.fov_default or 150, { parent = parent_id })
 
@@ -227,10 +263,9 @@ function M.register_aimbot(T, G, prefix, parent_id, opts)
     menu.add_slider_int(T, G, p .. "max_dist", "Max Distance (m)", 50, 2000, 500, { parent = parent_id })
 
     menu_util.section(T, G, "Aim")
+    migrate_sticky_checkbox(p)
+    menu.add_checkbox(T, G, p .. "sticky", "Sticky Aim", false, { parent = parent_id })
     menu.add_checkbox(T, G, p .. "auto_pred", "Auto Prediction", true, { parent = parent_id })
-    menu.add_multicombo(T, G, p .. "options", "Options", {
-        "Sticky Target",
-    }, { false }, { parent = parent_id })
     menu.add_slider_int(T, G, p .. "smooth", "Smoothness", 1, 25, 10, { parent = parent_id })
     menu.add_combo(T, G, p .. "smooth_type", "Smooth Type", {
         "Linear",

@@ -10,6 +10,7 @@ local mod_checker = April.require("features.utility.mod_checker")
 local mod_ids = April.require("game.mod_ids")
 local ep = April.require("core.entity_props")
 local cheater_detect = April.require("game.cheater_detect")
+local thick_bullet = April.require("features.combat.thick_bullet")
 
 local M = {}
 local P = "april_player_enabled"
@@ -196,9 +197,16 @@ local function movement_label(p)
 end
 
 local function native_bounds(player)
+    -- Hitbox Override inflates Head.Size; use the thick_bullet helper so boxes
+    -- stay on natural proportions while the hitbox remains expanded.
+    if thick_bullet and thick_bullet.esp_bounds then
+        return thick_bullet.esp_bounds(player)
+    end
     local fn = player and (player.GetBounds or player.get_bounds)
     if not fn then return nil end
-    return fn(player)
+    local ok, bounds = pcall(fn, player)
+    if ok then return bounds end
+    return nil
 end
 
 local function native_bones(player)

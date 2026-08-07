@@ -405,6 +405,26 @@ function M.drop_gravity(grav)
     return grav
 end
 
+-- Time between shots for the held/named gun (ToolInfo RPM, else Weapon.Cooldown).
+function M.shot_interval_ms(name)
+    name = name or M.cached_held_ranged() or M.get_held_ranged_weapon_name()
+    if not name then return 100 end
+
+    local entry = M.get(name)
+    local weapon = entry and entry.Weapon
+    if type(weapon) == "table" then
+        local rpm = tonumber(weapon.RPM or weapon.rpm)
+        if rpm and rpm > 0 then
+            return math.max(16, math.floor(60000 / rpm + 0.5))
+        end
+        local cd = tonumber(weapon.Cooldown or weapon.cooldown)
+        if cd and cd > 0 then
+            return math.max(16, math.floor(cd * 1000 + 0.5))
+        end
+    end
+    return 100
+end
+
 function M.get_weapon_stats(name)
     name = name or M.get_held_weapon_name()
     if not name then return nil end

@@ -686,6 +686,7 @@ function M.draw()
     -- Floating popups above all sections
     widgets.draw_color_overlay()
     widgets.draw_bind_mode_overlay()
+    widgets.draw_color_ctx_overlay()
     widgets.draw_tooltip_overlay()
     widgets.end_popups()
 

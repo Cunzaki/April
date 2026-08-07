@@ -189,7 +189,7 @@ function M.resolve_track(target, prefix, cx, cy)
     local flags = feature_flags()
     local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
     local bone = targeting.bone_name(prefix)
-    local hitpart = targeting.resolve_bone_world(target, bone, cx, cy)
+    local hitpart = targeting.resolve_bone_world(target, bone, cx, cy, { prefix = prefix })
     if not hitpart then return nil, nil, OFF_INFO end
     local muzzle = fire_origin(camera)
     local body = combat_origin.get_server_origin()
@@ -201,7 +201,7 @@ function M.resolve_track(target, prefix, cx, cy)
     local tp_on = flags.tp_on
 
     if tp_on then
-        local head = targeting.resolve_bone_world(target, "Head", cx, cy) or hitpart
+        local head = targeting.resolve_bone_world(target, "Head", cx, cy, { prefix = prefix }) or hitpart
         local tp = bullet_tp_ray.resolve({
             method = bullet_tp_ray.METHOD_UNDER_TP,
             camera = camera,

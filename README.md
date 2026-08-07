@@ -10,7 +10,7 @@ Paste this into a Vector script slot and execute:
 utility.LoadUrl("https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/april.lua")
 ```
 
-That always pulls the latest `april.lua` from GitHub `main`.
+That always pulls the latest full `april.lua` runtime from GitHub `main` (one file — no split chunks).
 
 Menu: **INSERT** (custom UI)
 
@@ -20,7 +20,7 @@ Menu: **INSERT** (custom UI)
 
 ```bash
 npm run build
-git add april.lua load.lua chunks src scripts
+git add april.lua load.lua "Script 1.lua" src scripts
 git commit -m "Ship April vX.Y.Z"
 git push origin main
 ```
@@ -33,8 +33,8 @@ After push, `utility.LoadUrl(...)` serves the new build.
 
 | Path | Purpose |
 |------|---------|
-| `april.lua` | Small remote loader executed by the one-line LoadUrl |
-| `chunks/` | Ordered runtime chunks loaded by `april.lua` |
+| `april.lua` | Full remote runtime executed by the one-line LoadUrl |
+| `Script 1.lua` | Identical local test copy of the full runtime |
 | `load.lua` | Same one-line LoadUrl shown above |
 | `src/` | Modular source |
 | `scripts/` | Bundle tools |

@@ -24,9 +24,37 @@ local cached_track = { origin = nil, aim = nil, manip = { state = "off" }, track
 local last_target_scan = 0
 local fire_was_down = false
 local shot_allowed = true
+local last_shot_roll_ms = 0
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+-- Align hitchance / Randomized Part rolls with the gun's actual shot cadence.
+local function shot_roll_interval_ms()
+    local interval = weapons.shot_interval_ms()
+    if settings.enabled("april_gm_fire_rate") then
+        local mult = tonumber(settings.num("april_gm_fire_rate_mult", 1.5)) or 1.5
+        if mult > 0.01 then
+            interval = math.max(16, math.floor(interval / mult + 0.5))
+        end
+    end
+    return interval
+end
+
+local function roll_silent_shot(target)
+    if targeting.bone_name(PREFIX) == "Random" then
+        targeting.pick_random_bone(target, PREFIX, true)
+    end
+    local hit_chance = math.floor(tonumber(settings.num(PREFIX .. "hit_chance", 100)) or 100)
+    if hit_chance >= 100 then
+        return true
+    end
+    if hit_chance <= 0 then
+        return false
+    end
+    -- Independent per-shot Bernoulli trial: P(success) == hit_chance / 100.
+    return math.random(1, 100) <= hit_chance
 end
 
 local function w2s(x, y, z)
@@ -71,7 +99,7 @@ function M.register_menu()
         PREFIX .. "target_type", PREFIX .. "bone",
         PREFIX .. "filters",
         PREFIX .. "whitelist_ids", PREFIX .. "whitelist_clear",
-        PREFIX .. "targets", PREFIX .. "options",
+        PREFIX .. "targets", PREFIX .. "sticky",
         PREFIX .. "draw_fov", PREFIX .. "fov_style", PREFIX .. "target_line",
         PREFIX .. "hit_chance", PREFIX .. "max_dist", PREFIX .. "fov",
     })
@@ -118,7 +146,7 @@ local function active()
 end
 
 local function update_target(cx, cy, fov, find_opts)
-    local sticky = settings.multi(PREFIX .. "options", 1, false)
+    local sticky = combat_menu.sticky_enabled(PREFIX)
     local now = tick_ms()
     find_opts = find_opts or {}
 
@@ -126,8 +154,10 @@ local function update_target(cx, cy, fov, find_opts)
         locked_target = targeting.refresh_npc_target(locked_target)
     end
 
+    -- Sticky silent: keep the first lock until they leave FOV / fail filters.
     if locked_target and not targeting.is_target_valid(locked_target, PREFIX, cx, cy, fov, find_opts) then
         locked_target = nil
+        targeting.clear_random_bone(PREFIX)
     end
 
     if locked_target and sticky then
@@ -138,7 +168,11 @@ local function update_target(cx, cy, fov, find_opts)
         return
     end
     last_target_scan = now
-    locked_target = targeting.find_target(cx, cy, fov, PREFIX, find_opts)
+    local next_target = targeting.find_target(cx, cy, fov, PREFIX, find_opts)
+    if not targeting.same_target(next_target, locked_target) then
+        targeting.clear_random_bone(PREFIX)
+    end
+    locked_target = next_target
 end
 
 function M.update(dt)
@@ -152,6 +186,8 @@ function M.update(dt)
         locked_target = nil
         fire_was_down = false
         shot_allowed = true
+        last_shot_roll_ms = 0
+        targeting.clear_random_bone(PREFIX)
         silent_ray.stop()
         body_peek.tick(nil, nil)
         return
@@ -201,18 +237,19 @@ function M.update(dt)
     local key_down = input and (input.is_key_down or input.IsKeyDown)
     local firing = key_down and key_down(SHOOT_VK) == true
 
-    -- Hit chance only for silent aim mouse-fire (not bullet-only).
+    -- Hit chance + Randomized Part: one independent roll per shot while MB1 is held
+    -- (press edge and each weapon fire interval), not once for the whole spray.
     if use_silent_fov then
-        if firing and not fire_was_down then
-            local hit_chance = settings.num(PREFIX .. "hit_chance", 100)
-            if hit_chance >= 100 then
-                shot_allowed = true
-            else
-                local roll = math.random(1, 100)
-                shot_allowed = roll <= hit_chance
+        if firing then
+            local now = tick_ms()
+            local new_shot = (not fire_was_down) or (now - last_shot_roll_ms >= shot_roll_interval_ms())
+            if new_shot then
+                last_shot_roll_ms = now
+                shot_allowed = roll_silent_shot(locked_target)
             end
-        elseif not firing then
+        else
             shot_allowed = true
+            last_shot_roll_ms = 0
         end
         fire_was_down = firing and true or false
 
@@ -223,6 +260,7 @@ function M.update(dt)
     else
         shot_allowed = true
         fire_was_down = false
+        last_shot_roll_ms = 0
     end
 
     local ok_resolve, origin, aim, manip_info = pcall(silent_resolve.resolve_track, locked_target, PREFIX, cx, cy)

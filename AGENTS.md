@@ -9,10 +9,10 @@ Read this at the start of every session.
 | Artifact | Purpose |
 |----------|---------|
 | `src/` | Modular source (edit here) |
-| `scripts/bundle.mjs` | Builds the remote loader, chunks, and full local test bundle |
-| `april.lua` | Small remote chunk loader |
+| `scripts/bundle.mjs` | Builds the single-file runtime (`april.lua` + `Script 1.lua`) and `load.lua` |
+| `april.lua` | Full remote runtime (one file — no split chunks) |
 | `load.lua` | Public one-line `utility.LoadUrl(...)` |
-| `Script 1.lua` | Full local bundle used for pre-release testing |
+| `Script 1.lua` | Identical full local bundle for pre-release testing |
 | `dump/` | Game dump (gitignored — local only) |
 | `tools/` | GC / rbxlx utilities (local workspace) |
 | `docs/API.md` | Vector Lua Engine API — read every session |
@@ -20,7 +20,7 @@ Read this at the start of every session.
 
 **Build:** `npm run build`
 
-**Custom UI:** Main script uses the Gamesense menu only (no Vector April tabs). Toggle with **INSERT**. Feature `register_menu()` still runs but writes into `gs_state` through `ui/menu_shim.lua`.
+**Custom UI:** Main script uses the Gamesense menu only (no Vector April tabs). Toggle with **INSERT**. Feature `register_menu()` still runs but writes into `gs_state` through `ui/menu_shim.lua`. The startup intro loading screen still plays on boot.
 
 **GitHub:** [Cunzaki/April](https://github.com/Cunzaki/April)
 
@@ -61,9 +61,9 @@ After meaningful changes: bump version in `scripts/bundle.mjs`, rebuild.
 ## Mandatory build and release workflow
 
 - Edit modular files under `src/`; do not hand-edit generated Lua artifacts.
-- Every build must generate the complete standalone runtime at `Script 1.lua`.
-- Test `Script 1.lua` before any release because it does not depend on unpushed GitHub chunks.
-- Release artifacts (`april.lua`, `load.lua`, `chunks/*.lua`, `Script 1.lua`, and `april_ui.lua`) must contain no Lua comments. The build scripts enforce this.
-- Keep the public usage as one `utility.LoadUrl(...)`; `april.lua` may load ordered remote chunks internally.
+- Every build must generate the complete standalone runtime at both `april.lua` and `Script 1.lua` (same contents).
+- Test `Script 1.lua` before any release.
+- Release artifacts (`april.lua`, `load.lua`, `Script 1.lua`, and `april_ui.lua`) must contain no Lua comments. The build scripts enforce this.
+- Keep the public usage as one `utility.LoadUrl(...)` that pulls the full `april.lua` runtime (no split chunk loading).
 - Do not commit or push after routine edits. Only commit and push when the user explicitly says to push.
-- Before an approved push: bump the version, run the complete build, verify generated artifacts, then commit and push all required source, loader, and chunk changes together.
+- Before an approved push: bump the version, run the complete build, verify generated artifacts, then commit and push all required source and runtime changes together.

@@ -92,6 +92,52 @@ local function thickness()
     return t
 end
 
+local function find_head(player)
+    local char = ep.character(player)
+    if not char or not env.is_valid(char) then return nil end
+    return env.safe_call(function()
+        return char:FindFirstChild("Head") or char:find_first_child("Head")
+    end)
+end
+
+function M.is_active()
+    return was_on == true and active()
+end
+
+-- GetBounds includes inflated Head.Size. Temporarily restore the natural size for
+-- this player only so ESP/boxes do not reveal Override Size, then re-apply.
+function M.esp_bounds(player)
+    local fn = player and (player.GetBounds or player.get_bounds)
+    if not fn then return nil end
+
+    if not M.is_active() then
+        local ok, bounds = pcall(fn, player)
+        if ok then return bounds end
+        return nil
+    end
+
+    local head = find_head(player)
+    if not head or not env.is_valid(head) then
+        local ok, bounds = pcall(fn, player)
+        if ok then return bounds end
+        return nil
+    end
+
+    local entry = tracked[head_key(head)]
+    if not entry then
+        local ok, bounds = pcall(fn, player)
+        if ok then return bounds end
+        return nil
+    end
+
+    local mult = thickness()
+    write_size(head, entry.sx, entry.sy, entry.sz)
+    local ok, bounds = pcall(fn, player)
+    write_size(head, entry.sx * mult, entry.sy * mult, entry.sz * mult)
+    if ok then return bounds end
+    return nil
+end
+
 function M.update(_dt)
     local on = active()
     if not on then
@@ -113,15 +159,12 @@ function M.update(_dt)
         if not p or ep.is_local(p) then goto continue end
         if p.IsAlive == false or p.is_alive == false then goto continue end
 
-        local char = ep.character(p)
-        if not char or not env.is_valid(char) then goto continue end
-
-        local head = env.safe_call(function()
-            return char:FindFirstChild("Head") or char:find_first_child("Head")
-        end)
+        local head = find_head(p)
         if not head or not env.is_valid(head) then goto continue end
 
         local hum = ep.humanoid(p) or env.safe_call(function()
+            local char = ep.character(p)
+            if not char then return nil end
             return char:FindFirstChildOfClass("Humanoid") or char:find_first_child_of_class("Humanoid")
         end)
         local hp = hum and tonumber(hum.Health or hum.health)
@@ -133,6 +176,10 @@ function M.update(_dt)
         if not entry then
             local sx, sy, sz = read_size(head)
             if not sx then
+                sx, sy, sz = BASE.x, BASE.y, BASE.z
+            end
+            -- If we first see an already-inflated head, store the natural base.
+            if sx > BASE.x * 1.35 or sy > BASE.y * 1.35 or sz > BASE.z * 1.35 then
                 sx, sy, sz = BASE.x, BASE.y, BASE.z
             end
             entry = {
