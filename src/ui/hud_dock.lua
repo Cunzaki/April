@@ -155,11 +155,13 @@ function M.draw_floating(_default_x, _default_y, sw, _sh)
             widgets.interacted = true
         end
         if hot then
-            local label_w = text_width(panel.label, theme.FONT_CAPTION)
+            local i18n = April.require("ui.i18n")
+            local plabel = i18n.t(panel.label)
+            local label_w = text_width(plabel, theme.FONT_CAPTION)
             local tx = cursor_x + (item - label_w) * 0.5
             widgets.rect(tx - 5, y + bar_h + 5, label_w + 10, 18,
                 theme.OVERLAY, true, theme.CORNER_SMALL)
-            widgets.text(tx, y + bar_h + 7, panel.label, theme.TEXT_ACTIVE, theme.FONT_CAPTION)
+            widgets.text(tx, y + bar_h + 7, plabel, theme.TEXT_ACTIVE, theme.FONT_CAPTION)
         end
         cursor_x = cursor_x + item + gap
     end
@@ -206,8 +208,10 @@ function M.draw(x, y, w, h)
     local widths = {}
     local total = settings_w
 
+    local i18n = April.require("ui.i18n")
     for i, panel in ipairs(PANELS) do
-        local label_w = text_width(panel.label, theme.FONT_CAPTION)
+        local plabel = i18n.t(panel.label)
+        local label_w = text_width(plabel, theme.FONT_CAPTION)
         widths[i] = icon_w + label_w + (theme.DOCK_PAD_X or 10)
         total = total + widths[i] + gap
     end
@@ -230,9 +234,10 @@ function M.draw(x, y, w, h)
 
         local icon_col = active and theme.TEXT_ACTIVE
             or anim.mix(theme.TEXT_DIM, theme.TEXT_ACTIVE, t)
+        local plabel = i18n.t(panel.label)
         icons.draw(panel.icon, cursor_x + icon_w * 0.5, chip_y + chip_h * 0.5, icon_col, 0.76)
         widgets.text(cursor_x + icon_w - 1, chip_y + math.floor((chip_h - theme.FONT_CAPTION) * 0.5) - 1,
-            panel.label, icon_col, theme.FONT_CAPTION)
+            plabel, icon_col, theme.FONT_CAPTION)
 
         if input.clicked(cursor_x, chip_y, chip_w, chip_h) and not widgets.block_under then
             state.set(panel.id, not active)
@@ -276,7 +281,8 @@ function M.draw_overlay()
     widgets.block_under = false
     widgets.rect(r.x, r.y, r.w, r.h, theme.OVERLAY, true, theme.CORNER)
     widgets.rect(r.x, r.y, r.w, r.h, theme.BORDER_SOFT, false, theme.CORNER)
-    widgets.text(r.x + 12, r.y + 10, "HUD SETTINGS", theme.TEXT_ACTIVE, theme.FONT_TITLE)
+    local i18n = April.require("ui.i18n")
+    widgets.text(r.x + 12, r.y + 10, i18n.t("HUD SETTINGS"), theme.TEXT_ACTIVE, theme.FONT_TITLE)
     widgets.text(r.x + r.w - 22, r.y + 9, "x", theme.TEXT_DIM, theme.FONT_TITLE)
 
     if input.clicked(r.x + r.w - 30, r.y + 3, 28, 25) then

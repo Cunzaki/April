@@ -102,11 +102,12 @@ function M.draw()
     )
     x, y = panel_drag.clamp(x, y, PANEL_W, height, sw, sh)
 
-    overlay_theme.draw_panel(x, y, PANEL_W, height, "KEYBINDS")
+    local i18n = April.require("ui.i18n")
+    overlay_theme.draw_panel(x, y, PANEL_W, height, i18n.t("KEYBINDS"))
 
     local ry = y + TITLE_H + 4
     if #rows == 0 then
-        draw_util.text(x + pad, ry, "No binds", theme.TEXT_MUTED, 11)
+        draw_util.text(x + pad, ry, i18n.t("No binds"), theme.TEXT_MUTED, 11)
         return
     end
 
@@ -117,7 +118,7 @@ function M.draw()
         local name_col = row.active and theme.TEXT or theme.TEXT_MUTED
         local key_col = row.active and accent or theme.TEXT_DIM
 
-        local label = row.label
+        local label = i18n.t(row.label)
         if #label > max_label then label = label:sub(1, math.max(1, max_label - 2)) .. ".." end
         draw_util.text(x + pad, ry + 3, label, name_col, 11)
 

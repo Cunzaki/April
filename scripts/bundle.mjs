@@ -122,6 +122,7 @@ const ORDER = [
   "ui/gs_input.lua",
   "ui/gs_state.lua",
   "ui/gs_anim.lua",
+  "ui/i18n.lua",
   "ui/tooltips.lua",
   "ui/menu_shim.lua",
   "ui/gs_icons.lua",
@@ -135,7 +136,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.1.38";
+const VERSION = "4.1.40";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector

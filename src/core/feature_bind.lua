@@ -108,7 +108,12 @@ function M.mode_index(id)
 end
 
 function M.mode_name(id)
-    return M.MODES[M.mode_index(id) + 1] or "Toggle"
+    local name = M.MODES[M.mode_index(id) + 1] or "Toggle"
+    local ok, i18n = pcall(April.require, "ui.i18n")
+    if ok and i18n and i18n.t then
+        return i18n.t(name)
+    end
+    return name
 end
 
 function M.hide_key_id(id)

@@ -35,6 +35,7 @@ local EXCLUDE = {
 }
 
 local MENU_KEYS = {
+    "april_ui_russian",
     "april_ui_theme_preset", "april_ui_window_opacity", "april_ui_panel_opacity",
     "april_ui_border_strength", "april_ui_corner_style", "april_ui_scale", "april_ui_density",
     "april_ui_menu_overlay", "april_ui_overlay_strength",

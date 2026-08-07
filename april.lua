@@ -1,5 +1,5 @@
 April = {
-    version = "4.1.38",
+    version = "4.1.40",
     debug = false,
     crash_logging = false,
     crash_trace = false,
@@ -1864,7 +1864,12 @@ function M.mode_index(id)
     return settings.combo_index(e.mode_id, M.MODES, 0)
 end
 function M.mode_name(id)
-    return M.MODES[M.mode_index(id) + 1] or "Toggle"
+    local name = M.MODES[M.mode_index(id) + 1] or "Toggle"
+    local ok, i18n = pcall(April.require, "ui.i18n")
+    if ok and i18n and i18n.t then
+        return i18n.t(name)
+    end
+    return name
 end
 function M.hide_key_id(id)
     return id .. "_hide_kb"
@@ -6592,6 +6597,7 @@ local EXCLUDE = {
     april_speed_speed = true,
 }
 local MENU_KEYS = {
+    "april_ui_russian",
     "april_ui_theme_preset", "april_ui_window_opacity", "april_ui_panel_opacity",
     "april_ui_border_strength", "april_ui_corner_style", "april_ui_scale", "april_ui_density",
     "april_ui_menu_overlay", "april_ui_overlay_strength",
@@ -15629,18 +15635,27 @@ local hitscan_on = info.hitscan_on == true
 local tp_on = info.tp_on == true
 local manip_on = info.manip_on == true
 if not hitscan_on and not tp_on and not manip_on then return end
+local i18n = April.require("ui.i18n")
 local manip_state = info.manip_state or "off"
 local fire_mode = info.state or "off"
-local fire_label = FIRE_LABELS[fire_mode] or fire_mode
-local manip_label = MANIP_LABELS[manip_state] or manip_state
+local fire_label = i18n.t(FIRE_LABELS[fire_mode] or fire_mode)
+local manip_label = i18n.t(MANIP_LABELS[manip_state] or manip_state)
 if info.scan_cached and (manip_state == "ready" or manip_state == "blocked") then
 manip_label = manip_label .. " *"
 end
 local pad_x, pad_y = 10, 6
 local row_h = 14
 local bar_h = 5
-local title = "BULLET STATUS"
+local title = i18n.t("BULLET STATUS")
 local title_w = theme.text_w(title, 11)
+local on_txt = i18n.t("ON")
+local off_txt = i18n.t("OFF")
+local hitscan_l = i18n.t("Hitscan")
+local tp_l = i18n.t("Bullet TP")
+local manip_l = i18n.t("Manip")
+local fire_l = i18n.t("Fire")
+local peek_l = i18n.t("Peek R")
+local ring_l = i18n.t("Ring")
 local radius_text = fmt_radius(info)
 local ring_text = "-"
 if manip_on and info.radii_total and info.radius_idx then
@@ -15650,12 +15665,12 @@ ring_text = "hit"
 elseif manip_on and manip_state == "direct" then
 ring_text = "los"
 end
-local w1 = theme.text_w("Hitscan", 10) + theme.text_w("ON", 10) + 24
-local w2 = theme.text_w("Bullet TP", 10) + theme.text_w("ON", 10) + 24
-local w3 = theme.text_w("Manip", 10) + theme.text_w(manip_label, 10) + 24
-local w4 = theme.text_w("Fire", 10) + theme.text_w(fire_label, 10) + 24
-local w5 = theme.text_w("Peek R", 10) + theme.text_w(radius_text, 10) + 24
-local w6 = theme.text_w("Ring", 10) + theme.text_w(ring_text, 10) + 24
+local w1 = theme.text_w(hitscan_l, 10) + theme.text_w(on_txt, 10) + 24
+local w2 = theme.text_w(tp_l, 10) + theme.text_w(on_txt, 10) + 24
+local w3 = theme.text_w(manip_l, 10) + theme.text_w(manip_label, 10) + 24
+local w4 = theme.text_w(fire_l, 10) + theme.text_w(fire_label, 10) + 24
+local w5 = theme.text_w(peek_l, 10) + theme.text_w(radius_text, 10) + 24
+local w6 = theme.text_w(ring_l, 10) + theme.text_w(ring_text, 10) + 24
 local panel_w = math.max(title_w, w1, w2, w3, w4, w5, w6) + pad_x * 2 + 8
 panel_w = math.max(panel_w, 178)
 local rows = manip_on and 6 or 4
@@ -15674,11 +15689,11 @@ local vw = theme.text_w(value, 10)
 draw_util.text(x + panel_w - pad_x - vw, ry, value, col, 10)
 ry = ry + row_h
 end
-draw_row("Hitscan", hitscan_on and "ON" or "OFF", row_color(hitscan_on, true, false))
-draw_row("Bullet TP", tp_on and "ON" or "OFF", row_color(tp_on, true, false))
+draw_row(hitscan_l, hitscan_on and on_txt or off_txt, row_color(hitscan_on, true, false))
+draw_row(tp_l, tp_on and on_txt or off_txt, row_color(tp_on, true, false))
 local manip_ok = manip_state == "ready" or manip_state == "direct"
 local manip_warn = manip_state == "scanning"
-draw_row("Manip", manip_on and manip_label or "OFF",
+draw_row(manip_l, manip_on and manip_label or off_txt,
 row_color(manip_on, manip_ok, manip_warn))
 local fire_col = theme.CYAN
 if fire_mode == "tp" then
@@ -15690,10 +15705,10 @@ fire_col = theme.GREEN
 elseif fire_mode == "scanning" or fire_mode == "blocked" then
 fire_col = theme.ORANGE
 end
-draw_row("Fire", fire_label, fire_col)
+draw_row(fire_l, fire_label, fire_col)
 if manip_on then
-draw_row("Peek R", radius_text, overlay_theme.text())
-draw_row("Ring", ring_text, overlay_theme.text())
+draw_row(peek_l, radius_text, overlay_theme.text())
+draw_row(ring_l, ring_text, overlay_theme.text())
 end
 if has_bar then
 local bar_w = panel_w - pad_x * 2
@@ -18828,14 +18843,15 @@ local pad = 12
 local row_h = 38
 local count = math.max(#rows, 1)
 local height = TITLE_H + count * row_h + 6
-local title = "STAFF IN LOBBY"
+local i18n = April.require("ui.i18n")
+local title = i18n.t("STAFF IN LOBBY")
 if #rows > 1 then
 title = title .. " (" .. #rows .. ")"
 end
 overlay_theme.draw_panel(x, y, width, height, title)
 local ry = y + TITLE_H + 5
 if #rows == 0 then
-draw.text(x + pad, ry + 2, "No staff detected", theme.TEXT_MUTED, 11)
+draw.text(x + pad, ry + 2, i18n.t("No staff detected"), theme.TEXT_MUTED, 11)
 return height
 end
 local max_name = math.max(10, math.floor((width - pad * 2 - 12) / 7))
@@ -19201,7 +19217,8 @@ PANEL_W, TITLE_H, sw, sh,
 sw - PANEL_W - 16, 300
 )
 x, y = panel_drag.clamp(x, y, PANEL_W, height, sw, sh)
-overlay_theme.draw_panel(x, y, PANEL_W, height, "EVENT STATUS")
+local i18n = April.require("ui.i18n")
+overlay_theme.draw_panel(x, y, PANEL_W, height, i18n.t("EVENT STATUS"))
 local ry = y + TITLE_H + 5
 if #rows == 0 then
 draw_util.text(x + 12, ry + 4, "No active events", theme.TEXT_MUTED, 11)
@@ -20021,7 +20038,8 @@ function M.draw()
         panel_h = panel_h + 16
     end
     local panel_x = cx - panel_w * 0.5
-    overlay_theme.draw_panel(panel_x, top, panel_w, panel_h, "TARGET LOADOUT", { title_center = true })
+    local i18n = April.require("ui.i18n")
+    overlay_theme.draw_panel(panel_x, top, panel_w, panel_h, i18n.t("TARGET LOADOUT"), { title_center = true })
     local max_name_w = panel_w - 114
     local header_name = name
     while #header_name > 1 and select(1, draw.get_text_size(header_name, 10)) > max_name_w do
@@ -24537,10 +24555,11 @@ function M.draw()
         16, 280
     )
     x, y = panel_drag.clamp(x, y, PANEL_W, height, sw, sh)
-    overlay_theme.draw_panel(x, y, PANEL_W, height, "KEYBINDS")
+    local i18n = April.require("ui.i18n")
+    overlay_theme.draw_panel(x, y, PANEL_W, height, i18n.t("KEYBINDS"))
     local ry = y + TITLE_H + 4
     if #rows == 0 then
-        draw_util.text(x + pad, ry, "No binds", theme.TEXT_MUTED, 11)
+        draw_util.text(x + pad, ry, i18n.t("No binds"), theme.TEXT_MUTED, 11)
         return
     end
     local max_label = math.max(8, math.floor((PANEL_W - pad * 2) * 0.55 / 7))
@@ -24548,7 +24567,7 @@ function M.draw()
         local row = rows[i]
         local name_col = row.active and theme.TEXT or theme.TEXT_MUTED
         local key_col = row.active and accent or theme.TEXT_DIM
-        local label = row.label
+        local label = i18n.t(row.label)
         if #label > max_label then label = label:sub(1, math.max(1, max_label - 2)) .. ".." end
         draw_util.text(x + pad, ry + 3, label, name_col, 11)
         local right = row.key
@@ -26529,6 +26548,909 @@ end
 return M
 end)()
 
+April._mods["ui.i18n"] = (function()
+local M = {}
+M.LANG_ID = "april_ui_russian"
+local STRINGS = {
+    ["Aim"] = "Aim",
+    ["Aimbot"] = "Aimbot",
+    ["Visuals"] = "Vizualy",
+    ["World"] = "Mir",
+    ["Guns"] = "Oruzhie",
+    ["Gun Mods"] = "Mody oruzhiya",
+    ["Misc"] = "Raznoe",
+    ["Radar"] = "Radar",
+    ["Config"] = "Konfig",
+    ["Always"] = "Vsegda",
+    ["Hold"] = "Uderzhanie",
+    ["Toggle"] = "Pereklyuchenie",
+    ["KEYBIND SETTINGS"] = "NASTROYKI BINDA",
+    ["Hide from keybind list"] = "Skryt iz spiska bindov",
+    ["COLOR"] = "TSVET",
+    ["Copy Color"] = "Kopirovat tsvet",
+    ["Paste Color"] = "Vstavit tsvet",
+    ["None"] = "Net",
+    ["Made by Cunzaki"] = "Sdelano Cunzaki",
+    ["Loading modules"] = "Zagruzka moduley",
+    ["KEYBINDS"] = "BINDY",
+    ["No binds"] = "Net bindov",
+    ["EVENT STATUS"] = "STATUS IVENTOV",
+    ["STAFF IN LOBBY"] = "PERSONAL V LOBBI",
+    ["Staff In Lobby"] = "Personal v lobbi",
+    ["No staff detected"] = "Personal ne obnaruzhen",
+    ["TARGET LOADOUT"] = "SNARYAZHENIE CELI",
+    ["HUD SETTINGS"] = "NASTROYKI HUD",
+    ["BULLET STATUS"] = "STATUS PULI",
+    ["ON"] = "VKL",
+    ["OFF"] = "VYKL",
+    ["Fire"] = "Vystrel",
+    ["Ring"] = "Koltso",
+    ["Peek R"] = "Peek R",
+    ["Manip"] = "Manip",
+    ["Manip Peek"] = "Manip peek",
+    ["Clear LOS"] = "Chistyy LOS",
+    ["Ballistic"] = "Ballistika",
+    ["Blocked"] = "Zablokirovano",
+    ["Scanning"] = "Skanirovanie",
+    ["Idle"] = "Ozhidanie",
+    ["Peek Ready"] = "Peek gotov",
+    ["No Peek"] = "Net peek",
+    ["Off"] = "Vykl",
+    ["Core"] = "Yadro",
+    ["Services"] = "Servisy",
+    ["Game Data"] = "Dannye igry",
+    ["Features"] = "Funktsii",
+    ["Interface"] = "Interfeys",
+    ["Failed: "] = "Oshibka: ",
+    ["Loading "] = "Zagruzka ",
+    ["Binds"] = "Bindy",
+    ["Staff"] = "Personal",
+    ["Events"] = "Iventy",
+    ["Map"] = "Karta",
+    ["April"] = "April",
+    ["STAFF"] = "PERSONAL",
+    ["MAP"] = "KARTA",
+    ["EVENTS"] = "IVENTY",
+    ["Only active binds"] = "Tolko aktivnye bindy",
+    ["Show unbound"] = "Pokazyvat bez klavishi",
+    ["Show bind mode"] = "Pokazyvat rezhim binda",
+    ["Scan interval"] = "Interval skana",
+    ["Reset map position"] = "Sbrosit pozitsiyu karty",
+    ["Only active events"] = "Tolko aktivnye iventy",
+    ["Enable Binds, Staff, Events, Map, or April above."] = "Vklyuchite Bindy, Personal, Iventy, Kartu ili April vyshe.",
+    ["Only Show Active"] = "Tolko aktivnye",
+    ["Show Unbound"] = "Pokazyvat bez klavishi",
+    ["Show Bind Mode"] = "Pokazyvat rezhim binda",
+    ["Keybinds Display"] = "Otobrazhenie bindov",
+    ["Event Status"] = "Status iventov",
+    ["HUD panels are managed from the top dock."] = "Paneli HUD upravlyayutsya iz verhnego doka.",
+    ["Also toggled from the top dock."] = "Takzhe vklyuchaetsya iz verhnego doka.",
+    ["Silent Aim"] = "Saylent aim",
+    ["Bullet"] = "Pulya",
+    ["Player ESP"] = "ESP igrokov",
+    ["Target Gear"] = "Snaryazhenie tseli",
+    ["Crosshair"] = "Pritsel",
+    ["Player Colors"] = "Tsveta igrokov",
+    ["Resources"] = "Resursy",
+    ["Loot"] = "Lut",
+    ["Bases"] = "Bazy",
+    ["Base Xray"] = "Rentgen bazy",
+    ["NPCs"] = "NPC",
+    ["NPC Colors"] = "Tsveta NPC",
+    ["Raids"] = "Reydy",
+    ["Movement"] = "Dvizhenie",
+    ["Utility"] = "Utility",
+    ["Tactical Map"] = "Takticheskaya karta",
+    ["Waypoints"] = "Veypointy",
+    ["Appearance"] = "Vneshniy vid",
+    ["Motion"] = "Animatsiya",
+    ["Accent Colors"] = "Tsveta aktsenta",
+    ["Anime Baddie"] = "Anime-devushka",
+    ["Enable Aimbot"] = "Vklyuchit aimbot",
+    ["Aim Key"] = "Klavisha aima",
+    ["Target Type"] = "Tip tseli",
+    ["Crosshair"] = "Pritsel",
+    ["Distance"] = "Distantsiya",
+    ["Hitbox"] = "Hitboks",
+    ["Aim At"] = "Tselitsya v",
+    ["Filters"] = "Filtry",
+    ["Health Check"] = "Proverka zdorovya",
+    ["Visible Only"] = "Tolko vidimye",
+    ["Team Check"] = "Proverka komandy",
+    ["Skip Safezone"] = "Propuskat SZ",
+    ["Whitelist"] = "Vaytlist",
+    ["Skip Downed"] = "Propuskat daunov",
+    ["Whitelist IDs"] = "ID vaytlista",
+    ["Clear Whitelist"] = "Ochistit vaytlist",
+    ["Max Distance (m)"] = "Maks. distantsiya (m)",
+    ["Sticky Aim"] = "Lipkiy aim",
+    ["Sticky Target"] = "Lipkaya tsel",
+    ["Auto Prediction"] = "Avtopredskazanie",
+    ["Smoothness"] = "Plavnost",
+    ["Smooth Type"] = "Tip plavnosti",
+    ["Linear"] = "Lineynyy",
+    ["Ease Out"] = "Ease Out",
+    ["Ease In-Out"] = "Ease In-Out",
+    ["Exponential"] = "Eksponentsialnyy",
+    ["Adaptive"] = "Adaptivnyy",
+    ["Humanize"] = "Humanizatsiya",
+    ["Humanize Strength"] = "Sila humanizatsii",
+    ["FOV Radius (px)"] = "Radius FOV (px)",
+    ["FOV Circle"] = "Krug FOV",
+    ["FOV Style"] = "Stil FOV",
+    ["Outline"] = "Kontur",
+    ["Filled Circle"] = "Zalityy krug",
+    ["Target Line"] = "Liniya do tseli",
+    ["Enable Silent Aim"] = "Vklyuchit saylent aim",
+    ["Hit Chance %"] = "Shans popadaniya %",
+    ["Snapline"] = "Snaplayn",
+    ["Enable Bullet"] = "Vklyuchit pulyu",
+    ["Hitscan"] = "Hitscan",
+    ["Bullet TP"] = "Bullet TP",
+    ["Silent Bullet Manip"] = "Silent Bullet Manip",
+    ["Manip Distance"] = "Distantsiya manipa",
+    ["Extend"] = "Rasshirenie",
+    ["Extend Distance"] = "Distantsiya rasshireniya",
+    ["Body Peek (desync)"] = "Body Peek (desink)",
+    ["Hitbox Override"] = "Overrayd hitboksa",
+    ["Override Size"] = "Razmer overrayda",
+    ["Status HUD"] = "Status HUD",
+    ["Peek Visual"] = "Vizual pika",
+    ["Head"] = "Golova",
+    ["Torso"] = "Tors",
+    ["Left Arm"] = "Levaya ruka",
+    ["Right Arm"] = "Pravaya ruka",
+    ["Left Leg"] = "Levaya noga",
+    ["Right Leg"] = "Pravaya noga",
+    ["Closest"] = "Blizhayshaya",
+    ["Randomized Part"] = "Sluchaynaya chast",
+    ["Players"] = "Igroki",
+    ["Soldier"] = "Soldat",
+    ["Bruno"] = "Bruno",
+    ["Boris"] = "Boris",
+    ["Brutus"] = "Brutus",
+    ["Attack Heli"] = "Attack Heli",
+    ["BTR"] = "BTR",
+    ["Diver Dave"] = "Diver Dave",
+    ["Pilot Pete"] = "Pilot Pete",
+    ["Player Box"] = "Boks igroka",
+    ["2D"] = "2D",
+    ["Corner"] = "Ugly",
+    ["Displayed Elements"] = "Otobrazhaemye elementy",
+    ["Health Bar"] = "Poloska HP",
+    ["Skeleton"] = "Skelet",
+    ["Name"] = "Imya",
+    ["Clan Tag"] = "Klan-teg",
+    ["Held Item"] = "Predmet v rukah",
+    ["ESP Filters"] = "Filtry ESP",
+    ["ESP Flags"] = "Flagi ESP",
+    ["Downed"] = "Daun",
+    ["Safezone"] = "Seyfzona",
+    ["Reviving"] = "Revayv",
+    ["VIP"] = "VIP",
+    ["Cheater"] = "Chiter",
+    ["Player Range"] = "Dalnost igrokov",
+    ["Target Gear Overlay"] = "Overley snaryazheniya tseli",
+    ["Gear FOV"] = "FOV snaryazheniya",
+    ["Max Distance"] = "Maks. distantsiya",
+    ["Gear Icon Size"] = "Razmer ikonok",
+    ["Top Offset"] = "Otstup sverhu",
+    ["Custom Crosshair"] = "Svoy pritsel",
+    ["Style"] = "Stil",
+    ["Cross"] = "Krest",
+    ["Circle"] = "Krug",
+    ["Dot"] = "Tochka",
+    ["T-Shape"] = "T-forma",
+    ["Diamond"] = "Romb",
+    ["Plus"] = "Plyus",
+    ["Brackets"] = "Skobki",
+    ["X"] = "X",
+    ["Follow Target"] = "Sledovat za tselyu",
+    ["Target From"] = "Tsel iz",
+    ["Auto"] = "Avto",
+    ["Follow Smoothness"] = "Plavnost sledovaniya",
+    ["Motion"] = "Animatsiya",
+    ["Spin"] = "Vraschenie",
+    ["Pulse Size"] = "Puls razmera",
+    ["Spin Speed"] = "Skorost vrascheniya",
+    ["Pulse Speed"] = "Skorost pulsa",
+    ["Options"] = "Optsii",
+    ["Center Dot"] = "Tsentralnaya tochka",
+    ["Rainbow"] = "Raduga",
+    ["Crosshair Color"] = "Tsvet pritsela",
+    ["Center Dot Color"] = "Tsvet tochki",
+    ["Rainbow Speed"] = "Skorost radugi",
+    ["Size"] = "Razmer",
+    ["Gap"] = "Zazor",
+    ["Thickness"] = "Tolschina",
+    ["Box"] = "Boks",
+    ["Resource ESP"] = "ESP resursov",
+    ["Resource 3D Boxes"] = "3D-boksy resursov",
+    ["Resource Show Name"] = "Imena resursov",
+    ["Resource Show Distance"] = "Distantsiya resursov",
+    ["Resource Range"] = "Dalnost resursov",
+    ["Loot ESP"] = "ESP luta",
+    ["Loot 3D Boxes"] = "3D-boksy luta",
+    ["Loot Show Name"] = "Imena luta",
+    ["Loot Show Distance"] = "Distantsiya luta",
+    ["Loot Range"] = "Dalnost luta",
+    ["Base ESP"] = "ESP bazy",
+    ["Base 3D Boxes"] = "3D-boksy bazy",
+    ["Base Show Name"] = "Imena bazy",
+    ["Base Show Distance"] = "Distantsiya bazy",
+    ["Base Range"] = "Dalnost bazy",
+    ["Base Xray"] = "Rentgen bazy",
+    ["Xray Range"] = "Dalnost rentgena",
+    ["NPC ESP"] = "ESP NPC",
+    ["NPC Types"] = "Tipy NPC",
+    ["NPC Box"] = "Boks NPC",
+    ["NPC Range"] = "Dalnost NPC",
+    ["Raid ESP"] = "ESP reydov",
+    ["Raid Notifications"] = "Uvedomleniya o reydah",
+    ["Raid ESP Range"] = "Dalnost ESP reydov",
+    ["Mesh Chams (GPU)"] = "Mesh Chams (GPU)",
+    ["Cham Types"] = "Tipy chamsov",
+    ["Chams Mode"] = "Rezhim chamsov",
+    ["Glow Preset"] = "Preset svecheniya",
+    ["Fill"] = "Zalivka",
+    ["Wireframe"] = "Karkas",
+    ["Fill Glow"] = "Zalivka + svechenie",
+    ["Wireframe Glow"] = "Karkas + svechenie",
+    ["Default"] = "Po umolchaniyu",
+    ["Red"] = "Krasnyy",
+    ["Green"] = "Zelenyy",
+    ["Yellow"] = "Zheltyy",
+    ["Blue"] = "Siniy",
+    ["Magenta"] = "Purpurnyy",
+    ["Cyan"] = "Goluboy",
+    ["Stone Node"] = "Kamennyy uzel",
+    ["Metal Node"] = "Metallicheskiy uzel",
+    ["Phosphate Node"] = "Fosfatnyy uzel",
+    ["Corn Plant"] = "Kukuruza",
+    ["Tomato Plant"] = "Tomat",
+    ["Pumpkin Plant"] = "Tykva",
+    ["Lemon Plant"] = "Limon",
+    ["Raspberry Plant"] = "Malina",
+    ["Blueberry Plant"] = "Chernika",
+    ["Wool Plant"] = "Sherst",
+    ["Deer"] = "Olen",
+    ["Wild Boar"] = "Kaban",
+    ["Boar"] = "Kaban",
+    ["Wolf"] = "Volk",
+    ["Dropped Items"] = "Vybroshennye predmety",
+    ["Wooden Crate"] = "Derevyannyy yaschik",
+    ["Metal Crate"] = "Metallicheskiy yaschik",
+    ["Steel Crate"] = "Stalnoy yaschik",
+    ["Food Crate"] = "Yaschik s edoy",
+    ["Timed Crate"] = "Taymernyy yaschik",
+    ["Care Package"] = "Care Package",
+    ["BTR Crate"] = "Yaschik BTR",
+    ["Body Bag"] = "Meshok s telom",
+    ["Sleepers"] = "Slipery",
+    ["Trash Can"] = "Musorka",
+    ["Oil Barrel"] = "Bochka s maslom",
+    ["Small Egg / Gift"] = "Malenkoe yaytso / podarok",
+    ["Medium Egg / Gift"] = "Srednee yaytso / podarok",
+    ["Large Egg / Gift"] = "Bolshoe yaytso / podarok",
+    ["Wooden Boat"] = "Derevyannaya lodka",
+    ["Military Boat"] = "Voennaya lodka",
+    ["Salvaged Flycopter"] = "Salvaged Flycopter",
+    ["Heli Crate"] = "Yaschik vertoleta",
+    ["Base Cabinet"] = "Bazovyy shkaf",
+    ["Storage Cabinet"] = "Shkaf hraneniya",
+    ["Small Storage Box"] = "Malyy yaschik",
+    ["Large Storage Box"] = "Bolshoy yaschik",
+    ["Sleeping Bag"] = "Spalnik",
+    ["Auto Turret"] = "Avtoturel",
+    ["Shotgun Turret"] = "Drobovaya turel",
+    ["Wooden Door"] = "Derevyannaya dver",
+    ["Wooden Double Door"] = "Derevyannaya dvoynaya dver",
+    ["Metal Door"] = "Metallicheskaya dver",
+    ["Salvaged Metal Door"] = "Samodelnaya metal. dver",
+    ["Metal Double Door"] = "Metallicheskaya dvoynaya dver",
+    ["Steel Door"] = "Stalnaya dver",
+    ["Steel Double Door"] = "Stalnaya dvoynaya dver",
+    ["Garage Door"] = "Garazhnaya dver",
+    ["Trap Door"] = "Lyuk",
+    ["Triangle Trap Door"] = "Treugolnyy lyuk",
+    ["Small Battery"] = "Malaya batareya",
+    ["Medium Battery"] = "Srednyaya batareya",
+    ["Large Battery"] = "Bolshaya batareya",
+    ["Solar Panel"] = "Solnechnaya panel",
+    ["Windmill"] = "Vetryak",
+    ["Auto Turret Range Ring"] = "Avtoturel koltso dalnosti",
+    ["Shotgun Turret Range Ring"] = "Drobovaya turel koltso dalnosti",
+    ["Enable Gun Mods"] = "Vklyuchit mody oruzhiya",
+    ["No Recoil"] = "Bez otdachi",
+    ["Recoil Reduction %"] = "Snizhenie otdachi %",
+    ["No Spread"] = "Bez razbrosa",
+    ["Spread Reduction %"] = "Snizhenie razbrosa %",
+    ["No Sway"] = "Bez pokachivaniya",
+    ["Fire Rate"] = "Skorostrelnost",
+    ["Fire Rate Multiplier"] = "Mnozhitel skorostrelnosti",
+    ["Bullet Speed"] = "Skorost puli",
+    ["Speed Mult"] = "Mnozhitel skorosti",
+    ["Gun Range"] = "Dalnost oruzhiya",
+    ["Range Mult"] = "Mnozhitel dalnosti",
+    ["Double Tap"] = "Double Tap",
+    ["Fly"] = "Polet",
+    ["Fly Speed"] = "Skorost poleta",
+    ["Fly Noclip"] = "Polet noclip",
+    ["Spider"] = "Pauk",
+    ["Spider Speed"] = "Skorost pauka",
+    ["Bunny Hop"] = "Bunny Hop",
+    ["Desync"] = "Desink",
+    ["Desync Visualize"] = "Vizualizatsiya desinka",
+    ["Anti-Aim"] = "Anti-aim",
+    ["Yaw Mode"] = "Rezhim yaw",
+    ["Backwards"] = "Nazad",
+    ["Jitter"] = "Dzhitter",
+    ["Random Jitter"] = "Sluchaynyy dzhitter",
+    ["Sideways Left"] = "Vbok vlevo",
+    ["Sideways Right"] = "Vbok vpravo",
+    ["Manual"] = "Vruchnuyu",
+    ["Manual Yaw"] = "Ruchnoy yaw",
+    ["Jitter Step"] = "Shag dzhittera",
+    ["Jitter Interval (ms)"] = "Interval dzhittera (ms)",
+    ["Fake Duck"] = "Feyk-prised",
+    ["Duck Height"] = "Vysota priseda",
+    ["Spam Height"] = "Spam vysoty",
+    ["Spam Mode"] = "Rezhim spama",
+    ["Alternating"] = "Cheredovanie",
+    ["Random"] = "Sluchayno",
+    ["Spam Min"] = "Spam min.",
+    ["Spam Max"] = "Spam maks.",
+    ["Spam Interval (ms)"] = "Interval spama (ms)",
+    ["Fling"] = "Fling",
+    ["Fling FOV"] = "FOV fling",
+    ["Fling Duration"] = "Dlitelnost fling",
+    ["Autofarm"] = "Avtofarm",
+    ["Farm Resources"] = "Resursy farma",
+    ["Trees"] = "Derevya",
+    ["Stone"] = "Kamen",
+    ["Metal"] = "Metall",
+    ["Phosphate"] = "Fosfat",
+    ["Search Range"] = "Dalnost poiska",
+    ["Debug Target Path"] = "Otladka puti k tseli",
+    ["Manual Farm Helper"] = "Ruchnoy pomoschnik farma",
+    ["Farm Range (studs)"] = "Dalnost farma (studs)",
+    ["Anti AFK"] = "Anti-AFK",
+    ["Anti Fling"] = "Anti-fling",
+    ["Visible Layers"] = "Vidimye sloi",
+    ["NPCs"] = "NPC",
+    ["Base Parts"] = "Chasti bazy",
+    ["Labels"] = "Podpisi",
+    ["Radar Players Color"] = "Tsvet igrokov na radare",
+    ["Radar NPCs Color"] = "Tsvet NPC na radare",
+    ["Radar Loot Color"] = "Tsvet luta na radare",
+    ["Radar Resources Color"] = "Tsvet resursov na radare",
+    ["Radar Base Color"] = "Tsvet bazy na radare",
+    ["Radar Waypoints Color"] = "Tsvet veypointov na radare",
+    ["Radar Raids Color"] = "Tsvet reydov na radare",
+    ["Radar Zoom Level"] = "Zum radara",
+    ["Radar Size"] = "Razmer radara",
+    ["Radar Opacity"] = "Prozrachnost radara",
+    ["Radar Blip Size"] = "Razmer blipov",
+    ["Reset Radar Position"] = "Sbrosit pozitsiyu radara",
+    ["Waypoint Show Distance"] = "Distantsiya veypointa",
+    ["Beacon Pillar"] = "Stolb-mayak",
+    ["Beacon Height"] = "Vysota mayaka",
+    ["Draw Markers"] = "Risovat markery",
+    ["Waypoint Active Slot"] = "Aktivnyy slot veypointa",
+    ["Set Active Waypoint"] = "Ustanovit aktivnyy veypoint",
+    ["Clear Active Waypoint"] = "Ochistit aktivnyy veypoint",
+    ["Clear All Waypoints"] = "Ochistit vse veypointy",
+    ["Look"] = "Vid",
+    ["Menu Toggle Key"] = "Klavisha menyu",
+    ["Theme Preset"] = "Preset temy",
+    ["Violet Glass"] = "Fioletovoe steklo",
+    ["Midnight Blue"] = "Polunochnyy siniy",
+    ["Graphite"] = "Grafit",
+    ["Emerald Glass"] = "Izumrudnoe steklo",
+    ["Crimson Ember"] = "Bagrovyy ugolek",
+    ["Arctic Frost"] = "Arkticheskiy iney",
+    ["Amber Noir"] = "Yantarnyy nuar",
+    ["Sakura Night"] = "Noch sakury",
+    ["Ocean Abyss"] = "Okeanskaya bezdna",
+    ["Copper Dust"] = "Mednaya pyl",
+    ["Neon Lime"] = "Neonovyy laym",
+    ["Royal Indigo"] = "Korolevskiy indigo",
+    ["Window Opacity %"] = "Prozrachnost okna %",
+    ["Panel Opacity %"] = "Prozrachnost paneley %",
+    ["Border Strength %"] = "Sila ramki %",
+    ["Corners"] = "Ugly",
+    ["Sharp"] = "Ostrye",
+    ["Soft"] = "Myagkie",
+    ["Rounded"] = "Skruglennye",
+    ["UI Scale %"] = "Masshtab UI %",
+    ["Density"] = "Plotnost",
+    ["Compact"] = "Kompaktnaya",
+    ["Balanced"] = "Sbalansirovannaya",
+    ["Comfortable"] = "Komfortnaya",
+    ["Cursor Dot"] = "Tochka kursora",
+    ["Backdrop"] = "Fon",
+    ["Menu Overlay"] = "Overley menyu",
+    ["Overlay Strength"] = "Sila overleya",
+    ["Snow"] = "Sneg",
+    ["Enable Snow"] = "Vklyuchit sneg",
+    ["Amount"] = "Kolichestvo",
+    ["Speed"] = "Skorost",
+    ["Opacity"] = "Prozrachnost",
+    ["Basics"] = "Osnovnoe",
+    ["Startup Animation"] = "Startovaya animatsiya",
+    ["Motion Profile"] = "Profil animatsii",
+    ["Subtle"] = "Sderzhannyy",
+    ["Expressive"] = "Vyrazitelnyy",
+    ["Reduce Motion"] = "Menshe animatsii",
+    ["Advanced"] = "Dopolnitelno",
+    ["Advanced Animation"] = "Rasshirennaya animatsiya",
+    ["Accent Style"] = "Stil aktsenta",
+    ["Static"] = "Statichnyy",
+    ["Pulse"] = "Puls",
+    ["Wave"] = "Volna",
+    ["Flow"] = "Potok",
+    ["Accent Speed"] = "Skorost aktsenta",
+    ["Ambient Fade Pulse"] = "Puls fonovogo zatuhaniya",
+    ["Animate"] = "Animirovat",
+    ["Title Bar"] = "Zagolovok",
+    ["Section Tops"] = "Verh sektsiy",
+    ["Sliders"] = "Slaydery",
+    ["Scrollbars"] = "Skrollbary",
+    ["Navbar"] = "Navbar",
+    ["Switches"] = "Pereklyuchateli",
+    ["Hover"] = "Hover",
+    ["Overlay Panels"] = "Overley-paneli",
+    ["Per-Element Styles"] = "Stili po elementam",
+    ["Accent"] = "Aktsent",
+    ["Custom Colors"] = "Svoi tsveta",
+    ["Main Accent"] = "Glavnyy aktsent",
+    ["Overrides"] = "Pereopredeleniya",
+    ["Override For"] = "Pereopredelit dlya",
+    ["Character"] = "Personazh",
+    ["Personality"] = "Harakter",
+    ["Mixed"] = "Smeshannyy",
+    ["Roasty"] = "Yazvitelnyy",
+    ["Supportive"] = "Podderzhivayuschiy",
+    ["React To"] = "Reagirovat na",
+    ["Death / Respawn"] = "Smert / respavn",
+    ["Downed / Revived"] = "Daun / revayv",
+    ["Low Health"] = "Malo HP",
+    ["Safe Zone"] = "Seyfzona",
+    ["Combat / Bleed"] = "Boy / krovotechenie",
+    ["Survival Needs"] = "Nuzhdy vyzhivaniya",
+    ["Nearby Threats"] = "Blizhnie ugrozy",
+    ["World Events"] = "Mirovye iventy",
+    ["Scale"] = "Masshtab",
+    ["Bubble Duration"] = "Dlitelnost puzyrya",
+    ["Chatter Cooldown"] = "Kuldaun replik",
+    ["Stay Visible"] = "Ostavatsya vidimoy",
+    ["Preview Line"] = "Prevyu repliki",
+    ["Reset Position"] = "Sbrosit pozitsiyu",
+    ["Configs"] = "Konfigi",
+    ["Config Name"] = "Imya konfiga",
+    ["Saved Configs"] = "Sohranennye konfigi",
+    ["(no configs)"] = "(net konfigov)",
+    ["Save Config"] = "Sohranit konfig",
+    ["Load Config"] = "Zagruzit konfig",
+    ["Delete Config"] = "Udalit konfig",
+    ["Refresh List"] = "Obnovit spisok",
+    ["Autoload"] = "Avtozagruzka",
+    ["Autoload on Start"] = "Avtozagruzka pri starte",
+    ["Autoload Config Name"] = "Imya avtozagruzhaemogo konfiga",
+    ["Extras"] = "Dopolnitelno",
+    ["ESP Text Size"] = "Razmer teksta ESP",
+    ["Reload Game Modules"] = "Perezagruzit moduli igry",
+    ["Draws only the outside edge."] = "Risuet tolko vneshniy kontur.",
+    ["Draws a translucent filled circle with an outline."] = "Risuet poluprozrachnyy zalityy krug s konturom.",
+    ["Rejects dead or zero-health targets. Leave this on unless you specifically need stale targets."] = "Otsekaet mertvye ili nulevye po HP tseli. Ostavlyayte vklyuchennym, esli ne nuzhny «ustarevshie» tseli.",
+    ["Only selects targets with a clear line of sight. Turning it off allows locking through walls, but shots may still be blocked."] = "Beret tolko tseli s pryamoy vidimostyu. Vyklyuchenie daet lok skvoz steny, no vystrely vse ravno mogut blokirovatsya.",
+    ["Ignores players on your team. This applies to players only, not NPC types."] = "Ignoriruet igrokov vashey komandy. Tolko igroki, ne tipy NPC.",
+    ["Ignores players protected by a safezone so the aim system does not lock onto targets you cannot damage."] = "Ignoriruet igrokov v seyfzone, chtoby aim ne lochil neuyazvimye tseli.",
+    ["Skips whitelisted players. Enter comma-separated Roblox user IDs below, or middle-click the current player target to toggle them. Aimbot and Silent Aim keep separate lists."] = "Propuskaet igrokov iz vaytlista. Vvedite Roblox user ID cherez zapyatuyu nizhe ili PKM-kolesikom po tekuschey tseli. U aimbota i saylenta spiski otdelnye.",
+    ["Ignores downed players and looks for a target that is still standing."] = "Ignoriruet daunov i ischet stoyaschuyu tsel.",
+    ["Targets other players that pass the selected Filters."] = "Tselitsya v igrokov, proshedshih vybrannye filtry.",
+    ["Targets standard Soldier NPCs."] = "Tselitsya v obychnyh Soldier NPC.",
+    ["Targets the Bruno boss NPC."] = "Tselitsya v bossa Bruno.",
+    ["Targets the Boris boss NPC."] = "Tselitsya v bossa Boris.",
+    ["Targets the Brutus boss NPC."] = "Tselitsya v bossa Brutus.",
+    ["Targets the Attack Helicopter NPC."] = "Tselitsya v Attack Helicopter NPC.",
+    ["Targets the BTR armored vehicle NPC."] = "Tselitsya v bronevik BTR.",
+    ["Targets the Diver Dave NPC."] = "Tselitsya v NPC Diver Dave.",
+    ["Targets the Pilot Pete NPC."] = "Tselitsya v NPC Pilot Pete.",
+    ["Aims at the head for the highest usual damage."] = "Tselitsya v golovu dlya maksimalnogo urona.",
+    ["Aims at the torso for a larger, steadier target."] = "Tselitsya v tors — tsel krupnee i stabilnee.",
+    ["Aims at the target's left arm."] = "Tselitsya v levuyu ruku tseli.",
+    ["Aims at the target's right arm."] = "Tselitsya v pravuyu ruku tseli.",
+    ["Aims at the target's left leg."] = "Tselitsya v levuyu nogu tseli.",
+    ["Aims at the target's right leg."] = "Tselitsya v pravuyu nogu tseli.",
+    ["Automatically uses the valid body part closest to your crosshair."] = "Avtomaticheski beret validnuyu chast tela blizhe vsego k pritselu.",
+    ["Picks a random body part (head, torso, arms, or legs). Re-rolls every shot while Mouse 1 is held."] = "Vybiraet sluchaynuyu chast tela (golova, tors, ruki ili nogi). Perebrasyvaet kazhdyy vystrel, poka zazhat Mouse 1.",
+    ["Prefers the valid target closest to the center of your screen."] = "Predpochitaet validnuyu tsel blizhe vsego k tsentru ekrana.",
+    ["Prefers the valid target closest to your character in world distance."] = "Predpochitaet validnuyu tsel blizhe vsego k personazhu po distantsii.",
+    ["Moves toward the target at a consistent smoothing rate."] = "Dvizhetsya k tseli s postoyannoy skorostyu sglazhivaniya.",
+    ["Moves faster while far away and settles softly near the target."] = "Bystree na bolshoy oshibke i myagko dovodit u tseli.",
+    ["Uses a gradual acceleration and deceleration curve."] = "Ispolzuet plavnoe uskorenie i zamedlenie.",
+    ["Uses an exponential curve for a responsive but smooth correction."] = "Eksponentsialnaya krivaya: otzyvchivo, no plavno.",
+    ["Automatically moves faster on large misses and slows down for small corrections."] = "Uskoryaetsya na bolshih promahah i zamedlyaetsya na melkih popravkah.",
+    ["Uses the first enabled combat system with a valid target."] = "Beret pervuyu vklyuchennuyu boevuyu sistemu s validnoy tselyu.",
+    ["Follows Silent Aim's current target."] = "Sleduet za tekuschey tselyu Silent Aim.",
+    ["Follows the regular camera Aimbot's current target."] = "Sleduet za tekuschey tselyu obychnogo aimbota.",
+    ["Allows Autofarm to harvest tree models. Equip an axe, hatchet, chainsaw, or compatible hybrid tool."] = "Razreshaet avtofarmu rubit derevya. Nuzhen topor, benzopila ili sovmestimyy gibridnyy instrument.",
+    ["Allows Autofarm to mine Stone_Node models. Equip a pickaxe, mining drill, or compatible hybrid tool."] = "Razreshaet avtofarmu dobyvat Stone_Node. Nuzhna kirka, bur ili sovmestimyy gibridnyy instrument.",
+    ["Allows Autofarm to mine Metal_Node models. Equip a pickaxe, mining drill, or compatible hybrid tool."] = "Razreshaet avtofarmu dobyvat Metal_Node. Nuzhna kirka, bur ili sovmestimyy gibridnyy instrument.",
+    ["Allows Autofarm to mine Phosphate_Node models. Equip a pickaxe, mining drill, or compatible hybrid tool."] = "Razreshaet avtofarmu dobyvat Phosphate_Node. Nuzhna kirka, bur ili sovmestimyy gibridnyy instrument.",
+    ["Keeps the current target locked according to that aim system's sticky rules."] = "Derzhit tekuschuyu tsel po pravilam sticky vybrannoy sistemy aima.",
+    ["Picks a random body part from head, torso, arms, and legs. Re-rolls every shot while Mouse 1 is held."] = "Sluchaynaya chast tela iz golovy, torsa, ruk i nog. Perebrasyvaet kazhdyy vystrel pri zazhatom Mouse 1.",
+    ["Disables this visual or selection."] = "Otklyuchaet etot vizual ili vybor.",
+    ["Shows the target's current health as a bar."] = "Pokazyvaet tekuschee HP tseli poloskoy.",
+    ["Draws lines between the target's body joints."] = "Risuet linii mezhdu sustavami tseli.",
+    ["Shows the target's display name."] = "Pokazyvaet otobrazhaemoe imya tseli.",
+    ["Shows the target's clan tag when available."] = "Pokazyvaet klan-teg tseli, esli est.",
+    ["Shows the item or weapon the target currently has equipped."] = "Pokazyvaet predmet ili oruzhie v rukah tseli.",
+    ["Shows how far away the target is."] = "Pokazyvaet, kak daleko tsel.",
+    ["Shows when a player is knocked down."] = "Pokazyvaet, kogda igrok sbit (daun).",
+    ["Shows when a player is protected by a safezone."] = "Pokazyvaet, kogda igrok v seyfzone.",
+    ["Shows the staff/moderator status detected for a player."] = "Pokazyvaet status personala/moderatora u igroka.",
+    ["Shows when a player is reviving someone."] = "Pokazyvaet, kogda igrok revayvit kogo-to.",
+    ["Shows useful movement-state information."] = "Pokazyvaet poleznuyu informatsiyu o sostoyanii dvizheniya.",
+    ["Shows the player's VIP status when available."] = "Pokazyvaet VIP-status igroka, esli dostupen.",
+    ["Continuously rotates the visual while enabled."] = "Postoyanno vraschaet vizual, poka vklyucheno.",
+    ["Smoothly grows and shrinks the visual."] = "Plavno uvelichivaet i umenshaet vizual.",
+    ["Adds a small dot at the exact screen center."] = "Dobavlyaet malenkuyu tochku v tsentre ekrana.",
+    ["Cycles the visual through rainbow colors."] = "Progonyaet vizual po raduzhnym tsvetam.",
+}
+local TIPS = {
+    april_ui_russian = "Pereklyuchaet ves interfeys April i tekst HUD na russkiy (latinitsey — shrift Vector ne risuet kirillitsu).",
+    april_aimbot = "Plavnyy aim assist kameroy po tekuschey tseli. Bind na chipe (Vsegda / Uderzhanie / Pereklyuchenie).",
+    april_aim_key = "Uderzhivayte ili pereklyuchayte etu klavishu, chtoby aktivirovat aimbot.",
+    april_silent_aim = "Perenapravlyaet vystrely v zalochennuyu tsel bez dvizheniya kamery.",
+    april_bullet_enabled = "Glavnyy pereklyuchatel prodvinutogo marshruta puli (hitscan, bullet TP, silent manip). Rezhim Always / Hold / Toggle — s chipa klavishi.",
+    april_silent_hitscan = "Mgnovenno registriruet popadaniya po zalochennoy tseli. Server mozhet otklonit nevalidnye vystrely.",
+    april_silent_bullet_tp = "Ischet na golove blizhayshuyu k pritselu vidimuyu tochku (matematika manip), spavnit luch na tseli i strelyaet cherez nee. Smescheniya tsikliruyutsya kazhdyy kadr.",
+    april_silent_bullet_manip = "Ischet ugol dlya vystrela iz-za ukrytiya. Server mozhet otklonit nevalidnye vystrely.",
+    april_silent_manip_extend = "Ischet dalshe ot tela, esli blizkiy peek ne nayden.",
+    april_bullet_body_peek = "Dvigaet vas k peek s desinkom dlya serverno-validnyh vystrelov. Mozhet davat invalids ili kiki.",
+    april_thick_bullet = "Uvelichivaet hitboksy golov drugih igrokov na kliente i delaet ih poluprozrachnymi. Boksy Player ESP ostayutsya naturalnogo razmera — Override Size skryt ot ESP. Pomogaet lokalnym hit-testam; server vse ravno mozhet otklonit vystrely, zadevshie tolko razdutuyu obolochku.",
+    april_thick_bullet_mult = "Naskolko krupnymi stanovyatsya hitboksy golov vragov (1x = norma, do 4x). Boksy ESP ostayutsya obychnogo razmera.",
+    april_aim_targets = "Vyberite, tselitsya li aimbot v igrokov, NPC ili i teh i drugih.",
+    april_aim_filters = "Filtry, kakie tseli aimbot budet uchityvat.",
+    april_aim_sticky = "Poka klavisha aima zazhata, derzhit pervuyu tsel dazhe vne FOV. Pri otpuskanii binda tsel sbrasyvaetsya.",
+    april_aim_auto_pred = "Vedet dvizhuschiesya tseli po skorosti puli i dropu oruzhiya. Vykl. = tolko kost. Takzhe propuskaet predikt, esli v rukah net oruzhiya.",
+    april_aim_smooth = "Bolshie znacheniya medlennee vedut kameru k tseli.",
+    april_aim_smooth_type = "Kak uskoryaetsya sglazhivanie: Linear, Ease Out, Ease In-Out, Exponential ili Adaptive.",
+    april_aim_humanize = "Dobavlyaet legkiy dreyf i perelet, chtoby dvizhenie myshi vyglyadelo menee robotizirovannym.",
+    april_aim_humanize_str = "Naskolko silny dreyf i perelet humanizatsii.",
+    april_aim_whitelist_ids = "Roblox user ID cherez zapyatuyu, kotoryh aimbot obyazan ignorirovat. Snachala vklyuchite Whitelist v Filters. Takzhe mozhno middle-click po tekuschey tseli igroka, chtoby dobavit/ubrat.",
+    april_silent_targets = "Vyberite, tselitsya li saylent v igrokov, NPC ili i teh i drugih.",
+    april_silent_filters = "Filtry, kakie tseli saylent budet uchityvat.",
+    april_silent_sticky = "Lochit pervuyu validnuyu tsel i derzhit ee, poka ona ne vyydet iz FOV ili ne stanet nevalidnoy.",
+    april_silent_whitelist_ids = "Roblox user ID cherez zapyatuyu, kotoryh Silent Aim obyazan ignorirovat. Snachala vklyuchite Whitelist v Filters. Takzhe mozhno middle-click po tekuschey tseli igroka.",
+    april_silent_bone = "Kakuyu chast tela trekaet saylent. Randomized Part perebrasyvaet kazhdyy vystrel pri zazhatom Mouse 1.",
+    april_silent_hit_chance = "Shans, chto kazhdyy vystrel primenit saylent pri zazhatom Mouse 1. Roll nezavisim na kazhdyy vystrel po fire rate oruzhiya (ne odin raz na ves sprey).",
+    april_aim_bone = "Kakuyu chast tela trekaet aimbot. Randomized Part perebrasyvaet kazhdyy vystrel pri zazhatom Mouse 1.",
+    april_player_enabled = "Pokazyvaet boksy i informatsiyu na drugih igrokah.",
+    april_ui_player_elements = "Vyberite, kakuyu informatsiyu pokazyvat na ESP igrokov.",
+    april_player_show_held = "Pokazyvaet predmet v rukah igroka (tot zhe put chteniya, chto u Target Gear).",
+    april_player_esp_filters = "Filtr, kakie igroki poyavlyayutsya na ESP.",
+    april_player_esp_flags = "Pokazyvat status-flagi (daun, SZ, personal, revayv, dvizhenie, VIP, chiter).",
+    april_target_overlay = "Pokazyvaet oruzhie i snaryazhenie igroka, blizhayshego k pritselu.",
+    april_target_overlay_fov = "Otdelnyy FOV (pikseli ot pritsela) tolko dlya Target Gear Overlay.",
+    april_target_overlay_max_dist = "Maksimalnaya mirovaya distantsiya (studs) dlya vybora Target Gear Overlay.",
+    april_crosshair_enabled = "Risuet svoy pritsel na ekrane.",
+    april_crosshair_follow = "Dvigaet pritsel k aktivnoy boevoy tseli.",
+    april_ui_crosshair_motion = "Dobavlyaet vraschenie ili puls k pritselu.",
+    april_ui_crosshair_options = "Dopolnitelnye optsii otrisovki pritsela.",
+    april_world_enabled = "Podsvechivaet sobiraemye resursy i zhivotnyh v mire.",
+    april_loot_enabled = "Podsvechivaet yaschiki, sumki i drugoy lut v mire.",
+    april_base_enabled = "Podsvechivaet chasti bazy: dveri, tureli i hranilischa.",
+    april_npc_enabled = "Podsvechivaet soldat NPC, bossov, vertolety i BTR.",
+    april_ui_npc_types = "Vyberite, kakie tipy NPC poyavlyayutsya na ESP.",
+    april_ui_npc_elements = "Vyberite, kakuyu informatsiyu pokazyvat na ESP NPC.",
+    april_npc_btr = "Pokazyvaet iventovyy transport BTR na NPC ESP.",
+    april_raid_enabled = "Pomechaet klastery vzryvov kak vozmozhnye reydy.",
+    april_raid_notifications = "Tost pri obnaruzhenii vzryva reyda.",
+    april_world_boxes = "Risuet 3D-boksy vokrug vidimyh resursov.",
+    april_world_show_name = "Pokazyvaet imena na ESP resursov.",
+    april_world_show_distance = "Pokazyvaet distantsiyu na ESP resursov.",
+    april_loot_boxes = "Risuet 3D-boksy vokrug vidimogo luta.",
+    april_loot_show_name = "Pokazyvaet imena na ESP luta.",
+    april_loot_show_distance = "Pokazyvaet distantsiyu na ESP luta.",
+    april_base_boxes = "Risuet 3D-boksy vokrug vidimyh chastey bazy.",
+    april_base_show_name = "Pokazyvaet imena na ESP bazy.",
+    april_base_show_distance = "Pokazyvaet distantsiyu na ESP bazy.",
+    april_npc_soldier = "Pokazyvaet voennyh Soldier NPC na ESP.",
+    april_npc_bruno = "Pokazyvaet bossa Bruno na ESP.",
+    april_npc_boris = "Pokazyvaet bossa Boris na ESP.",
+    april_npc_brutus = "Pokazyvaet bossa Brutus na ESP.",
+    april_npc_attack_heli = "Pokazyvaet iventovyy Attack Heli NPC na ESP.",
+    april_npc_diver_dave = "Pokazyvaet vendora Diver Dave na ESP.",
+    april_npc_pilot_pete = "Pokazyvaet vendora Pilot Pete na ESP.",
+    april_gunmods_enabled = "Primenyaet izmeneniya statov globalno k oruzhiyu v rukah.",
+    april_gm_recoil = "Snizhaet otdachu. Rabotaet na lyubom oruzhii — vlozhenie ne obyazatelno.",
+    april_gm_spread = "Suzhaet pritsel i hip-razbros. Pritsely (Holo, ACOG, skoupy) tozhe dayut mnozhiteli razbrosa — etot stakaetsya s nimi.",
+    april_gm_sway = "Ubiraet pokachivanie skoupa v pritsele. Vliyaet tolko na oruzhie s ustanovlennym skoupom/pritselom.",
+    april_gm_fire_rate = "Povyshaet RPM cherez FireRateMult. Obychno nuzhen Muzzle Boost na oruzhii — bez nego igra chasto ignoriruet mnozhiteli skorostrelnosti.",
+    april_gm_speed = "Povyshaet skorost puli cherez SpeedMult v zhivyh tablitsah oruzhiya. Eto ne stat vlozheniya — Swift Heavy Ammo tozhe daet skorost; ekipiruyte oruzhie pered vklyucheniem.",
+    april_gm_range = "Uvelichivaet maks. dalnost cherez RangeMult. Glushitel i kompensator rezhut dalnost; eto patchit suschestvuyuschie mnozhiteli dalnosti na vashem oruzhii.",
+    april_gm_double_tap = "Forsiruet 2-patronnyy berst na oruzhii v rukah. Patchit ToolInfo napryamuyu — ne ispolzuet GC-mnozhiteli.",
+    april_fly_enabled = "Polet skorostyu HRP otnositelno kamery (WASD + Space/Ctrl). Vstroennyy prised (HipHeight 0.01) i jump-state v vozduhe — ne pereklyuchaet Fake Duck. Nikogda ne menyaet WalkSpeed ili JumpPower.",
+    april_fly_noclip = "Otklyuchaet kolliziyu klyuchevyh chastey personazha v polete. Kolliziya vosstanavlivaetsya pri posadke ili vyklyuchenii Fly.",
+    april_spider_enabled = "Lezete vverh, nazhimayas v blizhayshuyu stenu. Pulsiruet jump-state tolko posle proverok steny na neskolkih vysotah — menshe otskokov.",
+    april_bhop_enabled = "Avtopryzhok, poka Space zazhat na zemle, dlya bolee plavnogo bunny hop.",
+    april_antifling_enabled = "Delaet chasti chuzhih personazhey nekollizionnymi na vashem kliente. Ishodnye znacheniya kollizii vosstanavlivayutsya pri vyklyuchenii.",
+    april_desync_enabled = "Rassinhroniziruet setevuyu pozitsiyu s tem, gde vy vyglyadite.",
+    april_antiaim_enabled = "Podmenyaet napravlenie vzglyada dlya drugih igrokov.",
+    april_fakeduck_enabled = "Bystro menyaet vysotu hitboksa (prised).",
+    april_fling_enabled = "Podbrasyvaet blizhayshie suschnosti vverh.",
+    april_autofarm = "Avtomaticheski povorachivaetsya i bezhit k vybrannym resursam, proveryaet vidimost i tsentr zhivoy weak point, zatem bet sovmestimym instrumentom. Vector dolzhen byt na perednem plane — dvizhenie i kliki idut cherez OS input.",
+    april_autofarm_resources = "Vyberite vse tipy resursov, kotorye avtofarm mozhet poseschat. Instrument v rukah dolzhen podhodit: topory dlya derevev, kirki dlya uzlov ili sovmestimyy gibrid.",
+    april_autofarm_search_range = "Maksimalnaya distantsiya v studs pri poiske sleduyuschego resursa. Bolshe — shire zona, no marshruty mogut byt dlinnee.",
+    april_autofarm_debug_path = "Risuet trasser k tochnoy tochke TreeX ili NodeSpark plyus tekuschee sostoyanie, distantsiyu i instrument v rukah.",
+    april_farm_helper = "Ruchnaya alternativa avtofarmu. Perenapravlyaet udary mili na blizhayshuyu sovmestimuyu weak point, no dvigaetes i derzhite ataku sami.",
+    april_anti_afk = "Predotvraschaet kik za prostoy, imitiruya aktivnost.",
+    april_mod_checker_enabled = "Preduprezhdaet, kogda personal ili mody zahodyat na server.",
+    april_keybinds_enabled = "Pokazyvaet na ekrane spisok vashih bindov.",
+    april_event_status_enabled = "Pokazyvaet zhivye timed crates, iventovyh NPC i bossov. BTR trekaet 13-minutnyy kuldaun luta posle unichtozheniya (reydy — tolko cherez Raid ESP).",
+    april_event_status_active_only = "Skryvaet neaktivnye stroki iz paneli statusa iventov.",
+    april_map_enabled = "Pokazyvaet peretaskivaemyy takticheskiy minikart-overley.",
+    april_ui_radar_layers = "Vyberite, chto vidno na takticheskoy karte.",
+    april_map_opacity = "Prozrachnost paneli i karty takticheskogo radara.",
+    april_waypoints_enabled = "Stavte i navigiruytes k sohranennym mirovym veypointam.",
+    april_world_chams = "GPU mesh chams na vybrannyh tipah resursov (tolko v radiuse).",
+    april_world_chams_mode = "Fill, Wireframe, Fill Glow ili Wireframe Glow.",
+    april_world_chams_color = "Tsvet preseta svecheniya (tolko Fill Glow / Wireframe Glow).",
+    april_loot_chams = "GPU mesh chams na vybrannyh tipah luta (tolko v radiuse).",
+    april_loot_chams_mode = "Fill, Wireframe, Fill Glow ili Wireframe Glow.",
+    april_loot_chams_color = "Tsvet preseta svecheniya (tolko Fill Glow / Wireframe Glow).",
+    april_base_chams = "GPU mesh chams na vybrannyh strukturah bazy (tolko v radiuse).",
+    april_base_chams_mode = "Fill, Wireframe, Fill Glow ili Wireframe Glow.",
+    april_base_chams_color = "Tsvet preseta svecheniya (tolko Fill Glow / Wireframe Glow).",
+    april_base_xray_enabled = "Karkasnye mesh chams na stenah/polah/fundamentah (Detail meshes). Tolko ApplyChams — bez zapisey Material/Texture/Transparency i bez novyh instansov. Propuskaet tseli Base ESP (dveri, yaschiki, tureli, shkafy).",
+    april_base_xray_range = "Tolko strukturnye kuski v etoy distantsii poluchayut karkasnye chamsy.",
+    april_ui_startup_intro = "Proigryvaet intro April.lua pri kazhdom zapuske skripta. Sohranite v profile avtozagruzki.",
+    april_ui_menu_key = "Klavisha otkrytiya i zakrytiya etogo menyu.",
+    april_ui_menu_overlay = "Zatemnyaet ves ekran za menyu s plavnym feydom. Ne perekryvaet elementy upravleniya menyu.",
+    april_ui_snow = "Myagkiy padayuschiy sneg za menyu. Skryt pri Reduce Motion.",
+    april_anime_baddie_enabled = "Pokazyvaet peretaskivaemogo prozrachnogo anime-anonsera, reagiruyuschego na lokalnye sobytiya vyzhivaniya. Tolko otrisovka: ne sozdaet Roblox-instansy i nichego ne pishet v Workspace.",
+    april_anime_baddie_character = "Vybor anonsera. Bolshe personazhey mozhno dobavit cherez registry.",
+    april_anime_baddie_personality = "Mixed chereduet podkoly i podderzhku; Roasty i Supportive fiksiruyut ton.",
+    april_anime_baddie_events = "Kakie read-only perehody lokalnogo sostoyaniya mogut zapuskat repliki: vyzhivanie, boevoy status, blizhnie ugrozy i mirovye iventy.",
+    april_anime_baddie_scale = "Menyaet razmer personazha po poyas.",
+    april_anime_baddie_opacity = "Menyaet prozrachnost personazha. Puzyr rechi pochti neprozrachen dlya chitaemosti.",
+    april_anime_baddie_duration = "Kak dolgo viden kazhdyy rechevoy puzyr.",
+    april_anime_baddie_cooldown = "Minimalnaya pauza mezhdu nesrochnymi replikami. Smert, daun, utoplenie i boy mogut prervat kuldaun.",
+    april_anime_baddie_stay = "Derzhit personazha vidimym mezhdu replikami. Vyklyuchite dlya popapov tolko po sobytiyam.",
+    april_anime_baddie_preview = "Proigryvaet sluchaynoe privetstvie dlya proverki vida i dialoga.",
+    april_anime_baddie_reset = "Vozvraschaet anonsera v nizhniy levyy ugol.",
+    april_cfg_autoload = "Avtomaticheski zagruzhaet vash imenovannyy konfig pri inzhekte.",
+    april_cfg_profile_name = "Imya pri sohranenii. Po vozmozhnosti April_configs\\Name.cfg, inache April_Config_Name.cfg v Scripts. Starye slot-fayly importiruyutsya avtomaticheski.",
+    april_cfg_selected = "Vyberite sohranennyy/importirovannyy konfig. Vybor zapolnyaet Config Name.",
+    april_cfg_autoload_config = "Imya konfiga dlya zagruzki pri starte. Pri neobhodimosti otkatyvaetsya k staromu Autoload Slot.",
+    april_cfg_refresh = "Pereskaniruet sohranennye konfigi i zanovo importiruet starye fayly April_Slot.",
+    april_aim_whitelist_clear = "Ochischaet spisok vaytlista aimbota.",
+    april_silent_whitelist_clear = "Ochischaet spisok vaytlista saylent aima.",
+    april_map_reset_position = "Vozvraschaet takticheskuyu kartu na pozitsiyu po umolchaniyu.",
+    april_wp_set = "Sohranyaet tekuschuyu pozitsiyu v aktivnyy slot veypointa.",
+    april_wp_clear = "Ochischaet aktivnyy slot veypointa.",
+    april_wp_clear_all = "Ochischaet vse sohranennye veypointy.",
+    april_cfg_save = "Sohranyaet tekuschie nastroyki v April_configs kak ConfigName.cfg.",
+    april_cfg_load = "Zagruzhaet vybrannyy / nazvannyy konfig iz April_configs.",
+    april_cfg_delete = "Udalyaet vybrannyy fayl konfiga iz April_configs.",
+    april_reload_modules = "Perezagruzhaet offsety igrovyh moduley i keshi.",
+    april_aim_target_type = "Kak vybirat tsel: blizhe k tsentru ekrana (Crosshair) ili po mirovoy distantsii.",
+    april_silent_target_type = "Kak vybirat tsel saylenta: blizhe k pritselu ili po distantsii.",
+    april_aim_max_dist = "Maksimalnaya distantsiya (m), na kotoroy aimbot rassmatrivaet tseli.",
+    april_silent_max_dist = "Maksimalnaya distantsiya (m), na kotoroy saylent rassmatrivaet tseli.",
+    april_aim_fov = "Radius FOV aimbota v pikselyah ot tsentra ekrana.",
+    april_silent_fov = "Radius FOV saylenta v pikselyah ot tsentra ekrana.",
+    april_silent_manip_dist = "Bazovaya distantsiya poiska ugla dlya Silent Bullet Manip.",
+    april_silent_manip_extend_dist = "Dopolnitelnaya distantsiya poiska pri vklyuchennom Extend.",
+    april_player_box_mode = "Stil boksa igroka: vykl., 2D ili uglovoy.",
+    april_npc_box_mode = "Stil boksa NPC: vykl., 2D ili uglovoy.",
+    april_player_range = "Maksimalnaya distantsiya otrisovki ESP igrokov.",
+    april_world_range = "Maksimalnaya distantsiya ESP resursov.",
+    april_loot_range = "Maksimalnaya distantsiya ESP luta.",
+    april_base_range = "Maksimalnaya distantsiya ESP bazy.",
+    april_npc_range = "Maksimalnaya distantsiya ESP NPC.",
+    april_raid_range = "Maksimalnaya distantsiya ESP reydov.",
+    april_target_overlay_gear_size = "Razmer ikonok snaryazheniya v overlee tseli.",
+    april_target_overlay_top = "Vertikalnyy otstup paneli snaryazheniya tseli.",
+    april_crosshair_type = "Forma svoego pritsela.",
+    april_crosshair_source = "Otkuda brat tsel dlya sledovaniya pritsela.",
+    april_crosshair_follow_smooth = "Naskolko plavno pritsel sleduet za tselyu.",
+    april_crosshair_spin_speed = "Skorost vrascheniya pritsela.",
+    april_crosshair_pulse_speed = "Skorost pulsatsii razmera pritsela.",
+    april_crosshair_rainbow_speed = "Skorost raduzhnogo tsikla tsveta pritsela.",
+    april_crosshair_size = "Razmer pritsela.",
+    april_crosshair_gap = "Zazor v tsentre pritsela.",
+    april_crosshair_thickness = "Tolschina liniy pritsela.",
+    april_crosshair_color = "Tsvet pritsela.",
+    april_gm_recoil_pct = "Naskolko snizhat otdachu (protsent).",
+    april_gm_spread_pct = "Naskolko snizhat razbros (protsent).",
+    april_gm_fire_rate_mult = "Mnozhitel skorostrelnosti oruzhiya.",
+    april_gm_speed_mult = "Mnozhitel skorosti puli.",
+    april_gm_range_mult = "Mnozhitel dalnosti oruzhiya.",
+    april_fly_speed = "Skorost poleta otnositelno kamery.",
+    april_spider_speed = "Skorost lazaniya po stene.",
+    april_antiaim_yaw_mode = "Kak podmenyat yaw dlya drugih igrokov.",
+    april_antiaim_yaw_manual = "Ruchnoe znachenie yaw v rezhime Manual.",
+    april_antiaim_spin_speed = "Skorost vrascheniya yaw v rezhime Spin.",
+    april_antiaim_jitter_step = "Shag ugla dzhittera.",
+    april_antiaim_jitter_ms = "Interval smeny dzhittera v millisekundah.",
+    april_fakeduck_height = "Tselevaya vysota priseda Fake Duck.",
+    april_fakeduck_spam_mode = "Kak spamit vysotu: cheredovanie ili sluchayno.",
+    april_fakeduck_spam_min = "Minimalnaya vysota pri spame.",
+    april_fakeduck_spam_max = "Maksimalnaya vysota pri spame.",
+    april_fakeduck_spam_ms = "Interval spama vysoty v millisekundah.",
+    april_fling_fov = "FOV vybora tseli dlya Fling.",
+    april_fling_duration = "Dlitelnost effekta Fling.",
+    april_farm_radius = "Radius ruchnogo pomoschnika farma v studs.",
+    april_mod_checker_interval = "Kak chasto skanirovat lobbi na personal.",
+    april_map_zoom = "Uroven zuma takticheskoy karty.",
+    april_map_size = "Razmer paneli takticheskoy karty.",
+    april_map_icon_scale = "Razmer blipov na radare.",
+    april_wp_beacon_h = "Vysota stolba-mayaka veypointa.",
+    april_wp_slot = "Aktivnyy slot veypointa (1–5).",
+    april_ui_theme_preset = "Gotovyy tsvetovoy preset menyu.",
+    april_ui_window_opacity = "Prozrachnost okna menyu.",
+    april_ui_panel_opacity = "Prozrachnost paneley menyu.",
+    april_ui_border_strength = "Sila/yarkost ramok menyu.",
+    april_ui_corner_style = "Stil skrugleniya uglov menyu.",
+    april_ui_scale = "Obschiy masshtab UI.",
+    april_ui_density = "Plotnost raspolozheniya elementov.",
+    april_ui_overlay_strength = "Sila zatemneniya overleya za menyu.",
+    april_ui_snow_amount = "Kolichestvo snezhinok.",
+    april_ui_snow_speed = "Skorost padeniya snega.",
+    april_ui_snow_size = "Razmer snezhinok.",
+    april_ui_snow_opacity = "Prozrachnost snega.",
+    april_ui_motion_profile = "Naskolko vyrazitelny animatsii menyu.",
+    april_ui_accent_anim = "Stil animatsii aktsentnogo tsveta.",
+    april_ui_anim_speed = "Skorost animatsii aktsenta.",
+    april_ui_anim_targets = "Kakie chasti UI animirovat.",
+    april_ui_color_overrides = "Dlya kakih elementov pereopredelit tsvet aktsenta.",
+    april_esp_text_size = "Razmer teksta na ESP.",
+    april_stone_node = "Podsvechivaet kamennyy uzel na ESP resursov.",
+    april_metal_node = "Podsvechivaet metallicheskiy uzel na ESP resursov.",
+    april_phosphate_node = "Podsvechivaet fosfatnyy uzel na ESP resursov.",
+    april_corn_plant = "Podsvechivaet kukuruzu na ESP resursov.",
+    april_tomato_plant = "Podsvechivaet tomaty na ESP resursov.",
+    april_pumpkin_plant = "Podsvechivaet tykvu na ESP resursov.",
+    april_lemon_plant = "Podsvechivaet limon na ESP resursov.",
+    april_raspberry_plant = "Podsvechivaet malinu na ESP resursov.",
+    april_blueberry_plant = "Podsvechivaet cherniku na ESP resursov.",
+    april_wool_plant = "Podsvechivaet sherst na ESP resursov.",
+    april_deer = "Podsvechivaet oleney na ESP resursov.",
+    april_boar = "Podsvechivaet kabanov na ESP resursov.",
+    april_wolf = "Podsvechivaet volkov na ESP resursov.",
+    april_dropped_item = "Podsvechivaet vybroshennye predmety na ESP luta.",
+    april_wooden_crate = "Podsvechivaet derevyannye yaschiki na ESP luta.",
+    april_metal_crate = "Podsvechivaet metallicheskie yaschiki na ESP luta.",
+    april_steel_crate = "Podsvechivaet stalnye yaschiki na ESP luta.",
+    april_food_crate = "Podsvechivaet yaschiki s edoy na ESP luta.",
+    april_timed_crate = "Podsvechivaet taymernye yaschiki na ESP luta.",
+    april_care_package = "Podsvechivaet Care Package na ESP luta.",
+    april_btr_crate = "Podsvechivaet yaschiki BTR na ESP luta.",
+    april_body_bag = "Podsvechivaet meshki s telom na ESP luta.",
+    april_sleeper = "Podsvechivaet sliperov na ESP luta.",
+    april_trash_can = "Podsvechivaet musorki na ESP luta.",
+    april_oil_barrel = "Podsvechivaet bochki s maslom na ESP luta.",
+    april_small_egg = "Podsvechivaet malenkie yaytsa/podarki na ESP luta.",
+    april_medium_egg = "Podsvechivaet srednie yaytsa/podarki na ESP luta.",
+    april_large_egg = "Podsvechivaet bolshie yaytsa/podarki na ESP luta.",
+    april_wooden_boat = "Podsvechivaet derevyannye lodki na ESP luta.",
+    april_military_boat = "Podsvechivaet voennye lodki na ESP luta.",
+    april_flycopter = "Podsvechivaet Salvaged Flycopter na ESP luta.",
+    april_heli_crate = "Podsvechivaet yaschiki vertoleta na ESP luta.",
+    april_base_cabinet = "Podsvechivaet bazovye shkafy na ESP bazy.",
+    april_storage_cabinet = "Podsvechivaet shkafy hraneniya na ESP bazy.",
+    april_small_box = "Podsvechivaet malye yaschiki hraneniya na ESP bazy.",
+    april_large_box = "Podsvechivaet bolshie yaschiki hraneniya na ESP bazy.",
+    april_sleeping_bag = "Podsvechivaet spalniki na ESP bazy.",
+    april_auto_turret = "Podsvechivaet avtotureli na ESP bazy.",
+    april_auto_turret_ring = "Pokazyvaet koltso dalnosti vokrug blizhayshih avtotureley.",
+    april_shotgun_turret = "Podsvechivaet drobovye tureli na ESP bazy.",
+    april_shotgun_turret_ring = "Pokazyvaet koltso dalnosti vokrug blizhayshih drobovyh tureley.",
+    april_wooden_door = "Podsvechivaet derevyannye dveri na ESP bazy.",
+    april_wooden_double_door = "Podsvechivaet derevyannye dvoynye dveri na ESP bazy.",
+    april_metal_door = "Podsvechivaet metallicheskie dveri na ESP bazy.",
+    april_salvaged_door = "Podsvechivaet samodelnye metallicheskie dveri na ESP bazy.",
+    april_metal_double_door = "Podsvechivaet metallicheskie dvoynye dveri na ESP bazy.",
+    april_steel_door = "Podsvechivaet stalnye dveri na ESP bazy.",
+    april_steel_double_door = "Podsvechivaet stalnye dvoynye dveri na ESP bazy.",
+    april_garage_door = "Podsvechivaet garazhnye dveri na ESP bazy.",
+    april_trap_door = "Podsvechivaet lyuki na ESP bazy.",
+    april_triangle_trap_door = "Podsvechivaet treugolnye lyuki na ESP bazy.",
+    april_small_battery = "Podsvechivaet malye batarei na ESP bazy.",
+    april_medium_battery = "Podsvechivaet srednie batarei na ESP bazy.",
+    april_large_battery = "Podsvechivaet bolshie batarei na ESP bazy.",
+    april_solar_panel = "Podsvechivaet solnechnye paneli na ESP bazy.",
+    april_windmill = "Podsvechivaet vetryaki na ESP bazy.",
+}
+local _last_check = nil
+local _cached_ru = false
+local function as_bool(v)
+    if v == true or v == 1 or v == "1" or v == "true" or v == "True" then
+        return true
+    end
+    return false
+end
+local function read_lang()
+    local ok, gs = pcall(function()
+        return April.require("ui.gs_state")
+    end)
+    if ok and type(gs) == "table" then
+        if type(gs.bool) == "function" then
+            local v = gs.bool(M.LANG_ID, false)
+            if v ~= nil then return as_bool(v) end
+        end
+        if type(gs.get) == "function" then
+            local v = gs.get(M.LANG_ID, nil)
+            if v ~= nil then return as_bool(v) end
+        end
+    end
+    local ok2, settings = pcall(function()
+        return April.require("core.settings")
+    end)
+    if ok2 and type(settings) == "table" and type(settings.bool) == "function" then
+        return settings.bool(M.LANG_ID, false) == true
+    end
+    if menu and type(menu.get) == "function" then
+        local v = menu.get(M.LANG_ID)
+        if v ~= nil then return as_bool(v) end
+    end
+    return false
+end
+function M.is_ru()
+    local tick = nil
+    if utility and utility.get_tick_count then
+        tick = utility.get_tick_count()
+    end
+    if tick ~= nil and tick == _last_check then
+        return _cached_ru
+    end
+    _last_check = tick
+    _cached_ru = read_lang()
+    return _cached_ru
+end
+function M.t(text)
+    if text == nil or text == "" then return text end
+    if not M.is_ru() then return text end
+    local key = tostring(text)
+    local hit = STRINGS[key]
+    if hit then return hit end
+    local suffix = " Range Ring"
+    if #key > #suffix and key:sub(-#suffix) == suffix then
+        local base = key:sub(1, #key - #suffix)
+        local base_ru = STRINGS[base] or base
+        return base_ru .. " koltso dalnosti"
+    end
+    return text
+end
+function M.options(list)
+    local out = {}
+    if type(list) ~= "table" then return out end
+    for i = 1, #list do
+        out[i] = M.t(list[i])
+    end
+    return out
+end
+function M.tip(id, text)
+    if M.is_ru() and id ~= nil and TIPS[id] then
+        return TIPS[id]
+    end
+    local tr = M.t(text)
+    if tr ~= nil and tr ~= "" then return tr end
+    return text
+end
+function M.modes()
+    if M.is_ru() then
+        return { "Vsegda", "Uderzhanie", "Pereklyuchenie" }
+    end
+    return { "Always", "Hold", "Toggle" }
+end
+return M
+end)()
+
 April._mods["ui.tooltips"] = (function()
 local esp_maps = April.require("game.esp_maps")
 local M = {}
@@ -26657,6 +27579,7 @@ april_autofarm_resources = "Select every resource type Autofarm may visit. Your 
 april_autofarm_search_range = "Maximum distance in studs used when searching for the next resource. Larger ranges cover more area but can produce longer direct routes.",
 april_autofarm_debug_path = "Draws a tracer to the exact TreeX or NodeSpark point plus the current state, distance, and held tool.",
 april_farm_helper = "Manual alternative to Autofarm. It redirects your held melee swings to the nearest compatible weak point, but you move and hold attack yourself.",
+april_ui_russian = "Switches the entire April menu and HUD text to Russian (Latin spelling — Vector's font cannot draw Cyrillic).",
 april_anti_afk = "Prevents idle kick by simulating activity.",
 april_mod_checker_enabled = "Alerts you when staff or mods join the server.",
 april_keybinds_enabled = "Shows an on-screen list of your keybinds.",
@@ -26853,6 +27776,20 @@ else
 tip = fallback_tip(item)
 end
 if not tip then return nil end
+local i18n = April.require("ui.i18n")
+if i18n.is_ru() then
+tip = i18n.tip(item.id, tip)
+if item.type == "keybind" then
+return tip .. " LKM po chipu — naznachit (Mouse 1 posle otpuskaniya); PKM — Vsegda, Uderzhanie ili Pereklyuchenie. Uderzhanie takzhe trebuet vklyuchennyy pereklyuchatel. Escape, Backspace ili Delete snimayut bind."
+end
+if item.type == "aim_key" then
+return tip .. " LKM po chipu — naznachit (Mouse 1 posle otpuskaniya); PKM — Vsegda, Uderzhanie ili Pereklyuchenie. Escape, Backspace ili Delete snimayut bind."
+end
+if item.type == "hotkey" then
+return tip .. " LKM po chipu — naznachit (Mouse 1 posle otpuskaniya). Escape, Backspace ili Delete snimayut bind."
+end
+return tip
+end
 if item.type == "keybind" then
 return tip .. " Left-click the key chip to bind (Mouse 1 works after you release); right-click it for Always, Hold, or Toggle. Hold mode also requires the feature switch enabled. Escape, Backspace, or Delete clears the bind."
 end
@@ -26867,8 +27804,15 @@ end
 function M.for_option(id, index, label)
 local by_id = M.OPTION_TIPS[id]
 local tip = by_id and by_id[index] or nil
-if tip then return tip end
-return M.OPTION_BY_LABEL[tostring(label or "")]
+if not tip then
+tip = M.OPTION_BY_LABEL[tostring(label or "")]
+end
+if not tip then return tip end
+local i18n = April.require("ui.i18n")
+if i18n.is_ru() then
+return i18n.t(tip)
+end
+return tip
 end
 return M
 end)()
@@ -27674,7 +28618,8 @@ M._bind_mode_hit = nil
 return
 end
 local id = M.open_bind_mode
-local modes = { "Always", "Hold", "Toggle" }
+local i18n = April.require("ui.i18n")
+local modes = i18n.modes()
 local mode_id = id .. "_mode"
 local cur = tonumber(state.get(mode_id, 2)) or 2
 local feature_bind = nil
@@ -27709,7 +28654,7 @@ if py + ph > sh - 4 then py = sh - ph - 4 end
 M._bind_mode_hit = { x = px, y = py, w = pw, h = ph }
 M.rect(px, py, pw, ph, theme.OVERLAY, true, theme.CORNER_SMALL)
 M.rect(px, py, pw, ph, theme.BORDER_SOFT, false, theme.CORNER_SMALL)
-M.text(px + 9, py + 6, "KEYBIND SETTINGS", theme.TEXT_TITLE, theme.FONT_CAPTION)
+M.text(px + 9, py + 6, i18n.t("KEYBIND SETTINGS"), theme.TEXT_TITLE, theme.FONT_CAPTION)
 M.rect(px + 8, py + header_h - 1, pw - 16, 1, theme.BORDER_SOFT, true)
 for i, name in ipairs(modes) do
 local iy = py + header_h + (i - 1) * row_h
@@ -27755,7 +28700,7 @@ M.rect(bx, by, box, box, hidden and theme.FOCUS or theme.BORDER_SOFT, false, the
 if hidden then
 M.rect(bx + 2, by + 2, box - 4, box - 4, anim.checkbox_fill(), true, theme.CORNER_SMALL)
 end
-M.text(bx + box + 8, hide_y + 7, "Hide from keybind list",
+M.text(bx + box + 8, hide_y + 7, i18n.t("Hide from keybind list"),
 hidden and theme.TEXT_ACTIVE or theme.TEXT, theme.FONT_SMALL)
 if input.clicked(px, hide_y, pw, hide_h) then
 mark_interacted()
@@ -27773,9 +28718,10 @@ return
 end
 local id = M.open_color_ctx
 local has_clip = type(M._color_clipboard) == "table"
+local i18n = April.require("ui.i18n")
 local items = {
-{ id = "copy", label = "Copy Color", enabled = true },
-{ id = "paste", label = "Paste Color", enabled = has_clip },
+{ id = "copy", label = i18n.t("Copy Color"), enabled = true },
+{ id = "paste", label = i18n.t("Paste Color"), enabled = has_clip },
 }
 local pw = 118
 local header_h = 24
@@ -27801,7 +28747,7 @@ if py + ph > sh - 4 then py = sh - ph - 4 end
 M._color_ctx_hit = { x = px, y = py, w = pw, h = ph }
 M.rect(px, py, pw, ph, theme.OVERLAY, true, theme.CORNER_SMALL)
 M.rect(px, py, pw, ph, theme.BORDER_SOFT, false, theme.CORNER_SMALL)
-M.text(px + 9, py + 6, "COLOR", theme.TEXT_TITLE, theme.FONT_CAPTION)
+M.text(px + 9, py + 6, i18n.t("COLOR"), theme.TEXT_TITLE, theme.FONT_CAPTION)
 M.rect(px + 8, py + header_h - 1, pw - 16, 1, theme.BORDER_SOFT, true)
 if has_clip then
 local clip = M._color_clipboard
@@ -28443,7 +29389,8 @@ local parts = {}
 for i, opt in ipairs(options) do
 if vals[i] then parts[#parts + 1] = opt end
 end
-local summary = (#parts > 0) and table.concat(parts, ", ") or "None"
+local i18n = April.require("ui.i18n")
+local summary = (#parts > 0) and table.concat(parts, ", ") or i18n.t("None")
 summary = fit_text(summary, bw - 20, theme.FONT_SMALL)
 M.text(bx + 6, by + math.floor((bh - 12) * 0.5), summary, theme.TEXT_ACTIVE, theme.FONT_SMALL)
 if ui_clicked(bx, by, bw, bh) then
@@ -28799,32 +29746,35 @@ end
 return theme.ROW_H + extra
 end
 function M.draw_item(item, x, y, w)
+local i18n = April.require("ui.i18n")
+local label = i18n.t(item.label)
+local options = item.options and i18n.options(item.options) or item.options
 local t = item.type
 local h = 0
 if t == "checkbox" then
-h = M.checkbox(x, y, w, item.id, item.label, item)
+h = M.checkbox(x, y, w, item.id, label, item)
 elseif t == "keybind" then
-h = M.keybind(x, y, w, item.id, item.label, item.default, item)
+h = M.keybind(x, y, w, item.id, label, item.default, item)
 elseif t == "aim_key" then
-h = M.aim_key_row(x, y, w, item.id, item.mode_id, item.label)
+h = M.aim_key_row(x, y, w, item.id, item.mode_id, label)
 elseif t == "hotkey" then
-h = M.hotkey_row(x, y, w, item.id, item.label, item.default)
+h = M.hotkey_row(x, y, w, item.id, label, item.default)
 elseif t == "slider" then
-h = M.slider(x, y, w, item.id, item.label, item.min, item.max, item.default, item)
+h = M.slider(x, y, w, item.id, label, item.min, item.max, item.default, item)
 elseif t == "combo" then
-h = M.combo(x, y, w, item.id, item.label, item.options, item.default)
+h = M.combo(x, y, w, item.id, label, options, item.default)
 elseif t == "multi" then
-h = M.multi(x, y, w, item.id, item.label, item.options, item.defaults, item)
+h = M.multi(x, y, w, item.id, label, options, item.defaults, item)
 elseif t == "button" then
-h = M.button(x + 4, y, w - 8, item.id, item.label)
+h = M.button(x + 4, y, w - 8, item.id, label)
 elseif t == "label" then
-h = M.label(x, y, w, item.label, item.dim)
+h = M.label(x, y, w, label, item.dim)
 elseif t == "separator" then
 h = M.separator(x, y, w)
 elseif t == "color" then
-h = M.color_row(x, y, w, item.id, item.label, item.default)
+h = M.color_row(x, y, w, item.id, label, item.default)
 elseif t == "input" then
-h = M.input_row(x, y, w, item.id, item.label, item.default)
+h = M.input_row(x, y, w, item.id, label, item.default)
 end
 local tip = tooltips.for_item(item)
 if tip and item.id and h > 0 then
@@ -29519,6 +30469,8 @@ end)
 local config_group = {
 title = "Config",
 items = {
+cb("april_ui_russian", "Russkiy yazyk", false),
+sep(),
 label("Configs", true),
 input("april_cfg_profile_name", "Config Name", "Default"),
 combo("april_cfg_selected", "Saved Configs", cfg_labels, 0),
@@ -29688,11 +30640,13 @@ state.set(panel.id, not active)
 widgets.interacted = true
 end
 if hot then
-local label_w = text_width(panel.label, theme.FONT_CAPTION)
+local i18n = April.require("ui.i18n")
+local plabel = i18n.t(panel.label)
+local label_w = text_width(plabel, theme.FONT_CAPTION)
 local tx = cursor_x + (item - label_w) * 0.5
 widgets.rect(tx - 5, y + bar_h + 5, label_w + 10, 18,
 theme.OVERLAY, true, theme.CORNER_SMALL)
-widgets.text(tx, y + bar_h + 7, panel.label, theme.TEXT_ACTIVE, theme.FONT_CAPTION)
+widgets.text(tx, y + bar_h + 7, plabel, theme.TEXT_ACTIVE, theme.FONT_CAPTION)
 end
 cursor_x = cursor_x + item + gap
 end
@@ -29733,8 +30687,10 @@ local icon_w = chip_h
 local settings_w = chip_h
 local widths = {}
 local total = settings_w
+local i18n = April.require("ui.i18n")
 for i, panel in ipairs(PANELS) do
-local label_w = text_width(panel.label, theme.FONT_CAPTION)
+local plabel = i18n.t(panel.label)
+local label_w = text_width(plabel, theme.FONT_CAPTION)
 widths[i] = icon_w + label_w + (theme.DOCK_PAD_X or 10)
 total = total + widths[i] + gap
 end
@@ -29754,9 +30710,10 @@ widgets.rect(cursor_x, chip_y, chip_w, chip_h,
 active and theme.alpha(theme.ACCENT, 0.62) or theme.BORDER_SOFT, false, theme.CORNER_SMALL)
 local icon_col = active and theme.TEXT_ACTIVE
 or anim.mix(theme.TEXT_DIM, theme.TEXT_ACTIVE, t)
+local plabel = i18n.t(panel.label)
 icons.draw(panel.icon, cursor_x + icon_w * 0.5, chip_y + chip_h * 0.5, icon_col, 0.76)
 widgets.text(cursor_x + icon_w - 1, chip_y + math.floor((chip_h - theme.FONT_CAPTION) * 0.5) - 1,
-panel.label, icon_col, theme.FONT_CAPTION)
+plabel, icon_col, theme.FONT_CAPTION)
 if input.clicked(cursor_x, chip_y, chip_w, chip_h) and not widgets.block_under then
 state.set(panel.id, not active)
 widgets.interacted = true
@@ -29794,7 +30751,8 @@ local underlay_blocked = widgets.block_under
 widgets.block_under = false
 widgets.rect(r.x, r.y, r.w, r.h, theme.OVERLAY, true, theme.CORNER)
 widgets.rect(r.x, r.y, r.w, r.h, theme.BORDER_SOFT, false, theme.CORNER)
-widgets.text(r.x + 12, r.y + 10, "HUD SETTINGS", theme.TEXT_ACTIVE, theme.FONT_TITLE)
+local i18n = April.require("ui.i18n")
+widgets.text(r.x + 12, r.y + 10, i18n.t("HUD SETTINGS"), theme.TEXT_ACTIVE, theme.FONT_TITLE)
 widgets.text(r.x + r.w - 22, r.y + 9, "x", theme.TEXT_DIM, theme.FONT_TITLE)
 if input.clicked(r.x + r.w - 30, r.y + 3, 28, 25) then
 open_settings = false
@@ -30022,7 +30980,8 @@ local function draw_module_status(center_x, y, elapsed, alpha)
     if not draw_text or not line then return end
     local accent = anim.title_color()
     local size = math.max(12, math.floor(13 * (theme.SCALE or 1)))
-    local heading = "Loading modules"
+    local i18n = April.require("ui.i18n")
+    local heading = i18n.t("Loading modules")
     local heading_size = math.max(11, size - 1)
     draw_text(center_x - text_width(heading, heading_size) * 0.5, y, heading,
         { theme.TEXT_ACTIVE[1], theme.TEXT_ACTIVE[2], theme.TEXT_ACTIVE[3], alpha * 0.48 },
@@ -30035,9 +30994,10 @@ local function draw_module_status(center_x, y, elapsed, alpha)
             local loaded = status.state == "loaded"
             local failed = status.state == "failed"
             local checked = loaded and ease_out_cubic((elapsed - appear_at - 0.13) / 0.20) or 0
-            local label = loaded and tostring(status.name)
-                or failed and ("Failed: " .. tostring(status.name))
-                or ("Loading " .. tostring(status.name) .. "...")
+            local name = i18n.t(tostring(status.name))
+            local label = loaded and name
+                or failed and (i18n.t("Failed: ") .. name)
+                or (i18n.t("Loading ") .. name .. "...")
             local label_width = text_width(label, size)
             local row_alpha = alpha * appear
             local icon_x = center_x - (label_width + 24) * 0.5
@@ -30114,7 +31074,8 @@ function M.draw()
     local title_size = math.max(40, math.floor(54 * (theme.SCALE or 1)))
     local author_size = math.max(15, math.floor(18 * (theme.SCALE or 1)))
     draw_wave("April.lua", title_x, center_y - 38, title_size, title_alpha, 0, 1.35)
-    draw_wave("Made by Cunzaki", author_x, center_y + 22, author_size, author_alpha, 1.7, 0.8)
+    local i18n = April.require("ui.i18n")
+    draw_wave(i18n.t("Made by Cunzaki"), author_x, center_y + 22, author_size, author_alpha, 1.7, 0.8)
     draw_module_status(center_x, center_y + 62, elapsed, author_alpha)
     if profile_alpha > 0.01 then
         local final_w = math.max(230, math.min(420, math.floor(math.min(width, height) * 0.50)))
@@ -30336,7 +31297,8 @@ widgets.rect(cursor_x, tab_y, tab_w, tab_h,
 theme.alpha(theme.HOVER, emphasis * 0.55), true, theme.CORNER_SMALL)
 end
 local col = active and anim.tab_icon_color() or anim.mix(theme.TEXT_DIM, theme.TEXT, emphasis * 0.45)
-local label = tab.label or tab.title or tab.id
+local i18n = April.require("ui.i18n")
+local label = i18n.t(tab.label or tab.title or tab.id)
 local icon_x = cursor_x + 16
 local cy = y + h * 0.5
 icons.draw(tab.icon or tab.id, icon_x, cy, col, 0.72)
@@ -30508,7 +31470,8 @@ if box_top >= y - 2 and box_top < y + h then
 widgets.rect(x + 1, box_top + 1, w - 2, theme.GROUP_HEADER_H - 2,
 theme.alpha(theme.PANEL_ALT, 0.42), true, theme.CORNER)
 local header_hot = gin.hover(x, box_top, w, theme.GROUP_HEADER_H)
-draw_group_title(x, box_top, w, group.title, entry.collapsed, header_hot)
+local i18n = April.require("ui.i18n")
+draw_group_title(x, box_top, w, i18n.t(group.title), entry.collapsed, header_hot)
 if gin.clicked(x, box_top, w, theme.GROUP_HEADER_H)
 and not widgets.block_under
 and not widgets.open_combo and not widgets.open_multi
@@ -30592,6 +31555,7 @@ state.define("april_ui_snow_speed", 40)
 state.define("april_ui_snow_size", 3)
 state.define("april_ui_snow_opacity", 55)
 state.define("april_ui_menu_fade", false)
+state.define("april_ui_russian", false)
 state.define("april_ui_anim_targets", {
 true, true, true, true, true, true, true, true,
 })
@@ -30694,7 +31658,8 @@ draw_brand(x + 14, y + 9)
 local version_text = "v" .. tostring(April.version or "")
 widgets.text(x + w - 14 - text_width(version_text, theme.FONT_CAPTION), y + 5,
 version_text, theme.TEXT_DIM, theme.FONT_CAPTION)
-local author_text = "Made by Cunzaki"
+local i18n = April.require("ui.i18n")
+local author_text = i18n.t("Made by Cunzaki")
 local author_size = math.max(8, (theme.FONT_CAPTION or 11) - 2)
 draw_wave_text(
 author_text,

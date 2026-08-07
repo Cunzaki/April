@@ -149,6 +149,7 @@ M.BY_ID = {
     april_autofarm_search_range = "Maximum distance in studs used when searching for the next resource. Larger ranges cover more area but can produce longer direct routes.",
     april_autofarm_debug_path = "Draws a tracer to the exact TreeX or NodeSpark point plus the current state, distance, and held tool.",
     april_farm_helper = "Manual alternative to Autofarm. It redirects your held melee swings to the nearest compatible weak point, but you move and hold attack yourself.",
+    april_ui_russian = "Switches the entire April menu and HUD text to Russian (Latin spelling — Vector's font cannot draw Cyrillic).",
     april_anti_afk = "Prevents idle kick by simulating activity.",
     april_mod_checker_enabled = "Alerts you when staff or mods join the server.",
     april_keybinds_enabled = "Shows an on-screen list of your keybinds.",
@@ -365,6 +366,22 @@ function M.for_item(item)
         tip = fallback_tip(item)
     end
     if not tip then return nil end
+
+    local i18n = April.require("ui.i18n")
+    if i18n.is_ru() then
+        tip = i18n.tip(item.id, tip)
+        if item.type == "keybind" then
+            return tip .. " LKM po chipu — naznachit (Mouse 1 posle otpuskaniya); PKM — Vsegda, Uderzhanie ili Pereklyuchenie. Uderzhanie takzhe trebuet vklyuchennyy pereklyuchatel. Escape, Backspace ili Delete snimayut bind."
+        end
+        if item.type == "aim_key" then
+            return tip .. " LKM po chipu — naznachit (Mouse 1 posle otpuskaniya); PKM — Vsegda, Uderzhanie ili Pereklyuchenie. Escape, Backspace ili Delete snimayut bind."
+        end
+        if item.type == "hotkey" then
+            return tip .. " LKM po chipu — naznachit (Mouse 1 posle otpuskaniya). Escape, Backspace ili Delete snimayut bind."
+        end
+        return tip
+    end
+
     if item.type == "keybind" then
         return tip .. " Left-click the key chip to bind (Mouse 1 works after you release); right-click it for Always, Hold, or Toggle. Hold mode also requires the feature switch enabled. Escape, Backspace, or Delete clears the bind."
     end
@@ -380,8 +397,15 @@ end
 function M.for_option(id, index, label)
     local by_id = M.OPTION_TIPS[id]
     local tip = by_id and by_id[index] or nil
-    if tip then return tip end
-    return M.OPTION_BY_LABEL[tostring(label or "")]
+    if not tip then
+        tip = M.OPTION_BY_LABEL[tostring(label or "")]
+    end
+    if not tip then return tip end
+    local i18n = April.require("ui.i18n")
+    if i18n.is_ru() then
+        return i18n.t(tip)
+    end
+    return tip
 end
 
 return M

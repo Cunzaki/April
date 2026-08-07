@@ -79,7 +79,8 @@ local function draw_module_status(center_x, y, elapsed, alpha)
     if not draw_text or not line then return end
     local accent = anim.title_color()
     local size = math.max(12, math.floor(13 * (theme.SCALE or 1)))
-    local heading = "Loading modules"
+    local i18n = April.require("ui.i18n")
+    local heading = i18n.t("Loading modules")
     local heading_size = math.max(11, size - 1)
     draw_text(center_x - text_width(heading, heading_size) * 0.5, y, heading,
         { theme.TEXT_ACTIVE[1], theme.TEXT_ACTIVE[2], theme.TEXT_ACTIVE[3], alpha * 0.48 },
@@ -93,9 +94,10 @@ local function draw_module_status(center_x, y, elapsed, alpha)
             local loaded = status.state == "loaded"
             local failed = status.state == "failed"
             local checked = loaded and ease_out_cubic((elapsed - appear_at - 0.13) / 0.20) or 0
-            local label = loaded and tostring(status.name)
-                or failed and ("Failed: " .. tostring(status.name))
-                or ("Loading " .. tostring(status.name) .. "...")
+            local name = i18n.t(tostring(status.name))
+            local label = loaded and name
+                or failed and (i18n.t("Failed: ") .. name)
+                or (i18n.t("Loading ") .. name .. "...")
             local label_width = text_width(label, size)
             local row_alpha = alpha * appear
             local icon_x = center_x - (label_width + 24) * 0.5
@@ -191,7 +193,8 @@ function M.draw()
     local author_size = math.max(15, math.floor(18 * (theme.SCALE or 1)))
 
     draw_wave("April.lua", title_x, center_y - 38, title_size, title_alpha, 0, 1.35)
-    draw_wave("Made by Cunzaki", author_x, center_y + 22, author_size, author_alpha, 1.7, 0.8)
+    local i18n = April.require("ui.i18n")
+    draw_wave(i18n.t("Made by Cunzaki"), author_x, center_y + 22, author_size, author_alpha, 1.7, 0.8)
     draw_module_status(center_x, center_y + 62, elapsed, author_alpha)
 
     if profile_alpha > 0.01 then

@@ -214,7 +214,8 @@ local function draw_top_navbar(x, y, w, h)
         end
 
         local col = active and anim.tab_icon_color() or anim.mix(theme.TEXT_DIM, theme.TEXT, emphasis * 0.45)
-        local label = tab.label or tab.title or tab.id
+        local i18n = April.require("ui.i18n")
+        local label = i18n.t(tab.label or tab.title or tab.id)
         local icon_x = cursor_x + 16
         local cy = y + h * 0.5
         icons.draw(tab.icon or tab.id, icon_x, cy, col, 0.72)
@@ -419,7 +420,8 @@ local function draw_group_column(groups, x, y, w, h, scroll_key)
                     widgets.rect(x + 1, box_top + 1, w - 2, theme.GROUP_HEADER_H - 2,
                         theme.alpha(theme.PANEL_ALT, 0.42), true, theme.CORNER)
                     local header_hot = gin.hover(x, box_top, w, theme.GROUP_HEADER_H)
-                    draw_group_title(x, box_top, w, group.title, entry.collapsed, header_hot)
+                    local i18n = April.require("ui.i18n")
+                    draw_group_title(x, box_top, w, i18n.t(group.title), entry.collapsed, header_hot)
                     if gin.clicked(x, box_top, w, theme.GROUP_HEADER_H)
                         and not widgets.block_under
                         and not widgets.open_combo and not widgets.open_multi
@@ -509,6 +511,7 @@ function M.init()
     state.define("april_ui_snow_size", 3)
     state.define("april_ui_snow_opacity", 55)
     state.define("april_ui_menu_fade", false)
+    state.define("april_ui_russian", false)
     state.define("april_ui_anim_targets", {
         true, true, true, true, true, true, true, true,
     })
@@ -630,7 +633,8 @@ function M.draw()
     local version_text = "v" .. tostring(April.version or "")
     widgets.text(x + w - 14 - text_width(version_text, theme.FONT_CAPTION), y + 5,
         version_text, theme.TEXT_DIM, theme.FONT_CAPTION)
-    local author_text = "Made by Cunzaki"
+    local i18n = April.require("ui.i18n")
+    local author_text = i18n.t("Made by Cunzaki")
     local author_size = math.max(8, (theme.FONT_CAPTION or 11) - 2)
     draw_wave_text(
         author_text,

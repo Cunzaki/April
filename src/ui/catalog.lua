@@ -732,6 +732,9 @@ local function build_config()
     local config_group = {
         title = "Config",
         items = {
+            -- Latin-only: Vector's draw font has no Cyrillic glyphs (shows as ???).
+            cb("april_ui_russian", "Russkiy yazyk", false),
+            sep(),
             label("Configs", true),
             input("april_cfg_profile_name", "Config Name", "Default"),
             combo("april_cfg_selected", "Saved Configs", cfg_labels, 0),

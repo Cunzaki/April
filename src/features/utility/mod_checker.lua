@@ -371,7 +371,8 @@ local function draw_staff_panel(x, y, width, rows)
     local count = math.max(#rows, 1)
     local height = TITLE_H + count * row_h + 6
 
-    local title = "STAFF IN LOBBY"
+    local i18n = April.require("ui.i18n")
+    local title = i18n.t("STAFF IN LOBBY")
     if #rows > 1 then
         title = title .. " (" .. #rows .. ")"
     end
@@ -379,7 +380,7 @@ local function draw_staff_panel(x, y, width, rows)
 
     local ry = y + TITLE_H + 5
     if #rows == 0 then
-        draw.text(x + pad, ry + 2, "No staff detected", theme.TEXT_MUTED, 11)
+        draw.text(x + pad, ry + 2, i18n.t("No staff detected"), theme.TEXT_MUTED, 11)
         return height
     end
 

@@ -551,7 +551,8 @@ function M.draw_bind_mode_overlay()
         return
     end
     local id = M.open_bind_mode
-    local modes = { "Always", "Hold", "Toggle" }
+    local i18n = April.require("ui.i18n")
+    local modes = i18n.modes()
     local mode_id = id .. "_mode"
     local cur = tonumber(state.get(mode_id, 2)) or 2
 
@@ -591,7 +592,7 @@ function M.draw_bind_mode_overlay()
     M.rect(px, py, pw, ph, theme.OVERLAY, true, theme.CORNER_SMALL)
     M.rect(px, py, pw, ph, theme.BORDER_SOFT, false, theme.CORNER_SMALL)
 
-    M.text(px + 9, py + 6, "KEYBIND SETTINGS", theme.TEXT_TITLE, theme.FONT_CAPTION)
+    M.text(px + 9, py + 6, i18n.t("KEYBIND SETTINGS"), theme.TEXT_TITLE, theme.FONT_CAPTION)
     M.rect(px + 8, py + header_h - 1, pw - 16, 1, theme.BORDER_SOFT, true)
 
     for i, name in ipairs(modes) do
@@ -639,7 +640,7 @@ function M.draw_bind_mode_overlay()
         if hidden then
             M.rect(bx + 2, by + 2, box - 4, box - 4, anim.checkbox_fill(), true, theme.CORNER_SMALL)
         end
-        M.text(bx + box + 8, hide_y + 7, "Hide from keybind list",
+        M.text(bx + box + 8, hide_y + 7, i18n.t("Hide from keybind list"),
             hidden and theme.TEXT_ACTIVE or theme.TEXT, theme.FONT_SMALL)
         if input.clicked(px, hide_y, pw, hide_h) then
             mark_interacted()
@@ -660,9 +661,10 @@ function M.draw_color_ctx_overlay()
     end
     local id = M.open_color_ctx
     local has_clip = type(M._color_clipboard) == "table"
+    local i18n = April.require("ui.i18n")
     local items = {
-        { id = "copy", label = "Copy Color", enabled = true },
-        { id = "paste", label = "Paste Color", enabled = has_clip },
+        { id = "copy", label = i18n.t("Copy Color"), enabled = true },
+        { id = "paste", label = i18n.t("Paste Color"), enabled = has_clip },
     }
 
     local pw = 118
@@ -692,7 +694,7 @@ function M.draw_color_ctx_overlay()
     M.rect(px, py, pw, ph, theme.OVERLAY, true, theme.CORNER_SMALL)
     M.rect(px, py, pw, ph, theme.BORDER_SOFT, false, theme.CORNER_SMALL)
 
-    M.text(px + 9, py + 6, "COLOR", theme.TEXT_TITLE, theme.FONT_CAPTION)
+    M.text(px + 9, py + 6, i18n.t("COLOR"), theme.TEXT_TITLE, theme.FONT_CAPTION)
     M.rect(px + 8, py + header_h - 1, pw - 16, 1, theme.BORDER_SOFT, true)
 
     -- Clipboard preview chip
@@ -1413,7 +1415,8 @@ function M.multi(x, y, w, id, label, options, defaults, opts)
     for i, opt in ipairs(options) do
         if vals[i] then parts[#parts + 1] = opt end
     end
-    local summary = (#parts > 0) and table.concat(parts, ", ") or "None"
+    local i18n = April.require("ui.i18n")
+    local summary = (#parts > 0) and table.concat(parts, ", ") or i18n.t("None")
     summary = fit_text(summary, bw - 20, theme.FONT_SMALL)
     M.text(bx + 6, by + math.floor((bh - 12) * 0.5), summary, theme.TEXT_ACTIVE, theme.FONT_SMALL)
 
@@ -1822,32 +1825,35 @@ function M.estimate_height(item)
 end
 
 function M.draw_item(item, x, y, w)
+    local i18n = April.require("ui.i18n")
+    local label = i18n.t(item.label)
+    local options = item.options and i18n.options(item.options) or item.options
     local t = item.type
     local h = 0
     if t == "checkbox" then
-        h = M.checkbox(x, y, w, item.id, item.label, item)
+        h = M.checkbox(x, y, w, item.id, label, item)
     elseif t == "keybind" then
-        h = M.keybind(x, y, w, item.id, item.label, item.default, item)
+        h = M.keybind(x, y, w, item.id, label, item.default, item)
     elseif t == "aim_key" then
-        h = M.aim_key_row(x, y, w, item.id, item.mode_id, item.label)
+        h = M.aim_key_row(x, y, w, item.id, item.mode_id, label)
     elseif t == "hotkey" then
-        h = M.hotkey_row(x, y, w, item.id, item.label, item.default)
+        h = M.hotkey_row(x, y, w, item.id, label, item.default)
     elseif t == "slider" then
-        h = M.slider(x, y, w, item.id, item.label, item.min, item.max, item.default, item)
+        h = M.slider(x, y, w, item.id, label, item.min, item.max, item.default, item)
     elseif t == "combo" then
-        h = M.combo(x, y, w, item.id, item.label, item.options, item.default)
+        h = M.combo(x, y, w, item.id, label, options, item.default)
     elseif t == "multi" then
-        h = M.multi(x, y, w, item.id, item.label, item.options, item.defaults, item)
+        h = M.multi(x, y, w, item.id, label, options, item.defaults, item)
     elseif t == "button" then
-        h = M.button(x + 4, y, w - 8, item.id, item.label)
+        h = M.button(x + 4, y, w - 8, item.id, label)
     elseif t == "label" then
-        h = M.label(x, y, w, item.label, item.dim)
+        h = M.label(x, y, w, label, item.dim)
     elseif t == "separator" then
         h = M.separator(x, y, w)
     elseif t == "color" then
-        h = M.color_row(x, y, w, item.id, item.label, item.default)
+        h = M.color_row(x, y, w, item.id, label, item.default)
     elseif t == "input" then
-        h = M.input_row(x, y, w, item.id, item.label, item.default)
+        h = M.input_row(x, y, w, item.id, label, item.default)
     end
 
     local tip = tooltips.for_item(item)

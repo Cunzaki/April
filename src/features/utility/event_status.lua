@@ -359,7 +359,8 @@ function M.draw()
         sw - PANEL_W - 16, 300
     )
     x, y = panel_drag.clamp(x, y, PANEL_W, height, sw, sh)
-    overlay_theme.draw_panel(x, y, PANEL_W, height, "EVENT STATUS")
+    local i18n = April.require("ui.i18n")
+    overlay_theme.draw_panel(x, y, PANEL_W, height, i18n.t("EVENT STATUS"))
 
     local ry = y + TITLE_H + 5
     if #rows == 0 then

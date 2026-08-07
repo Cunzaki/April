@@ -494,7 +494,8 @@ function M.draw()
         panel_h = panel_h + 16
     end
     local panel_x = cx - panel_w * 0.5
-    overlay_theme.draw_panel(panel_x, top, panel_w, panel_h, "TARGET LOADOUT", { title_center = true })
+    local i18n = April.require("ui.i18n")
+    overlay_theme.draw_panel(panel_x, top, panel_w, panel_h, i18n.t("TARGET LOADOUT"), { title_center = true })
 
     local max_name_w = panel_w - 114
     local header_name = name

@@ -70,10 +70,11 @@ local function draw_status_panel(cx, cy, fov, info)
     local manip_on = info.manip_on == true
     if not hitscan_on and not tp_on and not manip_on then return end
 
+    local i18n = April.require("ui.i18n")
     local manip_state = info.manip_state or "off"
     local fire_mode = info.state or "off"
-    local fire_label = FIRE_LABELS[fire_mode] or fire_mode
-    local manip_label = MANIP_LABELS[manip_state] or manip_state
+    local fire_label = i18n.t(FIRE_LABELS[fire_mode] or fire_mode)
+    local manip_label = i18n.t(MANIP_LABELS[manip_state] or manip_state)
     if info.scan_cached and (manip_state == "ready" or manip_state == "blocked") then
         manip_label = manip_label .. " *"
     end
@@ -81,8 +82,16 @@ local function draw_status_panel(cx, cy, fov, info)
     local pad_x, pad_y = 10, 6
     local row_h = 14
     local bar_h = 5
-    local title = "BULLET STATUS"
+    local title = i18n.t("BULLET STATUS")
     local title_w = theme.text_w(title, 11)
+    local on_txt = i18n.t("ON")
+    local off_txt = i18n.t("OFF")
+    local hitscan_l = i18n.t("Hitscan")
+    local tp_l = i18n.t("Bullet TP")
+    local manip_l = i18n.t("Manip")
+    local fire_l = i18n.t("Fire")
+    local peek_l = i18n.t("Peek R")
+    local ring_l = i18n.t("Ring")
 
     local radius_text = fmt_radius(info)
     local ring_text = "-"
@@ -94,12 +103,12 @@ local function draw_status_panel(cx, cy, fov, info)
         ring_text = "los"
     end
 
-    local w1 = theme.text_w("Hitscan", 10) + theme.text_w("ON", 10) + 24
-    local w2 = theme.text_w("Bullet TP", 10) + theme.text_w("ON", 10) + 24
-    local w3 = theme.text_w("Manip", 10) + theme.text_w(manip_label, 10) + 24
-    local w4 = theme.text_w("Fire", 10) + theme.text_w(fire_label, 10) + 24
-    local w5 = theme.text_w("Peek R", 10) + theme.text_w(radius_text, 10) + 24
-    local w6 = theme.text_w("Ring", 10) + theme.text_w(ring_text, 10) + 24
+    local w1 = theme.text_w(hitscan_l, 10) + theme.text_w(on_txt, 10) + 24
+    local w2 = theme.text_w(tp_l, 10) + theme.text_w(on_txt, 10) + 24
+    local w3 = theme.text_w(manip_l, 10) + theme.text_w(manip_label, 10) + 24
+    local w4 = theme.text_w(fire_l, 10) + theme.text_w(fire_label, 10) + 24
+    local w5 = theme.text_w(peek_l, 10) + theme.text_w(radius_text, 10) + 24
+    local w6 = theme.text_w(ring_l, 10) + theme.text_w(ring_text, 10) + 24
     local panel_w = math.max(title_w, w1, w2, w3, w4, w5, w6) + pad_x * 2 + 8
     panel_w = math.max(panel_w, 178)
 
@@ -123,12 +132,12 @@ local function draw_status_panel(cx, cy, fov, info)
         ry = ry + row_h
     end
 
-    draw_row("Hitscan", hitscan_on and "ON" or "OFF", row_color(hitscan_on, true, false))
-    draw_row("Bullet TP", tp_on and "ON" or "OFF", row_color(tp_on, true, false))
+    draw_row(hitscan_l, hitscan_on and on_txt or off_txt, row_color(hitscan_on, true, false))
+    draw_row(tp_l, tp_on and on_txt or off_txt, row_color(tp_on, true, false))
 
     local manip_ok = manip_state == "ready" or manip_state == "direct"
     local manip_warn = manip_state == "scanning"
-    draw_row("Manip", manip_on and manip_label or "OFF",
+    draw_row(manip_l, manip_on and manip_label or off_txt,
         row_color(manip_on, manip_ok, manip_warn))
 
     local fire_col = theme.CYAN
@@ -141,11 +150,11 @@ local function draw_status_panel(cx, cy, fov, info)
     elseif fire_mode == "scanning" or fire_mode == "blocked" then
         fire_col = theme.ORANGE
     end
-    draw_row("Fire", fire_label, fire_col)
+    draw_row(fire_l, fire_label, fire_col)
 
     if manip_on then
-        draw_row("Peek R", radius_text, overlay_theme.text())
-        draw_row("Ring", ring_text, overlay_theme.text())
+        draw_row(peek_l, radius_text, overlay_theme.text())
+        draw_row(ring_l, ring_text, overlay_theme.text())
     end
 
     if has_bar then
