@@ -1,5 +1,5 @@
 April = {
-    version = "4.1.36",
+    version = "4.1.38",
     debug = false,
     crash_logging = false,
     crash_trace = false,
@@ -6630,7 +6630,7 @@ local MENU_KEYS = {
     "april_crosshair_follow", "april_crosshair_follow_smooth",
     "april_crosshair_spin", "april_crosshair_spin_speed",
     "april_crosshair_pulse", "april_crosshair_pulse_speed",
-    "april_aimbot", "april_aim_key", "april_aim_key_mode",
+    "april_aimbot", "april_aimbot_mode", "april_aim_key", "april_aim_key_mode",
     "april_aim_target_type", "april_aim_bone",
     "april_aim_filters", "april_aim_whitelist_ids",
     "april_aim_targets", "april_aim_options", "april_aim_sticky",
@@ -15843,7 +15843,7 @@ end
 return false
 end
 local function enabled()
-return settings.bool(P_MASTER, false)
+return settings.enabled(P_MASTER)
 end
 local function aiming()
 if not enabled() then return false end
@@ -16000,7 +16000,7 @@ end
 function M.register_menu()
 local G = menu_util.G
 local T, _ = menu_util.group(G.SILENT_AIM)
-menu.add_checkbox(T, G, P_MASTER, "Enable Aimbot", false)
+menu_util.register_keybind(T, G.SILENT_AIM, P_MASTER, "Enable Aimbot", false)
 menu.add_combo(T, G, P_AIM_KEY_MODE, "Aim Key Mode", { "Always", "Hold", "Toggle" }, 1,
 { parent = P_MASTER })
 if menu.add_hotkey then
@@ -16015,6 +16015,7 @@ fov_color = theme.GREEN or { 0.2, 1, 0.45, 1 },
 line_color = { 0.2, 1, 0.45, 1 },
 })
 menu_util.bind_children(P_MASTER, {
+P_MASTER .. "_mode",
 P_AIM_KEY, P_AIM_KEY_MODE,
 PREFIX .. "target_type", PREFIX .. "bone",
 PREFIX .. "filters",
@@ -26569,7 +26570,7 @@ april_ui_snow = true,
 april_fakeduck_spam = true,
 }
 M.BY_ID = {
-april_aimbot = "Smooth camera aim assist on your current target.",
+april_aimbot = "Smooth camera aim assist on your current target. Bind a key on the chip (Always / Hold / Toggle).",
 april_aim_key = "Hold or toggle this key to activate aimbot.",
 april_silent_aim = "Redirects shots to your locked target without moving the camera.",
 april_bullet_enabled = "Master toggle for advanced bullet routing (hitscan, bullet TP, silent manip). Bind Always / Hold / Toggle from the key chip.",
@@ -28968,7 +28969,7 @@ local regular = {
 title = "Aimbot",
 master = "april_aimbot",
 items = {
-cb("april_aimbot", "Enable Aimbot", false, nil, nil, { hide_color = true }),
+kb("april_aimbot", "Enable Aimbot", false, nil, { hide_color = true }),
 ak("april_aim_key", "Aim Key"),
 sep(),
 combo("april_aim_target_type", "Target Type", { "Crosshair", "Distance" }, 0),

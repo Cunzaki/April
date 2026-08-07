@@ -73,7 +73,7 @@ local MENU_KEYS = {
     "april_crosshair_follow", "april_crosshair_follow_smooth",
     "april_crosshair_spin", "april_crosshair_spin_speed",
     "april_crosshair_pulse", "april_crosshair_pulse_speed",
-    "april_aimbot", "april_aim_key", "april_aim_key_mode",
+    "april_aimbot", "april_aimbot_mode", "april_aim_key", "april_aim_key_mode",
     "april_aim_target_type", "april_aim_bone",
     "april_aim_filters", "april_aim_whitelist_ids",
     "april_aim_targets", "april_aim_options", "april_aim_sticky",

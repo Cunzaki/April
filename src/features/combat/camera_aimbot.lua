@@ -89,7 +89,7 @@ local function holding_weapon()
 end
 
 local function enabled()
-    return settings.bool(P_MASTER, false)
+    return settings.enabled(P_MASTER)
 end
 
 local function aiming()
@@ -282,7 +282,7 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.SILENT_AIM)
 
-    menu.add_checkbox(T, G, P_MASTER, "Enable Aimbot", false)
+    menu_util.register_keybind(T, G.SILENT_AIM, P_MASTER, "Enable Aimbot", false)
 
     menu.add_combo(T, G, P_AIM_KEY_MODE, "Aim Key Mode", { "Always", "Hold", "Toggle" }, 1,
         { parent = P_MASTER })
@@ -300,6 +300,7 @@ function M.register_menu()
     })
 
     menu_util.bind_children(P_MASTER, {
+        P_MASTER .. "_mode",
         P_AIM_KEY, P_AIM_KEY_MODE,
         PREFIX .. "target_type", PREFIX .. "bone",
         PREFIX .. "filters",

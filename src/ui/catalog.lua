@@ -157,7 +157,7 @@ local function build_aim()
         title = "Aimbot",
         master = "april_aimbot",
         items = {
-            cb("april_aimbot", "Enable Aimbot", false, nil, nil, { hide_color = true }),
+            kb("april_aimbot", "Enable Aimbot", false, nil, { hide_color = true }),
             ak("april_aim_key", "Aim Key"),
             sep(),
             combo("april_aim_target_type", "Target Type", { "Crosshair", "Distance" }, 0),

@@ -45,7 +45,7 @@ M.SKIP_IDS = {
 
 M.BY_ID = {
     -- Aimbot
-    april_aimbot = "Smooth camera aim assist on your current target.",
+    april_aimbot = "Smooth camera aim assist on your current target. Bind a key on the chip (Always / Hold / Toggle).",
     april_aim_key = "Hold or toggle this key to activate aimbot.",
     april_silent_aim = "Redirects shots to your locked target without moving the camera.",
 
