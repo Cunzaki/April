@@ -1,0 +1,288 @@
+greeting|roasty|smug|O, ty menya vklyuchil? Ladno. Tolko ne pozor nas.
+greeting|roasty|pout|U menya byl normalnyy den, poka ty ne nazhal etot toggle.
+greeting|roasty|evil|Tvoy lichnyy commentator pribyl. Eto budet smeshno.
+greeting|roasty|laugh|Ya gotova. Day mne chto-to, nad chem mozhno porugat.
+greeting|roasty|neutral|April online. Ozhidaniya opasno nizkie.
+greeting|roasty|disgusted|Ty zval? Nadeyus, tvoy gameplay podros, poka menya ne bylo.
+greeting|supportive|smile|April online. Ya budu za toboy sledit.
+greeting|supportive|happy|Gotova, kogda ty gotov. Davay vyzhivem.
+greeting|supportive|neutral|Ya zdes. Bud na cheku - i vse budet ok.
+greeting|supportive|smile|Vse set! Postaraysya vernutsya v odnom kuske.
+greeting|supportive|happy|Tvoy lyubimyy announcer gotov k startu.
+greeting|supportive|neutral|Sistemy ready. Ya skazhu, esli chto-to vazhnoe.
+death|roasty|laugh|Ty otstoy, lol. Khochesh poprobovat snova?
+death|roasty|disgusted|Eto byl tvoy plan? Serezno?
+death|roasty|smug|Eshche odna tactical donation vragu.
+death|roasty|pout|Ya otvernulas na sekundu - i ty uzhe mertv.
+death|roasty|evil|Otlichnoe performance. Zero notes. Zero pulse tozhe.
+death|roasty|laugh|Speedrunish respawn screen snova?
+death|roasty|disgusted|Mozhet, puli promahnetsya, esli v sleduyushchiy raz postoyish eshche nepodvizhnee.
+death|roasty|smug|Khoroshie novosti: zemlya uspeshno tebya poymala.
+death|roasty|pout|Prekrati delat smert kak hobby.
+death|roasty|laugh|Oni dazhe ne napryaglis. Pochti impressive.
+death|roasty|evil|Bezuprechnaya demonstratsiya togo, kak ne nado.
+death|roasty|disgusted|Tvoi instincty vyzhivaniya podali v otstavku.
+death|roasty|smug|Ya videla training dummy s luchshim positioning.
+death|roasty|pout|Eta zhizn byla koroche, chem etot speech bubble.
+death|supportive|sad|Eto bylo bolno. Reset i medlennee.
+death|supportive|worried|Ty down, no eto ne konets. Uchish angle.
+death|supportive|smile|Plokhoy round. Fresh start.
+death|supportive|sad|Ne povezlo. Vernem v sleduyushchey zhizni.
+death|supportive|worried|Dysh. Podumay, chto tebya otkrylo.
+death|supportive|neutral|Death confirmed. Vremya menyat plan.
+death|supportive|smile|Otryasnis. Sleduyushchaya zhizn - tvoya.
+death|supportive|sad|Bylo zhestko, no teper ty znaesh, gde oni byli.
+death|supportive|worried|Razberi oshibku - i ostav ee pozadi.
+death|supportive|neutral|Odin plokhoy fight ne reshaet vsyu sessiyu.
+respawn|roasty|smug|Uzhe nazad? Poprobuy uderzhat eto telo hotya by minutku.
+respawn|roasty|pout|Novaya zhizn, te zhe somnitelnye decision-making.
+respawn|roasty|evil|Round two. Nu tochno nichego ne poydet ne tak.
+respawn|roasty|laugh|Knopka respawn zasluzhila overtime.
+respawn|roasty|neutral|S vozvrashcheniem. Ya sokhranila tvoyu dostoinstvo. Ego pochti ne bylo.
+respawn|roasty|smug|Fresh body dostavleno. Obrashchaysya chut berezhnee.
+respawn|roasty|pout|Ok, ne umirat srazu. Ves assignment na etom.
+respawn|roasty|laugh|Glyan, kto vybralsya s loading screen.
+respawn|supportive|happy|Ty vernulsya. Novaya zhizn, clean slate.
+respawn|supportive|smile|Respawned i ready. Ne toropis.
+respawn|supportive|neutral|Fresh start. Snachala check okrestnosti.
+respawn|supportive|happy|Vot i ty. Davay sdelaem etu zhizn znachimoy.
+respawn|supportive|smile|Snova v dele. Verni ritm.
+respawn|supportive|neutral|Respawn complete. Rebuild, prezhde chem brat fight.
+respawn|supportive|happy|Novaya zhizn ready. Nachni s bezopasnogo route.
+respawn|supportive|smile|S vozvrashcheniem. Po odnomu khoroshemu resheniyu za raz.
+downed|roasty|laugh|Inspektsiya pola idet khorosho?
+downed|roasty|smug|Ty nashel downed state. Ochen thorough testing.
+downed|roasty|pout|Crawl - eto ne combat strategy.
+downed|roasty|disgusted|Vot pochemu ya govorila ispolzovat cover.
+downed|roasty|evil|Technically zhiv. Emotionalno? Sporno.
+downed|roasty|laugh|Pomashi teammate snizu.
+downed|roasty|worried|Kto-nibud, revive etot professionalnyy pol-ornament.
+downed|roasty|smug|Vydayushchayasya poza. Ten out of ten.
+downed|supportive|worried|Ty downed. Za cover i zovi help.
+downed|supportive|fear|Derzhis nizko. Teammate eshche mozhet doyti.
+downed|supportive|sad|Ne sdavaysya. Polzi tuda, gde bezopasno.
+downed|supportive|worried|Downed, ne mertv. Break line of sight.
+downed|supportive|neutral|Ekonom movement i zhdi revive.
+downed|supportive|fear|Ostorozhno, eshche odin hit mozhet zakonchit.
+downed|supportive|sad|Polzi k cover, esli eto safe.
+downed|supportive|worried|Skazhi pozitsiyu i day team rabotat.
+revived|roasty|smug|Kto-to tebya realno podnyal. Bud blagodaren.
+revived|roasty|pout|Ty snova stoish. Sdelay tak, chtoby ono stoilo ih vremeni.
+revived|roasty|laugh|Revived! Pol budet skuchat.
+revived|roasty|evil|Second chance poluchen. Plokhie idei snova enabled.
+revived|roasty|neutral|Snova na nogah. Poprobuy ih ispolzovat v etot raz.
+revived|roasty|smug|U tvoego teammate neveroyatnaya vera v tebya.
+revived|supportive|happy|Ty up! Heal, prezhde chem re-engage.
+revived|supportive|smile|Nice recovery. Naydi cover i reset.
+revived|supportive|worried|Revived. Ne peek, poka ne healthy.
+revived|supportive|happy|Khoroshiy save. Teper derzhis s team.
+revived|supportive|neutral|Snova na nogah. Snachala stabilize.
+revived|supportive|smile|Second chance secured. Sdelay ego znachimym.
+low_health|roasty|worried|Tvoy health bar teper pochti decorative.
+low_health|roasty|pout|Odin chih - i ty snova na respawn.
+low_health|roasty|smug|Smelaya strategy: fight s trema pixelami HP.
+low_health|roasty|fear|Mozhet, hvatit peek? Prosto mysl.
+low_health|roasty|disgusted|Heal. Krasnyy screen - eto ne aesthetic.
+low_health|roasty|worried|Ty derzhishsya na confidence i plokhoy matematike.
+low_health|roasty|pout|Snachala naydi medicine, potom sleduyushchuyu pulyu.
+low_health|roasty|smug|Zhit na odnom hit point - eto ne personality.
+low_health|supportive|worried|Low health. Disengage i heal seychas.
+low_health|supportive|fear|Ty critical. Naydi hard cover.
+low_health|supportive|sad|Ne beri drugoy fight, poka ne vosstanovishsya.
+low_health|supportive|worried|Health nizkiy. Zamedlis i reset.
+low_health|supportive|neutral|Critical health. Priority - vyzhivanie.
+low_health|supportive|fear|Break line of sight i heal.
+low_health|supportive|worried|Seychas ne trade damage.
+low_health|supportive|neutral|Naydi bezopasnost, heal, potom pereotseni.
+recovered|roasty|smug|Health restored. Common sense eshche loading.
+recovered|roasty|smile|Patchnul - i gotov delat novye oshibki.
+recovered|roasty|laugh|Glyan-ka, ty otkryl healing.
+recovered|roasty|pout|Luchshe. Tolko ne trat eto srazu.
+recovered|roasty|evil|Polnee health bar, obnovlennyy capacity dlya haosa.
+recovered|roasty|neutral|Ty proshe medicine tutorial.
+recovered|supportive|happy|Health recovered. Ty snova ready.
+recovered|supportive|smile|Khoroshiy reset. Vybiray sleduyushchiy fight ostrozhno.
+recovered|supportive|neutral|Snova stable. Pereprover ammo i okrestnosti.
+recovered|supportive|happy|Nice recovery. Derzhi momentum.
+recovered|supportive|smile|Gorazdo luchshe. Ostavaysya disciplined.
+recovered|supportive|neutral|Recovery complete. Vozvrashchaysya, kogda timing pravilnyy.
+safe_enter|roasty|smug|Safe zone. Tut dazhe ty dolzhen vyzhit.
+safe_enter|roasty|laugh|Pozdravlyayu, igra teper tebya zashchishchaet.
+safe_enter|roasty|pout|Ty safe. Tolko ne spotknis ob nichego.
+safe_enter|roasty|neutral|Safe zone. Tvoi danger privileges vremenno otozvany.
+safe_enter|roasty|smile|Mirnaya minutka dlya tvoego overworked respawn key.
+safe_enter|roasty|evil|Naslazhdaysya safety, poka ona est.
+safe_enter|supportive|happy|Safe zone. Vozmi moment na reset.
+safe_enter|supportive|smile|Ty safe. Razberi inventar i planiruy dalshe.
+safe_enter|supportive|neutral|Safe zone. Horoshee vremya na regroup.
+safe_enter|supportive|happy|Dobralis safe. Restock, prezhde chem uhodit.
+safe_enter|supportive|smile|Tut ty protected. Ispolzuy breathing room.
+safe_enter|supportive|neutral|Prover, chto nuzhno, prezhde chem vykhodit.
+safe_leave|roasty|evil|Uezzhaesh iz safety? Eto budet entertaining.
+safe_leave|roasty|smug|Protection off. Posmotrim, skolko eto prodlitsya.
+safe_leave|roasty|pout|Obratno v danger bez vsyakogo supervision.
+safe_leave|roasty|laugh|Safe zone ostavlena. Respawn screen na dezhurstve.
+safe_leave|roasty|neutral|Ty snova vulnerable. Pritvoryaysya, chto ostorozhen.
+safe_leave|roasty|evil|I vot ushel tvoy posledniy khoroshiy excuse.
+safe_leave|supportive|worried|Vyhodish iz safe zone. Check route.
+safe_leave|supportive|neutral|Protection konchilas. Sledi za nearby players.
+safe_leave|supportive|smile|Snova snaruzhi. Dvizhaysya s purpose.
+safe_leave|supportive|worried|Ty snova exposed. Derzhi cover ryadom.
+safe_leave|supportive|neutral|Safe zone ostavlena. Sledi za okrestnostyami.
+safe_leave|supportive|smile|Route checked? Togda idem.
+combat_enter|roasty|evil|Combat start. Postaraysya ih ne feedit.
+combat_enter|roasty|smug|O, fight. Eto budet educational.
+combat_enter|roasty|surprised|Uzhe guns out? Smelo dlya tebya.
+combat_enter|roasty|laugh|Ty v combat. Khotya by raz povedi sebya sootvetstvenno.
+combat_enter|roasty|pout|Kto-to hochet tvoy inventar. Ne donate.
+combat_enter|roasty|evil|Fight mode. Please aim v nih, ne v pol.
+combat_enter|supportive|worried|Ty v combat. Derzhi cover i track angles.
+combat_enter|supportive|fear|Fight start. Focus i ne overextend.
+combat_enter|supportive|neutral|Combat engaged. Sledi flanks i reload timing.
+combat_enter|supportive|worried|Spokoyno. Vyigray trade, potom heal.
+combat_enter|supportive|smile|Ty spravishsya. Play smart, ne loud.
+combat_enter|supportive|neutral|V combat. Priority - info i positioning.
+combat_leave|roasty|smug|Combat over. Kak-to ty eshche dyshish.
+combat_leave|roasty|pout|Fight konchilsya. Spriach celebration.
+combat_leave|roasty|laugh|Out of combat. Ne nyryay obratno srazu.
+combat_leave|roasty|neutral|Threat ushel. Check ammo, prezhde chem loot.
+combat_leave|supportive|happy|Combat cleared. Reset i heal up.
+combat_leave|supportive|smile|Ty clear. Patch wounds i reload.
+combat_leave|supportive|neutral|Out of combat. Sekundu na stabilize.
+combat_leave|supportive|happy|Nice. Ispolzuy downtime umno.
+bleeding|roasty|disgusted|Ty bleeding. Congrats na utechku.
+bleeding|roasty|pout|Bandage. Seychas. Tvoy HP kapaet.
+bleeding|roasty|worried|Bleed tick idet. Medicine byla by smart.
+bleeding|roasty|laugh|Red trail unlocked. Stealth cancelled.
+bleeding|roasty|evil|Uzhe bleeding? Peak efficiency.
+bleeding|supportive|worried|Ty bleeding. Ostanovis i bandage srazu.
+bleeding|supportive|fear|Bleed status active. Priority - medkit.
+bleeding|supportive|sad|Ne ignoriruy bleed. Fix, prezhde chem fight.
+bleeding|supportive|worried|Kin bandage, poka ticks ne ubili fight.
+bleeding|supportive|neutral|Bleeding. Heal, potom pereotseni.
+bleed_stopped|roasty|smug|Bleed stopped. Chudesa byvayut.
+bleed_stopped|roasty|smile|Nakonets patched. Derzhi krov vnutri.
+bleed_stopped|roasty|neutral|Bleed cleared. Ne otkroy srazu snova.
+bleed_stopped|supportive|happy|Bleed stopped. Nice recovery.
+bleed_stopped|supportive|smile|Ty zapechatan. Bud ostorozhen.
+bleed_stopped|supportive|neutral|Bleeding resolved. Khoroshiy timing.
+hunger_low|roasty|pout|Ty golodayesh. Sesh chto-to, chto ne pulya.
+hunger_low|roasty|disgusted|Hunger low. Zheludok gromche footsteps.
+hunger_low|roasty|smug|Uzhe hungry? Professional scavenger energy.
+hunger_low|roasty|laugh|Food. Ili prodolzhay roleplay skeleton.
+hunger_low|supportive|worried|Hunger nizkiy. Naydi food, poka ne oslabel.
+hunger_low|supportive|neutral|Poesh skoro. Low hunger potom nakazhet.
+hunger_low|supportive|smile|Vozmi snack, kogda safe.
+hunger_low|supportive|worried|Hunger warning. Ne ignoriruy v fight.
+thirst_low|roasty|pout|Thirsty? Voda sushchestvuet. Shocking, ya znayu.
+thirst_low|roasty|disgusted|Tvoy thirst bar molit o help.
+thirst_low|roasty|smug|Dehydration speedrun, classic.
+thirst_low|roasty|laugh|Vypey chto-nibud. Pesok - eto ne hydration.
+thirst_low|supportive|worried|Thirst nizkiy. Voda skoro.
+thirst_low|supportive|neutral|Hydrate, prezhde chem brat drugoy fight.
+thirst_low|supportive|smile|Naydi clean water, kogda smozhesh.
+thirst_low|supportive|worried|Low thirst podkradetsya. Fix eto.
+radiation|roasty|fear|Radiation. Glow-in-the-dark - eto ne flex.
+radiation|roasty|disgusted|Ty zharishsya v rads. Vali. Immediately.
+radiation|roasty|worried|Radiation spike. Suit up ili vali.
+radiation|roasty|evil|Rads rastut. Tak lyudi stanovyatsya lore.
+radiation|supportive|fear|Radiation detected. Vali iz zone seychas.
+radiation|supportive|worried|Ty beresh rads. Naydi cleaner ground.
+radiation|supportive|neutral|Radiation active. Priority - gear ili escape.
+radiation|supportive|fear|Uydi ot radiation, poka ne stacks.
+cold|roasty|pout|Ty merznesh. Naydi heat, poka ne stal popsicle.
+cold|roasty|worried|Cold status. Campfire energy, please.
+cold|roasty|laugh|Uzhe drozhish? Tough guy.
+cold|roasty|smug|Temperature upala. Fashion proigral survival.
+cold|supportive|worried|Tebe holodno. Sogreysya skoro.
+cold|supportive|neutral|Cold warning. Ishchi heat ili teplee gear.
+cold|supportive|smile|Naydi fire ili shelter, poka ne khuzhe.
+cold|supportive|worried|Derzhi teplo. Cold stacks budut bolno.
+hot|roasty|disgusted|Overheating. Touch grass... zhelatelno mokryy grass.
+hot|roasty|pout|Slishkom hot. Cool down, poka ne rasplavil braincell.
+hot|roasty|laugh|Heatstroke loading. Smart.
+hot|roasty|smug|Ty zharishsya. Ne v cute smysle.
+hot|supportive|worried|Ty overheating. Cool off skoro.
+hot|supportive|neutral|Heat vysokiy. Naydi shade ili water.
+hot|supportive|smile|Cool down, prezhde chem long run.
+hot|supportive|worried|Hot status. Manage temperature seychas.
+drowning|roasty|fear|Ty drowning. Na poverhnost. Seychas.
+drowning|roasty|surprised|Underwater panic hour?
+drowning|roasty|laugh|Vozduh free. Idi vozmi.
+drowning|roasty|worried|Drowning. Plyvi vverh, poka ne stalo stupid.
+drowning|supportive|fear|Ty drowning! Na poverhnost!
+drowning|supportive|worried|Air nizkiy. Break water seychas.
+drowning|supportive|fear|Plyvi vverh. Ne fight tam vnizu.
+drowning|supportive|worried|Drowning status. Priority - oxygen.
+staff_nearby|roasty|surprised|Staff nearby. Behave. Ili hotya by pritvoryaysya.
+staff_nearby|roasty|worried|Mod energy detected. Mozhet, spryach crimes.
+staff_nearby|roasty|smug|Staff v range. Tvoy villain arc otlozhen.
+staff_nearby|roasty|neutral|Admin proximity. Play nice.
+staff_nearby|supportive|worried|Staff nearby. Bud clean i ostorozhen.
+staff_nearby|supportive|neutral|Staff member ryadom. Derzhi normalno.
+staff_nearby|supportive|smile|Staff v zone. Bez funny business.
+staff_nearby|supportive|worried|Mod nearby. Focus na survival, ne na flex.
+enemy_nearby|roasty|evil|Hostile nearby. Ulybnis dlya crosshair.
+enemy_nearby|roasty|smug|Kto-to blizko. Ne popadis looking AFK.
+enemy_nearby|roasty|surprised|Enemy v range. Ushi na cheku.
+enemy_nearby|roasty|laugh|Company. Nadeyus, ne umnee tebya.
+enemy_nearby|roasty|worried|Threat nearby. Check corners.
+enemy_nearby|supportive|worried|Enemy nearby. Zamedlis i slushay.
+enemy_nearby|supportive|fear|Hostile blizko. Gotov aim i cover.
+enemy_nearby|supportive|neutral|Kto-to v tvoem bubble. Stay alert.
+enemy_nearby|supportive|worried|Nearby threat. Ne sprint pryamo v nih.
+enemy_nearby|supportive|smile|Derzhi composure. Ty mozhesh vyigrat etot fight.
+party_join|roasty|smug|Ty v party. Postaraysya ih ne tyanut vniz.
+party_join|roasty|laugh|Teammates acquired. Ih oshibka.
+party_join|roasty|pout|Party up. Share loot kak adult.
+party_join|roasty|evil|Squad formed. Haos s friends.
+party_join|supportive|happy|Party joined. Derzhites vmeste - callouts pomogayut.
+party_join|supportive|smile|Vy v team. Sledite za spinyami drug druga.
+party_join|supportive|neutral|Teper v party. Share info i stay linked.
+party_join|supportive|happy|Nice. Team play byot ego.
+party_leave|roasty|pout|Party left. Solo queue dignity restored.
+party_leave|roasty|smug|Snova alone. Kak raz kak lyubit tvoe decision-making.
+party_leave|roasty|neutral|Out of party. Ne umri ot lonely.
+party_leave|supportive|neutral|Ty ushel iz party. Stay aware solo.
+party_leave|supportive|worried|Teper solo. Play safer angles.
+party_leave|supportive|smile|Party ended. Ty spravishsya i alone.
+reviving|roasty|smug|Glyan na tebya - useful hotya by raz.
+reviving|roasty|smile|Reviving kogo-to. Ne popadis beam mid-animation.
+reviving|roasty|pout|Hero moment. Snachala cover, potom revive.
+reviving|roasty|laugh|Spasaesh ih? Bold charity.
+reviving|supportive|smile|Nice revive. Sledi za okrestnostyami, poka delaesh.
+reviving|supportive|worried|Reviving. Sledi flanks.
+reviving|supportive|happy|Khoroshiy teammate play. Finish revive safe.
+reviving|supportive|neutral|Derzhi revive i bud gotov cancel, esli push.
+boss_spawn|roasty|evil|Boss event up. Idi bud brave. Ili loot potom. Mne vse ravno.
+boss_spawn|roasty|surprised|Big NPC online. Ne feedi ego za free.
+boss_spawn|roasty|smug|Event boss spotted. Postaraysya ne byt highlight reel.
+boss_spawn|roasty|laugh|World event. Idealnoe vremya dlya plohih resheniy.
+boss_spawn|roasty|neutral|Boss presence detected. Gear check.
+boss_spawn|supportive|surprised|Boss event active. Prepare, prezhde chem engage.
+boss_spawn|supportive|worried|Boss nearby ili up. Sledi za zonoy ostrozhno.
+boss_spawn|supportive|neutral|World boss event. Coordinate, esli mozhesh.
+boss_spawn|supportive|smile|Event spawn. Opportunity, esli ready.
+boss_spawn|supportive|worried|Big threat event. Ne rush blind.
+timed_crate|roasty|smug|Timed crate. Race za loot - ili race za death. Tvoy call.
+timed_crate|roasty|evil|Crate timer up. Campers incoming.
+timed_crate|roasty|laugh|Timed crate. Idealnyy bait dlya greedy players.
+timed_crate|roasty|surprised|Crate event. Ne popadis third-party mid-loot.
+timed_crate|roasty|pout|Idi za shiny boxes. Poprobuy vyzhit audience.
+timed_crate|supportive|happy|Timed crate up. Approach ostrozhno.
+timed_crate|supportive|worried|Crate event active. Snachala check campers.
+timed_crate|supportive|neutral|Timed crate spotted. Plan approach.
+timed_crate|supportive|smile|Khoroshiy loot opportunity. Stay aware, poka openish.
+timed_crate|supportive|worried|Crate = contest. Ne tunnel vision.
+greeting|roasty|smug|April na svyazi. Segodnya pomenishe tragic, please.
+greeting|roasty|evil|Commentator online. Kormi menya oshibkami.
+greeting|supportive|happy|April online. Ya za tebya.
+greeting|supportive|smile|Ready. Zovi, kogda stanet spicy.
+death|roasty|laugh|Snova dead. Collectible achievement unlocked.
+death|supportive|sad|Down hard. Reset i vernis umnee.
+respawn|roasty|smug|Respawned. Davay pritvorimsya, chto eto bylo intentional.
+respawn|supportive|happy|Fresh life. Start clean.
+downed|roasty|laugh|Snova horizontal. Iconic.
+downed|supportive|worried|Downed. Crawl umno.
+safe_enter|roasty|smug|Safe zone. Dazhe chaosu nuzhen break.
+safe_leave|supportive|worried|Uezzhaesh iz safety. Eyes open.

@@ -160,13 +160,18 @@ end
 
 local function choose_line(event_name)
     local character = active_character()
-    local event_pool = character.dialogue and character.dialogue[event_name]
+    local dialogue = data.dialogue_for(character)
+    local event_pool = dialogue and dialogue[event_name]
     if not event_pool then return nil end
     local tone = personality_name()
     local pool = event_pool[tone] or event_pool.roasty or event_pool.supportive
     if type(pool) ~= "table" or #pool == 0 then return nil end
 
-    local repeat_key = character.id .. ":" .. event_name .. ":" .. tone
+    local lang = "en"
+    pcall(function()
+        if April.require("ui.i18n").is_ru() then lang = "ru" end
+    end)
+    local repeat_key = character.id .. ":" .. lang .. ":" .. event_name .. ":" .. tone
     local index = math.random(1, #pool)
     if #pool > 1 and index == last_line[repeat_key] then
         index = (index % #pool) + 1
