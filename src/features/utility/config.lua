@@ -5,52 +5,69 @@ local notify = April.require("core.notify")
 
 local M = {}
 
-local function active_slot()
-    local slot = settings.num("april_cfg_slot", 1)
-    if slot < store.SLOT_MIN then slot = store.SLOT_MIN end
-    if slot > store.SLOT_MAX then slot = store.SLOT_MAX end
-    return slot
-end
-
 local function profile_label()
     return settings.str("april_cfg_profile_name", "Default")
+end
+
+local function selected_stem()
+    return store.active_stem()
 end
 
 function M.get_config_path(name)
     return store.get_config_path(name)
 end
 
-function M.save_slot(slot)
-    slot = slot or active_slot()
-    if store.save_slot(slot) then
+function M.save_config(name)
+    store.migrate_legacy()
+    local ok, stem, path = store.save_config(name or profile_label())
+    if ok then
         store.save_meta()
-        notify.success(string.format('Saved "%s" -> Slot %d', profile_label(), slot), 3500)
+        local file = path and path:match("([^\\]+)$") or (tostring(stem) .. ".cfg")
+        local folder = (path and path:find("April_configs", 1, true)) and "April_configs\\" or ""
+        notify.success(string.format('Saved "%s" -> %s%s', profile_label(), folder, file), 3500)
         return true
     end
-    notify.error("Failed to save config", 3500)
+    notify.error("Failed to save config (could not write file)", 4000)
     return false
 end
 
-function M.load_slot(slot)
-    slot = slot or active_slot()
-    if store.load_slot(slot) then
+function M.load_config(name)
+    store.migrate_legacy()
+    local stem = name or selected_stem()
+    local ok = store.load_config(stem)
+    if ok then
         store.save_meta()
-        notify.success(string.format('Loaded "%s" from Slot %d', profile_label(), slot), 3500)
+        notify.success(string.format('Loaded "%s"', store.display_name(stem)), 3500)
         return true
     end
-    notify.error(string.format("Slot %d is empty or unreadable", slot), 3500)
+    notify.error(string.format('Config "%s" not found', store.display_name(stem)), 3500)
     return false
 end
 
-function M.delete_slot(slot)
-    slot = slot or active_slot()
-    if store.delete_slot(slot) then
+function M.delete_config(name)
+    store.migrate_legacy()
+    local stem = name or selected_stem()
+    local ok = store.delete_config(stem)
+    if ok then
         store.save_meta()
-        notify.warning(string.format("Deleted Slot %d", slot), 3500)
+        notify.warning(string.format('Deleted "%s"', store.display_name(stem)), 3500)
         return true
     end
-    notify.error(string.format("Could not delete Slot %d", slot), 3500)
+    notify.error(string.format('Could not delete "%s"', store.display_name(stem)), 3500)
     return false
+end
+
+-- Back-compat for anything still calling slot helpers.
+function M.save_slot(_slot)
+    return M.save_config(profile_label())
+end
+
+function M.load_slot(_slot)
+    return M.load_config(selected_stem())
+end
+
+function M.delete_slot(_slot)
+    return M.delete_config(selected_stem())
 end
 
 function M.try_autoload()
@@ -61,29 +78,34 @@ function M.register_menu()
     local G = menu_util.G
     local T, _ = menu_util.group(G.CONFIG)
 
+    store.migrate_legacy()
+    store.load_meta()
+
     menu.add_checkbox(T, G.CONFIG, "april_ui_startup_intro", "Startup Animation", true)
-    menu_util.input(T, G.CONFIG, "april_cfg_profile_name", "Profile Name", "Default")
+    menu_util.input(T, G.CONFIG, "april_cfg_profile_name", "Config Name", "Default")
 
-    menu.add_slider_int(T, G.CONFIG, "april_cfg_slot", "Active Slot (1-5)", store.SLOT_MIN, store.SLOT_MAX, 1)
+    local labels = store.list_config_labels()
+    if #labels == 0 then labels = { "(no configs)" } end
+    menu.add_combo(T, G.CONFIG, "april_cfg_selected", "Saved Configs", labels, 0)
 
-    menu_util.button(T, G.CONFIG, "april_cfg_save", "Save to Active Slot", function()
-        M.save_slot(active_slot())
+    menu_util.button(T, G.CONFIG, "april_cfg_save", "Save Config", function()
+        M.save_config(profile_label())
     end)
-    menu_util.button(T, G.CONFIG, "april_cfg_load", "Load Active Slot", function()
-        M.load_slot(active_slot())
+    menu_util.button(T, G.CONFIG, "april_cfg_load", "Load Config", function()
+        M.load_config(selected_stem())
     end)
-    menu_util.button(T, G.CONFIG, "april_cfg_delete", "Delete Active Slot", function()
-        M.delete_slot(active_slot())
+    menu_util.button(T, G.CONFIG, "april_cfg_delete", "Delete Config", function()
+        M.delete_config(selected_stem())
+    end)
+    menu_util.button(T, G.CONFIG, "april_cfg_refresh", "Refresh List", function()
+        store.migrate_legacy()
+        store.refresh_index()
+        notify.info("Config list refreshed", 2000)
     end)
 
     menu_util.gap(T, G.CONFIG)
     menu.add_checkbox(T, G.CONFIG, "april_cfg_autoload", "Autoload on Start", false)
-    menu_util.input(T, G.CONFIG, "april_cfg_autoload_profile", "Autoload Profile Name", "")
-    menu.add_slider_int(
-        T, G.CONFIG, "april_cfg_autoload_slot", "Autoload Slot (fallback)",
-        store.SLOT_MIN, store.SLOT_MAX, 1,
-        menu_util.parent("april_cfg_autoload")
-    )
+    menu_util.input(T, G.CONFIG, "april_cfg_autoload_config", "Autoload Config Name", "")
 
     menu_util.gap(T, G.CONFIG)
     menu.add_slider_int(T, G.CONFIG, "april_esp_text_size", "ESP Text Size", 8, 24, 13)
@@ -92,15 +114,26 @@ function M.register_menu()
         notify.info("Reloading game modules...", 2500)
     end)
 
+    settings.on_change("april_cfg_selected", function()
+        local _, stems = store.list_config_labels()
+        local idx = math.floor(tonumber(settings.num("april_cfg_selected", 0)) or 0)
+        local stem = stems[idx + 1]
+        if stem and menu and menu.set then
+            menu.set("april_cfg_profile_name", store.display_name(stem))
+        end
+        store.save_meta()
+    end)
     settings.on_change("april_cfg_autoload", function()
         store.save_meta()
     end)
-    settings.on_change("april_cfg_autoload_slot", function() store.save_meta() end)
-    settings.on_change("april_cfg_autoload_profile", function() store.save_meta() end)
-    settings.on_change("april_cfg_slot", function() store.save_meta() end)
-    settings.on_change("april_cfg_profile_name", function() store.save_meta() end)
+    settings.on_change("april_cfg_autoload_config", function()
+        store.save_meta()
+    end)
+    settings.on_change("april_cfg_profile_name", function()
+        store.save_meta()
+    end)
 
-    menu_util.bind_master("april_cfg_autoload", { "april_cfg_autoload_profile", "april_cfg_autoload_slot" })
+    menu_util.bind_master("april_cfg_autoload", { "april_cfg_autoload_config" })
 end
 
 function M.update(_dt) end

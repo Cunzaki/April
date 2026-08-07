@@ -719,20 +719,30 @@ local function build_config()
         },
     }
 
+    local cfg_labels = { "(no configs)" }
+    pcall(function()
+        local store = April.require("core.config_store")
+        store.migrate_legacy()
+        local labels = store.list_config_labels()
+        if labels and #labels > 0 then
+            cfg_labels = labels
+        end
+    end)
+
     local config_group = {
         title = "Config",
         items = {
-            label("Profiles", true),
-            input("april_cfg_profile_name", "Profile Name", "Default"),
-            sl("april_cfg_slot", "Active Slot (1-5)", 1, 5, 1),
-            btn("april_cfg_save", "Save to Active Slot"),
-            btn("april_cfg_load", "Load Active Slot"),
-            btn("april_cfg_delete", "Delete Active Slot"),
+            label("Configs", true),
+            input("april_cfg_profile_name", "Config Name", "Default"),
+            combo("april_cfg_selected", "Saved Configs", cfg_labels, 0),
+            btn("april_cfg_save", "Save Config"),
+            btn("april_cfg_load", "Load Config"),
+            btn("april_cfg_delete", "Delete Config"),
+            btn("april_cfg_refresh", "Refresh List"),
             sep(),
             label("Autoload", true),
             cb("april_cfg_autoload", "Autoload on Start", false),
-            input("april_cfg_autoload_profile", "Autoload Profile Name", "", "april_cfg_autoload"),
-            sl("april_cfg_autoload_slot", "Autoload Slot", 1, 5, 1, false, "april_cfg_autoload"),
+            input("april_cfg_autoload_config", "Autoload Config Name", "", "april_cfg_autoload"),
             sep(),
             label("Extras", true),
             sl("april_esp_text_size", "ESP Text Size", 8, 24, 13),
