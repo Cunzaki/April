@@ -11,6 +11,7 @@ local math_util = April.require("core.math_util")
 local cache = April.require("core.cache")
 local ep = April.require("core.entity_props")
 local rbx_offsets = April.require("core.rbx_offsets")
+local player_state = April.require("game.player_state")
 
 local M = {}
 
@@ -20,15 +21,25 @@ local ID_FADE_OUT = P .. "_fade_out"
 local ID_SIZE = P .. "_size"
 local ID_COLOR = P .. "_color"
 local ID_MAX_DIST = P .. "_max_dist"
+local ID_UNDER = P .. "_under"
+local ID_SCREEN_Y = P .. "_screen_y"
+local ID_CHIP = P .. "_chip"
 
--- Scan throttle (ms). Indicator fade still runs every frame.
+-- Same multicombo as Player ESP → ESP Filters.
+local PLAYER_FILTERS = "april_player_esp_filters"
+local F_TEAM, F_SAFEZONE, F_SKIP_DOWNED = 1, 2, 3
+local PLAYER_RANGE = "april_player_range"
+
 local SCAN_MS = 70
 local HRP_CACHE_MS = 450
 local DEFAULT_MAX_DIST = 450
+local DEFAULT_UNDER = 2.8
+local DEFAULT_SCREEN_Y = 2
+local DEFAULT_SIZE = 10
 
 local indicators = {}
 local sound_prev = {}
-local player_cache = {} -- [uid] = { hrp, sounds, t, px, py, pz }
+local player_cache = {}
 local last_scan_ms = 0
 local offsets_ready = false
 local cached_off = nil
@@ -100,6 +111,28 @@ local function player_alive(p)
     return true
 end
 
+-- Honor Player ESP → ESP Filters (+ Player Range as a visual gate).
+local function passes_player_esp_filters(p)
+    if settings.multi(PLAYER_FILTERS, F_TEAM, true) then
+        if not player_state.passes_team_check(p) then
+            return false
+        end
+    end
+
+    local need_snap = settings.multi(PLAYER_FILTERS, F_SAFEZONE, false)
+        or settings.multi(PLAYER_FILTERS, F_SKIP_DOWNED, false)
+    if need_snap then
+        local snap = player_state.esp_state(p)
+        if settings.multi(PLAYER_FILTERS, F_SKIP_DOWNED, false) and snap and snap.downed then
+            return false
+        end
+        if settings.multi(PLAYER_FILTERS, F_SAFEZONE, false) and snap and snap.safezone then
+            return false
+        end
+    end
+    return true
+end
+
 local function player_key(p)
     local uid = ep.user_id(p)
     if uid and uid ~= 0 then return uid end
@@ -111,16 +144,22 @@ end
 local function pretty_name(raw)
     raw = tostring(raw or "Sound")
     if raw == "" then return "Sound" end
-    -- Strip common Roblox noise.
     raw = raw:gsub("^rbxassetid://%d+", "Sound")
     raw = raw:gsub("%.ogg$", ""):gsub("%.mp3$", ""):gsub("%.wav$", "")
     raw = raw:gsub("_", " ")
-    -- Collapse whitespace.
     raw = raw:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
     if #raw > 22 then
         raw = raw:sub(1, 20) .. ".."
     end
     return raw
+end
+
+local function under_studs()
+    return math.max(0, settings.num(ID_UNDER, DEFAULT_UNDER))
+end
+
+local function anchor_world(px, py, pz)
+    return px, py - under_studs(), pz
 end
 
 local function refresh_player_sounds(p, now)
@@ -200,6 +239,7 @@ local function read_sound_state(child, addr, off)
 end
 
 local function bump_indicator(addr, name, px, py, pz)
+    local ax, ay, az = anchor_world(px, py, pz)
     local ind = indicators[addr]
     if not ind then
         indicators[addr] = {
@@ -207,12 +247,12 @@ local function bump_indicator(addr, name, px, py, pz)
             alpha = 0,
             state = "fade_in",
             timer = 0,
-            x = px, y = py + 2.2, z = pz,
-            stack = 0,
+            x = ax, y = ay, z = az,
+            seen = true,
         }
         return
     end
-    ind.x, ind.y, ind.z = px, py + 2.2, pz
+    ind.x, ind.y, ind.z = ax, ay, az
     ind.name = name or ind.name
     ind.seen = true
     if ind.state == "fade_out" then
@@ -221,15 +261,16 @@ local function bump_indicator(addr, name, px, py, pz)
     end
 end
 
-local function scan_sounds(now, dt_unused)
+local function scan_sounds(now)
     local cam_x, cam_y, cam_z = camera_pos()
     if not cam_x then return end
 
     local off = ensure_offsets()
     if not ensure_mem() or not off.is_playing then return end
 
-    local max_dist = math.max(0, settings.num(ID_MAX_DIST, DEFAULT_MAX_DIST))
-    if max_dist <= 0 then max_dist = DEFAULT_MAX_DIST end
+    local sound_range = math.max(50, settings.num(ID_MAX_DIST, DEFAULT_MAX_DIST))
+    local player_range = math.max(50, settings.num(PLAYER_RANGE, 500))
+    local max_dist = math.min(sound_range, player_range)
 
     for _, prev in pairs(sound_prev) do
         prev.seen = false
@@ -243,7 +284,7 @@ local function scan_sounds(now, dt_unused)
 
     for i = 1, #players do
         local p = players[i]
-        if p and p.IsLocal ~= true and player_alive(p) then
+        if p and p.IsLocal ~= true and player_alive(p) and passes_player_esp_filters(p) then
             local px0, py0, pz0 = esp_util.vec3_pos(p.Position)
             if px0 then
                 local dist = math_util.distance3(px0 - cam_x, py0 - cam_y, pz0 - cam_z)
@@ -260,7 +301,6 @@ local function scan_sounds(now, dt_unused)
                             local s = sounds[si]
                             local addr = s.addr
                             local child = s.child
-                            -- Prefer live props; only IsPlaying requires memory.
                             local vol, spd, looped, rolloff = read_sound_state(child, addr, off)
                             local is_playing = mem_bool(addr, off.is_playing)
                             local is_audible = rolloff <= 0 or dist <= rolloff
@@ -299,8 +339,6 @@ local function scan_sounds(now, dt_unused)
 
                                 if started and not stopped and is_audible then
                                     bump_indicator(addr, s.name, px, py, pz)
-                                    local ind = indicators[addr]
-                                    if ind then ind.seen = true end
                                 elseif stopped then
                                     local ind = indicators[addr]
                                     if ind and ind.state ~= "fade_out" then
@@ -310,7 +348,8 @@ local function scan_sounds(now, dt_unused)
                                 else
                                     local ind = indicators[addr]
                                     if ind and ind.state ~= "fade_out" and is_audible then
-                                        ind.x, ind.y, ind.z = px, py + 2.2, pz
+                                        local ax, ay, az = anchor_world(px, py, pz)
+                                        ind.x, ind.y, ind.z = ax, ay, az
                                         ind.seen = true
                                     end
                                 end
@@ -370,13 +409,16 @@ function M.register_menu()
 
     menu_util.section(T, G.VISUALS, "Sound ESP")
     menu.add_checkbox(T, G.VISUALS, P, "Sound ESP", false)
-    menu.add_slider_float(T, G.VISUALS, ID_FADE_IN, "Fade In", 0.05, 2.0, 0.25, "%.2f", root)
-    menu.add_slider_float(T, G.VISUALS, ID_FADE_OUT, "Fade Out", 0.5, 15.0, 5.0, "%.2f", root)
-    menu.add_slider_int(T, G.VISUALS, ID_SIZE, "Text Size", 10, 24, 13, root)
-    menu.add_slider_int(T, G.VISUALS, ID_MAX_DIST, "Max Distance", 50, 2000, DEFAULT_MAX_DIST, root)
-    menu.add_colorpicker(T, G.VISUALS, ID_COLOR, "Sound Color", { 0.75, 0.88, 1.0, 0.95 }, root)
+    menu.add_slider_float(T, G.VISUALS, ID_FADE_IN, "Sound Fade In", 0.05, 2.0, 0.25, "%.2f", root)
+    menu.add_slider_float(T, G.VISUALS, ID_FADE_OUT, "Sound Fade Out", 0.5, 15.0, 5.0, "%.2f", root)
+    menu.add_slider_int(T, G.VISUALS, ID_SIZE, "Sound Text Size", 8, 20, DEFAULT_SIZE, root)
+    menu.add_slider_float(T, G.VISUALS, ID_UNDER, "Under Offset", 0, 6, DEFAULT_UNDER, "%.1f", root)
+    menu.add_slider_int(T, G.VISUALS, ID_SCREEN_Y, "Screen Offset", -20, 40, DEFAULT_SCREEN_Y, root)
+    menu.add_slider_int(T, G.VISUALS, ID_MAX_DIST, "Sound Range", 50, 2000, DEFAULT_MAX_DIST, root)
+    menu.add_checkbox(T, G.VISUALS, ID_CHIP, "Sound Chip", false, root)
+    menu.add_colorpicker(T, G.VISUALS, ID_COLOR, "Sound Color", { 0.78, 0.9, 1.0, 0.92 }, root)
     menu_util.bind_children(P, {
-        ID_FADE_IN, ID_FADE_OUT, ID_SIZE, ID_MAX_DIST, ID_COLOR,
+        ID_FADE_IN, ID_FADE_OUT, ID_SIZE, ID_UNDER, ID_SCREEN_Y, ID_MAX_DIST, ID_CHIP, ID_COLOR,
     })
 end
 
@@ -394,9 +436,8 @@ function M.update(dt)
     local now = tick_ms()
     if (now - last_scan_ms) >= SCAN_MS then
         last_scan_ms = now
-        scan_sounds(now, dt)
+        scan_sounds(now)
     else
-        -- Keep positions loosely updated for active indicators without scanning.
         for _, ind in pairs(indicators) do
             ind.seen = ind.state ~= "fade_out"
         end
@@ -405,7 +446,7 @@ function M.update(dt)
     tick_indicators(dt)
 end
 
-local function draw_label(sx, sy, text, col, size)
+local function draw_label(sx, sy, text, col, size, chip)
     local size_fn = draw.get_text_size or draw.GetTextSize
     local tw, th = 0, size
     if size_fn then
@@ -416,56 +457,46 @@ local function draw_label(sx, sy, text, col, size)
         end
     end
 
-    local pad_x, pad_y = 5, 2
-    local bw = tw + pad_x * 2
-    local bh = th + pad_y * 2
-    local bx = sx - bw * 0.5
-    local by = sy - bh * 0.5
-
     local a = col[4] or 1
-    if draw.rect_filled then
-        draw.rect_filled(bx, by, bw, bh, { 0.04, 0.05, 0.07, a * 0.55 }, 4)
-        draw.rect_filled(bx, by, 2, bh, { col[1], col[2], col[3], a * 0.9 }, 0)
+    if chip and draw.rect_filled then
+        local pad_x, pad_y = 4, 1
+        local bw = tw + pad_x * 2
+        local bh = th + pad_y * 2
+        local bx = sx - bw * 0.5
+        local by = sy
+        draw.rect_filled(bx, by, bw, bh, { 0.04, 0.05, 0.07, a * 0.45 }, 3)
+        draw_util.text(bx + pad_x + 1, by + pad_y + 1, text, { 0, 0, 0, a * 0.5 }, size)
+        draw_util.text(bx + pad_x, by + pad_y, text, col, size)
+        return
     end
 
-    local tx = bx + pad_x
-    local ty = by + pad_y
-    draw_util.text(tx + 1, ty + 1, text, { 0, 0, 0, a * 0.55 }, size)
-    draw_util.text(tx, ty, text, col, size)
-
-    -- Tiny tip under the chip pointing at the source.
-    if draw.poly_filled then
-        local mid = sx
-        local tip_y = by + bh
-        pcall(draw.poly_filled, {
-            { mid - 4, tip_y },
-            { mid + 4, tip_y },
-            { mid, tip_y + 5 },
-        }, { 0.04, 0.05, 0.07, a * 0.5 })
-    end
+    local tx = sx - tw * 0.5
+    draw_util.text(tx + 1, sy + 1, text, { 0, 0, 0, a * 0.55 }, size)
+    draw_util.text(tx, sy, text, col, size)
 end
 
 function M.draw()
     if not settings.enabled(P) then return end
     if not draw then return end
 
-    local size = math.floor(settings.num(ID_SIZE, 13))
-    local base = settings.color(ID_COLOR, { 0.75, 0.88, 1.0, 0.95 })
-    local br, bg, bb, ba = base[1] or 0.75, base[2] or 0.88, base[3] or 1, base[4] or 0.95
+    local size = math.floor(settings.num(ID_SIZE, DEFAULT_SIZE))
+    local screen_y = math.floor(settings.num(ID_SCREEN_Y, DEFAULT_SCREEN_Y))
+    local chip = settings.bool(ID_CHIP, false)
+    local base = settings.color(ID_COLOR, { 0.78, 0.9, 1.0, 0.92 })
+    local br, bg, bb, ba = base[1] or 0.78, base[2] or 0.9, base[3] or 1, base[4] or 0.92
 
-    -- Stack labels that share nearly the same screen point.
     local drawn = {}
     for _, ind in pairs(indicators) do
         local a = (ind.alpha or 0) * ba
         if a > 0.02 and ind.x then
             local sx, sy, vis = esp_util.w2s(ind.x, ind.y, ind.z)
-            if vis and esp_util.screen_point_ok(sx, sy, 48) then
-                local slot = 0
-                local key = math.floor(sx / 8) .. ":" .. math.floor(sy / 8)
-                slot = drawn[key] or 0
+            if vis and esp_util.screen_point_ok(sx, sy, 64) then
+                local key = math.floor(sx / 10) .. ":" .. math.floor(sy / 10)
+                local slot = drawn[key] or 0
                 drawn[key] = slot + 1
-                local y = sy - slot * (size + 8)
-                draw_label(sx, y, ind.name or "Sound", { br, bg, bb, a }, size)
+                -- Below the player; stack further down when multiple sounds.
+                local y = sy + screen_y + slot * (size + 2)
+                draw_label(sx, y, ind.name or "Sound", { br, bg, bb, a }, size, chip)
             end
         end
     end

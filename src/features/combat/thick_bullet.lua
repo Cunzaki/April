@@ -258,30 +258,37 @@ function M.restore_player(player)
     end
 end
 
--- ESP must never touch Head.Size. GetBounds includes the inflated head and was
--- previously "fixed" by restore→GetBounds→re-inflate, which thrashed memory and
--- tanked FPS. Use a cheap natural-height W2S box instead while Override is on.
+-- ESP must never write Head.Size (restore/re-inflate thrash killed FPS).
+-- Use native GetBounds always; when Override is on, lightly shrink the top so
+-- the inflated head does not dominate the box. Fall back to W2S if needed.
 function M.esp_bounds(player)
-    if not M.is_active() then
-        local fn = player and (player.GetBounds or player.get_bounds)
-        if not fn then return nil end
+    local fn = player and (player.GetBounds or player.get_bounds)
+    if fn then
         local ok, bounds = pcall(fn, player)
-        if ok then return bounds end
-        return nil
+        if ok and esp_util.bounds_usable(bounds) then
+            if M.is_active() then
+                local mult = thickness()
+                local shrink = math.min((bounds.h or 0) * 0.10 * math.max(0, mult - 1), (bounds.h or 0) * 0.22)
+                if shrink > 0.5 then
+                    return {
+                        x = bounds.x,
+                        y = (bounds.y or 0) + shrink,
+                        w = bounds.w,
+                        h = math.max(2, (bounds.h or 0) - shrink),
+                        valid = bounds.valid,
+                    }
+                end
+            end
+            return bounds
+        end
     end
 
+    -- Fallback only when GetBounds fails (keeps Player ESP alive).
     local hx, hy, hz = esp_util.vec3_pos(
         player.HeadPosition or player.head_position
             or player.Position or player.position
     )
-    if not hx then
-        local fn = player and (player.GetBounds or player.get_bounds)
-        if not fn then return nil end
-        local ok, bounds = pcall(fn, player)
-        if ok then return bounds end
-        return nil
-    end
-
+    if not hx then return nil end
     local px, py, pz = esp_util.vec3_pos(player.Position or player.position)
     local opts = {
         body_h = 5.0,
@@ -290,10 +297,8 @@ function M.esp_bounds(player)
         width_mul = 0.52,
     }
     if px then
-        -- Feet ≈ root minus lower body; keeps box stable while head Size is huge.
         opts.fx, opts.fy, opts.fz = px, py - 3.05, pz
     end
-
     return esp_util.head_body_screen_bounds(hx, hy, hz, opts)
 end
 

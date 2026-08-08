@@ -347,12 +347,16 @@ local function build_visuals()
         items = {
             cb("april_sound_esp", "Sound ESP", false),
             label("original by @n0v313w", true, "april_sound_esp"),
+            label("Uses Player ESP filters + range.", true, "april_sound_esp"),
             sep("april_sound_esp"),
-            sl("april_sound_esp_fade_in", "Fade In", 0.05, 2, 0.25, true, "april_sound_esp"),
-            sl("april_sound_esp_fade_out", "Fade Out", 0.5, 15, 5, true, "april_sound_esp"),
-            sl("april_sound_esp_size", "Text Size", 10, 24, 13, false, "april_sound_esp"),
-            sl("april_sound_esp_max_dist", "Max Distance", 50, 2000, 450, false, "april_sound_esp"),
-            color("april_sound_esp_color", "Sound Color", { 0.75, 0.88, 1.0, 0.95 }, "april_sound_esp"),
+            sl("april_sound_esp_fade_in", "Sound Fade In", 0.05, 2, 0.25, true, "april_sound_esp"),
+            sl("april_sound_esp_fade_out", "Sound Fade Out", 0.5, 15, 5, true, "april_sound_esp"),
+            sl("april_sound_esp_size", "Sound Text Size", 8, 20, 10, false, "april_sound_esp"),
+            sl("april_sound_esp_under", "Under Offset", 0, 6, 2.8, true, "april_sound_esp"),
+            sl("april_sound_esp_screen_y", "Screen Offset", -20, 40, 2, false, "april_sound_esp"),
+            sl("april_sound_esp_max_dist", "Sound Range", 50, 2000, 450, false, "april_sound_esp"),
+            cb("april_sound_esp_chip", "Sound Chip", false, nil, "april_sound_esp"),
+            color("april_sound_esp_color", "Sound Color", { 0.78, 0.9, 1.0, 0.92 }, "april_sound_esp"),
         },
     }
 

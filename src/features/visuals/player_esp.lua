@@ -197,10 +197,13 @@ local function movement_label(p)
 end
 
 local function native_bounds(player)
-    -- Hitbox Override inflates Head.Size; use the thick_bullet helper so boxes
-    -- stay on natural proportions while the hitbox remains expanded.
+    -- Hitbox Override inflates Head.Size; thick_bullet.esp_bounds adjusts the
+    -- box without Size thrash. Always fall back to native GetBounds.
     if thick_bullet and thick_bullet.esp_bounds then
-        return thick_bullet.esp_bounds(player)
+        local ok, bounds = pcall(thick_bullet.esp_bounds, player)
+        if ok and esp_util.bounds_usable(bounds) then
+            return bounds
+        end
     end
     local fn = player and (player.GetBounds or player.get_bounds)
     if not fn then return nil end
