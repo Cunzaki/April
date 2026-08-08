@@ -1,5 +1,5 @@
 April = {
-    version = "4.1.82",
+    version = "4.1.83",
     debug = false,
     crash_logging = false,
     crash_trace = false,
@@ -5086,9 +5086,20 @@ local booted = false
 local roblox_version = nil
 local last_fps_ms = 0
 local fps_applied = false
+local fps_notified = false
 local fps_disabled = false
 local fps_ready_at = 0
 local fps_fail_streak = 0
+local function notify_fps_unlocked(fps)
+    if fps_notified then return end
+    fps_notified = true
+    pcall(function()
+        local notify = April.require("core.notify")
+        if notify and notify.success then
+            notify.success(string.format("FPS unlocked (%d)", tonumber(fps) or TARGET_FPS), 3500)
+        end
+    end)
+end
 local function tick_ms()
     local fn = utility and (utility.get_tick_count or utility.GetTickCount)
     if type(fn) ~= "function" then return 0 end
@@ -5261,6 +5272,7 @@ function M.apply_max_fps(target)
         fps_applied = true
         fps_fail_streak = 0
         last_fps_ms = tick_ms()
+        notify_fps_unlocked(fps)
         return true
     end
     local ok, result = pcall(write, addr, kind, fps)
@@ -5270,6 +5282,7 @@ function M.apply_max_fps(target)
             fps_applied = true
             fps_fail_streak = 0
             last_fps_ms = tick_ms()
+            notify_fps_unlocked(fps)
             return true
         end
         pcall(write, addr, kind, cur)
