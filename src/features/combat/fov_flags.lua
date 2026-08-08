@@ -17,6 +17,9 @@ local P_DIST = "april_fov_flags_distance"
 
 local FLAG_GAP = 3
 local FLAG_SIZE = 12
+local VIS_CACHE_MS = 150
+local vis_cache = { t = 0, key = nil, visible = false }
+local i18n_mod = nil
 
 local function aimbot_on()
     return settings.enabled("april_aimbot")
@@ -91,14 +94,35 @@ local function target_distance(target)
     return math.sqrt(dx * dx + dy * dy + dz * dz)
 end
 
+local function tick_ms()
+    local fn = utility and (utility.get_tick_count or utility.GetTickCount)
+    if type(fn) ~= "function" then return 0 end
+    local ok, v = pcall(fn)
+    return (ok and tonumber(v)) or 0
+end
+
+local function target_cache_key(target)
+    if not target then return nil end
+    local uid = ep.user_id(target)
+    if uid and uid ~= 0 then return uid end
+    return target.Address or target.address or tostring(target)
+end
+
 -- Display-only visibility (not the Filters "Visible Only" gate).
 local function target_is_visible(target, prefix)
     if not target or not raycast then return false end
+
+    local now = tick_ms()
+    local key = target_cache_key(target)
+    if key and vis_cache.key == key and (now - (vis_cache.t or 0)) < VIS_CACHE_MS then
+        return vis_cache.visible == true
+    end
 
     pcall(function()
         April.require("core.api_aliases").apply()
     end)
 
+    local visible = false
     local sw, sh = targeting.screen_center()
     local cx, cy = sw * 0.5, sh * 0.5
     local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
@@ -110,32 +134,34 @@ local function target_is_visible(target, prefix)
         if origin and aim and (raycast.is_visible or raycast.IsVisible) then
             local fn = raycast.is_visible or raycast.IsVisible
             local ok, vis = pcall(fn, origin.x, origin.y, origin.z, aim.x, aim.y, aim.z)
-            return ok and vis == true
+            visible = ok and vis == true
         end
-        return false
-    end
+    else
+        local char = target.Character or target.character
+        if (not char) and ep.character then
+            char = ep.character(target)
+        end
 
-    local char = target.Character or target.character
-    if (not char) and ep.character then
-        char = ep.character(target)
-    end
+        local is_player_vis = raycast.is_player_visible or raycast.IsPlayerVisible
+        if char and type(is_player_vis) == "function" then
+            local addr = char.Address or char.address
+            local ok, vis = pcall(is_player_vis, addr or char)
+            if ok then
+                visible = vis == true
+            end
+        end
 
-    local is_player_vis = raycast.is_player_visible or raycast.IsPlayerVisible
-    if char and type(is_player_vis) == "function" then
-        local addr = char.Address or char.address
-        local ok, vis = pcall(is_player_vis, addr or char)
-        if ok then
-            return vis == true
+        if not visible and origin and aim and (raycast.is_visible or raycast.IsVisible) then
+            local fn = raycast.is_visible or raycast.IsVisible
+            local ok, vis = pcall(fn, origin.x, origin.y, origin.z, aim.x, aim.y, aim.z)
+            visible = ok and vis == true
         end
     end
 
-    if origin and aim and (raycast.is_visible or raycast.IsVisible) then
-        local fn = raycast.is_visible or raycast.IsVisible
-        local ok, vis = pcall(fn, origin.x, origin.y, origin.z, aim.x, aim.y, aim.z)
-        return ok and vis == true
-    end
-
-    return false
+    vis_cache.t = now
+    vis_cache.key = key
+    vis_cache.visible = visible
+    return visible
 end
 
 local function draw_flag(cx, y, text, col)
@@ -175,9 +201,13 @@ function M.draw()
     local target, prefix = resolve_target()
     if not target then return end
 
-    local i18n = April.require("ui.i18n")
+    if not i18n_mod then
+        pcall(function()
+            i18n_mod = April.require("ui.i18n")
+        end)
+    end
     local t = function(s)
-        return (i18n and i18n.t and i18n.t(s)) or s
+        return (i18n_mod and i18n_mod.t and i18n_mod.t(s)) or s
     end
 
     if settings.bool(P_VISIBLE, true) and target_is_visible(target, prefix) then

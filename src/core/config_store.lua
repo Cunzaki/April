@@ -65,6 +65,8 @@ local MENU_KEYS = {
     "april_player_flag_cheater",
     "april_player_esp_filters", "april_player_esp_flags",
     "april_player_range",
+    "april_sound_esp", "april_sound_esp_fade_in", "april_sound_esp_fade_out",
+    "april_sound_esp_size", "april_sound_esp_max_dist", "april_sound_esp_color",
     "april_target_overlay", "april_target_overlay_fov", "april_target_overlay_max_dist",
     "april_target_overlay_gear_size", "april_target_overlay_top",
     "april_crosshair_source",

@@ -25,6 +25,7 @@ M.FEATURE_ORDER = {
     "features.visuals.target_overlay",
     "features.visuals.target_visuals",
     "features.visuals.player_esp",
+    "features.visuals.sound_esp",
     "features.world.world_esp",
     "features.world.loot_esp",
     "features.world.npc_esp",

@@ -360,6 +360,8 @@ local function find_best_head_aim(head_center, camera, body, opts)
         peek_origins[#peek_origins + 1] = body
     end
 
+    -- Early-out once we have a clearly visible, well-aligned sample.
+    local GOOD_ENOUGH = 1.35
     for si, point in ipairs(samples) do
         checked = si
         local score = -math.huge
@@ -380,6 +382,9 @@ local function find_best_head_aim(head_center, camera, body, opts)
             best_score = score
             best_point = copy_pos(point)
             best_visible = visible
+            if best_visible and best_score >= GOOD_ENOUGH then
+                break
+            end
         end
     end
 

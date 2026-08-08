@@ -4,6 +4,7 @@ local env = April.require("core.env")
 local cache = April.require("core.cache")
 local move = April.require("core.cframe_move")
 local ep = April.require("core.entity_props")
+local esp_util = April.require("core.esp_util")
 
 local M = {}
 
@@ -13,10 +14,19 @@ local P_BULLET = "april_bullet_enabled"
 
 local BASE = { x = 1.15, y = 1.16, z = 1.16 }
 local TRANSP = 0.99
+-- Re-apply Size/transparency at most this often unless drifted hard.
+local APPLY_MS = 100
 
--- [head_addr] = { sx, sy, sz, transp }
+-- [head_addr] = { sx, sy, sz, transp, head?, next_apply? }
 local tracked = {}
 local was_on = false
+
+local function tick_ms_local()
+    local fn = utility and (utility.get_tick_count or utility.GetTickCount)
+    if type(fn) ~= "function" then return 0 end
+    local ok, v = pcall(fn)
+    return (ok and tonumber(v)) or 0
+end
 
 local function vec3(x, y, z)
     if Vector3 then
@@ -248,38 +258,43 @@ function M.restore_player(player)
     end
 end
 
--- GetBounds includes inflated Head.Size. Temporarily restore the natural size for
--- this player only so ESP/boxes do not reveal Override Size, then re-apply.
+-- ESP must never touch Head.Size. GetBounds includes the inflated head and was
+-- previously "fixed" by restore→GetBounds→re-inflate, which thrashed memory and
+-- tanked FPS. Use a cheap natural-height W2S box instead while Override is on.
 function M.esp_bounds(player)
-    local fn = player and (player.GetBounds or player.get_bounds)
-    if not fn then return nil end
-
     if not M.is_active() then
+        local fn = player and (player.GetBounds or player.get_bounds)
+        if not fn then return nil end
         local ok, bounds = pcall(fn, player)
         if ok then return bounds end
         return nil
     end
 
-    local head = find_head(player)
-    if not head or not env.is_valid(head) then
+    local hx, hy, hz = esp_util.vec3_pos(
+        player.HeadPosition or player.head_position
+            or player.Position or player.position
+    )
+    if not hx then
+        local fn = player and (player.GetBounds or player.get_bounds)
+        if not fn then return nil end
         local ok, bounds = pcall(fn, player)
         if ok then return bounds end
         return nil
     end
 
-    local entry = tracked[head_key(head)]
-    if not entry then
-        local ok, bounds = pcall(fn, player)
-        if ok then return bounds end
-        return nil
+    local px, py, pz = esp_util.vec3_pos(player.Position or player.position)
+    local opts = {
+        body_h = 5.0,
+        top_pad = 0.55,
+        bot_pad = 0.12,
+        width_mul = 0.52,
+    }
+    if px then
+        -- Feet ≈ root minus lower body; keeps box stable while head Size is huge.
+        opts.fx, opts.fy, opts.fz = px, py - 3.05, pz
     end
 
-    local mult = thickness()
-    write_size(head, entry.sx, entry.sy, entry.sz)
-    local ok, bounds = pcall(fn, player)
-    write_size(head, entry.sx * mult, entry.sy * mult, entry.sz * mult)
-    if ok then return bounds end
-    return nil
+    return esp_util.head_body_screen_bounds(hx, hy, hz, opts)
 end
 
 function M.update(_dt)
@@ -296,6 +311,7 @@ function M.update(_dt)
     local mult = thickness()
     local players = cache.players
     if type(players) ~= "table" then return end
+    local now = tick_ms_local()
 
     local seen = {}
     for i = 1, #players do
@@ -306,12 +322,7 @@ function M.update(_dt)
         local head = find_head(p)
         if not head or not env.is_valid(head) then goto continue end
 
-        local hum = ep.humanoid(p) or env.safe_call(function()
-            local char = ep.character(p)
-            if not char then return nil end
-            return char:FindFirstChildOfClass("Humanoid") or char:find_first_child_of_class("Humanoid")
-        end)
-        local hp = hum and tonumber(hum.Health or hum.health)
+        local hp = ep.health(p)
         local dead = hp ~= nil and hp <= 0
 
         local key = head_key(head)
@@ -331,30 +342,39 @@ function M.update(_dt)
                 sy = sy,
                 sz = sz,
                 transp = move.get_part_transparency(head),
+                next_apply = 0,
             }
             tracked[key] = entry
         end
 
+        local due = now >= (entry.next_apply or 0)
         if dead then
-            local cx, cy, cz = read_size(head)
-            if not cx or math.abs(cx - entry.sx) > 0.02
-                or math.abs(cy - entry.sy) > 0.02
-                or math.abs(cz - entry.sz) > 0.02
-            then
-                write_size(head, entry.sx, entry.sy, entry.sz)
+            if due then
+                local cx, cy, cz = read_size(head)
+                if not cx or math.abs(cx - entry.sx) > 0.02
+                    or math.abs(cy - entry.sy) > 0.02
+                    or math.abs(cz - entry.sz) > 0.02
+                then
+                    write_size(head, entry.sx, entry.sy, entry.sz)
+                end
+                entry.next_apply = now + APPLY_MS
             end
         else
             local want_x, want_y, want_z = entry.sx * mult, entry.sy * mult, entry.sz * mult
-            local cx, cy, cz = read_size(head)
-            if not cx or math.abs(cx - want_x) > 0.03
-                or math.abs(cy - want_y) > 0.03
-                or math.abs(cz - want_z) > 0.03
-            then
-                write_size(head, want_x, want_y, want_z)
-            end
-            local cur_t = move.get_part_transparency(head)
-            if cur_t == nil or math.abs((tonumber(cur_t) or 0) - TRANSP) > 0.01 then
-                move.set_part_transparency(head, TRANSP)
+            if due then
+                local cx, cy, cz = read_size(head)
+                local drifted = not cx
+                    or math.abs(cx - want_x) > 0.03
+                    or math.abs(cy - want_y) > 0.03
+                    or math.abs(cz - want_z) > 0.03
+                if drifted then
+                    write_size(head, want_x, want_y, want_z)
+                end
+                local cur_t = move.get_part_transparency(head)
+                if cur_t == nil or math.abs((tonumber(cur_t) or 0) - TRANSP) > 0.01 then
+                    move.set_part_transparency(head, TRANSP)
+                end
+                entry.next_apply = now + APPLY_MS
             end
         end
 

@@ -44,6 +44,7 @@ const ORDER = [
   "core/ballistic.lua",
   "core/silent_ray.lua",
   "core/fflag_mem.lua",
+  "core/rbx_offsets.lua",
   "core/manip_math.lua",
   "core/desync_vis.lua",
   "core/angle_util.lua",
@@ -99,6 +100,7 @@ const ORDER = [
   "features/utility/mod_checker.lua",
   "features/utility/event_status.lua",
   "features/visuals/player_esp.lua",
+  "features/visuals/sound_esp.lua",
   "features/visuals/target_overlay.lua",
   "features/visuals/target_visuals.lua",
   "features/visuals/crosshair.lua",
@@ -139,7 +141,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.1.73";
+const VERSION = "4.1.76";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector

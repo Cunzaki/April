@@ -340,7 +340,23 @@ local function build_visuals()
         },
     }
 
-    return { left, gear, target_vis, colors }
+    -- Bottom of Visuals: Sound ESP (adapted from n0v3l3w/external-sound-esp).
+    local sound_esp = {
+        title = "Sound ESP",
+        master = "april_sound_esp",
+        items = {
+            cb("april_sound_esp", "Sound ESP", false),
+            label("original by @n0v313w", true, "april_sound_esp"),
+            sep("april_sound_esp"),
+            sl("april_sound_esp_fade_in", "Fade In", 0.05, 2, 0.25, true, "april_sound_esp"),
+            sl("april_sound_esp_fade_out", "Fade Out", 0.5, 15, 5, true, "april_sound_esp"),
+            sl("april_sound_esp_size", "Text Size", 10, 24, 13, false, "april_sound_esp"),
+            sl("april_sound_esp_max_dist", "Max Distance", 50, 2000, 450, false, "april_sound_esp"),
+            color("april_sound_esp_color", "Sound Color", { 0.75, 0.88, 1.0, 0.95 }, "april_sound_esp"),
+        },
+    }
+
+    return { left, gear, target_vis, colors, sound_esp }
 end
 
 local function build_world()

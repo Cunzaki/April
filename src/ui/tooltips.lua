@@ -96,6 +96,12 @@ M.BY_ID = {
     april_crosshair_follow = "Moves the crosshair toward your active combat target.",
     april_ui_crosshair_motion = "Adds spin or pulse animation to the crosshair.",
     april_ui_crosshair_options = "Extra crosshair drawing options.",
+    april_sound_esp = "Draws soft chips when other players' HumanoidRootPart sounds start (footsteps, etc.). Throttled scan + remote Sound.IsPlaying offset. Adapted from @n0v313w.",
+    april_sound_esp_fade_in = "How quickly a new sound label fades in.",
+    april_sound_esp_fade_out = "How long a sound label takes to fade out after it stops.",
+    april_sound_esp_size = "On-screen text size for sound labels.",
+    april_sound_esp_max_dist = "Max player scan distance in studs (keeps Sound ESP cheap on full servers).",
+    april_sound_esp_color = "Color of sound ESP labels.",
 
     -- World masters
     april_world_enabled = "Highlights harvestable resources and animals in the world.",

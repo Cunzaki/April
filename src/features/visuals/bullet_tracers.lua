@@ -30,8 +30,13 @@ local P_IMPACT = "april_tracers_impact"
 local P_RAINBOW = "april_tracers_rainbow"
 
 local ACCUM_WINDOW_MS = 350
-local MAX_TRACERS = 64
+local MAX_TRACERS = 28
 local SHOOT_VK = 0x01
+local POLL_IDLE_MS = 50
+local last_poll_ms = 0
+local cached_active_target = nil
+local cached_silent = nil
+local cached_aim = nil
 local DEFAULT_COLOR = { 1.0, 0.55, 0.18, 1.0 }
 local DEFAULT_COLOR2 = { 1.0, 0.2, 0.35, 1.0 }
 
@@ -211,6 +216,24 @@ local function is_focus(key, now)
     return t and (now - t) <= 2500
 end
 
+local function ensure_combat_mods()
+    if not cached_active_target then
+        pcall(function()
+            cached_active_target = April.require("features.combat.active_target")
+        end)
+    end
+    if not cached_silent then
+        pcall(function()
+            cached_silent = April.require("features.combat.aimbot")
+        end)
+    end
+    if not cached_aim then
+        pcall(function()
+            cached_aim = April.require("features.combat.camera_aimbot")
+        end)
+    end
+end
+
 local function refresh_focus(now)
     local function add(player)
         if player and not ep.is_local(player) then
@@ -218,39 +241,35 @@ local function refresh_focus(now)
         end
     end
 
-    local ok, active_target = pcall(function()
-        return April.require("features.combat.active_target")
-    end)
-    if ok and active_target and active_target.get_target then
-        add(active_target.get_target())
+    ensure_combat_mods()
+    if cached_active_target and cached_active_target.get_target then
+        add(cached_active_target.get_target())
     end
-    local ok_s, silent = pcall(function()
-        return April.require("features.combat.aimbot")
-    end)
-    if ok_s and silent and silent.get_target then
-        add(silent.get_target())
+    if cached_silent and cached_silent.get_target then
+        add(cached_silent.get_target())
     end
-    local ok_a, aim = pcall(function()
-        return April.require("features.combat.camera_aimbot")
-    end)
-    if ok_a and aim and aim.get_target then
-        add(aim.get_target())
+    if cached_aim and cached_aim.get_target then
+        add(cached_aim.get_target())
     end
 end
 
 local function poll_damage(now)
-    refresh_focus(now)
     local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)
+    -- Idle: skip full HP scan most frames; focus refresh stays light.
+    if not firing and (now - last_poll_ms) < POLL_IDLE_MS then
+        refresh_focus(now)
+        return
+    end
+    last_poll_ms = now
+    refresh_focus(now)
+
     local threshold = damage_threshold()
     local players = cache.players
     if type(players) ~= "table" then
         players = {}
-        if entity and (entity.GetPlayers or entity.get_players) then
-            local ok, list = pcall(entity.GetPlayers or entity.get_players)
-            if ok and type(list) == "table" then players = list end
-        end
     end
 
+    -- While firing, only poll focused combat targets (huge win on full servers).
     local live = {}
     for i = 1, #players do
         local player = players[i]
@@ -259,35 +278,35 @@ local function poll_damage(now)
             and player_state.passes_team_check(player)
         then
             local key = player_key(player)
-            local hp = read_hp(player)
-            if key and hp then
-                live[key] = true
-                local prev = hp_cache[key]
-                if not prev then
-                    hp_cache[key] = { hp = hp, accum = 0, accum_ms = now }
-                else
-                    if hp > prev.hp + 5 then
+            if key and ((not firing) or is_focus(key, now)) then
+                local hp = read_hp(player)
+                if hp then
+                    live[key] = true
+                    local prev = hp_cache[key]
+                    if not prev then
                         hp_cache[key] = { hp = hp, accum = 0, accum_ms = now }
                     else
-                        local delta = prev.hp - hp
-                        local accum = prev.accum or 0
-                        local accum_ms = prev.accum_ms or now
-                        if (now - accum_ms) > ACCUM_WINDOW_MS then
-                            accum = 0
-                            accum_ms = now
-                        end
-                        if delta > 0 then
-                            accum = accum + delta
-                            accum_ms = now
-                        end
-                        hp_cache[key] = { hp = hp, accum = accum, accum_ms = accum_ms }
+                        if hp > prev.hp + 5 then
+                            hp_cache[key] = { hp = hp, accum = 0, accum_ms = now }
+                        else
+                            local delta = prev.hp - hp
+                            local accum = prev.accum or 0
+                            local accum_ms = prev.accum_ms or now
+                            if (now - accum_ms) > ACCUM_WINDOW_MS then
+                                accum = 0
+                                accum_ms = now
+                            end
+                            if delta > 0 then
+                                accum = accum + delta
+                                accum_ms = now
+                            end
+                            hp_cache[key] = { hp = hp, accum = accum, accum_ms = accum_ms }
 
-                        -- MB1 must be held AND this player must be our aim/silent focus.
-                        -- Avoids tracers when a locked target takes damage from someone else.
-                        if accum >= threshold and firing and is_focus(key, now) then
-                            hp_cache[key].accum = 0
-                            hp_cache[key].accum_ms = now
-                            on_hit(player)
+                            if accum >= threshold and firing and is_focus(key, now) then
+                                hp_cache[key].accum = 0
+                                hp_cache[key].accum_ms = now
+                                on_hit(player)
+                            end
                         end
                     end
                 end
@@ -386,11 +405,10 @@ local function draw_segment(x1, y1, x2, y2, col, thick, style, glow)
         line(x1, y1, x2, y2, col_mul_a({ 0, 0, 0, 1 }, (col[4] or 1) * 0.75), thick + 1.6)
     end
 
-    if style == 1 then -- Glow layers
+    if style == 1 then -- Glow layers (2 soft + core; keep cheap)
         local g = clamp(tonumber(settings.num(P_GLOW, 1)) or 1, 0.2, 3)
-        line(x1, y1, x2, y2, col_mul_a(col, 0.12 * g), thick * (3.6 + g))
-        line(x1, y1, x2, y2, col_mul_a(col, 0.22 * g), thick * (2.2 + g * 0.4))
-        line(x1, y1, x2, y2, col_mul_a(col, 0.45), thick * 1.35)
+        line(x1, y1, x2, y2, col_mul_a(col, 0.18 * g), thick * (2.6 + g * 0.5))
+        line(x1, y1, x2, y2, col_mul_a(col, 0.45), thick * 1.25)
         line(x1, y1, x2, y2, col, thick)
     else
         line(x1, y1, x2, y2, col, thick)
@@ -431,7 +449,7 @@ local function draw_one(tr, now)
     if ap.done then return false end
 
     local style = settings.combo_index(P_STYLE, STYLE_NAMES, 1)
-    local segs = math.floor(clamp(tonumber(settings.num(P_SEGS, 18)) or 18, 4, 48))
+    local segs = math.floor(clamp(tonumber(settings.num(P_SEGS, 12)) or 12, 4, 48))
     local c1 = tr.c1 or DEFAULT_COLOR
     local c2 = tr.c2 or DEFAULT_COLOR2
 
@@ -503,7 +521,7 @@ function M.register_menu()
     menu.add_slider_int(T, G.GUN_MODS, P_LIFE, "Lifetime (ms)", 100, 1500, 550, root)
     menu.add_slider_float(T, G.GUN_MODS, P_THICK, "Tracer Thickness", 0.5, 8, 2.2, "%.1f", root)
     menu.add_slider_float(T, G.GUN_MODS, P_TRANS, "Tracer Fade", 0, 0.9, 0.05, "%.2f", root)
-    menu.add_slider_int(T, G.GUN_MODS, P_SEGS, "Tracer Segments", 4, 48, 18, root)
+    menu.add_slider_int(T, G.GUN_MODS, P_SEGS, "Tracer Segments", 4, 48, 12, root)
     menu.add_slider_float(T, G.GUN_MODS, P_GLOW, "Glow Strength", 0.2, 3, 1, "%.2f", root)
     menu.add_slider_int(T, G.GUN_MODS, P_DMG, "Min Damage", 1, 50, 10, root)
     menu.add_checkbox(T, G.GUN_MODS, P_OUTLINE, "Tracer Outline", true, root)

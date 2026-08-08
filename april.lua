@@ -1,5 +1,5 @@
 April = {
-    version = "4.1.73",
+    version = "4.1.76",
     debug = false,
     crash_logging = false,
     crash_trace = false,
@@ -5033,6 +5033,97 @@ end
 return M
 end)()
 
+April._mods["core.rbx_offsets"] = (function()
+local M = {}
+local OFFSETS_URL = "https://offsets.imtheo.lol/Offsets.json"
+local DEFAULT_SOUND = {
+    SoundId = 200,
+    RollOffMaxDistance = 288,
+    RollOffMinDistance = 292,
+    PlaybackSpeed = 284,
+    Volume = 304,
+    SoundGroup = 232,
+    IsPlaying = 320,
+    Looped = 317,
+}
+local sound = {}
+for k, v in pairs(DEFAULT_SOUND) do
+    sound[k] = v
+end
+local fetched = false
+local fetch_ok = false
+local roblox_version = nil
+local function http_get(url)
+    local fn = utility and (utility.http_get or utility.HttpGet)
+    if type(fn) ~= "function" then return nil end
+    local ok, body, status = pcall(fn, url)
+    if not ok or type(body) ~= "string" or #body < 32 then return nil end
+    if status ~= nil then
+        local code = tonumber(status)
+        if code and (code < 200 or code >= 300) then return nil end
+    end
+    return body
+end
+local function parse_object_block(body, key)
+    if type(body) ~= "string" or type(key) ~= "string" then return nil end
+    return body:match('"' .. key .. '"%s*:%s*{([^}]+)}')
+end
+local function parse_int_fields(block, into)
+    if type(block) ~= "string" or type(into) ~= "table" then return end
+    for name, num in block:gmatch('"([%w_]+)"%s*:%s*(%d+)') do
+        into[name] = tonumber(num)
+    end
+end
+function M.fetch(force)
+    if fetched and not force then return fetch_ok end
+    fetched = true
+    fetch_ok = false
+    local body = http_get(OFFSETS_URL)
+    if not body then return false end
+    roblox_version = body:match('"Roblox Version"%s*:%s*"(.-)"')
+    local sound_block = parse_object_block(body, "Sound")
+    if sound_block then
+        local parsed = {}
+        parse_int_fields(sound_block, parsed)
+        if parsed.IsPlaying then
+            for k, v in pairs(parsed) do
+                sound[k] = v
+            end
+            fetch_ok = true
+            return true
+        end
+    end
+    local match = body:match('"IsPlaying"%s*:%s*(%d+)')
+    if match then
+        sound.IsPlaying = tonumber(match)
+        fetch_ok = true
+        return true
+    end
+    return false
+end
+function M.ensure()
+    if not fetched then
+        pcall(M.fetch)
+    end
+    return fetch_ok
+end
+function M.ready()
+    return fetch_ok
+end
+function M.roblox_version()
+    return roblox_version
+end
+function M.sound(field)
+    M.ensure()
+    if field == nil then return sound end
+    return sound[field] or DEFAULT_SOUND[field]
+end
+function M.sound_is_playing()
+    return M.sound("IsPlaying") or DEFAULT_SOUND.IsPlaying
+end
+return M
+end)()
+
 April._mods["core.manip_math"] = (function()
 local M = {}
 local math_util = April.require("core.math_util")
@@ -6724,6 +6815,8 @@ local MENU_KEYS = {
     "april_player_flag_cheater",
     "april_player_esp_filters", "april_player_esp_flags",
     "april_player_range",
+    "april_sound_esp", "april_sound_esp_fade_in", "april_sound_esp_fade_out",
+    "april_sound_esp_size", "april_sound_esp_max_dist", "april_sound_esp_color",
     "april_target_overlay", "april_target_overlay_fov", "april_target_overlay_max_dist",
     "april_target_overlay_gear_size", "april_target_overlay_top",
     "april_crosshair_source",
@@ -14951,6 +15044,7 @@ local function find_best_head_aim(head_center, camera, body, opts)
     elseif body then
         peek_origins[#peek_origins + 1] = body
     end
+    local GOOD_ENOUGH = 1.35
     for si, point in ipairs(samples) do
         checked = si
         local score = -math.huge
@@ -14969,6 +15063,9 @@ local function find_best_head_aim(head_center, camera, body, opts)
             best_score = score
             best_point = copy_pos(point)
             best_visible = visible
+            if best_visible and best_score >= GOOD_ENOUGH then
+                break
+            end
         end
     end
     local progress = total > 0 and (checked / total) or 1
@@ -17640,14 +17737,22 @@ local env = April.require("core.env")
 local cache = April.require("core.cache")
 local move = April.require("core.cframe_move")
 local ep = April.require("core.entity_props")
+local esp_util = April.require("core.esp_util")
 local M = {}
 local P = "april_thick_bullet"
 local P_MULT = "april_thick_bullet_mult"
 local P_BULLET = "april_bullet_enabled"
 local BASE = { x = 1.15, y = 1.16, z = 1.16 }
 local TRANSP = 0.99
+local APPLY_MS = 100
 local tracked = {}
 local was_on = false
+local function tick_ms_local()
+local fn = utility and (utility.get_tick_count or utility.GetTickCount)
+if type(fn) ~= "function" then return 0 end
+local ok, v = pcall(fn)
+return (ok and tonumber(v)) or 0
+end
 local function vec3(x, y, z)
 if Vector3 then
 local ctor = Vector3.new or Vector3.New
@@ -17850,31 +17955,35 @@ end
 end
 end
 function M.esp_bounds(player)
+if not M.is_active() then
 local fn = player and (player.GetBounds or player.get_bounds)
 if not fn then return nil end
-if not M.is_active() then
 local ok, bounds = pcall(fn, player)
 if ok then return bounds end
 return nil
 end
-local head = find_head(player)
-if not head or not env.is_valid(head) then
+local hx, hy, hz = esp_util.vec3_pos(
+player.HeadPosition or player.head_position
+or player.Position or player.position
+)
+if not hx then
+local fn = player and (player.GetBounds or player.get_bounds)
+if not fn then return nil end
 local ok, bounds = pcall(fn, player)
 if ok then return bounds end
 return nil
 end
-local entry = tracked[head_key(head)]
-if not entry then
-local ok, bounds = pcall(fn, player)
-if ok then return bounds end
-return nil
+local px, py, pz = esp_util.vec3_pos(player.Position or player.position)
+local opts = {
+body_h = 5.0,
+top_pad = 0.55,
+bot_pad = 0.12,
+width_mul = 0.52,
+}
+if px then
+opts.fx, opts.fy, opts.fz = px, py - 3.05, pz
 end
-local mult = thickness()
-write_size(head, entry.sx, entry.sy, entry.sz)
-local ok, bounds = pcall(fn, player)
-write_size(head, entry.sx * mult, entry.sy * mult, entry.sz * mult)
-if ok then return bounds end
-return nil
+return esp_util.head_body_screen_bounds(hx, hy, hz, opts)
 end
 function M.update(_dt)
 local on = active()
@@ -17889,6 +17998,7 @@ was_on = true
 local mult = thickness()
 local players = cache.players
 if type(players) ~= "table" then return end
+local now = tick_ms_local()
 local seen = {}
 for i = 1, #players do
 local p = players[i]
@@ -17896,12 +18006,7 @@ if not p or ep.is_local(p) then goto continue end
 if p.IsAlive == false or p.is_alive == false then goto continue end
 local head = find_head(p)
 if not head or not env.is_valid(head) then goto continue end
-local hum = ep.humanoid(p) or env.safe_call(function()
-local char = ep.character(p)
-if not char then return nil end
-return char:FindFirstChildOfClass("Humanoid") or char:find_first_child_of_class("Humanoid")
-end)
-local hp = hum and tonumber(hum.Health or hum.health)
+local hp = ep.health(p)
 local dead = hp ~= nil and hp <= 0
 local key = head_key(head)
 seen[key] = true
@@ -17919,10 +18024,13 @@ sx = sx,
 sy = sy,
 sz = sz,
 transp = move.get_part_transparency(head),
+next_apply = 0,
 }
 tracked[key] = entry
 end
+local due = now >= (entry.next_apply or 0)
 if dead then
+if due then
 local cx, cy, cz = read_size(head)
 if not cx or math.abs(cx - entry.sx) > 0.02
 or math.abs(cy - entry.sy) > 0.02
@@ -17930,18 +18038,24 @@ or math.abs(cz - entry.sz) > 0.02
 then
 write_size(head, entry.sx, entry.sy, entry.sz)
 end
+entry.next_apply = now + APPLY_MS
+end
 else
 local want_x, want_y, want_z = entry.sx * mult, entry.sy * mult, entry.sz * mult
+if due then
 local cx, cy, cz = read_size(head)
-if not cx or math.abs(cx - want_x) > 0.03
+local drifted = not cx
+or math.abs(cx - want_x) > 0.03
 or math.abs(cy - want_y) > 0.03
 or math.abs(cz - want_z) > 0.03
-then
+if drifted then
 write_size(head, want_x, want_y, want_z)
 end
 local cur_t = move.get_part_transparency(head)
 if cur_t == nil or math.abs((tonumber(cur_t) or 0) - TRANSP) > 0.01 then
 move.set_part_transparency(head, TRANSP)
+end
+entry.next_apply = now + APPLY_MS
 end
 end
 ::continue::
@@ -18296,6 +18410,9 @@ local P_VISIBLE = "april_fov_flags_visible"
 local P_DIST = "april_fov_flags_distance"
 local FLAG_GAP = 3
 local FLAG_SIZE = 12
+local VIS_CACHE_MS = 150
+local vis_cache = { t = 0, key = nil, visible = false }
+local i18n_mod = nil
 local function aimbot_on()
     return settings.enabled("april_aimbot")
 end
@@ -18359,11 +18476,29 @@ local function target_distance(target)
     local dx, dy, dz = x - origin.x, y - origin.y, z - origin.z
     return math.sqrt(dx * dx + dy * dy + dz * dz)
 end
+local function tick_ms()
+    local fn = utility and (utility.get_tick_count or utility.GetTickCount)
+    if type(fn) ~= "function" then return 0 end
+    local ok, v = pcall(fn)
+    return (ok and tonumber(v)) or 0
+end
+local function target_cache_key(target)
+    if not target then return nil end
+    local uid = ep.user_id(target)
+    if uid and uid ~= 0 then return uid end
+    return target.Address or target.address or tostring(target)
+end
 local function target_is_visible(target, prefix)
     if not target or not raycast then return false end
+    local now = tick_ms()
+    local key = target_cache_key(target)
+    if key and vis_cache.key == key and (now - (vis_cache.t or 0)) < VIS_CACHE_MS then
+        return vis_cache.visible == true
+    end
     pcall(function()
         April.require("core.api_aliases").apply()
     end)
+    local visible = false
     local sw, sh = targeting.screen_center()
     local cx, cy = sw * 0.5, sh * 0.5
     local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
@@ -18374,28 +18509,31 @@ local function target_is_visible(target, prefix)
         if origin and aim and (raycast.is_visible or raycast.IsVisible) then
             local fn = raycast.is_visible or raycast.IsVisible
             local ok, vis = pcall(fn, origin.x, origin.y, origin.z, aim.x, aim.y, aim.z)
-            return ok and vis == true
+            visible = ok and vis == true
         end
-        return false
-    end
-    local char = target.Character or target.character
-    if (not char) and ep.character then
-        char = ep.character(target)
-    end
-    local is_player_vis = raycast.is_player_visible or raycast.IsPlayerVisible
-    if char and type(is_player_vis) == "function" then
-        local addr = char.Address or char.address
-        local ok, vis = pcall(is_player_vis, addr or char)
-        if ok then
-            return vis == true
+    else
+        local char = target.Character or target.character
+        if (not char) and ep.character then
+            char = ep.character(target)
+        end
+        local is_player_vis = raycast.is_player_visible or raycast.IsPlayerVisible
+        if char and type(is_player_vis) == "function" then
+            local addr = char.Address or char.address
+            local ok, vis = pcall(is_player_vis, addr or char)
+            if ok then
+                visible = vis == true
+            end
+        end
+        if not visible and origin and aim and (raycast.is_visible or raycast.IsVisible) then
+            local fn = raycast.is_visible or raycast.IsVisible
+            local ok, vis = pcall(fn, origin.x, origin.y, origin.z, aim.x, aim.y, aim.z)
+            visible = ok and vis == true
         end
     end
-    if origin and aim and (raycast.is_visible or raycast.IsVisible) then
-        local fn = raycast.is_visible or raycast.IsVisible
-        local ok, vis = pcall(fn, origin.x, origin.y, origin.z, aim.x, aim.y, aim.z)
-        return ok and vis == true
-    end
-    return false
+    vis_cache.t = now
+    vis_cache.key = key
+    vis_cache.visible = visible
+    return visible
 end
 local function draw_flag(cx, y, text, col)
     local tw = theme.text_w(text, FLAG_SIZE)
@@ -18425,9 +18563,13 @@ function M.draw()
     local y = cy + fov + 8
     local target, prefix = resolve_target()
     if not target then return end
-    local i18n = April.require("ui.i18n")
+    if not i18n_mod then
+        pcall(function()
+            i18n_mod = April.require("ui.i18n")
+        end)
+    end
     local t = function(s)
-        return (i18n and i18n.t and i18n.t(s)) or s
+        return (i18n_mod and i18n_mod.t and i18n_mod.t(s)) or s
     end
     if settings.bool(P_VISIBLE, true) and target_is_visible(target, prefix) then
         y = y + draw_flag(cx, y, t("VISIBLE"), theme.GREEN or { 0.35, 1, 0.45, 1 })
@@ -20170,8 +20312,13 @@ local P_OUTLINE = "april_tracers_outline"
 local P_IMPACT = "april_tracers_impact"
 local P_RAINBOW = "april_tracers_rainbow"
 local ACCUM_WINDOW_MS = 350
-local MAX_TRACERS = 64
+local MAX_TRACERS = 28
 local SHOOT_VK = 0x01
+local POLL_IDLE_MS = 50
+local last_poll_ms = 0
+local cached_active_target = nil
+local cached_silent = nil
+local cached_aim = nil
 local DEFAULT_COLOR = { 1.0, 0.55, 0.18, 1.0 }
 local DEFAULT_COLOR2 = { 1.0, 0.2, 0.35, 1.0 }
 local STYLE_NAMES = { "Beam", "Glow", "Gradient", "Dashed", "Ribbon" }
@@ -20325,42 +20472,52 @@ local function is_focus(key, now)
     local t = focus_ms[key]
     return t and (now - t) <= 2500
 end
+local function ensure_combat_mods()
+    if not cached_active_target then
+        pcall(function()
+            cached_active_target = April.require("features.combat.active_target")
+        end)
+    end
+    if not cached_silent then
+        pcall(function()
+            cached_silent = April.require("features.combat.aimbot")
+        end)
+    end
+    if not cached_aim then
+        pcall(function()
+            cached_aim = April.require("features.combat.camera_aimbot")
+        end)
+    end
+end
 local function refresh_focus(now)
     local function add(player)
         if player and not ep.is_local(player) then
             mark_focus(player, now)
         end
     end
-    local ok, active_target = pcall(function()
-        return April.require("features.combat.active_target")
-    end)
-    if ok and active_target and active_target.get_target then
-        add(active_target.get_target())
+    ensure_combat_mods()
+    if cached_active_target and cached_active_target.get_target then
+        add(cached_active_target.get_target())
     end
-    local ok_s, silent = pcall(function()
-        return April.require("features.combat.aimbot")
-    end)
-    if ok_s and silent and silent.get_target then
-        add(silent.get_target())
+    if cached_silent and cached_silent.get_target then
+        add(cached_silent.get_target())
     end
-    local ok_a, aim = pcall(function()
-        return April.require("features.combat.camera_aimbot")
-    end)
-    if ok_a and aim and aim.get_target then
-        add(aim.get_target())
+    if cached_aim and cached_aim.get_target then
+        add(cached_aim.get_target())
     end
 end
 local function poll_damage(now)
-    refresh_focus(now)
     local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)
+    if not firing and (now - last_poll_ms) < POLL_IDLE_MS then
+        refresh_focus(now)
+        return
+    end
+    last_poll_ms = now
+    refresh_focus(now)
     local threshold = damage_threshold()
     local players = cache.players
     if type(players) ~= "table" then
         players = {}
-        if entity and (entity.GetPlayers or entity.get_players) then
-            local ok, list = pcall(entity.GetPlayers or entity.get_players)
-            if ok and type(list) == "table" then players = list end
-        end
     end
     local live = {}
     for i = 1, #players do
@@ -20370,32 +20527,34 @@ local function poll_damage(now)
             and player_state.passes_team_check(player)
         then
             local key = player_key(player)
-            local hp = read_hp(player)
-            if key and hp then
-                live[key] = true
-                local prev = hp_cache[key]
-                if not prev then
-                    hp_cache[key] = { hp = hp, accum = 0, accum_ms = now }
-                else
-                    if hp > prev.hp + 5 then
+            if key and ((not firing) or is_focus(key, now)) then
+                local hp = read_hp(player)
+                if hp then
+                    live[key] = true
+                    local prev = hp_cache[key]
+                    if not prev then
                         hp_cache[key] = { hp = hp, accum = 0, accum_ms = now }
                     else
-                        local delta = prev.hp - hp
-                        local accum = prev.accum or 0
-                        local accum_ms = prev.accum_ms or now
-                        if (now - accum_ms) > ACCUM_WINDOW_MS then
-                            accum = 0
-                            accum_ms = now
-                        end
-                        if delta > 0 then
-                            accum = accum + delta
-                            accum_ms = now
-                        end
-                        hp_cache[key] = { hp = hp, accum = accum, accum_ms = accum_ms }
-                        if accum >= threshold and firing and is_focus(key, now) then
-                            hp_cache[key].accum = 0
-                            hp_cache[key].accum_ms = now
-                            on_hit(player)
+                        if hp > prev.hp + 5 then
+                            hp_cache[key] = { hp = hp, accum = 0, accum_ms = now }
+                        else
+                            local delta = prev.hp - hp
+                            local accum = prev.accum or 0
+                            local accum_ms = prev.accum_ms or now
+                            if (now - accum_ms) > ACCUM_WINDOW_MS then
+                                accum = 0
+                                accum_ms = now
+                            end
+                            if delta > 0 then
+                                accum = accum + delta
+                                accum_ms = now
+                            end
+                            hp_cache[key] = { hp = hp, accum = accum, accum_ms = accum_ms }
+                            if accum >= threshold and firing and is_focus(key, now) then
+                                hp_cache[key].accum = 0
+                                hp_cache[key].accum_ms = now
+                                on_hit(player)
+                            end
                         end
                     end
                 end
@@ -20485,9 +20644,8 @@ local function draw_segment(x1, y1, x2, y2, col, thick, style, glow)
     end
     if style == 1 then
         local g = clamp(tonumber(settings.num(P_GLOW, 1)) or 1, 0.2, 3)
-        line(x1, y1, x2, y2, col_mul_a(col, 0.12 * g), thick * (3.6 + g))
-        line(x1, y1, x2, y2, col_mul_a(col, 0.22 * g), thick * (2.2 + g * 0.4))
-        line(x1, y1, x2, y2, col_mul_a(col, 0.45), thick * 1.35)
+        line(x1, y1, x2, y2, col_mul_a(col, 0.18 * g), thick * (2.6 + g * 0.5))
+        line(x1, y1, x2, y2, col_mul_a(col, 0.45), thick * 1.25)
         line(x1, y1, x2, y2, col, thick)
     else
         line(x1, y1, x2, y2, col, thick)
@@ -20524,7 +20682,7 @@ local function draw_one(tr, now)
     local ap = anim_params(tr, now)
     if ap.done then return false end
     local style = settings.combo_index(P_STYLE, STYLE_NAMES, 1)
-    local segs = math.floor(clamp(tonumber(settings.num(P_SEGS, 18)) or 18, 4, 48))
+    local segs = math.floor(clamp(tonumber(settings.num(P_SEGS, 12)) or 12, 4, 48))
     local c1 = tr.c1 or DEFAULT_COLOR
     local c2 = tr.c2 or DEFAULT_COLOR2
     local prev_sx, prev_sy, prev_ok = nil, nil, false
@@ -20588,7 +20746,7 @@ function M.register_menu()
     menu.add_slider_int(T, G.GUN_MODS, P_LIFE, "Lifetime (ms)", 100, 1500, 550, root)
     menu.add_slider_float(T, G.GUN_MODS, P_THICK, "Tracer Thickness", 0.5, 8, 2.2, "%.1f", root)
     menu.add_slider_float(T, G.GUN_MODS, P_TRANS, "Tracer Fade", 0, 0.9, 0.05, "%.2f", root)
-    menu.add_slider_int(T, G.GUN_MODS, P_SEGS, "Tracer Segments", 4, 48, 18, root)
+    menu.add_slider_int(T, G.GUN_MODS, P_SEGS, "Tracer Segments", 4, 48, 12, root)
     menu.add_slider_float(T, G.GUN_MODS, P_GLOW, "Glow Strength", 0.2, 3, 1, "%.2f", root)
     menu.add_slider_int(T, G.GUN_MODS, P_DMG, "Min Damage", 1, 50, 10, root)
     menu.add_checkbox(T, G.GUN_MODS, P_OUTLINE, "Tracer Outline", true, root)
@@ -21760,6 +21918,416 @@ ts
 end
 ::continue::
 end
+end
+return M
+end)()
+
+April._mods["features.visuals.sound_esp"] = (function()
+local settings = April.require("core.settings")
+local menu_util = April.require("core.menu_util")
+local draw_util = April.require("core.draw_util")
+local esp_util = April.require("core.esp_util")
+local math_util = April.require("core.math_util")
+local cache = April.require("core.cache")
+local ep = April.require("core.entity_props")
+local rbx_offsets = April.require("core.rbx_offsets")
+local M = {}
+local P = "april_sound_esp"
+local ID_FADE_IN = P .. "_fade_in"
+local ID_FADE_OUT = P .. "_fade_out"
+local ID_SIZE = P .. "_size"
+local ID_COLOR = P .. "_color"
+local ID_MAX_DIST = P .. "_max_dist"
+local SCAN_MS = 70
+local HRP_CACHE_MS = 450
+local DEFAULT_MAX_DIST = 450
+local indicators = {}
+local sound_prev = {}
+local player_cache = {}
+local last_scan_ms = 0
+local offsets_ready = false
+local cached_off = nil
+local mem_read_fn = nil
+local function tick_ms()
+    local fn = utility and (utility.get_tick_count or utility.GetTickCount)
+    if type(fn) ~= "function" then return 0 end
+    local ok, v = pcall(fn)
+    return (ok and tonumber(v)) or 0
+end
+local function ensure_mem()
+    if mem_read_fn then return mem_read_fn end
+    if not memory then return nil end
+    mem_read_fn = memory.read or memory.Read
+    if type(mem_read_fn) ~= "function" then
+        mem_read_fn = nil
+    end
+    return mem_read_fn
+end
+local function mem_bool(addr, off)
+    local fn = ensure_mem()
+    if not fn or not addr or not off then return false end
+    local ok, value = pcall(fn, addr + off, "bool")
+    return ok and value == true
+end
+local function mem_float(addr, off)
+    local fn = ensure_mem()
+    if not fn or not addr or not off then return nil end
+    local ok, value = pcall(fn, addr + off, "float")
+    if ok then return tonumber(value) end
+    return nil
+end
+local function ensure_offsets()
+    if cached_off then return cached_off end
+    if not offsets_ready then
+        offsets_ready = true
+        pcall(rbx_offsets.fetch)
+    end
+    cached_off = {
+        is_playing = rbx_offsets.sound_is_playing(),
+        volume = rbx_offsets.sound("Volume"),
+        speed = rbx_offsets.sound("PlaybackSpeed"),
+        looped = rbx_offsets.sound("Looped"),
+        rolloff = rbx_offsets.sound("RollOffMaxDistance"),
+    }
+    return cached_off
+end
+local function camera_pos()
+    if not camera then return nil end
+    local fn = camera.get_position or camera.GetPosition
+    if type(fn) ~= "function" then return nil end
+    local ok, pos = pcall(fn)
+    if not ok or not pos then return nil end
+    local x, y, z = esp_util.vec3_pos(pos)
+    if not x then return nil end
+    return x, y, z
+end
+local function player_alive(p)
+    if not p or p.IsAlive == false then return false end
+    local hp = ep.health(p)
+    if hp ~= nil and hp <= 0 then return false end
+    return true
+end
+local function player_key(p)
+    local uid = ep.user_id(p)
+    if uid and uid ~= 0 then return uid end
+    local addr = p.Address or p.address
+    if addr then return tostring(addr) end
+    return tostring(p)
+end
+local function pretty_name(raw)
+    raw = tostring(raw or "Sound")
+    if raw == "" then return "Sound" end
+    raw = raw:gsub("^rbxassetid://%d+", "Sound")
+    raw = raw:gsub("%.ogg$", ""):gsub("%.mp3$", ""):gsub("%.wav$", "")
+    raw = raw:gsub("_", " ")
+    raw = raw:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+    if #raw > 22 then
+        raw = raw:sub(1, 20) .. ".."
+    end
+    return raw
+end
+local function refresh_player_sounds(p, now)
+    local key = player_key(p)
+    local entry = player_cache[key]
+    if entry and (now - (entry.t or 0)) < HRP_CACHE_MS and entry.hrp then
+        local px, py, pz = esp_util.vec3_pos(p.Position)
+        if px then
+            entry.px, entry.py, entry.pz = px, py, pz
+        end
+        return entry
+    end
+    local character = p.Character
+    if not character then
+        player_cache[key] = nil
+        return nil
+    end
+    local ok_hrp, hrp = pcall(function()
+        return character:FindFirstChild("HumanoidRootPart")
+    end)
+    if not ok_hrp or not hrp then
+        player_cache[key] = nil
+        return nil
+    end
+    local sounds = {}
+    local ok_kids, kids = pcall(function()
+        return hrp:GetChildren()
+    end)
+    if ok_kids and type(kids) == "table" then
+        for i = 1, #kids do
+            local child = kids[i]
+            if child and child.ClassName == "Sound" then
+                local addr = tonumber(child.Address)
+                if addr and addr > 0 then
+                    sounds[#sounds + 1] = {
+                        addr = addr,
+                        name = pretty_name(child.Name),
+                        child = child,
+                    }
+                end
+            end
+        end
+    end
+    local px, py, pz = esp_util.vec3_pos(p.Position or hrp.Position)
+    entry = {
+        hrp = hrp,
+        sounds = sounds,
+        t = now,
+        px = px, py = py, pz = pz,
+    }
+    player_cache[key] = entry
+    return entry
+end
+local function read_sound_state(child, addr, off)
+    local vol = tonumber(child and child.Volume)
+    if vol == nil then vol = mem_float(addr, off.volume) or 0 end
+    local spd = tonumber(child and child.PlaybackSpeed)
+    if spd == nil then spd = mem_float(addr, off.speed) or 0 end
+    local looped
+    if child and child.Looped ~= nil then
+        looped = child.Looped == true
+    else
+        looped = mem_bool(addr, off.looped)
+    end
+    local rolloff = tonumber(child and child.RollOffMaxDistance)
+    if rolloff == nil then rolloff = mem_float(addr, off.rolloff) or 0 end
+    return vol, spd, looped, rolloff
+end
+local function bump_indicator(addr, name, px, py, pz)
+    local ind = indicators[addr]
+    if not ind then
+        indicators[addr] = {
+            name = name,
+            alpha = 0,
+            state = "fade_in",
+            timer = 0,
+            x = px, y = py + 2.2, z = pz,
+            stack = 0,
+        }
+        return
+    end
+    ind.x, ind.y, ind.z = px, py + 2.2, pz
+    ind.name = name or ind.name
+    ind.seen = true
+    if ind.state == "fade_out" then
+        ind.state = "fade_in"
+        ind.timer = 0
+    end
+end
+local function scan_sounds(now, dt_unused)
+    local cam_x, cam_y, cam_z = camera_pos()
+    if not cam_x then return end
+    local off = ensure_offsets()
+    if not ensure_mem() or not off.is_playing then return end
+    local max_dist = math.max(0, settings.num(ID_MAX_DIST, DEFAULT_MAX_DIST))
+    if max_dist <= 0 then max_dist = DEFAULT_MAX_DIST end
+    for _, prev in pairs(sound_prev) do
+        prev.seen = false
+    end
+    for _, ind in pairs(indicators) do
+        ind.seen = false
+    end
+    local players = cache.players or {}
+    local live_keys = {}
+    for i = 1, #players do
+        local p = players[i]
+        if p and p.IsLocal ~= true and player_alive(p) then
+            local px0, py0, pz0 = esp_util.vec3_pos(p.Position)
+            if px0 then
+                local dist = math_util.distance3(px0 - cam_x, py0 - cam_y, pz0 - cam_z)
+                if dist <= max_dist then
+                    local key = player_key(p)
+                    live_keys[key] = true
+                    local entry = refresh_player_sounds(p, now)
+                    if entry and entry.sounds then
+                        local px = entry.px or px0
+                        local py = entry.py or py0
+                        local pz = entry.pz or pz0
+                        local sounds = entry.sounds
+                        for si = 1, #sounds do
+                            local s = sounds[si]
+                            local addr = s.addr
+                            local child = s.child
+                            local vol, spd, looped, rolloff = read_sound_state(child, addr, off)
+                            local is_playing = mem_bool(addr, off.is_playing)
+                            local is_audible = rolloff <= 0 or dist <= rolloff
+                            local prev = sound_prev[addr]
+                            if not prev then
+                                sound_prev[addr] = {
+                                    vol = vol, spd = spd, looped = looped,
+                                    playing = is_playing, audible = is_audible,
+                                    seen = true,
+                                }
+                            else
+                                prev.seen = true
+                                local started = false
+                                local stopped = false
+                                if vol > prev.vol then started = true end
+                                if vol < prev.vol then stopped = true end
+                                if spd > prev.spd then started = true end
+                                if spd < prev.spd then stopped = true end
+                                if looped and not prev.looped then started = true end
+                                if (not looped) and prev.looped then stopped = true end
+                                if is_playing and not prev.playing then started = true end
+                                if (not is_playing) and prev.playing then stopped = true end
+                                local emitting = vol > 0 and spd > 0 and is_playing
+                                if emitting and is_audible and not prev.audible then
+                                    started = true
+                                end
+                                if (not is_audible) and prev.audible then
+                                    stopped = true
+                                end
+                                prev.vol, prev.spd, prev.looped = vol, spd, looped
+                                prev.playing, prev.audible = is_playing, is_audible
+                                if started and not stopped and is_audible then
+                                    bump_indicator(addr, s.name, px, py, pz)
+                                    local ind = indicators[addr]
+                                    if ind then ind.seen = true end
+                                elseif stopped then
+                                    local ind = indicators[addr]
+                                    if ind and ind.state ~= "fade_out" then
+                                        ind.state = "fade_out"
+                                        ind.timer = 0
+                                    end
+                                else
+                                    local ind = indicators[addr]
+                                    if ind and ind.state ~= "fade_out" and is_audible then
+                                        ind.x, ind.y, ind.z = px, py + 2.2, pz
+                                        ind.seen = true
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    for key in pairs(player_cache) do
+        if not live_keys[key] then
+            player_cache[key] = nil
+        end
+    end
+    for addr, prev in pairs(sound_prev) do
+        if not prev.seen then
+            sound_prev[addr] = nil
+        end
+    end
+end
+local function tick_indicators(dt)
+    local fade_in = math.max(0.05, settings.num(ID_FADE_IN, 0.25))
+    local fade_out = math.max(0.05, settings.num(ID_FADE_OUT, 5.0))
+    for addr, ind in pairs(indicators) do
+        if not ind.seen and ind.state ~= "fade_out" then
+            ind.state = "fade_out"
+            ind.timer = 0
+        end
+        ind.timer = (ind.timer or 0) + dt
+        if ind.state == "fade_in" then
+            ind.alpha = math.min(1, ind.timer / fade_in)
+            if ind.alpha >= 1 then
+                ind.state = "visible"
+                ind.timer = 0
+            end
+        elseif ind.state == "visible" then
+            ind.alpha = 1
+        elseif ind.state == "fade_out" then
+            ind.alpha = math.max(0, 1 - ind.timer / fade_out)
+            if ind.alpha <= 0 then
+                indicators[addr] = nil
+            end
+        end
+    end
+end
+function M.register_menu()
+    local G = menu_util.G
+    local T = menu_util.group(G.VISUALS)
+    local root = menu_util.parent(P)
+    menu_util.section(T, G.VISUALS, "Sound ESP")
+    menu.add_checkbox(T, G.VISUALS, P, "Sound ESP", false)
+    menu.add_slider_float(T, G.VISUALS, ID_FADE_IN, "Fade In", 0.05, 2.0, 0.25, "%.2f", root)
+    menu.add_slider_float(T, G.VISUALS, ID_FADE_OUT, "Fade Out", 0.5, 15.0, 5.0, "%.2f", root)
+    menu.add_slider_int(T, G.VISUALS, ID_SIZE, "Text Size", 10, 24, 13, root)
+    menu.add_slider_int(T, G.VISUALS, ID_MAX_DIST, "Max Distance", 50, 2000, DEFAULT_MAX_DIST, root)
+    menu.add_colorpicker(T, G.VISUALS, ID_COLOR, "Sound Color", { 0.75, 0.88, 1.0, 0.95 }, root)
+    menu_util.bind_children(P, {
+        ID_FADE_IN, ID_FADE_OUT, ID_SIZE, ID_MAX_DIST, ID_COLOR,
+    })
+end
+function M.update(dt)
+    if not settings.enabled(P) then
+        if next(indicators) then indicators = {} end
+        if next(sound_prev) then sound_prev = {} end
+        if next(player_cache) then player_cache = {} end
+        return
+    end
+    dt = tonumber(dt) or 0
+    if dt <= 0 then dt = 1 / 60 end
+    local now = tick_ms()
+    if (now - last_scan_ms) >= SCAN_MS then
+        last_scan_ms = now
+        scan_sounds(now, dt)
+    else
+        for _, ind in pairs(indicators) do
+            ind.seen = ind.state ~= "fade_out"
+        end
+    end
+    tick_indicators(dt)
+end
+local function draw_label(sx, sy, text, col, size)
+    local size_fn = draw.get_text_size or draw.GetTextSize
+    local tw, th = 0, size
+    if size_fn then
+        local ok, w, h = pcall(size_fn, text, size)
+        if ok then
+            tw = tonumber(w) or 0
+            th = tonumber(h) or size
+        end
+    end
+    local pad_x, pad_y = 5, 2
+    local bw = tw + pad_x * 2
+    local bh = th + pad_y * 2
+    local bx = sx - bw * 0.5
+    local by = sy - bh * 0.5
+    local a = col[4] or 1
+    if draw.rect_filled then
+        draw.rect_filled(bx, by, bw, bh, { 0.04, 0.05, 0.07, a * 0.55 }, 4)
+        draw.rect_filled(bx, by, 2, bh, { col[1], col[2], col[3], a * 0.9 }, 0)
+    end
+    local tx = bx + pad_x
+    local ty = by + pad_y
+    draw_util.text(tx + 1, ty + 1, text, { 0, 0, 0, a * 0.55 }, size)
+    draw_util.text(tx, ty, text, col, size)
+    if draw.poly_filled then
+        local mid = sx
+        local tip_y = by + bh
+        pcall(draw.poly_filled, {
+            { mid - 4, tip_y },
+            { mid + 4, tip_y },
+            { mid, tip_y + 5 },
+        }, { 0.04, 0.05, 0.07, a * 0.5 })
+    end
+end
+function M.draw()
+    if not settings.enabled(P) then return end
+    if not draw then return end
+    local size = math.floor(settings.num(ID_SIZE, 13))
+    local base = settings.color(ID_COLOR, { 0.75, 0.88, 1.0, 0.95 })
+    local br, bg, bb, ba = base[1] or 0.75, base[2] or 0.88, base[3] or 1, base[4] or 0.95
+    local drawn = {}
+    for _, ind in pairs(indicators) do
+        local a = (ind.alpha or 0) * ba
+        if a > 0.02 and ind.x then
+            local sx, sy, vis = esp_util.w2s(ind.x, ind.y, ind.z)
+            if vis and esp_util.screen_point_ok(sx, sy, 48) then
+                local slot = 0
+                local key = math.floor(sx / 8) .. ":" .. math.floor(sy / 8)
+                slot = drawn[key] or 0
+                drawn[key] = slot + 1
+                local y = sy - slot * (size + 8)
+                draw_label(sx, y, ind.name or "Sound", { br, bg, bb, a }, size)
+            end
+        end
+    end
 end
 return M
 end)()
@@ -28945,6 +29513,12 @@ local STRINGS = {
     ["Target Gear"] = "Snaryazhenie tseli",
     ["Crosshair"] = "Pritsel",
     ["Player Colors"] = "Tsveta igrokov",
+    ["Sound ESP"] = "Sound ESP",
+    ["original by @n0v313w"] = "original by @n0v313w",
+    ["Fade In"] = "Poyavlenie",
+    ["Fade Out"] = "Ischeznovenie",
+    ["Text Size"] = "Razmer teksta",
+    ["Sound Color"] = "Tsvet zvuka",
     ["Resources"] = "Resursy",
     ["Loot"] = "Lut",
     ["Bases"] = "Bazy",
@@ -29452,6 +30026,12 @@ local TIPS = {
     april_silent_hit_chance = "Shans, chto kazhdyy vystrel primenit saylent pri zazhatom Mouse 1. Roll nezavisim na kazhdyy vystrel po fire rate oruzhiya (ne odin raz na ves sprey).",
     april_aim_bone = "Kakuyu chast tela trekaet aimbot. Randomized Part perebrasyvaet kazhdyy vystrel pri zazhatom Mouse 1.",
     april_player_enabled = "Pokazyvaet boksy i informatsiyu na drugih igrokah.",
+    april_sound_esp = "Risuet potuhayuschie podpisi, kogda u drugih igrokov startuyut zvuki na HumanoidRootPart. IsPlaying chitaetsya cherez remote Sound-offsets. Adaptatsiya @n0v313w.",
+    april_sound_esp_fade_in = "Kak bystro poyavlyaetsya novaya zvukovaya podpis.",
+    april_sound_esp_fade_out = "Kak dolgo podpis gasnet posle ostanovki zvuka.",
+    april_sound_esp_size = "Razmer teksta zvukovogo ESP.",
+    april_sound_esp_max_dist = "Maks. distantsiya skana v stadah (derzhit Sound ESP deshevym na polnyh serverah).",
+    april_sound_esp_color = "Tsvet podpisey zvukovogo ESP.",
     april_ui_player_elements = "Vyberite, kakuyu informatsiyu pokazyvat na ESP igrokov.",
     april_player_show_held = "Pokazyvaet predmet v rukah igroka (tot zhe put chteniya, chto u Target Gear).",
     april_player_esp_filters = "Filtr, kakie igroki poyavlyayutsya na ESP.",
@@ -29873,6 +30453,12 @@ april_crosshair_enabled = "Draws a custom crosshair on screen.",
 april_crosshair_follow = "Moves the crosshair toward your active combat target.",
 april_ui_crosshair_motion = "Adds spin or pulse animation to the crosshair.",
 april_ui_crosshair_options = "Extra crosshair drawing options.",
+april_sound_esp = "Draws soft chips when other players' HumanoidRootPart sounds start (footsteps, etc.). Throttled scan + remote Sound.IsPlaying offset. Adapted from @n0v313w.",
+april_sound_esp_fade_in = "How quickly a new sound label fades in.",
+april_sound_esp_fade_out = "How long a sound label takes to fade out after it stops.",
+april_sound_esp_size = "On-screen text size for sound labels.",
+april_sound_esp_max_dist = "Max player scan distance in studs (keeps Sound ESP cheap on full servers).",
+april_sound_esp_color = "Color of sound ESP labels.",
 april_world_enabled = "Highlights harvestable resources and animals in the world.",
 april_loot_enabled = "Highlights crates, bags, and other loot in the world.",
 april_base_enabled = "Highlights base parts like doors, turrets, and storage.",
@@ -32450,7 +33036,21 @@ color("april_player_flag_vip", "VIP", { 1, 0.82, 0.2, 1 }),
 color("april_player_flag_cheater", "Cheater", { 1, 0.05, 0.05, 1 }),
 },
 }
-return { left, gear, target_vis, colors }
+local sound_esp = {
+title = "Sound ESP",
+master = "april_sound_esp",
+items = {
+cb("april_sound_esp", "Sound ESP", false),
+label("original by @n0v313w", true, "april_sound_esp"),
+sep("april_sound_esp"),
+sl("april_sound_esp_fade_in", "Fade In", 0.05, 2, 0.25, true, "april_sound_esp"),
+sl("april_sound_esp_fade_out", "Fade Out", 0.5, 15, 5, true, "april_sound_esp"),
+sl("april_sound_esp_size", "Text Size", 10, 24, 13, false, "april_sound_esp"),
+sl("april_sound_esp_max_dist", "Max Distance", 50, 2000, 450, false, "april_sound_esp"),
+color("april_sound_esp_color", "Sound Color", { 0.75, 0.88, 1.0, 0.95 }, "april_sound_esp"),
+},
+}
+return { left, gear, target_vis, colors, sound_esp }
 end
 local function build_world()
 local resources = {
@@ -34147,6 +34747,7 @@ M.FEATURE_ORDER = {
     "features.visuals.target_overlay",
     "features.visuals.target_visuals",
     "features.visuals.player_esp",
+    "features.visuals.sound_esp",
     "features.world.world_esp",
     "features.world.loot_esp",
     "features.world.npc_esp",
