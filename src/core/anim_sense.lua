@@ -205,22 +205,29 @@ local function track_is_active(track_addr)
     return true
 end
 
+local function ptr_ok(addr)
+    addr = tonumber(addr)
+    return addr and addr >= 0x10000
+end
+
 local function walk_active_tracks(animator_addr)
     local out = {}
-    if not animator_addr then return out end
+    if not ptr_ok(animator_addr) then return out end
     local active_off = rbx_offsets.animator("ActiveAnimations") or 2944
     local head = read_ptr(animator_addr + active_off)
-    if not head then return out end
+    if not ptr_ok(head) then return out end
 
     local node = read_ptr(head)
     local guard = 0
-    while node and node ~= 0 and node ~= head and guard < MAX_TRACKS do
+    while ptr_ok(node) and node ~= head and guard < MAX_TRACKS do
         guard = guard + 1
         local track = read_ptr(node + TRACK_IN_NODE)
-        if track then
+        if ptr_ok(track) then
             out[#out + 1] = track
         end
-        node = read_ptr(node)
+        local next_node = read_ptr(node)
+        if not next_node or next_node == node then break end
+        node = next_node
     end
     return out
 end

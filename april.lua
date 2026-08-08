@@ -1,5 +1,5 @@
 April = {
-    version = "4.1.81",
+    version = "4.1.82",
     debug = false,
     crash_logging = false,
     crash_trace = false,
@@ -5037,7 +5037,9 @@ April._mods["core.rbx_offsets"] = (function()
 local M = {}
 local OFFSETS_URL = "https://offsets.imtheo.lol/Offsets.json"
 local TARGET_FPS = 999
-local FPS_REFRESH_MS = 4000
+local FPS_REFRESH_MS = 8000
+local FPS_READY_DELAY_MS = 2500
+local FPS_FAIL_COOLDOWN_MS = 15000
 local DEFAULT_SOUND = {
     SoundId = 200,
     RollOffMaxDistance = 288,
@@ -5061,6 +5063,8 @@ local DEFAULT_ANIMATOR = {
 }
 local DEFAULT_TASK = {
     Pointer = 142190312,
+    JobStart = 200,
+    JobEnd = 208,
     MaxFPS = 176,
 }
 local DEFAULT_MISC = {
@@ -5082,6 +5086,9 @@ local booted = false
 local roblox_version = nil
 local last_fps_ms = 0
 local fps_applied = false
+local fps_disabled = false
+local fps_ready_at = 0
+local fps_fail_streak = 0
 local function tick_ms()
     local fn = utility and (utility.get_tick_count or utility.GetTickCount)
     if type(fn) ~= "function" then return 0 end
@@ -5148,45 +5155,157 @@ local function mem_fn(name_a, name_b)
     if type(fn) == "function" then return fn end
     return nil
 end
-function M.apply_max_fps(target)
-    local write = mem_fn("Write", "write")
-    local read = mem_fn("Read", "read")
-    if not write or not read then return false end
-    local base = tonumber(memory.base)
-    if (not base or base == 0) and memory.GetBase then
+local function module_base()
+    local base = tonumber(memory and memory.base)
+    if (not base or base == 0) and memory and memory.GetBase then
         local ok, v = pcall(memory.GetBase)
         if ok then base = tonumber(v) end
     end
-    if not base or base == 0 then return false end
+    if not base or base == 0 then return nil end
+    return base
+end
+local function ptr_sane(addr)
+    addr = tonumber(addr)
+    if not addr then return false end
+    if addr < 0x10000 then return false end
+    if addr == 0xFFFFFFFF or addr == 0xFFFFFFFFFFFFFFFF then return false end
+    return true
+end
+local function looks_like_fps(v)
+    v = tonumber(v)
+    if not v then return false end
+    if v ~= v then return false end
+    if v == math.huge or v == -math.huge then return false end
+    return v >= 1 and v <= 10000
+end
+local function in_place_ready()
+    if not game then return false end
+    local pid = tonumber(game.PlaceId or game.place_id)
+    if not pid or pid == 0 then return false end
+    local lp = game.LocalPlayer or game.local_player
+    if lp ~= nil then return true end
+    if entity then
+        local fn = entity.GetLocalPlayer or entity.get_local_player
+        if type(fn) == "function" then
+            local ok, p = pcall(fn)
+            if ok and p ~= nil then return true end
+        end
+    end
+    return false
+end
+local function scheduler_looks_valid(read, ts)
+    if not ptr_sane(ts) then return false end
+    local job_start_off = tonumber(task_sched.JobStart) or DEFAULT_TASK.JobStart
+    local job_end_off = tonumber(task_sched.JobEnd) or DEFAULT_TASK.JobEnd
+    local ok_a, a = pcall(read, ts + job_start_off, "ptr")
+    local ok_b, b = pcall(read, ts + job_end_off, "ptr")
+    if not ok_a or not ok_b then return false end
+    a, b = tonumber(a), tonumber(b)
+    if not a or not b then return false end
+    if b < a then return false end
+    if (b - a) > 0x10000000 then return false end
+    return true
+end
+local function read_fps_slot(read, addr)
+    local ok_d, as_double = pcall(read, addr, "double")
+    if ok_d and looks_like_fps(as_double) then
+        return "double", tonumber(as_double)
+    end
+    local ok_f, as_float = pcall(read, addr, "float")
+    if ok_f and looks_like_fps(as_float) then
+        return "float", tonumber(as_float)
+    end
+    return nil, nil
+end
+function M.apply_max_fps(target)
+    if fps_disabled then return false end
+    if not in_place_ready() then return false end
+    local write = mem_fn("Write", "write")
+    local read = mem_fn("Read", "read")
+    if not write or not read then return false end
+    local base = module_base()
+    if not base then return false end
     local ptr_rva = tonumber(task_sched.Pointer) or DEFAULT_TASK.Pointer
     local max_off = tonumber(task_sched.MaxFPS) or DEFAULT_TASK.MaxFPS
+    if not ptr_rva or ptr_rva <= 0 or not max_off or max_off < 0 or max_off > 0x4000 then
+        fps_disabled = true
+        return false
+    end
     local fps = tonumber(target) or TARGET_FPS
     if fps < 30 then fps = 30 end
-    if fps > 9999 then fps = 9999 end
+    if fps > 999 then fps = 999 end
     local ok_ptr, ts = pcall(read, base + ptr_rva, "ptr")
-    if not ok_ptr or not ts or ts == 0 then return false end
+    if not ok_ptr or not ptr_sane(ts) then
+        fps_fail_streak = fps_fail_streak + 1
+        if fps_fail_streak >= 5 then fps_disabled = true end
+        return false
+    end
+    ts = tonumber(ts)
+    if not scheduler_looks_valid(read, ts) then
+        fps_fail_streak = fps_fail_streak + 1
+        if fps_fail_streak >= 5 then fps_disabled = true end
+        return false
+    end
     local addr = ts + max_off
-    local ok = pcall(write, addr, "double", fps)
-    if not ok then
-        ok = pcall(write, addr, "float", fps)
+    if not ptr_sane(addr) then
+        fps_disabled = true
+        return false
     end
-    if ok then
+    local kind, cur = read_fps_slot(read, addr)
+    if not kind then
+        fps_fail_streak = fps_fail_streak + 1
+        if fps_fail_streak >= 5 then fps_disabled = true end
+        return false
+    end
+    if cur and math.abs(cur - fps) < 0.5 then
         fps_applied = true
+        fps_fail_streak = 0
         last_fps_ms = tick_ms()
+        return true
     end
-    return ok == true
+    local ok, result = pcall(write, addr, kind, fps)
+    if ok and result ~= false then
+        local kind2, cur2 = read_fps_slot(read, addr)
+        if kind2 and cur2 and math.abs(cur2 - fps) < 1.0 then
+            fps_applied = true
+            fps_fail_streak = 0
+            last_fps_ms = tick_ms()
+            return true
+        end
+        pcall(write, addr, kind, cur)
+        fps_fail_streak = fps_fail_streak + 1
+        if fps_fail_streak >= 3 then fps_disabled = true end
+        return false
+    end
+    fps_fail_streak = fps_fail_streak + 1
+    if fps_fail_streak >= 5 then fps_disabled = true end
+    return false
 end
 function M.boot()
     if booted then return fetch_ok end
     booted = true
     pcall(M.fetch)
-    pcall(M.apply_max_fps, TARGET_FPS)
+    fps_ready_at = 0
+    last_fps_ms = 0
     return fetch_ok
 end
 function M.tick_fps()
-    if not booted then return end
+    if not booted or fps_disabled then return end
+    if not in_place_ready() then
+        fps_ready_at = 0
+        return
+    end
     local now = tick_ms()
-    if now > 0 and (now - last_fps_ms) < FPS_REFRESH_MS then return end
+    if fps_ready_at == 0 then
+        fps_ready_at = now + FPS_READY_DELAY_MS
+        return
+    end
+    if now > 0 and now < fps_ready_at then return end
+    local wait = fps_applied and FPS_REFRESH_MS or 1000
+    if fps_fail_streak > 0 then
+        wait = FPS_FAIL_COOLDOWN_MS
+    end
+    if now > 0 and last_fps_ms > 0 and (now - last_fps_ms) < wait then return end
     pcall(M.apply_max_fps, TARGET_FPS)
 end
 function M.ensure()
@@ -5200,6 +5319,9 @@ function M.ready()
 end
 function M.fps_unlocked()
     return fps_applied
+end
+function M.fps_disabled_unsafe()
+    return fps_disabled
 end
 function M.roblox_version()
     return roblox_version
@@ -13679,21 +13801,27 @@ local function track_is_active(track_addr)
     if tp and tp > 0.02 then return true end
     return true
 end
+local function ptr_ok(addr)
+    addr = tonumber(addr)
+    return addr and addr >= 0x10000
+end
 local function walk_active_tracks(animator_addr)
     local out = {}
-    if not animator_addr then return out end
+    if not ptr_ok(animator_addr) then return out end
     local active_off = rbx_offsets.animator("ActiveAnimations") or 2944
     local head = read_ptr(animator_addr + active_off)
-    if not head then return out end
+    if not ptr_ok(head) then return out end
     local node = read_ptr(head)
     local guard = 0
-    while node and node ~= 0 and node ~= head and guard < MAX_TRACKS do
+    while ptr_ok(node) and node ~= head and guard < MAX_TRACKS do
         guard = guard + 1
         local track = read_ptr(node + TRACK_IN_NODE)
-        if track then
+        if ptr_ok(track) then
             out[#out + 1] = track
         end
-        node = read_ptr(node)
+        local next_node = read_ptr(node)
+        if not next_node or next_node == node then break end
+        node = next_node
     end
     return out
 end

@@ -165,7 +165,8 @@ function M.init()
         April.require("ui.menu_shim").install()
     end)
 
-    -- Theo offsets + MaxFPS unlock load with the script (not on feature toggle).
+    -- Fetch Theo offsets at boot (HTTP only). MaxFPS write is deferred until
+    -- the place/local player are ready — early memory.Write hard-crashes Roblox.
     pcall(function()
         April.require("core.rbx_offsets").boot()
     end)
