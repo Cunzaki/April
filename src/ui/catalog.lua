@@ -270,8 +270,8 @@ local function build_visuals()
                 "Team Check", "Skip Safezone", "Skip Downed",
             }, { true, false, false }),
             multi("april_player_esp_flags", "ESP Flags", {
-                "Downed", "Safezone", "Staff", "Reviving", "Movement", "VIP", "Cheater",
-            }, { true, true, true, true, false, true, true }),
+                "Downed", "Safezone", "Staff", "Reviving", "Movement", "VIP", "Cheater", "Animation",
+            }, { true, true, true, true, false, true, true, false }),
             sl("april_player_range", "Player Range", 50, 2000, 500),
         },
     }
@@ -337,17 +337,24 @@ local function build_visuals()
             color("april_player_flag_movement", "Movement", { 0.75, 0.85, 1, 1 }),
             color("april_player_flag_vip", "VIP", { 1, 0.82, 0.2, 1 }),
             color("april_player_flag_cheater", "Cheater", { 1, 0.05, 0.05, 1 }),
+            color("april_player_flag_animation", "Animation", { 0.95, 0.78, 1.0, 1 }),
         },
     }
 
-    -- Bottom of Visuals: Sound ESP (adapted from n0v3l3w/external-sound-esp).
+    -- Bottom of Visuals: Audio Radar (adapted from n0v3l3w/external-sound-esp).
     local sound_esp = {
-        title = "Sound ESP",
+        title = "Audio Radar",
         master = "april_sound_esp",
         items = {
             cb("april_sound_esp", "Sound ESP", false),
             label("original by @n0v313w", true, "april_sound_esp"),
             label("Uses Player ESP filters + range.", true, "april_sound_esp"),
+            sep("april_sound_esp"),
+            multi("april_sound_esp_filters", "Radar Filters", {
+                "Footsteps", "Combat", "Utility", "World", "Other",
+            }, { true, true, true, true, true }, "april_sound_esp"),
+            cb("april_sound_esp_detail", "Radar Detail", true, nil, "april_sound_esp"),
+            cb("april_sound_esp_cat_color", "Category Colors", true, nil, "april_sound_esp"),
             sep("april_sound_esp"),
             sl("april_sound_esp_fade_in", "Sound Fade In", 0.05, 2, 0.25, true, "april_sound_esp"),
             sl("april_sound_esp_fade_out", "Sound Fade Out", 0.5, 15, 5, true, "april_sound_esp"),
@@ -355,6 +362,7 @@ local function build_visuals()
             sl("april_sound_esp_under", "Under Offset", 0, 6, 2.8, true, "april_sound_esp"),
             sl("april_sound_esp_screen_y", "Screen Offset", -20, 40, 2, false, "april_sound_esp"),
             sl("april_sound_esp_max_dist", "Sound Range", 50, 2000, 450, false, "april_sound_esp"),
+            sl("april_sound_esp_max_per", "Max Per Player", 1, 10, 4, false, "april_sound_esp"),
             cb("april_sound_esp_chip", "Sound Chip", false, nil, "april_sound_esp"),
             color("april_sound_esp_color", "Sound Color", { 0.78, 0.9, 1.0, 0.92 }, "april_sound_esp"),
         },

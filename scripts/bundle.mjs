@@ -75,6 +75,7 @@ const ORDER = [
   "game/farm_targets.lua",
   "game/inventory.lua",
   "game/player_gear.lua",
+  "core/anim_sense.lua",
   "game/npcs.lua",
   "game/map_image.lua",
   "game/turret_stats.lua",
@@ -141,7 +142,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.1.78";
+const VERSION = "4.1.81";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector

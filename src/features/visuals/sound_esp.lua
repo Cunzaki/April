@@ -1,6 +1,7 @@
 --[[
-  Sound ESP — adapted from n0v3l3w/external-sound-esp (vector_sound_esp.lua).
-  Credit: @n0v3l3w / UI credit @n0v313w under the toggle.
+  Audio Radar (Sound ESP) — full sound classification + volume / range readout.
+  Adapted from n0v3l3w/external-sound-esp. Credit: @n0v3l3w / UI @n0v313w.
+  Theo offsets are loaded at script boot (core.rbx_offsets), not on toggle.
 ]]
 
 local settings = April.require("core.settings")
@@ -24,11 +25,16 @@ local ID_MAX_DIST = P .. "_max_dist"
 local ID_UNDER = P .. "_under"
 local ID_SCREEN_Y = P .. "_screen_y"
 local ID_CHIP = P .. "_chip"
+local ID_DETAIL = P .. "_detail"
+local ID_CAT_COLOR = P .. "_cat_color"
+local ID_FILTERS = P .. "_filters"
+local ID_MAX_PER = P .. "_max_per"
 
--- Same multicombo as Player ESP → ESP Filters.
 local PLAYER_FILTERS = "april_player_esp_filters"
 local F_TEAM, F_SAFEZONE, F_SKIP_DOWNED = 1, 2, 3
 local PLAYER_RANGE = "april_player_range"
+
+local CF_FOOT, CF_COMBAT, CF_UTIL, CF_WORLD, CF_OTHER = 1, 2, 3, 4, 5
 
 local SCAN_MS = 70
 local HRP_CACHE_MS = 450
@@ -36,14 +42,79 @@ local DEFAULT_MAX_DIST = 450
 local DEFAULT_UNDER = 2.8
 local DEFAULT_SCREEN_Y = 2
 local DEFAULT_SIZE = 10
+local DEFAULT_MAX_PER = 4
+
+local CAT_PRIORITY = {
+    GUN = 100, EXPL = 95, HIT = 90, RELOAD = 85, HEAL = 80, MELEE = 75,
+    INTER = 55, VEH = 45, VOICE = 30, FOOT = 20, OTHER = 10,
+}
+
+local CAT = {
+    FOOT = {
+        key = "FOOT", filter = CF_FOOT,
+        color = { 0.72, 0.86, 1.0, 0.95 },
+        rules = { "foot", "step", "run", "walk", "land", "jump", "sprint", "crawl" },
+    },
+    GUN = {
+        key = "GUN", filter = CF_COMBAT,
+        color = { 1.0, 0.45, 0.38, 0.95 },
+        rules = { "gun", "fire", "shot", "shoot", "bullet", "rifle", "pistol", "smg", "shotgun", "sniper", "ak", "m4", "ar15" },
+    },
+    RELOAD = {
+        key = "RELOAD", filter = CF_COMBAT,
+        color = { 1.0, 0.72, 0.35, 0.95 },
+        rules = { "reload", "mag", "chamber", "bolt" },
+    },
+    HIT = {
+        key = "HIT", filter = CF_COMBAT,
+        color = { 1.0, 0.28, 0.28, 0.95 },
+        rules = { "hit", "impact", "flesh", "hurt", "damage", "headshot" },
+    },
+    EXPL = {
+        key = "EXPL", filter = CF_COMBAT,
+        color = { 1.0, 0.55, 0.15, 0.95 },
+        rules = { "explod", "grenade", "boom", "rpg", "rocket", "c4" },
+    },
+    HEAL = {
+        key = "HEAL", filter = CF_UTIL,
+        color = { 0.45, 1.0, 0.62, 0.95 },
+        rules = { "heal", "bandage", "med", "syringe", "stim", "revive", "cpr" },
+    },
+    MELEE = {
+        key = "MELEE", filter = CF_COMBAT,
+        color = { 0.95, 0.8, 0.4, 0.95 },
+        rules = { "melee", "swing", "slash", "punch", "knife", "axe" },
+    },
+    VEH = {
+        key = "VEH", filter = CF_WORLD,
+        color = { 0.55, 0.75, 1.0, 0.95 },
+        rules = { "car", "engine", "vehicle", "heli", "bike", "tire", "horn" },
+    },
+    INTER = {
+        key = "INTER", filter = CF_UTIL,
+        color = { 0.85, 0.78, 1.0, 0.95 },
+        rules = { "door", "open", "close", "loot", "pickup", "item", "craft", "build", "place" },
+    },
+    VOICE = {
+        key = "VOICE", filter = CF_OTHER,
+        color = { 0.95, 0.7, 0.95, 0.95 },
+        rules = { "voice", "talk", "radio", "mic", "chat" },
+    },
+    OTHER = {
+        key = "OTHER", filter = CF_OTHER,
+        color = { 0.78, 0.9, 1.0, 0.92 },
+        rules = {},
+    },
+}
+
+local CAT_ORDER = { "FOOT", "GUN", "RELOAD", "HIT", "EXPL", "HEAL", "MELEE", "VEH", "INTER", "VOICE", "OTHER" }
 
 local indicators = {}
 local sound_prev = {}
 local player_cache = {}
 local last_scan_ms = 0
-local offsets_ready = false
-local cached_off = nil
 local mem_read_fn = nil
+local cached_off = nil
 
 local function tick_ms()
     local fn = utility and (utility.get_tick_count or utility.GetTickCount)
@@ -77,18 +148,16 @@ local function mem_float(addr, off)
     return nil
 end
 
-local function ensure_offsets()
+local function sound_offs()
     if cached_off then return cached_off end
-    if not offsets_ready then
-        offsets_ready = true
-        pcall(rbx_offsets.fetch)
-    end
     cached_off = {
         is_playing = rbx_offsets.sound_is_playing(),
         volume = rbx_offsets.sound("Volume"),
         speed = rbx_offsets.sound("PlaybackSpeed"),
         looped = rbx_offsets.sound("Looped"),
         rolloff = rbx_offsets.sound("RollOffMaxDistance"),
+        rolloff_min = rbx_offsets.sound("RollOffMinDistance"),
+        sound_id = rbx_offsets.sound("SoundId"),
     }
     return cached_off
 end
@@ -111,7 +180,6 @@ local function player_alive(p)
     return true
 end
 
--- Honor Player ESP → ESP Filters (+ Player Range as a visual gate).
 local function passes_player_esp_filters(p)
     if settings.multi(PLAYER_FILTERS, F_TEAM, true) then
         if not player_state.passes_team_check(p) then
@@ -154,6 +222,28 @@ local function pretty_name(raw)
     return raw
 end
 
+local function classify_sound(name, sound_id)
+    local blob = (tostring(name or "") .. " " .. tostring(sound_id or "")):lower()
+    for i = 1, #CAT_ORDER do
+        local key = CAT_ORDER[i]
+        if key ~= "OTHER" then
+            local def = CAT[key]
+            local rules = def.rules
+            for ri = 1, #rules do
+                if blob:find(rules[ri], 1, true) then
+                    return def
+                end
+            end
+        end
+    end
+    return CAT.OTHER
+end
+
+local function filter_allows(cat_def)
+    local slot = cat_def and cat_def.filter or CF_OTHER
+    return settings.multi(ID_FILTERS, slot, true)
+end
+
 local function under_studs()
     return math.max(0, settings.num(ID_UNDER, DEFAULT_UNDER))
 end
@@ -162,10 +252,74 @@ local function anchor_world(px, py, pz)
     return px, py - under_studs(), pz
 end
 
+local function read_sound_id(child, addr, off)
+    if child then
+        local sid = child.SoundId or child.sound_id
+        if type(sid) == "string" and sid ~= "" then return sid end
+    end
+    if memory and memory.ReadString and addr and off.sound_id then
+        local ok, ptr = pcall(function()
+            return (memory.Read or memory.read)(addr + off.sound_id, "ptr")
+        end)
+        if ok and ptr and ptr ~= 0 then
+            local ok2, s = pcall(memory.ReadString, ptr, 96)
+            if ok2 and type(s) == "string" and s ~= "" then return s end
+        end
+    end
+    return nil
+end
+
+local function gather_sounds(character, hrp)
+    local sounds = {}
+    local seen = {}
+
+    local function push(child)
+        if not child or child.ClassName ~= "Sound" then return end
+        local addr = tonumber(child.Address or child.address)
+        if not addr or addr <= 0 or seen[addr] then return end
+        seen[addr] = true
+        sounds[#sounds + 1] = {
+            addr = addr,
+            name = pretty_name(child.Name or child.name),
+            child = child,
+        }
+    end
+
+    if hrp and hrp.GetChildren then
+        local ok, kids = pcall(function() return hrp:GetChildren() end)
+        if ok and type(kids) == "table" then
+            for i = 1, #kids do push(kids[i]) end
+        end
+    end
+
+    if character then
+        if character.GetDescendantsOfClass then
+            local ok, list = pcall(function()
+                return character:GetDescendantsOfClass("Sound")
+            end)
+            if ok and type(list) == "table" then
+                for i = 1, #list do push(list[i]) end
+            end
+        elseif character.GetDescendants then
+            local ok, list = pcall(function() return character:GetDescendants() end)
+            if ok and type(list) == "table" then
+                for i = 1, math.min(#list, 80) do
+                    local d = list[i]
+                    if d and (d.ClassName or d.class_name) == "Sound" then
+                        push(d)
+                    end
+                end
+            end
+        end
+    end
+
+    return sounds
+end
+
 local function refresh_player_sounds(p, now)
     local key = player_key(p)
     local entry = player_cache[key]
-    if entry and (now - (entry.t or 0)) < HRP_CACHE_MS and entry.hrp then
+    if entry and (now - (entry.t or 0)) < HRP_CACHE_MS and entry.sounds then
         local px, py, pz = esp_util.vec3_pos(p.Position)
         if px then
             entry.px, entry.py, entry.pz = px, py, pz
@@ -187,30 +341,10 @@ local function refresh_player_sounds(p, now)
         return nil
     end
 
-    local sounds = {}
-    local ok_kids, kids = pcall(function()
-        return hrp:GetChildren()
-    end)
-    if ok_kids and type(kids) == "table" then
-        for i = 1, #kids do
-            local child = kids[i]
-            if child and child.ClassName == "Sound" then
-                local addr = tonumber(child.Address)
-                if addr and addr > 0 then
-                    sounds[#sounds + 1] = {
-                        addr = addr,
-                        name = pretty_name(child.Name),
-                        child = child,
-                    }
-                end
-            end
-        end
-    end
-
     local px, py, pz = esp_util.vec3_pos(p.Position or hrp.Position)
     entry = {
         hrp = hrp,
-        sounds = sounds,
+        sounds = gather_sounds(character, hrp),
         t = now,
         px = px, py = py, pz = pz,
     }
@@ -235,15 +369,30 @@ local function read_sound_state(child, addr, off)
     local rolloff = tonumber(child and child.RollOffMaxDistance)
     if rolloff == nil then rolloff = mem_float(addr, off.rolloff) or 0 end
 
-    return vol, spd, looped, rolloff
+    local sid = read_sound_id(child, addr, off)
+    return vol, spd, looped, rolloff, sid
 end
 
-local function bump_indicator(addr, name, px, py, pz)
-    local ax, ay, az = anchor_world(px, py, pz)
+local function format_label(cat_key, name, vol, dist, detail)
+    if detail then
+        local v = math.floor((tonumber(vol) or 0) * 100 + 0.5)
+        local d = math.floor((tonumber(dist) or 0) + 0.5)
+        return string.format("%s · %dm · %d%%", cat_key, d, v)
+    end
+    return cat_key
+end
+
+local function bump_indicator(addr, payload)
+    local ax, ay, az = anchor_world(payload.px, payload.py, payload.pz)
     local ind = indicators[addr]
     if not ind then
         indicators[addr] = {
-            name = name,
+            name = payload.name,
+            cat = payload.cat,
+            text = payload.text,
+            color = payload.color,
+            pkey = payload.pkey,
+            pri = payload.pri or 0,
             alpha = 0,
             state = "fade_in",
             timer = 0,
@@ -253,7 +402,12 @@ local function bump_indicator(addr, name, px, py, pz)
         return
     end
     ind.x, ind.y, ind.z = ax, ay, az
-    ind.name = name or ind.name
+    ind.name = payload.name or ind.name
+    ind.cat = payload.cat or ind.cat
+    ind.text = payload.text or ind.text
+    ind.color = payload.color or ind.color
+    ind.pkey = payload.pkey or ind.pkey
+    ind.pri = payload.pri or ind.pri or 0
     ind.seen = true
     if ind.state == "fade_out" then
         ind.state = "fade_in"
@@ -261,16 +415,59 @@ local function bump_indicator(addr, name, px, py, pz)
     end
 end
 
+-- Keep only the top N active labels per player (by category priority).
+local function enforce_max_per_player(max_per)
+    max_per = math.floor(tonumber(max_per) or DEFAULT_MAX_PER)
+    if max_per < 1 then max_per = 1 end
+    if max_per > 10 then max_per = 10 end
+
+    local by_player = {}
+    for addr, ind in pairs(indicators) do
+        if ind and ind.state ~= "fade_out" and ind.pkey ~= nil then
+            local list = by_player[ind.pkey]
+            if not list then
+                list = {}
+                by_player[ind.pkey] = list
+            end
+            list[#list + 1] = {
+                addr = addr,
+                pri = tonumber(ind.pri) or 0,
+                age = tonumber(ind.timer) or 0,
+            }
+        end
+    end
+
+    for _, list in pairs(by_player) do
+        if #list > max_per then
+            table.sort(list, function(a, b)
+                if a.pri ~= b.pri then return a.pri > b.pri end
+                return a.age < b.age
+            end)
+            for i = max_per + 1, #list do
+                local ind = indicators[list[i].addr]
+                if ind then
+                    ind.state = "fade_out"
+                    ind.timer = 0
+                    ind.seen = false
+                end
+            end
+        end
+    end
+end
+
 local function scan_sounds(now)
     local cam_x, cam_y, cam_z = camera_pos()
     if not cam_x then return end
 
-    local off = ensure_offsets()
+    local off = sound_offs()
     if not ensure_mem() or not off.is_playing then return end
 
     local sound_range = math.max(50, settings.num(ID_MAX_DIST, DEFAULT_MAX_DIST))
     local player_range = math.max(50, settings.num(PLAYER_RANGE, 500))
     local max_dist = math.min(sound_range, player_range)
+    local detail = settings.bool(ID_DETAIL, true)
+    local use_cat_color = settings.bool(ID_CAT_COLOR, true)
+    local max_per = settings.num(ID_MAX_PER, DEFAULT_MAX_PER)
 
     for _, prev in pairs(sound_prev) do
         prev.seen = false
@@ -301,9 +498,13 @@ local function scan_sounds(now)
                             local s = sounds[si]
                             local addr = s.addr
                             local child = s.child
-                            local vol, spd, looped, rolloff = read_sound_state(child, addr, off)
+                            local vol, spd, looped, rolloff, sid = read_sound_state(child, addr, off)
                             local is_playing = mem_bool(addr, off.is_playing)
                             local is_audible = rolloff <= 0 or dist <= rolloff
+                            local cat = classify_sound(s.name, sid)
+                            if not filter_allows(cat) then
+                                goto next_sound
+                            end
 
                             local prev = sound_prev[addr]
                             if not prev then
@@ -337,8 +538,20 @@ local function scan_sounds(now)
                                 prev.vol, prev.spd, prev.looped = vol, spd, looped
                                 prev.playing, prev.audible = is_playing, is_audible
 
+                                local text = format_label(cat.key, s.name, vol, dist, detail)
+                                local col = use_cat_color and cat.color or nil
+                                local payload = {
+                                    name = s.name,
+                                    cat = cat.key,
+                                    text = text,
+                                    color = col,
+                                    px = px, py = py, pz = pz,
+                                    pkey = key,
+                                    pri = CAT_PRIORITY[cat.key] or 10,
+                                }
+
                                 if started and not stopped and is_audible then
-                                    bump_indicator(addr, s.name, px, py, pz)
+                                    bump_indicator(addr, payload)
                                 elseif stopped then
                                     local ind = indicators[addr]
                                     if ind and ind.state ~= "fade_out" then
@@ -350,16 +563,26 @@ local function scan_sounds(now)
                                     if ind and ind.state ~= "fade_out" and is_audible then
                                         local ax, ay, az = anchor_world(px, py, pz)
                                         ind.x, ind.y, ind.z = ax, ay, az
+                                        ind.text = text
+                                        ind.cat = cat.key
+                                        ind.color = col or ind.color
+                                        ind.pkey = key
+                                        ind.pri = CAT_PRIORITY[cat.key] or ind.pri or 10
                                         ind.seen = true
+                                    elseif emitting and is_audible and not indicators[addr] then
+                                        bump_indicator(addr, payload)
                                     end
                                 end
                             end
+                            ::next_sound::
                         end
                     end
                 end
             end
         end
     end
+
+    enforce_max_per_player(max_per)
 
     for key in pairs(player_cache) do
         if not live_keys[key] then
@@ -407,7 +630,7 @@ function M.register_menu()
     local T = menu_util.group(G.VISUALS)
     local root = menu_util.parent(P)
 
-    menu_util.section(T, G.VISUALS, "Sound ESP")
+    menu_util.section(T, G.VISUALS, "Audio Radar")
     menu.add_checkbox(T, G.VISUALS, P, "Sound ESP", false)
     menu.add_slider_float(T, G.VISUALS, ID_FADE_IN, "Sound Fade In", 0.05, 2.0, 0.25, "%.2f", root)
     menu.add_slider_float(T, G.VISUALS, ID_FADE_OUT, "Sound Fade Out", 0.5, 15.0, 5.0, "%.2f", root)
@@ -415,10 +638,17 @@ function M.register_menu()
     menu.add_slider_float(T, G.VISUALS, ID_UNDER, "Under Offset", 0, 6, DEFAULT_UNDER, "%.1f", root)
     menu.add_slider_int(T, G.VISUALS, ID_SCREEN_Y, "Screen Offset", -20, 40, DEFAULT_SCREEN_Y, root)
     menu.add_slider_int(T, G.VISUALS, ID_MAX_DIST, "Sound Range", 50, 2000, DEFAULT_MAX_DIST, root)
+    menu.add_slider_int(T, G.VISUALS, ID_MAX_PER, "Max Per Player", 1, 10, DEFAULT_MAX_PER, root)
+    menu.add_multicombo(T, G.VISUALS, ID_FILTERS, "Radar Filters", {
+        "Footsteps", "Combat", "Utility", "World", "Other",
+    }, { true, true, true, true, true }, root)
+    menu.add_checkbox(T, G.VISUALS, ID_DETAIL, "Radar Detail", true, root)
+    menu.add_checkbox(T, G.VISUALS, ID_CAT_COLOR, "Category Colors", true, root)
     menu.add_checkbox(T, G.VISUALS, ID_CHIP, "Sound Chip", false, root)
     menu.add_colorpicker(T, G.VISUALS, ID_COLOR, "Sound Color", { 0.78, 0.9, 1.0, 0.92 }, root)
     menu_util.bind_children(P, {
-        ID_FADE_IN, ID_FADE_OUT, ID_SIZE, ID_UNDER, ID_SCREEN_Y, ID_MAX_DIST, ID_CHIP, ID_COLOR,
+        ID_FADE_IN, ID_FADE_OUT, ID_SIZE, ID_UNDER, ID_SCREEN_Y, ID_MAX_DIST, ID_MAX_PER,
+        ID_FILTERS, ID_DETAIL, ID_CAT_COLOR, ID_CHIP, ID_COLOR,
     })
 end
 
@@ -494,9 +724,14 @@ function M.draw()
                 local key = math.floor(sx / 10) .. ":" .. math.floor(sy / 10)
                 local slot = drawn[key] or 0
                 drawn[key] = slot + 1
-                -- Below the player; stack further down when multiple sounds.
                 local y = sy + screen_y + slot * (size + 2)
-                draw_label(sx, y, ind.name or "Sound", { br, bg, bb, a }, size, chip)
+                local col = ind.color
+                if type(col) ~= "table" then
+                    col = { br, bg, bb, a }
+                else
+                    col = { col[1] or br, col[2] or bg, col[3] or bb, a }
+                end
+                draw_label(sx, y, ind.text or ind.cat or ind.name or "Sound", col, size, chip)
             end
         end
     end

@@ -134,6 +134,9 @@ function M.update(dt)
     weapons.tick()
     runservice.dispatch(dt)
     incremental_scan.tick()
+    pcall(function()
+        April.require("core.rbx_offsets").tick_fps()
+    end)
     for i, feat in ipairs(M.features) do
         if feat.update then
             local name = M.FEATURE_ORDER[i] or ("#" .. i)
@@ -160,6 +163,11 @@ function M.init()
 
     pcall(function()
         April.require("ui.menu_shim").install()
+    end)
+
+    -- Theo offsets + MaxFPS unlock load with the script (not on feature toggle).
+    pcall(function()
+        April.require("core.rbx_offsets").boot()
     end)
 
     M.register_all()
