@@ -46,18 +46,22 @@ M.SKIP_IDS = {
 M.BY_ID = {
     -- Aimbot
     april_aimbot = "Smooth camera aim assist on your current target. Bind a key on the chip (Always / Hold / Toggle).",
+    april_fov_flags_enabled = "Draw status flags under the larger enabled Aimbot / Silent Aim FOV (or whichever is on).",
+    april_fov_flags_visible = "Shows VISIBLE under the FOV when your current aim/silent target is visible. Display only — not the Filters Visible Only gate.",
+    april_fov_flags_distance = "Shows distance in meters under the FOV to your current aim/silent target.",
     april_aim_key = "Hold or toggle this key to activate aimbot.",
     april_silent_aim = "Redirects shots to your locked target without moving the camera.",
 
     -- Bullet
     april_bullet_enabled = "Master toggle for advanced bullet routing (hitscan, bullet TP, silent manip). Bind Always / Hold / Toggle from the key chip.",
     april_silent_hitscan = "Registers hits instantly on your locked target. Server may reject invalid shots.",
-    april_silent_bullet_tp = "Scans the head for the closest visible point to your crosshair (manip-style math), spawns the ray on the target, and shoots through that point. Cycles offsets every frame.",
+    april_silent_bullet_tp = "Scans the head for the closest visible point to your crosshair, spawns the ray on the target, and shoots through that point. Scales with Hitbox Override Size when both are on.",
     april_silent_bullet_manip = "Finds a shootable angle around cover. Server may reject invalid shots.",
     april_silent_manip_extend = "Searches farther from your body when no close peek is found.",
     april_bullet_body_peek = "Moves you to the peek with desync for server-valid shots. Can cause invalids or kicks.",
-    april_thick_bullet = "Expands other players' head hitboxes on your client and fades them. Player ESP boxes still use natural head size so Override Size stays hidden. Helps local hit tests; the server can still reject shots that only clip the inflated shell.",
-    april_thick_bullet_mult = "How large enemy head hitboxes become (1x = normal, up to 4x). ESP boxes stay normal-sized.",
+    april_thick_bullet = "Expands other players' head hitboxes on your client and fades them. Bullet TP / hitscan aim samples scale to Override Size. ESP boxes still use natural head size. Server can still reject shell-only clips.",
+    april_thick_bullet_mult = "How large enemy head hitboxes become (1x–4x). Also scales Bullet TP head-scan radius when Override is on.",
+    april_bullet_ug_resolver = "While targeting with Bullet aim/silent: expands their head hitbox to 4x and lifts their entire body 2 studs on your client every frame. Disables Hitbox Override while on.",
 
     -- Aimbot options
     april_aim_targets = "Choose whether aimbot targets players, NPCs, or both.",
@@ -85,7 +89,7 @@ M.BY_ID = {
     april_player_show_held = "Shows the item a player is holding (same read path as Target Gear).",
     april_player_esp_filters = "Filter which players appear on ESP.",
     april_player_esp_flags = "Show status flags (downed, SZ, staff, revive, movement state, VIP, cheater).",
-    april_target_overlay = "Shows held weapon and gear for the player closest to your crosshair.",
+    april_target_overlay = "Shows name, health, distance, held weapon, and gear for the player closest to your crosshair.",
     april_target_overlay_fov = "Independent FOV (pixels from crosshair) used only by Target Gear Overlay.",
     april_target_overlay_max_dist = "Maximum world distance (studs) for Target Gear Overlay selection.",
     april_crosshair_enabled = "Draws a custom crosshair on screen.",
@@ -131,6 +135,21 @@ M.BY_ID = {
     april_gm_speed = "Boosts bullet speed via SpeedMult on live weapon tables. Not an attachment stat — Swift Heavy Ammo also adds speed; equip a gun before enabling.",
     april_gm_range = "Extends max range via RangeMult. Silencer and Compensator reduce range; this patches whatever range mults exist on your gun.",
     april_gm_double_tap = "Forces a 2-round burst on your held gun. Patches ToolInfo directly — does not use GC mults.",
+    april_tracers_enabled = "On hit (enemy HP drop while holding Mouse 1 on your aim/silent target), draws an animated screen-space tracer from you to them.",
+    april_tracers_color = "Start / primary tracer color.",
+    april_tracers_color2 = "End / accent color (gradient, travel head, impact).",
+    april_tracers_style = "Beam (clean), Glow (bloom layers), Gradient, Dashed (moving), or Ribbon (filled).",
+    april_tracers_anim = "How the tracer plays out: Fade, Sweep (grows to target), Shrink, Pulse, Travel (moving hotspot), Bloom.",
+    april_tracers_anim_speed = "Speed of sweep / pulse / travel / rainbow motion.",
+    april_tracers_lifetime = "How long each tracer stays on screen.",
+    april_tracers_thickness = "Base line thickness in pixels.",
+    april_tracers_transparency = "Starting fade amount (higher = more transparent).",
+    april_tracers_segments = "How many segments make up the path — higher is smoother.",
+    april_tracers_glow = "Extra bloom strength for Glow style and impact rings.",
+    april_tracers_damage = "Minimum accumulated HP lost within ~350ms on a focused/sprayed enemy before a tracer fires.",
+    april_tracers_outline = "Dark outline behind the tracer for contrast.",
+    april_tracers_impact = "Small expanding flash at the hit point.",
+    april_tracers_rainbow = "Cycles tracer colors over time.",
 
     -- Movement
     april_fly_enabled = "Camera-relative HRP velocity fly (WASD + Space/Ctrl). Built-in duck (HipHeight 0.01) and jump state while airborne — does not toggle Fake Duck. Never changes WalkSpeed or JumpPower.",

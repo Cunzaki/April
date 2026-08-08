@@ -54,7 +54,17 @@ end
 
 function M.instance_addr(inst)
     if not inst then return nil end
-    return inst.Address or inst.address
+    local addr = inst.Address or inst.address
+    addr = tonumber(addr)
+    if addr and addr ~= 0 then return addr end
+    return nil
+end
+
+-- Stable applied-set key. Prefer engine Address; fall back to the Instance
+-- userdata itself so parts without Address can still be stamped once.
+function M.part_key(inst)
+    if not inst then return nil end
+    return M.instance_addr(inst) or inst
 end
 
 function M.color_visible_for_mode(mode)
@@ -120,14 +130,26 @@ end
 
 local function apply_one(inst, applied)
     if not M.available() or not inst then return false end
-    if not M.is_part(inst) then return false end
-    local addr = M.instance_addr(inst)
-    if not addr then return false end
-    if applied[addr] then return true end
-    local ok, result = pcall(exploits.ApplyChamsToInstance, inst)
+    local key = M.part_key(inst)
+    if key == nil then return false end
+    if applied[key] then return true end
+    -- Class probes are unreliable on some Vector builds; if we have an Address
+    -- (or a part class), attempt ApplyChams either way.
+    local looks_part = M.is_part(inst)
+    if not looks_part and type(key) ~= "number" then
+        return false
+    end
+    -- Docs: ApplyChamsToInstance accepts Instance OR raw Address integer.
+    local ok, result = false, false
+    if type(key) == "number" then
+        ok, result = pcall(exploits.ApplyChamsToInstance, key)
+    end
+    if (not ok or result == false) then
+        ok, result = pcall(exploits.ApplyChamsToInstance, inst)
+    end
     -- Some builds return nil on success; only treat explicit false as failure.
     if ok and result ~= false then
-        applied[addr] = true
+        applied[key] = true
         return true
     end
     return false
@@ -135,6 +157,54 @@ end
 
 function M.cham_part(inst, applied)
     return apply_one(inst, applied or {})
+end
+
+local PART_CLASS_LIST = {
+    "MeshPart", "Part", "WedgePart", "CornerWedgePart", "TrussPart", "UnionOperation",
+}
+
+-- Docs-preferred collector: GetDescendantsOfClass per accepted part class,
+-- then GetDescendants fallback if the class filter returned nothing.
+function M.for_each_part(root, fn)
+    if not root or type(fn) ~= "function" then return 0 end
+    local n = 0
+    for i = 1, #PART_CLASS_LIST do
+        local class_name = PART_CLASS_LIST[i]
+        local list = env.safe_call(function()
+            if root.GetDescendantsOfClass then
+                return root:GetDescendantsOfClass(class_name)
+            end
+            if root.get_descendants_of_class then
+                return root:get_descendants_of_class(class_name)
+            end
+            return nil
+        end)
+        if type(list) == "table" then
+            for j = 1, #list do
+                local inst = list[j]
+                -- Trust GetDescendantsOfClass; ClassName probes are flaky on some builds.
+                if inst then
+                    fn(inst)
+                    n = n + 1
+                end
+            end
+        end
+    end
+    if n > 0 then return n end
+
+    local list = env.safe_call(function()
+        if root.get_descendants then return root:get_descendants() end
+        if root.GetDescendants then return root:GetDescendants() end
+        return nil
+    end) or {}
+    for i = 1, #list do
+        local inst = list[i]
+        if inst and M.is_part(inst) then
+            fn(inst)
+            n = n + 1
+        end
+    end
+    return n
 end
 
 -- Fallen R15: body MeshParts + nested armor copies under skin Models (dump).
@@ -150,7 +220,23 @@ local PLAYER_CHAM_NAMES = {
 local PLAYER_CHAM_SKIP = {
     HumanoidRootPart = true,
     CollisionPart = true,
+    Collision = true,
 }
+
+function M.cham_model_parts(root, applied, skip_names)
+    if not root then return 0 end
+    applied = applied or {}
+    skip_names = skip_names or PLAYER_CHAM_SKIP
+    local n = 0
+    M.for_each_part(root, function(inst)
+        local name = inst.Name or inst.name
+        if name and skip_names[name] then return end
+        if apply_one(inst, applied) then
+            n = n + 1
+        end
+    end)
+    return n
+end
 
 function M.cham_player_character(char, applied)
     if not char or not env.is_valid(char) then return 0 end
@@ -392,6 +478,16 @@ function M.sync_owner(id, force)
 
     local front = owner.applied
 
+    -- Empty collect while we already have stamps almost always means a transient
+    -- lookup failure (character nil for a frame, GetDescendants hiccup). Reverting
+    -- here causes the RevertChams thrash / lag loop — keep the front buffer.
+    if next(back) == nil then
+        if next(front) ~= nil then
+            return
+        end
+        return
+    end
+
     if sets_equal(front, back) then
         return
     end
@@ -407,11 +503,11 @@ function M.sync_owner(id, force)
         return
     end
 
-    -- Only additions: stamp new addresses, no Revert needed.
-    for addr, _ in pairs(back) do
-        if not front[addr] then
-            pcall(exploits.ApplyChamsToInstance, addr)
-            front[addr] = true
+    -- Only additions: stamp new keys, no Revert needed.
+    for key, _ in pairs(back) do
+        if not front[key] then
+            pcall(exploits.ApplyChamsToInstance, key)
+            front[key] = true
         end
     end
     owner.applied = front

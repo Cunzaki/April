@@ -1,4 +1,4 @@
--- Themed on-screen HUD for bullet features (hitscan / TP / manip).
+-- Themed on-screen HUD for bullet features (hitscan / TP / manip / hitbox).
 local settings = April.require("core.settings")
 local draw_util = April.require("core.draw_util")
 local theme = April.require("core.ui_theme")
@@ -13,6 +13,7 @@ local PREFIX = "april_silent_"
 local P_BULLET = "april_bullet_enabled"
 
 local scan_anim = 0
+local i18n_mod = nil
 
 local FIRE_LABELS = {
     tp = "Bullet TP",
@@ -33,11 +34,18 @@ local MANIP_LABELS = {
     off = "Off",
 }
 
-local function bullet_flag(name, default)
-    if not settings.enabled(P_BULLET) then
-        return false
+local function i18n()
+    if i18n_mod then return i18n_mod end
+    local ok, mod = pcall(function()
+        return April.require("ui.i18n")
+    end)
+    if ok and mod then
+        i18n_mod = mod
+        return mod
     end
-    return settings.bool(PREFIX .. name, default == true)
+    return {
+        t = function(s) return s end,
+    }
 end
 
 function M.update(dt)
@@ -68,13 +76,18 @@ local function draw_status_panel(cx, cy, fov, info)
     local hitscan_on = info.hitscan_on == true
     local tp_on = info.tp_on == true
     local manip_on = info.manip_on == true
-    if not hitscan_on and not tp_on and not manip_on then return end
+    local hitbox_on = info.hitbox_on == true
+    if not hitscan_on and not tp_on and not manip_on and not hitbox_on then return end
 
-    local i18n = April.require("ui.i18n")
+    local t = i18n()
     local manip_state = info.manip_state or "off"
     local fire_mode = info.state or "off"
-    local fire_label = i18n.t(FIRE_LABELS[fire_mode] or fire_mode)
-    local manip_label = i18n.t(MANIP_LABELS[manip_state] or manip_state)
+    local fire_label = t.t(FIRE_LABELS[fire_mode] or fire_mode)
+    if fire_mode == "tp" and hitbox_on then
+        local mult = tonumber(info.hitbox_mult) or tonumber(info.head_scale) or 1
+        fire_label = fire_label .. string.format(" x%.1f", mult)
+    end
+    local manip_label = t.t(MANIP_LABELS[manip_state] or manip_state)
     if info.scan_cached and (manip_state == "ready" or manip_state == "blocked") then
         manip_label = manip_label .. " *"
     end
@@ -82,16 +95,21 @@ local function draw_status_panel(cx, cy, fov, info)
     local pad_x, pad_y = 10, 6
     local row_h = 14
     local bar_h = 5
-    local title = i18n.t("BULLET STATUS")
+    local title = t.t("BULLET STATUS")
     local title_w = theme.text_w(title, 11)
-    local on_txt = i18n.t("ON")
-    local off_txt = i18n.t("OFF")
-    local hitscan_l = i18n.t("Hitscan")
-    local tp_l = i18n.t("Bullet TP")
-    local manip_l = i18n.t("Manip")
-    local fire_l = i18n.t("Fire")
-    local peek_l = i18n.t("Peek R")
-    local ring_l = i18n.t("Ring")
+    local on_txt = t.t("ON")
+    local off_txt = t.t("OFF")
+    local hitscan_l = t.t("Hitscan")
+    local tp_l = t.t("Bullet TP")
+    local manip_l = t.t("Manip")
+    local hitbox_l = t.t("Hitbox")
+    local fire_l = t.t("Fire")
+    local peek_l = t.t("Peek R")
+    local ring_l = t.t("Ring")
+    local scan_l = t.t("TP Scan")
+
+    local hitbox_mult = tonumber(info.hitbox_mult) or 1
+    local hitbox_txt = hitbox_on and string.format("%s x%.1f", on_txt, hitbox_mult) or off_txt
 
     local radius_text = fmt_radius(info)
     local ring_text = "-"
@@ -103,19 +121,34 @@ local function draw_status_panel(cx, cy, fov, info)
         ring_text = "los"
     end
 
+    local tp_scan_txt = "-"
+    if tp_on then
+        if info.tp_scan_visible then
+            tp_scan_txt = t.t("Visible")
+        else
+            local prog = math.max(0, math.min(1, info.tp_scan_progress or 0))
+            tp_scan_txt = string.format("%d%%", math.floor(prog * 100 + 0.5))
+        end
+    end
+
     local w1 = theme.text_w(hitscan_l, 10) + theme.text_w(on_txt, 10) + 24
     local w2 = theme.text_w(tp_l, 10) + theme.text_w(on_txt, 10) + 24
-    local w3 = theme.text_w(manip_l, 10) + theme.text_w(manip_label, 10) + 24
-    local w4 = theme.text_w(fire_l, 10) + theme.text_w(fire_label, 10) + 24
-    local w5 = theme.text_w(peek_l, 10) + theme.text_w(radius_text, 10) + 24
-    local w6 = theme.text_w(ring_l, 10) + theme.text_w(ring_text, 10) + 24
-    local panel_w = math.max(title_w, w1, w2, w3, w4, w5, w6) + pad_x * 2 + 8
-    panel_w = math.max(panel_w, 178)
+    local w3 = theme.text_w(hitbox_l, 10) + theme.text_w(hitbox_txt, 10) + 24
+    local w4 = theme.text_w(manip_l, 10) + theme.text_w(manip_label, 10) + 24
+    local w5 = theme.text_w(fire_l, 10) + theme.text_w(fire_label, 10) + 24
+    local w6 = theme.text_w(peek_l, 10) + theme.text_w(radius_text, 10) + 24
+    local w7 = theme.text_w(ring_l, 10) + theme.text_w(ring_text, 10) + 24
+    local w8 = theme.text_w(scan_l, 10) + theme.text_w(tp_scan_txt, 10) + 24
+    local panel_w = math.max(title_w, w1, w2, w3, w4, w5, w6, w7, w8) + pad_x * 2 + 8
+    panel_w = math.max(panel_w, 188)
 
-    local rows = manip_on and 6 or 4
-    local has_bar = manip_on and (
+    local rows = 5 -- hitscan, tp, hitbox, manip, fire
+    if tp_on then rows = rows + 1 end
+    if manip_on then rows = rows + 2 end
+
+    local has_bar = (manip_on and (
         manip_state == "scanning" or manip_state == "ready" or manip_state == "direct"
-    )
+    )) or (tp_on and fire_mode == "tp")
     local panel_h = 22 + rows * row_h + pad_y + (has_bar and (bar_h + 6) or 0)
     local x = cx - panel_w * 0.5
     local y = cy + fov + 10
@@ -134,6 +167,7 @@ local function draw_status_panel(cx, cy, fov, info)
 
     draw_row(hitscan_l, hitscan_on and on_txt or off_txt, row_color(hitscan_on, true, false))
     draw_row(tp_l, tp_on and on_txt or off_txt, row_color(tp_on, true, false))
+    draw_row(hitbox_l, hitbox_txt, row_color(hitbox_on, true, false))
 
     local manip_ok = manip_state == "ready" or manip_state == "direct"
     local manip_warn = manip_state == "scanning"
@@ -149,8 +183,15 @@ local function draw_status_panel(cx, cy, fov, info)
         fire_col = theme.GREEN
     elseif fire_mode == "scanning" or fire_mode == "blocked" then
         fire_col = theme.ORANGE
+    elseif fire_mode == "off" and hitbox_on and not hitscan_on and not tp_on and not manip_on then
+        fire_label = t.t("Override")
+        fire_col = theme.GREEN
     end
     draw_row(fire_l, fire_label, fire_col)
+
+    if tp_on then
+        draw_row(scan_l, tp_scan_txt, info.tp_scan_visible and theme.GREEN or overlay_theme.text())
+    end
 
     if manip_on then
         draw_row(peek_l, radius_text, overlay_theme.text())
@@ -161,16 +202,22 @@ local function draw_status_panel(cx, cy, fov, info)
         local bar_w = panel_w - pad_x * 2
         local bar_x = x + pad_x
         local bar_y = ry + 2
-        local ready = manip_state == "ready" or manip_state == "direct"
+        local ready = manip_state == "ready" or manip_state == "direct" or info.tp_scan_visible == true
         local prog
-        if ready then
-            prog = 1
+        if ready and not (tp_on and fire_mode == "tp" and manip_state == "scanning") then
+            if tp_on and fire_mode == "tp" then
+                prog = info.tp_scan_visible and 1 or math.max(0, math.min(1, info.tp_scan_progress or 0))
+            else
+                prog = 1
+            end
         elseif manip_state == "scanning" then
-            -- Prefer real amortized progress; pulse lightly on top.
             local real = math.max(0, math.min(1, info.scan_progress or 0))
             prog = math.max(0.08, real * 0.85 + scan_anim * 0.12)
+        elseif tp_on and fire_mode == "tp" then
+            local real = math.max(0, math.min(1, info.tp_scan_progress or 0))
+            prog = math.max(0.08, real * 0.9 + scan_anim * 0.08)
         else
-            prog = math.max(0, math.min(1, info.scan_progress or 0))
+            prog = math.max(0, math.min(1, info.scan_progress or info.tp_scan_progress or 0))
         end
 
         local bg = theme.alpha(overlay_theme.panel_bg(), 0.95)
@@ -229,7 +276,24 @@ function M.draw(cx, cy, fov, track)
     if not draw then return end
 
     local info = track and track.manip
-    if not info then return end
+    -- Hitbox-only: synthesize a minimal info blob so Status HUD still renders.
+    if not info then
+        local hitbox_on = settings.bool("april_thick_bullet", false)
+        if not hitbox_on then return end
+        local mult = tonumber(settings.num("april_thick_bullet_mult", 2)) or 2
+        info = {
+            state = "off",
+            manip_state = "off",
+            hitscan_on = false,
+            tp_on = false,
+            manip_on = false,
+            hitbox_on = true,
+            hitbox_mult = mult,
+        }
+    elseif info.hitbox_on == nil then
+        info.hitbox_on = settings.bool("april_thick_bullet", false)
+        info.hitbox_mult = tonumber(settings.num("april_thick_bullet_mult", 2)) or 2
+    end
 
     local show_hud = settings.bool(PREFIX .. "manip_status", false)
     local show_peek = settings.bool(PREFIX .. "manip_peek_vis", false)

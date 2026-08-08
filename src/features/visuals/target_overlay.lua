@@ -474,6 +474,130 @@ function M.update(_dt)
     M.refresh_target()
 end
 
+local function target_distance_m(target)
+    if not target then return nil end
+    local ox, oy, oz = local_origin()
+    local origin = (ox and { x = ox, y = oy, z = oz }) or nil
+    local dist = ep.distance_to(target, origin)
+    if dist then return dist end
+    if not ox then return nil end
+    local hx, hy, hz = esp_util.vec3_pos(ep.head_position(target) or ep.position(target))
+    if not hx then return nil end
+    return math_util.distance3(hx - ox, hy - oy, hz - oz)
+end
+
+local function target_hp(target)
+    local hp = ep.health(target)
+    local max_hp = ep.max_health(target)
+    if not hp then
+        local ok, v = pcall(function()
+            return target.Health or target.health
+        end)
+        if ok then hp = tonumber(v) end
+    end
+    if not max_hp then
+        local ok, v = pcall(function()
+            return target.MaxHealth or target.max_health
+        end)
+        if ok then max_hp = tonumber(v) end
+    end
+    if not max_hp or max_hp <= 0 then max_hp = 100 end
+    if not hp then hp = max_hp end
+    if hp < 0 then hp = 0 end
+    if hp > max_hp then hp = max_hp end
+    return hp, max_hp
+end
+
+local function hp_fill_color(pct)
+    if pct > 0.5 then
+        local t = (pct - 0.5) * 2
+        return { (1 - t) * 0.95, 0.92 + t * 0.08, 0.22, 1 }
+    end
+    local t = pct * 2
+    return { 1, 0.22 + t * 0.7, 0.18, 1 }
+end
+
+local function truncate_text(text, max_w, fs)
+    if not text or text == "" then return "" end
+    if select(1, draw.get_text_size(text, fs)) <= max_w then
+        return text
+    end
+    local out = text
+    while #out > 1 and select(1, draw.get_text_size(out .. "..", fs)) > max_w do
+        out = out:sub(1, -2)
+    end
+    return out .. ".."
+end
+
+local function resolve_player_name(target)
+    local name = ep.display_name(target) or ep.name(target)
+    if (not name or name == "") and target then
+        name = target.DisplayName or target.display_name or target.Name or target.name
+    end
+    name = text_util.sanitize(name or "")
+    if name == "" then name = "Unknown" end
+    return name
+end
+
+-- Compact header: name + distance on one row, full-width HP bar + value under it.
+local function draw_info_band(panel_x, y, panel_w, target)
+    local pad = 12
+    local name = resolve_player_name(target)
+    local dist = target_distance_m(target)
+    local dist_txt = dist and string.format("%dm", math.floor(dist + 0.5)) or "--"
+    local hp, max_hp = target_hp(target)
+    local pct = max_hp > 0 and (hp / max_hp) or 0
+    if pct < 0 then pct = 0 end
+    if pct > 1 then pct = 1 end
+    local hp_txt = string.format("%d", math.floor(hp + 0.5))
+    local hp_col = hp_fill_color(pct)
+
+    local name_fs = 13
+    local meta_fs = 11
+    local dist_w = select(1, draw.get_text_size(dist_txt, meta_fs)) or 0
+    local hp_w = select(1, draw.get_text_size(hp_txt, meta_fs)) or 0
+
+    -- Row 1: name (left) · distance (right)
+    local name_max = panel_w - pad * 2 - dist_w - 14
+    local shown = truncate_text(name, name_max, name_fs)
+    draw.text(panel_x + pad, y, shown, overlay_theme.text(), name_fs)
+    draw.text(
+        panel_x + panel_w - pad - dist_w, y + 1,
+        dist_txt, overlay_theme.text_muted(), meta_fs
+    )
+
+    -- Row 2: HP bar spanning content, value tucked at end
+    local bar_y = y + 17
+    local bar_h = 6
+    local gap = 8
+    local bar_x = panel_x + pad
+    local bar_w = panel_w - pad * 2 - hp_w - gap
+    if bar_w < 48 then
+        bar_w = panel_w - pad * 2
+        hp_w = 0
+    end
+
+    if draw.rect_filled then
+        draw.rect_filled(bar_x, bar_y, bar_w, bar_h, { 0.07, 0.08, 0.10, 0.95 }, 2)
+        local fill_w = math.floor(bar_w * pct + 0.5)
+        if fill_w > 0 then
+            draw.rect_filled(bar_x, bar_y, fill_w, bar_h, hp_col, 2)
+        end
+    end
+
+    if hp_w > 0 then
+        draw.text(
+            panel_x + panel_w - pad - hp_w,
+            bar_y - 2,
+            hp_txt,
+            hp_col,
+            meta_fs
+        )
+    end
+
+    return 30
+end
+
 function M.draw()
     if not settings.enabled(P) then return end
     if not draw or not draw.text or not draw.rect_filled then return end
@@ -486,10 +610,11 @@ function M.draw()
     local top = settings.num(P .. "_top", 88)
     local cx = sw * 0.5
 
-    local name = text_util.sanitize(target.display_name or target.name or "Unknown")
     local content_w = math.max(layout.held_row_w, layout.row_w)
-    local panel_w = math.max(220, content_w + 18)
-    local panel_h = 24 + 8 + layout.held_sz + layout.row_gap + layout.gear_sz + 9
+    local panel_w = math.max(248, content_w + 20)
+    local info_h = 30
+    local title_h = 24
+    local panel_h = title_h + 4 + info_h + 10 + layout.held_sz + layout.row_gap + layout.gear_sz + 10
     if not held_piece(layout.held) and layout.filled == 0 then
         panel_h = panel_h + 16
     end
@@ -497,16 +622,9 @@ function M.draw()
     local i18n = April.require("ui.i18n")
     overlay_theme.draw_panel(panel_x, top, panel_w, panel_h, i18n.t("TARGET LOADOUT"), { title_center = true })
 
-    local max_name_w = panel_w - 114
-    local header_name = name
-    while #header_name > 1 and select(1, draw.get_text_size(header_name, 10)) > max_name_w do
-        header_name = header_name:sub(1, -2)
-    end
-    if header_name ~= name then header_name = header_name .. ".." end
-    local nw = select(1, draw.get_text_size(header_name, 10))
-    draw.text(panel_x + panel_w - nw - 8, top + 7, header_name, overlay_theme.accent(), 10)
+    local y = top + title_h + 4
+    y = y + draw_info_band(panel_x, y, panel_w, target) + 8
 
-    local y = top + 32
     local held = held_piece(layout.held)
     local row_x = cx - layout.held_row_w * 0.5
 

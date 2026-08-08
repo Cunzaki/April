@@ -222,6 +222,8 @@ function M.register_bullet(T, G, prefix, parent_id)
     menu.add_slider_float(T, G, "april_thick_bullet_mult", "Override Size", 1, 4, 2, "%.1f",
         menu_util.parent("april_thick_bullet"))
 
+    -- UG Resolver POC kept in features/combat/ug_resolver.lua (UI retired for now).
+
     local vis_root = menu_util.parent(parent_id)
     menu.add_checkbox(T, G, p .. "manip_status", "Status HUD", false, vis_root)
     menu.add_checkbox(T, G, p .. "manip_peek_vis", "Peek Visual", false, vis_root)

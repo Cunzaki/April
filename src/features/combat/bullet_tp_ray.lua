@@ -6,8 +6,10 @@ local M = {}
 local GRID_STEP = 0.22
 local HEAD_RADIUS = 0.55
 local SCAN_CACHE_MS = 160
+local SCAN_CACHE_LITE_MS = 280
 local VISIBLE_BONUS = 2500
 local PEEK_VISIBLE_BONUS = 1800
+local MAX_HEAD_CACHE = 48
 
 M.METHODS = {
     "Center",
@@ -182,24 +184,56 @@ local function los_clear(from, to)
     return true
 end
 
-local function head_sample_points(center, camera)
+local function scale_off(off, scale)
+    if not off then return { x = 0, y = 0, z = 0 } end
+    scale = tonumber(scale) or 1
+    if scale < 1 then scale = 1 end
+    if scale > 4 then scale = 4 end
+    return {
+        x = (off.x or 0) * scale,
+        y = (off.y or 0) * scale,
+        z = (off.z or 0) * scale,
+    }
+end
+
+local function head_sample_points(center, camera, head_scale, step)
     local pts = {}
-    for _, off in ipairs(HEAD_SAMPLES) do
-        pts[#pts + 1] = add_off(center, off)
+    head_scale = tonumber(head_scale) or 1
+    if head_scale < 1 then head_scale = 1 end
+    if head_scale > 4 then head_scale = 4 end
+    step = math.max(1, math.floor(tonumber(step) or 1))
+
+    for i = 1, #HEAD_SAMPLES, step do
+        pts[#pts + 1] = add_off(center, scale_off(HEAD_SAMPLES[i], head_scale))
     end
 
     if camera then
         local lx, ly, lz = toward_camera(center, camera)
         for _, d in ipairs({ 0.12, 0.28, 0.45, 0.62 }) do
+            local dd = d * head_scale
             pts[#pts + 1] = {
-                x = center.x + lx * d,
-                y = center.y + ly * d,
-                z = center.z + lz * d,
+                x = center.x + lx * dd,
+                y = center.y + ly * dd,
+                z = center.z + lz * dd,
             }
         end
     end
 
     return pts
+end
+
+local function prune_head_cache(now)
+    local n = 0
+    for _ in pairs(head_scan_cache) do
+        n = n + 1
+    end
+    if n <= MAX_HEAD_CACHE then return end
+    local drop_before = now - (SCAN_CACHE_LITE_MS * 3)
+    for k, ent in pairs(head_scan_cache) do
+        if not ent or (now - (ent.t or 0)) > drop_before then
+            head_scan_cache[k] = nil
+        end
+    end
 end
 
 local function score_head_point(from, view_x, view_y, view_z, point, ref_eye)
@@ -238,54 +272,93 @@ local function score_head_point(from, view_x, view_y, view_z, point, ref_eye)
     return score, visible
 end
 
-local function scan_cache_key(camera, center, body)
+local function scan_cache_key(camera, center, body, head_scale)
     if not center then return nil end
     local bx, by, bz = 0, 0, 0
     if body then
         bx, by, bz = body.x or 0, body.y or 0, body.z or 0
     end
     local cx, cy, cz = camera and camera.x or 0, camera and camera.y or 0, camera and camera.z or 0
+    local hs = math.floor(((tonumber(head_scale) or 1) * 10) + 0.5)
     return string.format(
-        "%.1f,%.1f,%.1f>%.1f,%.1f,%.1f@%.1f,%.1f,%.1f",
-        cx, cy, cz, center.x, center.y, center.z, bx, by, bz
+        "%.1f,%.1f,%.1f>%.1f,%.1f,%.1f@%.1f,%.1f,%.1f#s%d",
+        cx, cy, cz, center.x, center.y, center.z, bx, by, bz, hs
     )
 end
 
-local function find_best_head_aim(head_center, camera, body)
+local function find_best_head_aim(head_center, camera, body, opts)
+    opts = opts or {}
     if not head_center or not camera then
         return copy_pos(head_center), false, 0, 0
     end
 
-    local key = scan_cache_key(camera, head_center, body)
+    local head_scale = tonumber(opts.head_scale) or 1
+    if head_scale < 1 then head_scale = 1 end
+    if head_scale > 4 then head_scale = 4 end
+    local lite = opts.lite == true
+    local seed = opts.seed
+
+    local key = scan_cache_key(camera, head_center, body, head_scale)
     local now = tick_ms()
+    local ttl = lite and SCAN_CACHE_LITE_MS or SCAN_CACHE_MS
     if key and head_scan_cache[key] then
         local ent = head_scan_cache[key]
-        if ent.point and (now - (ent.t or 0)) < SCAN_CACHE_MS then
+        if ent.point and (now - (ent.t or 0)) < ttl then
             return copy_pos(ent.point), ent.visible == true, ent.score or 0, ent.progress or 1
         end
     end
 
+    -- Lite path (not firing): reuse seed / center, skip dense ray storm.
+    if lite then
+        local point = copy_pos(seed) or copy_pos(head_center)
+        local visible = manip_math.is_visible_from_pos(camera, point)
+        if key then
+            head_scan_cache[key] = {
+                point = copy_pos(point),
+                visible = visible,
+                score = visible and VISIBLE_BONUS or 0,
+                progress = 1,
+                t = now,
+            }
+            prune_head_cache(now)
+        end
+        return point, visible, 0, 1
+    end
+
     local view_x, view_y, view_z = view_dir(camera, head_center)
-    local samples = head_sample_points(head_center, camera)
+    -- LOD: denser samples near, skip every other far away.
+    local dx = (head_center.x or 0) - (camera.x or 0)
+    local dy = (head_center.y or 0) - (camera.y or 0)
+    local dz = (head_center.z or 0) - (camera.z or 0)
+    local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+    local step = (dist > 180) and 3 or ((dist > 90) and 2 or 1)
+    local samples = head_sample_points(head_center, camera, head_scale, step)
+    if seed then
+        samples[#samples + 1] = copy_pos(seed)
+    end
     local total = #samples
     if total < 1 then
         return copy_pos(head_center), false, 0, 0
     end
 
-    local best_point = copy_pos(head_center)
+    local best_point = copy_pos(seed) or copy_pos(head_center)
     local best_score = -math.huge
     local best_visible = false
     local checked = 0
 
     local peek_origins = {}
-    if body then
+    peek_origins[#peek_origins + 1] = camera
+    local cam_visible = manip_math.is_visible_from_pos(camera, head_center)
+    -- Only pay for peek search when camera LOS is blocked.
+    if body and not cam_visible then
         peek_origins[#peek_origins + 1] = body
         local peek = manip_math.search_peek_at_radius(body, head_center, 1, 22)
         if peek then
             peek_origins[#peek_origins + 1] = peek
         end
+    elseif body then
+        peek_origins[#peek_origins + 1] = body
     end
-    peek_origins[#peek_origins + 1] = camera
 
     for si, point in ipairs(samples) do
         checked = si
@@ -319,6 +392,7 @@ local function find_best_head_aim(head_center, camera, body)
             progress = progress,
             t = now,
         }
+        prune_head_cache(now)
     end
 
     return best_point, best_visible, best_score, progress
@@ -425,14 +499,17 @@ local function origin_shuffle_valid(center, camera, tries)
     return best
 end
 
-local function aim_spam_cycle(center, camera)
+local function aim_spam_cycle(center, camera, head_scale)
+    head_scale = tonumber(head_scale) or 1
+    if head_scale < 1 then head_scale = 1 end
+    if head_scale > 4 then head_scale = 4 end
     local cycle = scan.spam_idx
-    local off = next_spam_offset()
+    local off = scale_off(next_spam_offset(), head_scale)
     local origin = add_off(center, off)
 
     if cycle % 4 == 0 and camera then
         local lx, ly, lz = toward_camera(center, camera)
-        local depth = 0.15 + ((cycle * 13) % 80) / 100
+        local depth = (0.15 + ((cycle * 13) % 80) / 100) * head_scale
         origin = {
             x = center.x - lx * depth + (off.x or 0) * 0.35,
             y = center.y - ly * depth + (off.y or 0) * 0.35,
@@ -444,7 +521,7 @@ local function aim_spam_cycle(center, camera)
 end
 
 local function origin_spam_cycle(center, camera, _method_idx)
-    return aim_spam_cycle(center, camera)
+    return aim_spam_cycle(center, camera, 1)
 end
 
 local function origin_under_tp(_center, _camera, _method_idx)
@@ -464,11 +541,17 @@ local ORIGIN_FN = {
     origin_under_tp,
 }
 
-local function resolve_target_tp(spawn, hitpart, camera, muzzle, body)
-    local best_aim, scan_visible, _score, scan_progress = find_best_head_aim(spawn, camera, body)
+local function resolve_target_tp(spawn, hitpart, camera, muzzle, body, opts)
+    opts = opts or {}
+    local head_scale = tonumber(opts.head_scale) or 1
+    local best_aim, scan_visible, _score, scan_progress = find_best_head_aim(spawn, camera, body, {
+        head_scale = head_scale,
+        lite = opts.lite == true,
+        seed = opts.seed,
+    })
     local aim_point = copy_pos(best_aim) or copy_pos(hitpart)
-    -- Origins cycle around head center (proven TP geometry); aim goes through scanned best point.
-    local origin = aim_spam_cycle(spawn, camera)
+    -- Origins cycle around head center (scaled with Hitbox Override); aim through scanned best point.
+    local origin = aim_spam_cycle(spawn, camera, head_scale)
     local aim = aim_through(aim_point, origin, camera)
 
     return {
@@ -479,6 +562,7 @@ local function resolve_target_tp(spawn, hitpart, camera, muzzle, body)
         tp_path = M.build_path(origin, aim_point, muzzle),
         tp_scan_visible = scan_visible,
         tp_scan_progress = scan_progress,
+        head_scale = head_scale,
     }
 end
 
@@ -503,7 +587,7 @@ function M.resolve(opts)
     local body = opts.body
 
     if method_idx == M.METHOD_UNDER_TP then
-        return resolve_target_tp(spawn, hitpart, camera, muzzle, body)
+        return resolve_target_tp(spawn, hitpart, camera, muzzle, body, opts)
     end
 
     local pick = ORIGIN_FN[method_idx + 1] or origin_spam_cycle
@@ -511,8 +595,9 @@ function M.resolve(opts)
     if not origin then return nil end
 
     local aim_point
+    local head_scale = tonumber(opts.head_scale) or 1
     if method_idx == M.METHOD_SPAM_CYCLE then
-        origin = aim_spam_cycle(spawn, camera)
+        origin = aim_spam_cycle(spawn, camera, head_scale)
         aim_point = copy_pos(hitpart)
     else
         aim_point = copy_pos(hitpart)

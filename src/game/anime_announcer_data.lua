@@ -2,8 +2,22 @@ local M = {}
 local asset_urls = April.require("game.asset_urls")
 local DIALOGUE_ROOT = asset_urls.CDN_BASE .. "/anime/april/"
 
-local H = {
+local function bind_character(ch)
+    function ch.sprite_file(expression)
+        return (ch.expressions[expression] or ch.expressions.neutral) .. ".png"
+    end
+    function ch.url(expression)
+        return ch.urls(expression)[1]
+    end
+    function ch.urls(expression)
+        return asset_urls.anime_sprite_urls(ch.folder or ch.id, ch.sprite_file(expression))
+    end
+    return ch
+end
+
+local H = bind_character({
     id = "april",
+    folder = "april",
     name = "April",
     aspect = 346 / 400,
     mouth_x = 0.56,
@@ -14,19 +28,24 @@ local H = {
         sad = "sad", disgusted = "disgusted", evil = "evil", surprised = "oh",
     },
     dialogue = {},
-}
+})
 
-function H.sprite_file(expression)
-    return (H.expressions[expression] or H.expressions.neutral) .. ".png"
-end
-
-function H.url(expression)
-    return H.urls(expression)[1]
-end
-
-function H.urls(expression)
-    return asset_urls.anime_sprite_urls("april", H.sprite_file(expression))
-end
+-- VectorChan mascot: 4 emotion sprites mapped onto April's dialogue expression keys.
+local V = bind_character({
+    id = "vector",
+    folder = "vector",
+    name = "VectorChan",
+    aspect = 346 / 400,
+    -- Measured from angry.png mouth/teeth band (~176x, ~184y on 346x400).
+    mouth_x = 0.51,
+    mouth_y = 0.485,
+    expressions = {
+        neutral = "neutral", smile = "happy", happy = "happy", laugh = "happy",
+        smug = "angry", pout = "sad", worried = "sad", fear = "sad",
+        sad = "sad", disgusted = "angry", evil = "angry", surprised = "angry",
+    },
+    dialogue = {},
+})
 
 -- Offline + bundled dialogue. Remote refresh optional.
 local DIALOGUE_EN = {
@@ -635,6 +654,10 @@ load_lines(H.dialogue_en, table.concat(DIALOGUE_EN, "\n"))
 load_lines(H.dialogue_ru, table.concat(DIALOGUE_RU, "\n"))
 -- Compat alias (English).
 H.dialogue = H.dialogue_en
+-- Vector shares April's line pools (same events / tones / wording).
+V.dialogue_en = H.dialogue_en
+V.dialogue_ru = H.dialogue_ru
+V.dialogue = H.dialogue_en
 
 local function fetch_dialogue(file_name)
     local fn = utility and (utility.http_get or utility.HttpGet)
@@ -679,8 +702,8 @@ function M.dialogue_for(character)
     return character.dialogue_en or character.dialogue or H.dialogue_en
 end
 
-M.characters = { H }
-M.character_labels = { H.name }
+M.characters = { H, V }
+M.character_labels = { H.name, V.name }
 
 function M.character(index)
     return M.characters[math.floor(tonumber(index) or 0) + 1] or H

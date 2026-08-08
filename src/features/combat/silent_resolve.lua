@@ -17,8 +17,11 @@ local OFF_INFO = {
     hitscan_on = false,
     tp_on = false,
     manip_on = false,
+    hitbox_on = false,
+    hitbox_mult = 1,
 }
 local BULLET_PREFIX = "april_silent_"
+local SHOOT_VK = 0x01
 
 function M.bullet_enabled()
     return settings.enabled("april_bullet_enabled")
@@ -31,15 +34,45 @@ local function bullet_flag(name, default)
     return settings.bool(BULLET_PREFIX .. name, default == true)
 end
 
+local function thick_mod()
+    local ok, mod = pcall(function()
+        return April.require("features.combat.thick_bullet")
+    end)
+    if ok then return mod end
+    return nil
+end
+
+local function hitbox_state()
+    local thick = thick_mod()
+    if not thick or not thick.is_active or not thick.is_active() then
+        return false, 1
+    end
+    local mult = 1
+    if thick.thickness then
+        mult = tonumber(thick.thickness()) or 1
+    end
+    if mult < 1 then mult = 1 end
+    if mult > 4 then mult = 4 end
+    return true, mult
+end
+
+local function mb1_held()
+    local key_down = input and (input.is_key_down or input.IsKeyDown)
+    return key_down and key_down(SHOOT_VK) == true
+end
+
 local function fire_origin(camera)
     return combat_origin.get_muzzle_origin() or camera
 end
 
 local function feature_flags()
+    local hitbox_on, hitbox_mult = hitbox_state()
     return {
         hitscan_on = bullet_flag("hitscan", false),
         tp_on = bullet_flag("bullet_tp", false),
         manip_on = bullet_flag("bullet_manip", false),
+        hitbox_on = hitbox_on,
+        hitbox_mult = hitbox_mult,
     }
 end
 
@@ -49,6 +82,8 @@ local function merge_info(base, manip_extra, flags)
     info.hitscan_on = flags.hitscan_on
     info.tp_on = flags.tp_on
     info.manip_on = flags.manip_on
+    info.hitbox_on = flags.hitbox_on == true
+    info.hitbox_mult = tonumber(flags.hitbox_mult) or 1
 
     if manip_extra then
         info.manip_state = manip_extra.state or "off"
@@ -176,8 +211,25 @@ local function apply_ray_aim(origin, aim, hitpart, weapon, state, manip_extra, m
         tp_method = meta.method,
         tp_scan_visible = meta.tp_scan_visible,
         tp_scan_progress = meta.tp_scan_progress,
+        head_scale = meta.head_scale,
     }, manip_extra, flags)
     return origin, aim, info
+end
+
+local function override_aim_point(target, bone, hitpart, flags)
+    if not flags.hitbox_on or not target or not hitpart then
+        return hitpart
+    end
+    local name = tostring(bone or "")
+    if name ~= "Head" and name ~= "head" then
+        return hitpart
+    end
+    local thick = thick_mod()
+    if thick and thick.head_face_world then
+        local face = thick.head_face_world(target, 0)
+        if face then return face end
+    end
+    return hitpart
 end
 
 function M.resolve_track(target, prefix, cx, cy)
@@ -191,6 +243,7 @@ function M.resolve_track(target, prefix, cx, cy)
     local bone = targeting.bone_name(prefix)
     local hitpart = targeting.resolve_bone_world(target, bone, cx, cy, { prefix = prefix })
     if not hitpart then return nil, nil, OFF_INFO end
+    hitpart = override_aim_point(target, bone, hitpart, flags)
     local muzzle = fire_origin(camera)
     local body = combat_origin.get_server_origin()
 
@@ -199,9 +252,17 @@ function M.resolve_track(target, prefix, cx, cy)
 
     local hitscan_on = flags.hitscan_on
     local tp_on = flags.tp_on
+    local firing = mb1_held()
 
     if tp_on then
         local head = targeting.resolve_bone_world(target, "Head", cx, cy, { prefix = prefix }) or hitpart
+        local seed = nil
+        if flags.hitbox_on then
+            local thick = thick_mod()
+            if thick and thick.head_face_world then
+                seed = thick.head_face_world(target, 0)
+            end
+        end
         local tp = bullet_tp_ray.resolve({
             method = bullet_tp_ray.METHOD_UNDER_TP,
             camera = camera,
@@ -209,6 +270,9 @@ function M.resolve_track(target, prefix, cx, cy)
             bone = "Head",
             muzzle = muzzle,
             body = body,
+            head_scale = flags.hitbox_on and flags.hitbox_mult or 1,
+            lite = not firing,
+            seed = seed,
         })
         if tp and tp.origin and tp.aim then
             local path = tp.tp_path or bullet_tp_ray.build_path(tp.origin, tp.aim, muzzle)
@@ -220,6 +284,7 @@ function M.resolve_track(target, prefix, cx, cy)
                 method = tp.method,
                 tp_scan_visible = tp.tp_scan_visible,
                 tp_scan_progress = tp.tp_scan_progress,
+                head_scale = tp.head_scale or flags.hitbox_mult,
             }, flags)
         end
     end
@@ -232,7 +297,9 @@ function M.resolve_track(target, prefix, cx, cy)
     end
 
     if hitscan_on then
-        return apply_ray_aim(muzzle or fire, hitpart, hitpart, weapon, "hitscan", manip_extra, nil, flags)
+        return apply_ray_aim(muzzle or fire, hitpart, hitpart, weapon, "hitscan", manip_extra, {
+            head_scale = flags.hitbox_on and flags.hitbox_mult or 1,
+        }, flags)
     end
 
     if manip_extra.state == "direct" then

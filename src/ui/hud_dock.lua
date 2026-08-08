@@ -102,6 +102,8 @@ end
 function M.init()
     state.define("april_keybinds_enabled", false)
     state.define("april_mod_checker_enabled", false)
+    state.define("april_mod_checker_x", -1)
+    state.define("april_mod_checker_y", -1)
     state.define("april_event_status_enabled", false)
     state.define("april_event_status_active_only", false)
     state.define("april_map_enabled", false)

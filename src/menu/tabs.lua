@@ -15,10 +15,13 @@ M._menu_registered = false
 
 M.FEATURE_ORDER = {
     "features.combat.camera_aimbot",
-    "features.combat.aimbot",
-    "features.combat.body_peek",
+    -- Inflate heads before silent/TP resolve so Override Size is live for aim math.
     "features.combat.thick_bullet",
+    "features.combat.aimbot",
+    "features.combat.fov_flags",
+    "features.combat.body_peek",
     "features.combat.gun_mods",
+    "features.visuals.bullet_tracers",
     "features.visuals.target_overlay",
     "features.visuals.target_visuals",
     "features.visuals.player_esp",

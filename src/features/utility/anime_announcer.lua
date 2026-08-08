@@ -195,8 +195,10 @@ local function activate(entry, now)
     entry.expires = now + duration
     current = entry
     last_emit_ms = now
-    local key = "anime_baddie:" .. entry.character.id .. ":" .. entry.expression
-    image_cache.preload(key, entry.character.urls(entry.expression))
+    local ch = entry.character
+    local sprite = ch.sprite_file and ch.sprite_file(entry.expression) or (entry.expression .. ".png")
+    local key = "anime_baddie:" .. ch.id .. ":" .. tostring(sprite):gsub("%.png$", "")
+    image_cache.preload(key, ch.urls(entry.expression))
 end
 
 local function emit(event_name, force)
@@ -595,7 +597,8 @@ local function draw_bubble(x, y, character_w, character_h, entry, alpha, sw, sh,
         draw.poly_filled(tail, panel)
     end
 
-    draw_util.text(bx + BUBBLE_PAD, by + 7, "APRIL", accent_col, 11)
+    local title = string.upper(tostring(character and character.name or "April"))
+    draw_util.text(bx + BUBBLE_PAD, by + 7, title, accent_col, 11)
     for i = 1, #entry.lines do
         local tx = bx + BUBBLE_PAD
         local ty = by + BUBBLE_HEADER_H + (i - 1) * BUBBLE_LINE_H
@@ -609,11 +612,15 @@ function M.install()
     session_key = session_id()
     pcall(data.load_remote)
     for _, character in ipairs(data.characters) do
-        for _, expression in ipairs({ "neutral", "smile" }) do
-            image_cache.preload(
-                "anime_baddie:" .. character.id .. ":" .. expression,
-                character.urls(expression)
-            )
+        local seen = {}
+        for expression, file in pairs(character.expressions or {}) do
+            if not seen[file] then
+                seen[file] = true
+                image_cache.preload(
+                    "anime_baddie:" .. character.id .. ":" .. tostring(file),
+                    character.urls(expression)
+                )
+            end
         end
     end
 end
@@ -730,7 +737,9 @@ function M.draw()
 
     local now = now_ms()
     local expression = current and current.expression or "neutral"
-    local key = "anime_baddie:" .. character.id .. ":" .. expression
+    local sprite = character.sprite_file and character.sprite_file(expression)
+        or (expression .. ".png")
+    local key = "anime_baddie:" .. character.id .. ":" .. tostring(sprite):gsub("%.png$", "")
     image_cache.ensure(key, character.urls(expression))
 
     local pop = 1

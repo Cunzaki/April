@@ -83,6 +83,7 @@ const ORDER = [
   "features/combat/bullet_tp_ray.lua",
   "features/combat/combat_menu.lua",
   "features/combat/targeting.lua",
+  "features/combat/ug_resolver.lua",
   "features/combat/active_target.lua",
   "features/combat/silent_resolve.lua",
   "features/combat/bullet_hud.lua",
@@ -90,9 +91,11 @@ const ORDER = [
   "features/combat/body_peek.lua",
   "features/combat/thick_bullet.lua",
   "features/combat/aimbot.lua",
+  "features/combat/fov_flags.lua",
   "features/combat/perfect_farm.lua",
   "features/utility/autofarm.lua",
   "features/combat/gun_mods.lua",
+  "features/visuals/bullet_tracers.lua",
   "features/utility/mod_checker.lua",
   "features/utility/event_status.lua",
   "features/visuals/player_esp.lua",
@@ -136,7 +139,7 @@ const ORDER = [
   "app.lua",
 ];
 
-const VERSION = "4.1.41";
+const VERSION = "4.1.73";
 
 const header = `--[[
     April Fallen - Fallen Survival for Project Vector

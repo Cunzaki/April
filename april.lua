@@ -1,5 +1,5 @@
 April = {
-    version = "4.1.41",
+    version = "4.1.73",
     debug = false,
     crash_logging = false,
     crash_trace = false,
@@ -1098,7 +1098,6 @@ function M.role_for_player(player, opts)
     end
     local uid = player_uid(player)
     if not uid then
-        write_cached_role(key, false)
         return nil
     end
     local group = mod_group()
@@ -2311,17 +2310,31 @@ return fn and fn(0x01)
 end
 local function persist_num(id, value)
 value = math.floor(tonumber(value) or 0)
+resolve_ui_modules()
+if gs_state and gs_state.define then pcall(gs_state.define, id, value) end
 if menu and menu.set then
 pcall(menu.set, id, value)
 end
-resolve_ui_modules()
 if gs_state and gs_state.set then pcall(gs_state.set, id, value) end
+end
+local function read_num(id, default)
+resolve_ui_modules()
+local v = nil
+if gs_state and gs_state.get then
+v = gs_state.get(id, nil)
+end
+if v == nil then
+v = settings.num(id, default)
+end
+v = tonumber(v)
+if v == nil then return default end
+return v
 end
 local function blocked(mx, my, allow_menu)
 resolve_ui_modules()
-if custom_menu and custom_menu.contains_point
+if not allow_menu
+and custom_menu and custom_menu.contains_point
 and custom_menu.contains_point(mx or 0, my or 0)
-and not allow_menu
 then
 return true
 end
@@ -2347,10 +2360,15 @@ if not st then
 st = { was_lmb = false, dragging = false, off_x = 0, off_y = 0 }
 state[id] = st
 end
-local x = settings.num(x_id, default_x)
-local y = settings.num(y_id, default_y)
+resolve_ui_modules()
+if gs_state and gs_state.define then
+pcall(gs_state.define, x_id, math.floor(tonumber(default_x) or 0))
+pcall(gs_state.define, y_id, math.floor(tonumber(default_y) or 0))
+end
+local x = read_num(x_id, default_x)
+local y = read_num(y_id, default_y)
 local mx, my = mouse_pos()
-local lmb = lmb_down()
+local lmb = lmb_down() == true
 local over_title = mx >= x and my >= y
 and mx <= x + title_w and my <= y + title_h
 if lmb and not st.was_lmb and over_title and not blocked(mx, my, allow_menu) then
@@ -2903,7 +2921,7 @@ April._mods["game.asset_urls"] = (function()
 local M = {}
 M.CDN_BASE = "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/assets"
 M.JSDELIVR_BASE = "https://cdn.jsdelivr.net/gh/Cunzaki/April@main/assets"
-M.ANIME_SPRITE_REF = "69aff26"
+M.ANIME_SPRITE_REF = "e026538"
 local function digits(id)
     return id and tostring(id):match("(%d+)")
 end
@@ -3705,7 +3723,14 @@ function M.is_part(inst)
 end
 function M.instance_addr(inst)
     if not inst then return nil end
-    return inst.Address or inst.address
+    local addr = inst.Address or inst.address
+    addr = tonumber(addr)
+    if addr and addr ~= 0 then return addr end
+    return nil
+end
+function M.part_key(inst)
+    if not inst then return nil end
+    return M.instance_addr(inst) or inst
 end
 function M.color_visible_for_mode(mode)
     mode = tonumber(mode) or 0
@@ -3760,19 +3785,70 @@ local function has_removed(prev, fresh)
 end
 local function apply_one(inst, applied)
     if not M.available() or not inst then return false end
-    if not M.is_part(inst) then return false end
-    local addr = M.instance_addr(inst)
-    if not addr then return false end
-    if applied[addr] then return true end
-    local ok, result = pcall(exploits.ApplyChamsToInstance, inst)
+    local key = M.part_key(inst)
+    if key == nil then return false end
+    if applied[key] then return true end
+    local looks_part = M.is_part(inst)
+    if not looks_part and type(key) ~= "number" then
+        return false
+    end
+    local ok, result = false, false
+    if type(key) == "number" then
+        ok, result = pcall(exploits.ApplyChamsToInstance, key)
+    end
+    if (not ok or result == false) then
+        ok, result = pcall(exploits.ApplyChamsToInstance, inst)
+    end
     if ok and result ~= false then
-        applied[addr] = true
+        applied[key] = true
         return true
     end
     return false
 end
 function M.cham_part(inst, applied)
     return apply_one(inst, applied or {})
+end
+local PART_CLASS_LIST = {
+    "MeshPart", "Part", "WedgePart", "CornerWedgePart", "TrussPart", "UnionOperation",
+}
+function M.for_each_part(root, fn)
+    if not root or type(fn) ~= "function" then return 0 end
+    local n = 0
+    for i = 1, #PART_CLASS_LIST do
+        local class_name = PART_CLASS_LIST[i]
+        local list = env.safe_call(function()
+            if root.GetDescendantsOfClass then
+                return root:GetDescendantsOfClass(class_name)
+            end
+            if root.get_descendants_of_class then
+                return root:get_descendants_of_class(class_name)
+            end
+            return nil
+        end)
+        if type(list) == "table" then
+            for j = 1, #list do
+                local inst = list[j]
+                if inst then
+                    fn(inst)
+                    n = n + 1
+                end
+            end
+        end
+    end
+    if n > 0 then return n end
+    local list = env.safe_call(function()
+        if root.get_descendants then return root:get_descendants() end
+        if root.GetDescendants then return root:GetDescendants() end
+        return nil
+    end) or {}
+    for i = 1, #list do
+        local inst = list[i]
+        if inst and M.is_part(inst) then
+            fn(inst)
+            n = n + 1
+        end
+    end
+    return n
 end
 local PLAYER_CHAM_NAMES = {
     Head = true, UpperTorso = true, LowerTorso = true, Torso = true,
@@ -3785,7 +3861,22 @@ local PLAYER_CHAM_NAMES = {
 local PLAYER_CHAM_SKIP = {
     HumanoidRootPart = true,
     CollisionPart = true,
+    Collision = true,
 }
+function M.cham_model_parts(root, applied, skip_names)
+    if not root then return 0 end
+    applied = applied or {}
+    skip_names = skip_names or PLAYER_CHAM_SKIP
+    local n = 0
+    M.for_each_part(root, function(inst)
+        local name = inst.Name or inst.name
+        if name and skip_names[name] then return end
+        if apply_one(inst, applied) then
+            n = n + 1
+        end
+    end)
+    return n
+end
 function M.cham_player_character(char, applied)
     if not char or not env.is_valid(char) then return 0 end
     applied = applied or {}
@@ -3989,6 +4080,12 @@ function M.sync_owner(id, force)
     local ok = pcall(owner.collect, back)
     if not ok then return end
     local front = owner.applied
+    if next(back) == nil then
+        if next(front) ~= nil then
+            return
+        end
+        return
+    end
     if sets_equal(front, back) then
         return
     end
@@ -3999,10 +4096,10 @@ function M.sync_owner(id, force)
         end
         return
     end
-    for addr, _ in pairs(back) do
-        if not front[addr] then
-            pcall(exploits.ApplyChamsToInstance, addr)
-            front[addr] = true
+    for key, _ in pairs(back) do
+        if not front[key] then
+            pcall(exploits.ApplyChamsToInstance, key)
+            front[key] = true
         end
     end
     owner.applied = front
@@ -6644,11 +6741,13 @@ local MENU_KEYS = {
     "april_aim_draw_fov", "april_aim_fov_style", "april_aim_target_line",
     "april_aim_max_dist", "april_aim_fov", "april_aim_smooth",
     "april_aim_smooth_type", "april_aim_humanize", "april_aim_humanize_str",
+    "april_fov_flags_enabled", "april_fov_flags_visible", "april_fov_flags_distance",
     "april_silent_aim", "april_silent_aim_mode",
     "april_silent_target_type", "april_silent_bone",
     "april_silent_filters", "april_silent_whitelist_ids",
     "april_silent_targets", "april_silent_options", "april_silent_sticky",
     "april_bullet_enabled", "april_bullet_enabled_mode", "april_bullet_body_peek",
+    "april_bullet_ug_resolver",
     "april_thick_bullet", "april_thick_bullet_mult",
     "april_silent_bullet_tp",
     "april_silent_bullet_manip",
@@ -6662,6 +6761,12 @@ local MENU_KEYS = {
     "april_gm_speed", "april_gm_speed_mult",
     "april_gm_range", "april_gm_range_mult",
     "april_gm_double_tap",
+    "april_tracers_enabled", "april_tracers_enabled_mode",
+    "april_tracers_color", "april_tracers_color2",
+    "april_tracers_style", "april_tracers_anim", "april_tracers_anim_speed",
+    "april_tracers_lifetime", "april_tracers_thickness", "april_tracers_transparency",
+    "april_tracers_segments", "april_tracers_glow", "april_tracers_damage",
+    "april_tracers_outline", "april_tracers_impact", "april_tracers_rainbow",
     "april_autofarm", "april_autofarm_mode", "april_autofarm_resources",
     "april_autofarm_search_range", "april_autofarm_debug_path",
     "april_farm_helper", "april_farm_helper_mode", "april_farm_radius",
@@ -11382,8 +11487,21 @@ April._mods["game.anime_announcer_data"] = (function()
 local M = {}
 local asset_urls = April.require("game.asset_urls")
 local DIALOGUE_ROOT = asset_urls.CDN_BASE .. "/anime/april/"
-local H = {
+local function bind_character(ch)
+function ch.sprite_file(expression)
+return (ch.expressions[expression] or ch.expressions.neutral) .. ".png"
+end
+function ch.url(expression)
+return ch.urls(expression)[1]
+end
+function ch.urls(expression)
+return asset_urls.anime_sprite_urls(ch.folder or ch.id, ch.sprite_file(expression))
+end
+return ch
+end
+local H = bind_character({
 id = "april",
+folder = "april",
 name = "April",
 aspect = 346 / 400,
 mouth_x = 0.56,
@@ -11394,16 +11512,21 @@ smug = "angrysmile", pout = "pout", worried = "worried", fear = "fear",
 sad = "sad", disgusted = "disgusted", evil = "evil", surprised = "oh",
 },
 dialogue = {},
-}
-function H.sprite_file(expression)
-return (H.expressions[expression] or H.expressions.neutral) .. ".png"
-end
-function H.url(expression)
-return H.urls(expression)[1]
-end
-function H.urls(expression)
-return asset_urls.anime_sprite_urls("april", H.sprite_file(expression))
-end
+})
+local V = bind_character({
+id = "vector",
+folder = "vector",
+name = "VectorChan",
+aspect = 346 / 400,
+mouth_x = 0.51,
+mouth_y = 0.485,
+expressions = {
+neutral = "neutral", smile = "happy", happy = "happy", laugh = "happy",
+smug = "angry", pout = "sad", worried = "sad", fear = "sad",
+sad = "sad", disgusted = "angry", evil = "angry", surprised = "angry",
+},
+dialogue = {},
+})
 local DIALOGUE_EN = {
 "greeting|roasty|smug|Oh, you enabled me? Fine. Try not to embarrass us.",
 "greeting|roasty|pout|I was having a nice day until you clicked that toggle.",
@@ -12004,6 +12127,9 @@ H.dialogue_ru = {}
 load_lines(H.dialogue_en, table.concat(DIALOGUE_EN, "\n"))
 load_lines(H.dialogue_ru, table.concat(DIALOGUE_RU, "\n"))
 H.dialogue = H.dialogue_en
+V.dialogue_en = H.dialogue_en
+V.dialogue_ru = H.dialogue_ru
+V.dialogue = H.dialogue_en
 local function fetch_dialogue(file_name)
 local fn = utility and (utility.http_get or utility.HttpGet)
 if type(fn) ~= "function" then return nil end
@@ -12044,8 +12170,8 @@ return character.dialogue_ru
 end
 return character.dialogue_en or character.dialogue or H.dialogue_en
 end
-M.characters = { H }
-M.character_labels = { H.name }
+M.characters = { H, V }
+M.character_labels = { H.name, V.name }
 function M.character(index)
 return M.characters[math.floor(tonumber(index) or 0) + 1] or H
 end
@@ -14517,8 +14643,10 @@ local M = {}
 local GRID_STEP = 0.22
 local HEAD_RADIUS = 0.55
 local SCAN_CACHE_MS = 160
+local SCAN_CACHE_LITE_MS = 280
 local VISIBLE_BONUS = 2500
 local PEEK_VISIBLE_BONUS = 1800
+local MAX_HEAD_CACHE = 48
 M.METHODS = {
     "Center",
     "Random Ring",
@@ -14670,22 +14798,51 @@ local function los_clear(from, to)
     end
     return true
 end
-local function head_sample_points(center, camera)
+local function scale_off(off, scale)
+    if not off then return { x = 0, y = 0, z = 0 } end
+    scale = tonumber(scale) or 1
+    if scale < 1 then scale = 1 end
+    if scale > 4 then scale = 4 end
+    return {
+        x = (off.x or 0) * scale,
+        y = (off.y or 0) * scale,
+        z = (off.z or 0) * scale,
+    }
+end
+local function head_sample_points(center, camera, head_scale, step)
     local pts = {}
-    for _, off in ipairs(HEAD_SAMPLES) do
-        pts[#pts + 1] = add_off(center, off)
+    head_scale = tonumber(head_scale) or 1
+    if head_scale < 1 then head_scale = 1 end
+    if head_scale > 4 then head_scale = 4 end
+    step = math.max(1, math.floor(tonumber(step) or 1))
+    for i = 1, #HEAD_SAMPLES, step do
+        pts[#pts + 1] = add_off(center, scale_off(HEAD_SAMPLES[i], head_scale))
     end
     if camera then
         local lx, ly, lz = toward_camera(center, camera)
         for _, d in ipairs({ 0.12, 0.28, 0.45, 0.62 }) do
+            local dd = d * head_scale
             pts[#pts + 1] = {
-                x = center.x + lx * d,
-                y = center.y + ly * d,
-                z = center.z + lz * d,
+                x = center.x + lx * dd,
+                y = center.y + ly * dd,
+                z = center.z + lz * dd,
             }
         end
     end
     return pts
+end
+local function prune_head_cache(now)
+    local n = 0
+    for _ in pairs(head_scan_cache) do
+        n = n + 1
+    end
+    if n <= MAX_HEAD_CACHE then return end
+    local drop_before = now - (SCAN_CACHE_LITE_MS * 3)
+    for k, ent in pairs(head_scan_cache) do
+        if not ent or (now - (ent.t or 0)) > drop_before then
+            head_scan_cache[k] = nil
+        end
+    end
 end
 local function score_head_point(from, view_x, view_y, view_z, point, ref_eye)
     if not from or not point then return -math.huge, false end
@@ -14717,49 +14874,83 @@ local function score_head_point(from, view_x, view_y, view_z, point, ref_eye)
     end
     return score, visible
 end
-local function scan_cache_key(camera, center, body)
+local function scan_cache_key(camera, center, body, head_scale)
     if not center then return nil end
     local bx, by, bz = 0, 0, 0
     if body then
         bx, by, bz = body.x or 0, body.y or 0, body.z or 0
     end
     local cx, cy, cz = camera and camera.x or 0, camera and camera.y or 0, camera and camera.z or 0
+    local hs = math.floor(((tonumber(head_scale) or 1) * 10) + 0.5)
     return string.format(
-        "%.1f,%.1f,%.1f>%.1f,%.1f,%.1f@%.1f,%.1f,%.1f",
-        cx, cy, cz, center.x, center.y, center.z, bx, by, bz
+        "%.1f,%.1f,%.1f>%.1f,%.1f,%.1f@%.1f,%.1f,%.1f#s%d",
+        cx, cy, cz, center.x, center.y, center.z, bx, by, bz, hs
     )
 end
-local function find_best_head_aim(head_center, camera, body)
+local function find_best_head_aim(head_center, camera, body, opts)
+    opts = opts or {}
     if not head_center or not camera then
         return copy_pos(head_center), false, 0, 0
     end
-    local key = scan_cache_key(camera, head_center, body)
+    local head_scale = tonumber(opts.head_scale) or 1
+    if head_scale < 1 then head_scale = 1 end
+    if head_scale > 4 then head_scale = 4 end
+    local lite = opts.lite == true
+    local seed = opts.seed
+    local key = scan_cache_key(camera, head_center, body, head_scale)
     local now = tick_ms()
+    local ttl = lite and SCAN_CACHE_LITE_MS or SCAN_CACHE_MS
     if key and head_scan_cache[key] then
         local ent = head_scan_cache[key]
-        if ent.point and (now - (ent.t or 0)) < SCAN_CACHE_MS then
+        if ent.point and (now - (ent.t or 0)) < ttl then
             return copy_pos(ent.point), ent.visible == true, ent.score or 0, ent.progress or 1
         end
     end
+    if lite then
+        local point = copy_pos(seed) or copy_pos(head_center)
+        local visible = manip_math.is_visible_from_pos(camera, point)
+        if key then
+            head_scan_cache[key] = {
+                point = copy_pos(point),
+                visible = visible,
+                score = visible and VISIBLE_BONUS or 0,
+                progress = 1,
+                t = now,
+            }
+            prune_head_cache(now)
+        end
+        return point, visible, 0, 1
+    end
     local view_x, view_y, view_z = view_dir(camera, head_center)
-    local samples = head_sample_points(head_center, camera)
+    local dx = (head_center.x or 0) - (camera.x or 0)
+    local dy = (head_center.y or 0) - (camera.y or 0)
+    local dz = (head_center.z or 0) - (camera.z or 0)
+    local dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+    local step = (dist > 180) and 3 or ((dist > 90) and 2 or 1)
+    local samples = head_sample_points(head_center, camera, head_scale, step)
+    if seed then
+        samples[#samples + 1] = copy_pos(seed)
+    end
     local total = #samples
     if total < 1 then
         return copy_pos(head_center), false, 0, 0
     end
-    local best_point = copy_pos(head_center)
+    local best_point = copy_pos(seed) or copy_pos(head_center)
     local best_score = -math.huge
     local best_visible = false
     local checked = 0
     local peek_origins = {}
-    if body then
+    peek_origins[#peek_origins + 1] = camera
+    local cam_visible = manip_math.is_visible_from_pos(camera, head_center)
+    if body and not cam_visible then
         peek_origins[#peek_origins + 1] = body
         local peek = manip_math.search_peek_at_radius(body, head_center, 1, 22)
         if peek then
             peek_origins[#peek_origins + 1] = peek
         end
+    elseif body then
+        peek_origins[#peek_origins + 1] = body
     end
-    peek_origins[#peek_origins + 1] = camera
     for si, point in ipairs(samples) do
         checked = si
         local score = -math.huge
@@ -14789,6 +14980,7 @@ local function find_best_head_aim(head_center, camera, body)
             progress = progress,
             t = now,
         }
+        prune_head_cache(now)
     end
     return best_point, best_visible, best_score, progress
 end
@@ -14882,13 +15074,16 @@ local function origin_shuffle_valid(center, camera, tries)
     end
     return best
 end
-local function aim_spam_cycle(center, camera)
+local function aim_spam_cycle(center, camera, head_scale)
+    head_scale = tonumber(head_scale) or 1
+    if head_scale < 1 then head_scale = 1 end
+    if head_scale > 4 then head_scale = 4 end
     local cycle = scan.spam_idx
-    local off = next_spam_offset()
+    local off = scale_off(next_spam_offset(), head_scale)
     local origin = add_off(center, off)
     if cycle % 4 == 0 and camera then
         local lx, ly, lz = toward_camera(center, camera)
-        local depth = 0.15 + ((cycle * 13) % 80) / 100
+        local depth = (0.15 + ((cycle * 13) % 80) / 100) * head_scale
         origin = {
             x = center.x - lx * depth + (off.x or 0) * 0.35,
             y = center.y - ly * depth + (off.y or 0) * 0.35,
@@ -14898,7 +15093,7 @@ local function aim_spam_cycle(center, camera)
     return origin
 end
 local function origin_spam_cycle(center, camera, _method_idx)
-    return aim_spam_cycle(center, camera)
+    return aim_spam_cycle(center, camera, 1)
 end
 local function origin_under_tp(_center, _camera, _method_idx)
     return nil
@@ -14915,10 +15110,16 @@ local ORIGIN_FN = {
     origin_spam_cycle,
     origin_under_tp,
 }
-local function resolve_target_tp(spawn, hitpart, camera, muzzle, body)
-    local best_aim, scan_visible, _score, scan_progress = find_best_head_aim(spawn, camera, body)
+local function resolve_target_tp(spawn, hitpart, camera, muzzle, body, opts)
+    opts = opts or {}
+    local head_scale = tonumber(opts.head_scale) or 1
+    local best_aim, scan_visible, _score, scan_progress = find_best_head_aim(spawn, camera, body, {
+        head_scale = head_scale,
+        lite = opts.lite == true,
+        seed = opts.seed,
+    })
     local aim_point = copy_pos(best_aim) or copy_pos(hitpart)
-    local origin = aim_spam_cycle(spawn, camera)
+    local origin = aim_spam_cycle(spawn, camera, head_scale)
     local aim = aim_through(aim_point, origin, camera)
     return {
         origin = origin,
@@ -14928,6 +15129,7 @@ local function resolve_target_tp(spawn, hitpart, camera, muzzle, body)
         tp_path = M.build_path(origin, aim_point, muzzle),
         tp_scan_visible = scan_visible,
         tp_scan_progress = scan_progress,
+        head_scale = head_scale,
     }
 end
 function M.hitpart_aim(hit, bone)
@@ -14946,14 +15148,15 @@ function M.resolve(opts)
     local muzzle = opts.muzzle or combat_origin.get_muzzle_origin() or camera
     local body = opts.body
     if method_idx == M.METHOD_UNDER_TP then
-        return resolve_target_tp(spawn, hitpart, camera, muzzle, body)
+        return resolve_target_tp(spawn, hitpart, camera, muzzle, body, opts)
     end
     local pick = ORIGIN_FN[method_idx + 1] or origin_spam_cycle
     local origin = pick(spawn, camera, method_idx)
     if not origin then return nil end
     local aim_point
+    local head_scale = tonumber(opts.head_scale) or 1
     if method_idx == M.METHOD_SPAM_CYCLE then
-        origin = aim_spam_cycle(spawn, camera)
+        origin = aim_spam_cycle(spawn, camera, head_scale)
         aim_point = copy_pos(hitpart)
     else
         aim_point = copy_pos(hitpart)
@@ -15687,10 +15890,24 @@ bone = bone or "Head"
 if bone == "Random" then
 bone = M.pick_random_bone(target, opts.prefix, opts.reroll_random == true)
 end
+local world
 if bone == "Closest" then
-return M.closest_bone_world(target, cx, cy)
+world = M.closest_bone_world(target, cx, cy)
+else
+world = M.bone_world(target, bone, cx, cy)
 end
-return M.bone_world(target, bone, cx, cy)
+if not world or M.is_npc_target(target) then
+return world
+end
+local ok, ug = pcall(function()
+return April.require("features.combat.ug_resolver")
+end)
+if ok and ug and ug.enabled and ug.enabled() and ug.apply then
+local head_world = M.bone_world(target, "Head", cx, cy)
+local probe = head_world or world
+return ug.apply(target, probe) or probe
+end
+return world
 end
 function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction, opts)
 opts = opts or {}
@@ -15833,6 +16050,407 @@ end
 return M
 end)()
 
+April._mods["features.combat.ug_resolver"] = (function()
+local settings = April.require("core.settings")
+local ep = April.require("core.entity_props")
+local esp_util = April.require("core.esp_util")
+local env = April.require("core.env")
+local move = April.require("core.cframe_move")
+local M = {}
+local UI_RETIRED = true
+local P_BULLET = "april_bullet_enabled"
+local P = "april_bullet_ug_resolver"
+local P_THICK = "april_thick_bullet"
+local P_THICK_MULT = "april_thick_bullet_mult"
+local UG_MULT = 4
+local LIFT_STUDS = 2
+local UG_MARGIN = 1.35
+local HEAD_ROOT_GAP = 3.0
+local last_ug_target = nil
+local lift_state = nil
+local wired = false
+local function thick()
+    local ok, mod = pcall(function()
+        return April.require("features.combat.thick_bullet")
+    end)
+    if ok then return mod end
+    return nil
+end
+local function make_vec3(x, y, z)
+    if not Vector3 then return nil end
+    local ctor = Vector3.New or Vector3.new
+    if type(ctor) ~= "function" then return nil end
+    local ok, v = pcall(ctor, x, y, z)
+    if ok then return v end
+    return nil
+end
+local function cast_fn()
+    if not raycast then return nil end
+    return raycast.cast or raycast.Cast
+end
+local function ray_ready()
+    if not raycast then return false end
+    local ready = raycast.is_ready or raycast.IsReady
+    if type(ready) ~= "function" then return true end
+    local ok, value = pcall(ready)
+    return (not ok) or value ~= false
+end
+local function unpack_hit_y(pos)
+    if pos == nil or type(pos) == "number" then return nil end
+    local y = pos.Y or pos.y
+    if type(y) == "number" then return y end
+    local _, py = esp_util.vec3_pos(pos)
+    return py
+end
+local function floor_y_at(x, y, z)
+    local cast = cast_fn()
+    if type(cast) ~= "function" or not ray_ready() then return nil end
+    local starts = { y + 64, y + 256, 512 }
+    for i = 1, #starts do
+        local sy = starts[i]
+        if sy < y + 8 then sy = y + 8 end
+        local ok, hit, pos = pcall(cast, x, sy, z, x, y - 512, z)
+        if ok and hit then
+            local fy = unpack_hit_y(pos)
+            if fy then return fy end
+        end
+    end
+    return nil
+end
+local function humanoid_hip_height(target)
+    local hh = tonumber(ep.get(target, "HipHeight", "hip_height"))
+    if hh then return hh end
+    local hum = ep.humanoid(target)
+    if not hum then return nil end
+    local ok, value = pcall(function()
+        return hum.HipHeight or hum.hip_height
+    end)
+    if ok then return tonumber(value) end
+    return nil
+end
+local function set_bool(id, value)
+    if menu and menu.set then
+        pcall(menu.set, id, value == true)
+    end
+    pcall(function()
+        April.require("ui.gs_state").set(id, value == true)
+    end)
+end
+local function set_visible(id, show)
+    if menu and menu.set_visible then
+        pcall(menu.set_visible, id, show == true)
+    end
+    pcall(function()
+        April.require("ui.gs_state").set_visible(id, show == true)
+    end)
+end
+local function sync_thick_gate()
+    local ug_on = settings.bool(P, false) == true
+    if ug_on then
+        if settings.bool(P_THICK, false) then
+            set_bool(P_THICK, false)
+        end
+        set_visible(P_THICK, false)
+        set_visible(P_THICK_MULT, false)
+    else
+        local bullet_on = settings.enabled(P_BULLET)
+        set_visible(P_THICK, bullet_on)
+        set_visible(P_THICK_MULT, bullet_on and settings.bool(P_THICK, false))
+    end
+end
+function M.wire_menu()
+    if wired then return end
+    wired = true
+    settings.on_change(P, function(v)
+        if v == true or v == 1 then
+            set_bool(P_THICK, false)
+        end
+        sync_thick_gate()
+    end)
+    settings.on_change(P_THICK, function(v)
+        if (v == true or v == 1) and settings.bool(P, false) then
+            set_bool(P_THICK, false)
+        end
+        sync_thick_gate()
+    end)
+    settings.on_change(P_BULLET, function()
+        sync_thick_gate()
+    end)
+    sync_thick_gate()
+end
+function M.enabled()
+    if UI_RETIRED then return false end
+    return settings.enabled(P_BULLET) and settings.bool(P, false)
+end
+function M.is_underground(target, point)
+    if not target and not point then return false end
+    local hx, hy, hz
+    if point then
+        hx, hy, hz = point.x, point.y, point.z
+    end
+    if type(hx) ~= "number" then
+        local head = ep.head_position(target)
+        if head then
+            hx, hy, hz = esp_util.vec3_pos(head)
+        end
+    end
+    local rx, ry, rz
+    local root = target and ep.position(target) or nil
+    if root then
+        rx, ry, rz = esp_util.vec3_pos(root)
+    end
+    if target then
+        local char = ep.character(target)
+        local hrp = char and move.find_part(char, "HumanoidRootPart") or nil
+        if hrp and env.is_valid(hrp) then
+            local px, py, pz = move.read_pos(hrp)
+            if px then
+                rx, ry, rz = px.x, px.y, px.z
+            end
+        end
+    end
+    if hy and ry and (hy - ry) >= HEAD_ROOT_GAP then
+        return true
+    end
+    if type(rx) == "number" and type(ry) == "number" and type(rz) == "number" then
+        local fy = floor_y_at(rx, ry, rz)
+        if fy and ry < fy + UG_MARGIN then
+            return true
+        end
+    end
+    if type(hx) == "number" and type(hy) == "number" and type(hz) == "number" then
+        local fy = floor_y_at(hx, hy, hz)
+        if fy and hy < fy + UG_MARGIN then
+            return true
+        end
+    end
+    local hh = humanoid_hip_height(target)
+    if hh and hh < 0.15 then
+        return true
+    end
+    return false
+end
+local function part_key(part)
+    return part.Address or part.address or tostring(part)
+end
+local function read_part_pos(part)
+    local p = move.read_pos(part)
+    if not p then return nil end
+    return p.x, p.y, p.z
+end
+local function write_part_pos(inst, x, y, z)
+    if not inst then return false end
+    local wrote = false
+    if part and part.set_position then
+        wrote = pcall(part.set_position, inst, x, y, z) or wrote
+    end
+    local v = make_vec3(x, y, z)
+    if v then
+        wrote = pcall(function() inst.Position = v end) or wrote
+        wrote = pcall(function() inst.position = v end) or wrote
+    end
+    pcall(function()
+        local cf = inst.CFrame or inst.cframe
+        if not cf then return end
+        local ctor = CFrame and (CFrame.new or CFrame.New)
+        if type(ctor) ~= "function" then return end
+        if cf.Position or cf.position then
+            local pos = cf.Position or cf.position
+            local rotation = cf - pos
+            inst.CFrame = ctor(x, y, z) * rotation
+        else
+            inst.CFrame = ctor(x, y, z)
+        end
+        wrote = true
+    end)
+    move.set_position_only(inst, x, y, z)
+    return wrote
+end
+local function write_entity_pos(player, x, y, z)
+    if not player then return false end
+    local v = make_vec3(x, y, z)
+    if not v then return false end
+    local wrote = false
+    wrote = pcall(function() player.Position = v end) or wrote
+    wrote = pcall(function() player.position = v end) or wrote
+    return wrote
+end
+local function find_hrp(char)
+    if not char then return nil end
+    return move.find_part(char, "HumanoidRootPart")
+end
+local function clear_lift()
+    lift_state = nil
+end
+local function clear_last_if_needed(current)
+    if not last_ug_target or last_ug_target == current then return end
+    local tb = thick()
+    if tb and tb.restore_player then
+        pcall(tb.restore_player, last_ug_target)
+    end
+    last_ug_target = nil
+    clear_lift()
+end
+local function body_parts(char, hrp)
+    local parts = move.iter_parts(char)
+    if type(parts) == "table" and #parts > 0 then
+        return parts
+    end
+    local names = {
+        "HumanoidRootPart", "Head", "Torso", "UpperTorso", "LowerTorso",
+        "Left Arm", "Right Arm", "Left Leg", "Right Leg",
+        "LeftUpperArm", "LeftLowerArm", "LeftHand",
+        "RightUpperArm", "RightLowerArm", "RightHand",
+        "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
+        "RightUpperLeg", "RightLowerLeg", "RightFoot",
+    }
+    local out = {}
+    local seen = {}
+    if hrp and env.is_valid(hrp) then
+        out[#out + 1] = hrp
+        seen[part_key(hrp)] = true
+    end
+    for i = 1, #names do
+        local p = move.find_part(char, names[i])
+        if p and env.is_valid(p) and move.is_base_part(p) then
+            local key = part_key(p)
+            if not seen[key] then
+                seen[key] = true
+                out[#out + 1] = p
+            end
+        end
+    end
+    return out
+end
+local function lift_body(target)
+    local char = ep.character(target)
+    if not char or not env.is_valid(char) then return nil end
+    local hrp = find_hrp(char)
+    local anchor = hrp
+    if not anchor or not env.is_valid(anchor) then
+        local tb = thick()
+        anchor = tb and tb.find_head and tb.find_head(target) or nil
+    end
+    if not anchor or not env.is_valid(anchor) then return nil end
+    local ax, ay, az = read_part_pos(anchor)
+    if not ax then
+        local ent = ep.position(target)
+        if ent then
+            ax, ay, az = esp_util.vec3_pos(ent)
+        end
+    end
+    if not ax then return nil end
+    local key = part_key(anchor)
+    local raw_y = ay
+    if lift_state and lift_state.key == key and lift_state.applied_y then
+        if math.abs(ay - lift_state.applied_y) < 0.35 then
+            raw_y = lift_state.raw_y
+        end
+    end
+    local target_y = raw_y + LIFT_STUDS
+    local dy = target_y - ay
+    write_entity_pos(target, ax, target_y, az)
+    local parts = body_parts(char, hrp)
+    if #parts == 0 then
+        write_part_pos(anchor, ax, target_y, az)
+        write_part_pos(anchor, ax, target_y, az)
+    else
+        for _ = 1, 2 do
+            for i = 1, #parts do
+                local inst = parts[i]
+                local px, py, pz = read_part_pos(inst)
+                if px then
+                    if math.abs(dy) >= 1e-4 then
+                        write_part_pos(inst, px, py + dy, pz)
+                    else
+                        write_part_pos(inst, px, py, pz)
+                    end
+                end
+            end
+            ax, ay, az = read_part_pos(anchor)
+            if ax then
+                dy = target_y - ay
+            end
+        end
+    end
+    lift_state = {
+        key = key,
+        raw_y = raw_y,
+        applied_y = target_y,
+    }
+    local tb = thick()
+    local head = tb and tb.find_head and tb.find_head(target) or nil
+    if head then
+        local hx, hy, hz = read_part_pos(head)
+        if hx then
+            if math.abs(hy - (raw_y + (hy - ay) + LIFT_STUDS)) > 0.75 then
+                return { x = hx, y = hy + dy, z = hz }
+            end
+            return { x = hx, y = hy, z = hz }
+        end
+    end
+    local head_pos = ep.head_position(target)
+    if head_pos then
+        local hx, hy, hz = esp_util.vec3_pos(head_pos)
+        if hx then
+            return { x = hx, y = hy + dy, z = hz }
+        end
+    end
+    return { x = ax, y = target_y, z = az }
+end
+function M.apply(target, point)
+    if not M.enabled() then
+        clear_last_if_needed(nil)
+        last_ug_target = nil
+        clear_lift()
+        return point
+    end
+    if not target or ep.is_local(target) then return point end
+    clear_last_if_needed(target)
+    last_ug_target = target
+    local tb = thick()
+    if tb and tb.ensure_inflated then
+        tb.ensure_inflated(target, UG_MULT)
+    end
+    local lifted_aim = lift_body(target)
+    if lifted_aim then
+        return lifted_aim
+    end
+    if point then
+        return {
+            x = point.x,
+            y = point.y + LIFT_STUDS,
+            z = point.z,
+        }
+    end
+    return point
+end
+function M.update(_dt)
+    if not M.enabled() then
+        clear_last_if_needed(nil)
+        last_ug_target = nil
+        clear_lift()
+        return
+    end
+    local ok, active_target = pcall(function()
+        return April.require("features.combat.active_target")
+    end)
+    if not ok or not active_target or not active_target.get_target then
+        return
+    end
+    local target = active_target.get_target()
+    if not target or ep.is_local(target) then
+        clear_last_if_needed(nil)
+        last_ug_target = nil
+        clear_lift()
+        return
+    end
+    M.apply(target, nil)
+end
+function M.draw() end
+return M
+end)()
+
 April._mods["features.combat.active_target"] = (function()
 local settings = April.require("core.settings")
 local targeting = April.require("features.combat.targeting")
@@ -15929,8 +16547,11 @@ radius = 1,
 hitscan_on = false,
 tp_on = false,
 manip_on = false,
+hitbox_on = false,
+hitbox_mult = 1,
 }
 local BULLET_PREFIX = "april_silent_"
+local SHOOT_VK = 0x01
 function M.bullet_enabled()
 return settings.enabled("april_bullet_enabled")
 end
@@ -15940,14 +16561,41 @@ return false
 end
 return settings.bool(BULLET_PREFIX .. name, default == true)
 end
+local function thick_mod()
+local ok, mod = pcall(function()
+return April.require("features.combat.thick_bullet")
+end)
+if ok then return mod end
+return nil
+end
+local function hitbox_state()
+local thick = thick_mod()
+if not thick or not thick.is_active or not thick.is_active() then
+return false, 1
+end
+local mult = 1
+if thick.thickness then
+mult = tonumber(thick.thickness()) or 1
+end
+if mult < 1 then mult = 1 end
+if mult > 4 then mult = 4 end
+return true, mult
+end
+local function mb1_held()
+local key_down = input and (input.is_key_down or input.IsKeyDown)
+return key_down and key_down(SHOOT_VK) == true
+end
 local function fire_origin(camera)
 return combat_origin.get_muzzle_origin() or camera
 end
 local function feature_flags()
+local hitbox_on, hitbox_mult = hitbox_state()
 return {
 hitscan_on = bullet_flag("hitscan", false),
 tp_on = bullet_flag("bullet_tp", false),
 manip_on = bullet_flag("bullet_manip", false),
+hitbox_on = hitbox_on,
+hitbox_mult = hitbox_mult,
 }
 end
 local function merge_info(base, manip_extra, flags)
@@ -15956,6 +16604,8 @@ flags = flags or feature_flags()
 info.hitscan_on = flags.hitscan_on
 info.tp_on = flags.tp_on
 info.manip_on = flags.manip_on
+info.hitbox_on = flags.hitbox_on == true
+info.hitbox_mult = tonumber(flags.hitbox_mult) or 1
 if manip_extra then
 info.manip_state = manip_extra.state or "off"
 info.peek = manip_extra.peek or info.peek
@@ -16068,8 +16718,24 @@ tp_path = meta.tp_path,
 tp_method = meta.method,
 tp_scan_visible = meta.tp_scan_visible,
 tp_scan_progress = meta.tp_scan_progress,
+head_scale = meta.head_scale,
 }, manip_extra, flags)
 return origin, aim, info
+end
+local function override_aim_point(target, bone, hitpart, flags)
+if not flags.hitbox_on or not target or not hitpart then
+return hitpart
+end
+local name = tostring(bone or "")
+if name ~= "Head" and name ~= "head" then
+return hitpart
+end
+local thick = thick_mod()
+if thick and thick.head_face_world then
+local face = thick.head_face_world(target, 0)
+if face then return face end
+end
+return hitpart
 end
 function M.resolve_track(target, prefix, cx, cy)
 if not target then return nil, nil, OFF_INFO end
@@ -16080,14 +16746,23 @@ local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_na
 local bone = targeting.bone_name(prefix)
 local hitpart = targeting.resolve_bone_world(target, bone, cx, cy, { prefix = prefix })
 if not hitpart then return nil, nil, OFF_INFO end
+hitpart = override_aim_point(target, bone, hitpart, flags)
 local muzzle = fire_origin(camera)
 local body = combat_origin.get_server_origin()
 local manip_fire, manip_extra = resolve_manip(body, hitpart, muzzle, target)
 local fire = manip_fire or muzzle
 local hitscan_on = flags.hitscan_on
 local tp_on = flags.tp_on
+local firing = mb1_held()
 if tp_on then
 local head = targeting.resolve_bone_world(target, "Head", cx, cy, { prefix = prefix }) or hitpart
+local seed = nil
+if flags.hitbox_on then
+local thick = thick_mod()
+if thick and thick.head_face_world then
+seed = thick.head_face_world(target, 0)
+end
+end
 local tp = bullet_tp_ray.resolve({
 method = bullet_tp_ray.METHOD_UNDER_TP,
 camera = camera,
@@ -16095,6 +16770,9 @@ hitpart = head,
 bone = "Head",
 muzzle = muzzle,
 body = body,
+head_scale = flags.hitbox_on and flags.hitbox_mult or 1,
+lite = not firing,
+seed = seed,
 })
 if tp and tp.origin and tp.aim then
 local path = tp.tp_path or bullet_tp_ray.build_path(tp.origin, tp.aim, muzzle)
@@ -16106,6 +16784,7 @@ tp_path = path,
 method = tp.method,
 tp_scan_visible = tp.tp_scan_visible,
 tp_scan_progress = tp.tp_scan_progress,
+head_scale = tp.head_scale or flags.hitbox_mult,
 }, flags)
 end
 end
@@ -16116,7 +16795,9 @@ method = "Manip",
 }, flags)
 end
 if hitscan_on then
-return apply_ray_aim(muzzle or fire, hitpart, hitpart, weapon, "hitscan", manip_extra, nil, flags)
+return apply_ray_aim(muzzle or fire, hitpart, hitpart, weapon, "hitscan", manip_extra, {
+head_scale = flags.hitbox_on and flags.hitbox_mult or 1,
+}, flags)
 end
 if manip_extra.state == "direct" then
 return apply_drop_aim(muzzle, hitpart, weapon, "direct", manip_extra, flags)
@@ -16146,6 +16827,7 @@ local M = {}
 local PREFIX = "april_silent_"
 local P_BULLET = "april_bullet_enabled"
 local scan_anim = 0
+local i18n_mod = nil
 local FIRE_LABELS = {
 tp = "Bullet TP",
 hitscan = "Hitscan",
@@ -16163,11 +16845,18 @@ scanning = "Scanning",
 blocked = "No Peek",
 off = "Off",
 }
-local function bullet_flag(name, default)
-if not settings.enabled(P_BULLET) then
-return false
+local function i18n()
+if i18n_mod then return i18n_mod end
+local ok, mod = pcall(function()
+return April.require("ui.i18n")
+end)
+if ok and mod then
+i18n_mod = mod
+return mod
 end
-return settings.bool(PREFIX .. name, default == true)
+return {
+t = function(s) return s end,
+}
 end
 function M.update(dt)
 scan_anim = scan_anim + (dt or 0.016) * 0.85
@@ -16193,28 +16882,37 @@ if not info then return end
 local hitscan_on = info.hitscan_on == true
 local tp_on = info.tp_on == true
 local manip_on = info.manip_on == true
-if not hitscan_on and not tp_on and not manip_on then return end
-local i18n = April.require("ui.i18n")
+local hitbox_on = info.hitbox_on == true
+if not hitscan_on and not tp_on and not manip_on and not hitbox_on then return end
+local t = i18n()
 local manip_state = info.manip_state or "off"
 local fire_mode = info.state or "off"
-local fire_label = i18n.t(FIRE_LABELS[fire_mode] or fire_mode)
-local manip_label = i18n.t(MANIP_LABELS[manip_state] or manip_state)
+local fire_label = t.t(FIRE_LABELS[fire_mode] or fire_mode)
+if fire_mode == "tp" and hitbox_on then
+local mult = tonumber(info.hitbox_mult) or tonumber(info.head_scale) or 1
+fire_label = fire_label .. string.format(" x%.1f", mult)
+end
+local manip_label = t.t(MANIP_LABELS[manip_state] or manip_state)
 if info.scan_cached and (manip_state == "ready" or manip_state == "blocked") then
 manip_label = manip_label .. " *"
 end
 local pad_x, pad_y = 10, 6
 local row_h = 14
 local bar_h = 5
-local title = i18n.t("BULLET STATUS")
+local title = t.t("BULLET STATUS")
 local title_w = theme.text_w(title, 11)
-local on_txt = i18n.t("ON")
-local off_txt = i18n.t("OFF")
-local hitscan_l = i18n.t("Hitscan")
-local tp_l = i18n.t("Bullet TP")
-local manip_l = i18n.t("Manip")
-local fire_l = i18n.t("Fire")
-local peek_l = i18n.t("Peek R")
-local ring_l = i18n.t("Ring")
+local on_txt = t.t("ON")
+local off_txt = t.t("OFF")
+local hitscan_l = t.t("Hitscan")
+local tp_l = t.t("Bullet TP")
+local manip_l = t.t("Manip")
+local hitbox_l = t.t("Hitbox")
+local fire_l = t.t("Fire")
+local peek_l = t.t("Peek R")
+local ring_l = t.t("Ring")
+local scan_l = t.t("TP Scan")
+local hitbox_mult = tonumber(info.hitbox_mult) or 1
+local hitbox_txt = hitbox_on and string.format("%s x%.1f", on_txt, hitbox_mult) or off_txt
 local radius_text = fmt_radius(info)
 local ring_text = "-"
 if manip_on and info.radii_total and info.radius_idx then
@@ -16224,18 +16922,31 @@ ring_text = "hit"
 elseif manip_on and manip_state == "direct" then
 ring_text = "los"
 end
+local tp_scan_txt = "-"
+if tp_on then
+if info.tp_scan_visible then
+tp_scan_txt = t.t("Visible")
+else
+local prog = math.max(0, math.min(1, info.tp_scan_progress or 0))
+tp_scan_txt = string.format("%d%%", math.floor(prog * 100 + 0.5))
+end
+end
 local w1 = theme.text_w(hitscan_l, 10) + theme.text_w(on_txt, 10) + 24
 local w2 = theme.text_w(tp_l, 10) + theme.text_w(on_txt, 10) + 24
-local w3 = theme.text_w(manip_l, 10) + theme.text_w(manip_label, 10) + 24
-local w4 = theme.text_w(fire_l, 10) + theme.text_w(fire_label, 10) + 24
-local w5 = theme.text_w(peek_l, 10) + theme.text_w(radius_text, 10) + 24
-local w6 = theme.text_w(ring_l, 10) + theme.text_w(ring_text, 10) + 24
-local panel_w = math.max(title_w, w1, w2, w3, w4, w5, w6) + pad_x * 2 + 8
-panel_w = math.max(panel_w, 178)
-local rows = manip_on and 6 or 4
-local has_bar = manip_on and (
+local w3 = theme.text_w(hitbox_l, 10) + theme.text_w(hitbox_txt, 10) + 24
+local w4 = theme.text_w(manip_l, 10) + theme.text_w(manip_label, 10) + 24
+local w5 = theme.text_w(fire_l, 10) + theme.text_w(fire_label, 10) + 24
+local w6 = theme.text_w(peek_l, 10) + theme.text_w(radius_text, 10) + 24
+local w7 = theme.text_w(ring_l, 10) + theme.text_w(ring_text, 10) + 24
+local w8 = theme.text_w(scan_l, 10) + theme.text_w(tp_scan_txt, 10) + 24
+local panel_w = math.max(title_w, w1, w2, w3, w4, w5, w6, w7, w8) + pad_x * 2 + 8
+panel_w = math.max(panel_w, 188)
+local rows = 5
+if tp_on then rows = rows + 1 end
+if manip_on then rows = rows + 2 end
+local has_bar = (manip_on and (
 manip_state == "scanning" or manip_state == "ready" or manip_state == "direct"
-)
+)) or (tp_on and fire_mode == "tp")
 local panel_h = 22 + rows * row_h + pad_y + (has_bar and (bar_h + 6) or 0)
 local x = cx - panel_w * 0.5
 local y = cy + fov + 10
@@ -16250,6 +16961,7 @@ ry = ry + row_h
 end
 draw_row(hitscan_l, hitscan_on and on_txt or off_txt, row_color(hitscan_on, true, false))
 draw_row(tp_l, tp_on and on_txt or off_txt, row_color(tp_on, true, false))
+draw_row(hitbox_l, hitbox_txt, row_color(hitbox_on, true, false))
 local manip_ok = manip_state == "ready" or manip_state == "direct"
 local manip_warn = manip_state == "scanning"
 draw_row(manip_l, manip_on and manip_label or off_txt,
@@ -16263,8 +16975,14 @@ elseif fire_mode == "ready" or fire_mode == "direct" then
 fire_col = theme.GREEN
 elseif fire_mode == "scanning" or fire_mode == "blocked" then
 fire_col = theme.ORANGE
+elseif fire_mode == "off" and hitbox_on and not hitscan_on and not tp_on and not manip_on then
+fire_label = t.t("Override")
+fire_col = theme.GREEN
 end
 draw_row(fire_l, fire_label, fire_col)
+if tp_on then
+draw_row(scan_l, tp_scan_txt, info.tp_scan_visible and theme.GREEN or overlay_theme.text())
+end
 if manip_on then
 draw_row(peek_l, radius_text, overlay_theme.text())
 draw_row(ring_l, ring_text, overlay_theme.text())
@@ -16273,15 +16991,22 @@ if has_bar then
 local bar_w = panel_w - pad_x * 2
 local bar_x = x + pad_x
 local bar_y = ry + 2
-local ready = manip_state == "ready" or manip_state == "direct"
+local ready = manip_state == "ready" or manip_state == "direct" or info.tp_scan_visible == true
 local prog
-if ready then
+if ready and not (tp_on and fire_mode == "tp" and manip_state == "scanning") then
+if tp_on and fire_mode == "tp" then
+prog = info.tp_scan_visible and 1 or math.max(0, math.min(1, info.tp_scan_progress or 0))
+else
 prog = 1
+end
 elseif manip_state == "scanning" then
 local real = math.max(0, math.min(1, info.scan_progress or 0))
 prog = math.max(0.08, real * 0.85 + scan_anim * 0.12)
+elseif tp_on and fire_mode == "tp" then
+local real = math.max(0, math.min(1, info.tp_scan_progress or 0))
+prog = math.max(0.08, real * 0.9 + scan_anim * 0.08)
 else
-prog = math.max(0, math.min(1, info.scan_progress or 0))
+prog = math.max(0, math.min(1, info.scan_progress or info.tp_scan_progress or 0))
 end
 local bg = theme.alpha(overlay_theme.panel_bg(), 0.95)
 local border = overlay_theme.border(0.5)
@@ -16328,7 +17053,23 @@ function M.draw(cx, cy, fov, track)
 if not settings.enabled(P_BULLET) then return end
 if not draw then return end
 local info = track and track.manip
-if not info then return end
+if not info then
+local hitbox_on = settings.bool("april_thick_bullet", false)
+if not hitbox_on then return end
+local mult = tonumber(settings.num("april_thick_bullet_mult", 2)) or 2
+info = {
+state = "off",
+manip_state = "off",
+hitscan_on = false,
+tp_on = false,
+manip_on = false,
+hitbox_on = true,
+hitbox_mult = mult,
+}
+elseif info.hitbox_on == nil then
+info.hitbox_on = settings.bool("april_thick_bullet", false)
+info.hitbox_mult = tonumber(settings.num("april_thick_bullet_mult", 2)) or 2
+end
 local show_hud = settings.bool(PREFIX .. "manip_status", false)
 local show_peek = settings.bool(PREFIX .. "manip_peek_vis", false)
 if not show_hud and not show_peek then return end
@@ -16964,7 +17705,17 @@ end
 end
 tracked = {}
 end
+local function ug_resolver_on()
+local ok, ug = pcall(function()
+return April.require("features.combat.ug_resolver")
+end)
+if ok and ug and ug.enabled then
+return ug.enabled() == true
+end
+return false
+end
 local function active()
+if ug_resolver_on() then return false end
 return settings.enabled(P_BULLET) and settings.bool(P, false)
 end
 local function thickness()
@@ -16982,6 +17733,121 @@ end)
 end
 function M.is_active()
 return was_on == true and active()
+end
+function M.thickness()
+return thickness()
+end
+function M.find_head(player)
+return find_head(player)
+end
+function M.ensure_inflated(player, mult)
+if not player or ep.is_local(player) then return nil end
+local head = find_head(player)
+if not head or not env.is_valid(head) then return nil end
+mult = tonumber(mult) or thickness()
+if mult < 1 then mult = 1 end
+if mult > 4 then mult = 4 end
+local key = head_key(head)
+local entry = tracked[key]
+if not entry then
+local sx, sy, sz = read_size(head)
+if not sx then
+sx, sy, sz = BASE.x, BASE.y, BASE.z
+end
+if sx > BASE.x * 1.35 or sy > BASE.y * 1.35 or sz > BASE.z * 1.35 then
+sx, sy, sz = BASE.x, BASE.y, BASE.z
+end
+entry = {
+sx = sx,
+sy = sy,
+sz = sz,
+transp = move.get_part_transparency(head),
+}
+tracked[key] = entry
+end
+local want_x, want_y, want_z = entry.sx * mult, entry.sy * mult, entry.sz * mult
+local cx, cy, cz = read_size(head)
+if not cx or math.abs(cx - want_x) > 0.03
+or math.abs(cy - want_y) > 0.03
+or math.abs(cz - want_z) > 0.03
+then
+write_size(head, want_x, want_y, want_z)
+end
+local cur_t = move.get_part_transparency(head)
+if cur_t == nil or math.abs((tonumber(cur_t) or 0) - TRANSP) > 0.01 then
+move.set_part_transparency(head, TRANSP)
+end
+return head
+end
+local function read_look(head, player)
+local ok, cf = pcall(function()
+return head.CFrame or head.cframe
+end)
+if ok and cf then
+local lv = cf.LookVector or cf.lookVector or cf.look_vector
+if lv then
+local x = tonumber(lv.X or lv.x)
+local y = tonumber(lv.Y or lv.y)
+local z = tonumber(lv.Z or lv.z)
+if x and y and z then
+local len = math.sqrt(x * x + y * y + z * z)
+if len > 1e-4 then
+return x / len, y / len, z / len
+end
+end
+end
+end
+if player then
+local lv = player.LookVector or player.look_vector
+if lv then
+local x = tonumber(lv.X or lv.x)
+local y = tonumber(lv.Y or lv.y)
+local z = tonumber(lv.Z or lv.z)
+if x and y and z then
+local len = math.sqrt(x * x + y * y + z * z)
+if len > 1e-4 then
+return x / len, y / len, z / len
+end
+end
+end
+end
+return 0, 0, -1
+end
+function M.head_face_world(player, up_bias)
+local head = find_head(player)
+if not head or not env.is_valid(head) then return nil end
+local ok, pos = pcall(function()
+return head.Position or head.position
+end)
+if not ok or not pos then return nil end
+local x = tonumber(pos.X or pos.x)
+local y = tonumber(pos.Y or pos.y)
+local z = tonumber(pos.Z or pos.z)
+if not x or not y or not z then return nil end
+local sx, sy, sz = read_size(head)
+if not sz then
+sz = BASE.z * 4
+end
+local lx, ly, lz = read_look(head, player)
+local half = sz * 0.5
+up_bias = tonumber(up_bias) or 0
+return {
+x = x + lx * half,
+y = y + ly * half + up_bias,
+z = z + lz * half,
+}
+end
+function M.restore_player(player)
+local head = find_head(player)
+if not head or not env.is_valid(head) then return end
+local key = head_key(head)
+local entry = tracked[key]
+if entry then
+restore_one(head, entry)
+if not active() then
+tracked[key] = nil
+end
+end
 end
 function M.esp_bounds(player)
 local fn = player and (player.GetBounds or player.get_bounds)
@@ -17057,10 +17923,26 @@ transp = move.get_part_transparency(head),
 tracked[key] = entry
 end
 if dead then
+local cx, cy, cz = read_size(head)
+if not cx or math.abs(cx - entry.sx) > 0.02
+or math.abs(cy - entry.sy) > 0.02
+or math.abs(cz - entry.sz) > 0.02
+then
 write_size(head, entry.sx, entry.sy, entry.sz)
+end
 else
-write_size(head, entry.sx * mult, entry.sy * mult, entry.sz * mult)
+local want_x, want_y, want_z = entry.sx * mult, entry.sy * mult, entry.sz * mult
+local cx, cy, cz = read_size(head)
+if not cx or math.abs(cx - want_x) > 0.03
+or math.abs(cy - want_y) > 0.03
+or math.abs(cz - want_z) > 0.03
+then
+write_size(head, want_x, want_y, want_z)
+end
+local cur_t = move.get_part_transparency(head)
+if cur_t == nil or math.abs((tonumber(cur_t) or 0) - TRANSP) > 0.01 then
 move.set_part_transparency(head, TRANSP)
+end
 end
 ::continue::
 end
@@ -17314,10 +18196,13 @@ local ok_set = false
 local ok_track = false
 if use_silent_fov then
 if info.use_curve and silent_ray.track_curve then
+ok_set = silent_ray.set_target(origin, hit, hit) == true
+if firing then
 ok_track = silent_ray.track_curve(
 origin, hit, info.weapon, SHOOT_VK, hit
 ) == true
-ok_set = silent_ray.last_ok() == true
+ok_set = ok_set or silent_ray.last_ok() == true
+end
 if not info.curve_path and silent_ray.last_curve then
 local curve = silent_ray.last_curve()
 if curve and curve.path then
@@ -17326,11 +18211,13 @@ end
 end
 else
 ok_set = silent_ray.set_target(origin, track_aim, hit) == true
+if firing then
 ok_track = silent_ray.track(origin, track_aim, SHOOT_VK, hit) == true
+end
 end
 else
 ok_set = silent_ray.set_target(origin, track_aim, hit) == true
-ok_track = ok_set
+ok_track = firing and ok_set
 end
 cached_track.aim = track_aim
 cached_track.tracking = ok_set or ok_track
@@ -17389,6 +18276,169 @@ draw_util.line(cx, cy, tx, ty, col, 1.5)
 end
 end
 end
+end
+return M
+end)()
+
+April._mods["features.combat.fov_flags"] = (function()
+local settings = April.require("core.settings")
+local menu_util = April.require("core.menu_util")
+local draw_util = April.require("core.draw_util")
+local theme = April.require("core.ui_theme")
+local targeting = April.require("features.combat.targeting")
+local combat_origin = April.require("game.combat_origin")
+local ep = April.require("core.entity_props")
+local esp_util = April.require("core.esp_util")
+local cache = April.require("core.cache")
+local M = {}
+local P = "april_fov_flags_enabled"
+local P_VISIBLE = "april_fov_flags_visible"
+local P_DIST = "april_fov_flags_distance"
+local FLAG_GAP = 3
+local FLAG_SIZE = 12
+local function aimbot_on()
+    return settings.enabled("april_aimbot")
+end
+local function silent_on()
+    return settings.enabled("april_silent_aim")
+end
+local function flag_fov_radius()
+    local aim_on = aimbot_on()
+    local sil_on = silent_on()
+    if not aim_on and not sil_on then
+        return nil
+    end
+    local aim_fov = tonumber(settings.num("april_aim_fov", 120)) or 120
+    local sil_fov = tonumber(settings.num("april_silent_fov", 150)) or 150
+    if aim_on and sil_on then
+        return math.max(aim_fov, sil_fov)
+    end
+    if aim_on then return aim_fov end
+    return sil_fov
+end
+local function resolve_target()
+    local silent_mod = April.require("features.combat.aimbot")
+    local aim_mod = April.require("features.combat.camera_aimbot")
+    if silent_on() and silent_mod then
+        local t = silent_mod.get_target and silent_mod.get_target()
+        if t then return t, "april_silent_" end
+        if silent_mod.get_scoped_target then
+            t = silent_mod.get_scoped_target()
+            if t then return t, "april_silent_" end
+        end
+    end
+    if aimbot_on() and aim_mod then
+        local t = aim_mod.get_target and aim_mod.get_target()
+        if t then return t, "april_aim_" end
+        if aim_mod.get_scoped_target then
+            t = aim_mod.get_scoped_target()
+            if t then return t, "april_aim_" end
+        end
+    end
+    return nil, nil
+end
+local function local_origin()
+    local me = cache.local_player
+    if me then
+        local x, y, z = esp_util.vec3_pos(
+            me.Position or me.position or me.HeadPosition or me.head_position
+        )
+        if x then return { x = x, y = y, z = z } end
+    end
+    return combat_origin.get_camera_origin() or combat_origin.get_server_origin()
+end
+local function target_distance(target)
+    if not target then return nil end
+    local origin = local_origin()
+    local dist = ep.distance_to(target, origin)
+    if dist then return dist end
+    if not origin then return nil end
+    local pos = ep.head_position(target) or ep.position(target)
+    local x, y, z = esp_util.vec3_pos(pos)
+    if not x then return nil end
+    local dx, dy, dz = x - origin.x, y - origin.y, z - origin.z
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+local function target_is_visible(target, prefix)
+    if not target or not raycast then return false end
+    pcall(function()
+        April.require("core.api_aliases").apply()
+    end)
+    local sw, sh = targeting.screen_center()
+    local cx, cy = sw * 0.5, sh * 0.5
+    local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
+    local aim = targeting.get_aim_point(
+        target, prefix or "april_silent_", nil, origin, cx, cy, false
+    )
+    if targeting.is_npc_target and targeting.is_npc_target(target) then
+        if origin and aim and (raycast.is_visible or raycast.IsVisible) then
+            local fn = raycast.is_visible or raycast.IsVisible
+            local ok, vis = pcall(fn, origin.x, origin.y, origin.z, aim.x, aim.y, aim.z)
+            return ok and vis == true
+        end
+        return false
+    end
+    local char = target.Character or target.character
+    if (not char) and ep.character then
+        char = ep.character(target)
+    end
+    local is_player_vis = raycast.is_player_visible or raycast.IsPlayerVisible
+    if char and type(is_player_vis) == "function" then
+        local addr = char.Address or char.address
+        local ok, vis = pcall(is_player_vis, addr or char)
+        if ok then
+            return vis == true
+        end
+    end
+    if origin and aim and (raycast.is_visible or raycast.IsVisible) then
+        local fn = raycast.is_visible or raycast.IsVisible
+        local ok, vis = pcall(fn, origin.x, origin.y, origin.z, aim.x, aim.y, aim.z)
+        return ok and vis == true
+    end
+    return false
+end
+local function draw_flag(cx, y, text, col)
+    local tw = theme.text_w(text, FLAG_SIZE)
+    draw_util.text(cx - tw * 0.5, y, text, col, FLAG_SIZE)
+    return FLAG_SIZE + FLAG_GAP
+end
+function M.register_menu()
+    local G = menu_util.G
+    local T = menu_util.group(G.SILENT_AIM)
+    local root = menu_util.parent(P)
+    menu_util.section(T, G.SILENT_AIM, "FOV Flags")
+    menu.add_checkbox(T, G.SILENT_AIM, P, "Enable FOV Flags", false)
+    menu.add_checkbox(T, G.SILENT_AIM, P_VISIBLE, "Visible Flag", true, root)
+    menu.add_checkbox(T, G.SILENT_AIM, P_DIST, "Distance Flag", true, root)
+    menu_util.bind_children(P, {
+        P_VISIBLE, P_DIST,
+    })
+end
+function M.update(_dt) end
+function M.draw()
+    if not settings.bool(P, false) then return end
+    if not draw then return end
+    local fov = flag_fov_radius()
+    if not fov then return end
+    local sw, sh = targeting.screen_center()
+    local cx, cy = sw * 0.5, sh * 0.5
+    local y = cy + fov + 8
+    local target, prefix = resolve_target()
+    if not target then return end
+    local i18n = April.require("ui.i18n")
+    local t = function(s)
+        return (i18n and i18n.t and i18n.t(s)) or s
+    end
+    if settings.bool(P_VISIBLE, true) and target_is_visible(target, prefix) then
+        y = y + draw_flag(cx, y, t("VISIBLE"), theme.GREEN or { 0.35, 1, 0.45, 1 })
+    end
+    if settings.bool(P_DIST, true) then
+        local dist = target_distance(target)
+        if dist then
+            local col = theme.TEXT or { 0.9, 0.92, 0.95, 1 }
+            y = y + draw_flag(cx, y, string.format("%dm", math.floor(dist + 0.5)), col)
+        end
+    end
 end
 return M
 end)()
@@ -19093,6 +20143,493 @@ function M.draw() end
 return M
 end)()
 
+April._mods["features.visuals.bullet_tracers"] = (function()
+local settings = April.require("core.settings")
+local menu_util = April.require("core.menu_util")
+local env = April.require("core.env")
+local ep = April.require("core.entity_props")
+local esp_util = April.require("core.esp_util")
+local draw_util = April.require("core.draw_util")
+local cache = April.require("core.cache")
+local combat_origin = April.require("game.combat_origin")
+local player_state = April.require("game.player_state")
+local M = {}
+local P = "april_tracers_enabled"
+local P_COLOR = "april_tracers_color"
+local P_COLOR2 = "april_tracers_color2"
+local P_LIFE = "april_tracers_lifetime"
+local P_THICK = "april_tracers_thickness"
+local P_TRANS = "april_tracers_transparency"
+local P_STYLE = "april_tracers_style"
+local P_ANIM = "april_tracers_anim"
+local P_ANIM_SPD = "april_tracers_anim_speed"
+local P_SEGS = "april_tracers_segments"
+local P_GLOW = "april_tracers_glow"
+local P_DMG = "april_tracers_damage"
+local P_OUTLINE = "april_tracers_outline"
+local P_IMPACT = "april_tracers_impact"
+local P_RAINBOW = "april_tracers_rainbow"
+local ACCUM_WINDOW_MS = 350
+local MAX_TRACERS = 64
+local SHOOT_VK = 0x01
+local DEFAULT_COLOR = { 1.0, 0.55, 0.18, 1.0 }
+local DEFAULT_COLOR2 = { 1.0, 0.2, 0.35, 1.0 }
+local STYLE_NAMES = { "Beam", "Glow", "Gradient", "Dashed", "Ribbon" }
+local ANIM_NAMES = { "Fade", "Sweep", "Shrink", "Pulse", "Travel", "Bloom" }
+local tracers = {}
+local hp_cache = {}
+local focus_ms = {}
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+local function tick_s()
+    return tick_ms() * 0.001
+end
+local function clamp(v, lo, hi)
+    if v < lo then return lo end
+    if v > hi then return hi end
+    return v
+end
+local function lerp(a, b, t)
+    return a + (b - a) * t
+end
+local function smoothstep(t)
+    t = clamp(t, 0, 1)
+    return t * t * (3 - 2 * t)
+end
+local function ease_out_cubic(t)
+    t = clamp(t, 0, 1)
+    local u = 1 - t
+    return 1 - u * u * u
+end
+local function col_mul_a(c, a)
+    return { c[1], c[2], c[3], (c[4] or 1) * a }
+end
+local function col_lerp(a, b, t)
+    return {
+        lerp(a[1], b[1], t),
+        lerp(a[2], b[2], t),
+        lerp(a[3], b[3], t),
+        lerp(a[4] or 1, b[4] or 1, t),
+    }
+end
+local function rainbow_color(offset)
+    local speed = settings.num(P_ANIM_SPD, 1) * 1.6
+    local t = tick_s() * speed + (offset or 0)
+    return {
+        (math.sin(t) + 1) * 0.5,
+        (math.sin(t + 2.094) + 1) * 0.5,
+        (math.sin(t + 4.189) + 1) * 0.5,
+        1,
+    }
+end
+local function tracer_colors()
+    local c1 = settings.color(P_COLOR, DEFAULT_COLOR)
+    local c2 = settings.color(P_COLOR2, DEFAULT_COLOR2)
+    if type(c1) ~= "table" then c1 = DEFAULT_COLOR end
+    if type(c2) ~= "table" then c2 = DEFAULT_COLOR2 end
+    c1 = {
+        tonumber(c1[1]) or DEFAULT_COLOR[1],
+        tonumber(c1[2]) or DEFAULT_COLOR[2],
+        tonumber(c1[3]) or DEFAULT_COLOR[3],
+        tonumber(c1[4]) or 1,
+    }
+    c2 = {
+        tonumber(c2[1]) or DEFAULT_COLOR2[1],
+        tonumber(c2[2]) or DEFAULT_COLOR2[2],
+        tonumber(c2[3]) or DEFAULT_COLOR2[3],
+        tonumber(c2[4]) or 1,
+    }
+    if settings.bool(P_RAINBOW, false) then
+        c1 = rainbow_color(0)
+        c2 = rainbow_color(1.2)
+    end
+    return c1, c2
+end
+local function damage_threshold()
+    return clamp(tonumber(settings.num(P_DMG, 10)) or 10, 1, 100)
+end
+local function player_key(player)
+    if not player then return nil end
+    local uid = ep.user_id(player)
+    if uid and uid ~= 0 then return "u:" .. tostring(uid) end
+    local addr = player.Address or player.address
+    if addr then return "a:" .. tostring(addr) end
+    return "p:" .. tostring(player)
+end
+local function read_hp(player)
+    if not player then return nil end
+    local ok, hp = pcall(function()
+        return player.Health or player.health
+    end)
+    if ok and tonumber(hp) then return tonumber(hp) end
+    return ep.health(player)
+end
+local function local_origin()
+    return combat_origin.get_muzzle_origin()
+        or combat_origin.get_fire_origin()
+        or combat_origin.get_camera_origin()
+        or combat_origin.get_server_origin()
+end
+local function target_point(player)
+    local head = ep.head_position(player)
+    if head then
+        local x, y, z = esp_util.vec3_pos(head)
+        if x then return { x = x, y = y, z = z } end
+    end
+    local pos = ep.position(player)
+    if pos then
+        local x, y, z = esp_util.vec3_pos(pos)
+        if x then return { x = x, y = y, z = z } end
+    end
+    return nil
+end
+local function clear_tracers()
+    tracers = {}
+end
+local function spawn_tracer(from, to)
+    if not from or not to then return end
+    local ox, oy, oz = from.x, from.y, from.z
+    local ex, ey, ez = to.x, to.y, to.z
+    if type(ox) ~= "number" or type(ex) ~= "number" then return end
+    local dx, dy, dz = ex - ox, ey - oy, ez - oz
+    local seg = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if seg < 0.35 then return end
+    local life = clamp(tonumber(settings.num(P_LIFE, 550)) or 550, 80, 3000)
+    local c1, c2 = tracer_colors()
+    while #tracers >= MAX_TRACERS do
+        table.remove(tracers, 1)
+    end
+    tracers[#tracers + 1] = {
+        ox = ox, oy = oy, oz = oz,
+        ex = ex, ey = ey, ez = ez,
+        born = tick_ms(),
+        life = life,
+        c1 = { c1[1], c1[2], c1[3], c1[4] },
+        c2 = { c2[1], c2[2], c2[3], c2[4] },
+        seed = (ox * 12.9898 + oz * 78.233) % 1,
+    }
+end
+local function on_hit(player)
+    local from = local_origin()
+    local to = target_point(player)
+    if from and to then
+        spawn_tracer(from, to)
+    end
+end
+local function mark_focus(player, now)
+    local key = player_key(player)
+    if key then focus_ms[key] = now end
+end
+local function is_focus(key, now)
+    local t = focus_ms[key]
+    return t and (now - t) <= 2500
+end
+local function refresh_focus(now)
+    local function add(player)
+        if player and not ep.is_local(player) then
+            mark_focus(player, now)
+        end
+    end
+    local ok, active_target = pcall(function()
+        return April.require("features.combat.active_target")
+    end)
+    if ok and active_target and active_target.get_target then
+        add(active_target.get_target())
+    end
+    local ok_s, silent = pcall(function()
+        return April.require("features.combat.aimbot")
+    end)
+    if ok_s and silent and silent.get_target then
+        add(silent.get_target())
+    end
+    local ok_a, aim = pcall(function()
+        return April.require("features.combat.camera_aimbot")
+    end)
+    if ok_a and aim and aim.get_target then
+        add(aim.get_target())
+    end
+end
+local function poll_damage(now)
+    refresh_focus(now)
+    local firing = input and input.is_key_down and input.is_key_down(SHOOT_VK)
+    local threshold = damage_threshold()
+    local players = cache.players
+    if type(players) ~= "table" then
+        players = {}
+        if entity and (entity.GetPlayers or entity.get_players) then
+            local ok, list = pcall(entity.GetPlayers or entity.get_players)
+            if ok and type(list) == "table" then players = list end
+        end
+    end
+    local live = {}
+    for i = 1, #players do
+        local player = players[i]
+        if player and not ep.is_local(player)
+            and player_state.is_combat_target(player)
+            and player_state.passes_team_check(player)
+        then
+            local key = player_key(player)
+            local hp = read_hp(player)
+            if key and hp then
+                live[key] = true
+                local prev = hp_cache[key]
+                if not prev then
+                    hp_cache[key] = { hp = hp, accum = 0, accum_ms = now }
+                else
+                    if hp > prev.hp + 5 then
+                        hp_cache[key] = { hp = hp, accum = 0, accum_ms = now }
+                    else
+                        local delta = prev.hp - hp
+                        local accum = prev.accum or 0
+                        local accum_ms = prev.accum_ms or now
+                        if (now - accum_ms) > ACCUM_WINDOW_MS then
+                            accum = 0
+                            accum_ms = now
+                        end
+                        if delta > 0 then
+                            accum = accum + delta
+                            accum_ms = now
+                        end
+                        hp_cache[key] = { hp = hp, accum = accum, accum_ms = accum_ms }
+                        if accum >= threshold and firing and is_focus(key, now) then
+                            hp_cache[key].accum = 0
+                            hp_cache[key].accum_ms = now
+                            on_hit(player)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    for key in pairs(hp_cache) do
+        if not live[key] then hp_cache[key] = nil end
+    end
+    for key, t in pairs(focus_ms) do
+        if (now - t) > 5000 then focus_ms[key] = nil end
+    end
+end
+local function line(x1, y1, x2, y2, col, thick)
+    if not x1 or not x2 then return end
+    if (x1 == 0 and y1 == 0) or (x2 == 0 and y2 == 0) then return end
+    draw_util.line(x1, y1, x2, y2, col, thick)
+end
+local function sample_world(t, tr)
+    return {
+        x = lerp(tr.ox, tr.ex, t),
+        y = lerp(tr.oy, tr.ey, t),
+        z = lerp(tr.oz, tr.ez, t),
+    }
+end
+local function project(t, tr)
+    local p = sample_world(t, tr)
+    local sx, sy, ok = esp_util.w2s_visible(p.x, p.y, p.z, 120)
+    if not ok then
+        sx, sy, ok = esp_util.w2s(p.x, p.y, p.z)
+    end
+    return sx, sy, ok == true
+end
+local function anim_params(tr, now)
+    local age = now - (tr.born or now)
+    local life = tr.life or 500
+    local u = clamp(age / life, 0, 1)
+    local anim = settings.combo_index(P_ANIM, ANIM_NAMES, 0)
+    local spd = clamp(tonumber(settings.num(P_ANIM_SPD, 1)) or 1, 0.25, 3)
+    local base_a = 1 - clamp(tonumber(settings.num(P_TRANS, 0.05)) or 0.05, 0, 0.95)
+    local thick = clamp(tonumber(settings.num(P_THICK, 2.2)) or 2.2, 0.5, 8)
+    local alpha = base_a
+    local reveal = 1
+    local thick_mul = 1
+    local travel = 0
+    local bloom = 0
+    if anim == 0 then
+        alpha = base_a * (1 - smoothstep(u))
+    elseif anim == 1 then
+        local grow = clamp(u * (1.15 + spd * 0.35), 0, 1)
+        reveal = ease_out_cubic(grow)
+        alpha = base_a * (1 - smoothstep(math.max(0, u - 0.55) / 0.45))
+    elseif anim == 2 then
+        thick_mul = 1 - smoothstep(u) * 0.85
+        alpha = base_a * (1 - smoothstep(u))
+    elseif anim == 3 then
+        local wave = 0.72 + 0.28 * math.sin(tick_s() * (6 + spd * 4) + (tr.seed or 0) * 6.28)
+        thick_mul = wave
+        alpha = base_a * (0.55 + 0.45 * wave) * (1 - smoothstep(u) * 0.85)
+    elseif anim == 4 then
+        travel = (u * spd * 1.35 + (tr.seed or 0)) % 1
+        reveal = 1
+        alpha = base_a * (1 - smoothstep(u))
+    elseif anim == 5 then
+        bloom = ease_out_cubic(clamp(u * 1.4, 0, 1))
+        thick_mul = 1 + bloom * 1.8
+        alpha = base_a * (1 - smoothstep(u))
+        reveal = clamp(u * 3, 0, 1)
+    else
+        alpha = base_a * (1 - smoothstep(u))
+    end
+    return {
+        u = u,
+        alpha = clamp(alpha, 0, 1),
+        reveal = clamp(reveal, 0, 1),
+        thick = thick * thick_mul,
+        travel = travel,
+        bloom = bloom,
+        anim = anim,
+        done = u >= 1 or alpha < 0.02,
+    }
+end
+local function draw_segment(x1, y1, x2, y2, col, thick, style, glow)
+    if not x1 or not x2 then return end
+    if settings.bool(P_OUTLINE, true) then
+        line(x1, y1, x2, y2, col_mul_a({ 0, 0, 0, 1 }, (col[4] or 1) * 0.75), thick + 1.6)
+    end
+    if style == 1 then
+        local g = clamp(tonumber(settings.num(P_GLOW, 1)) or 1, 0.2, 3)
+        line(x1, y1, x2, y2, col_mul_a(col, 0.12 * g), thick * (3.6 + g))
+        line(x1, y1, x2, y2, col_mul_a(col, 0.22 * g), thick * (2.2 + g * 0.4))
+        line(x1, y1, x2, y2, col_mul_a(col, 0.45), thick * 1.35)
+        line(x1, y1, x2, y2, col, thick)
+    else
+        line(x1, y1, x2, y2, col, thick)
+    end
+end
+local function draw_ribbon_segment(x1, y1, x2, y2, col, half_w)
+    local dx, dy = x2 - x1, y2 - y1
+    local len = math.sqrt(dx * dx + dy * dy)
+    if len < 0.5 then return end
+    local nx, ny = -dy / len * half_w, dx / len * half_w
+    local poly = draw.PolyFilled or draw.poly_filled
+    if type(poly) == "function" then
+        pcall(poly, {
+            { x = x1 + nx, y = y1 + ny },
+            { x = x2 + nx, y = y2 + ny },
+            { x = x2 - nx, y = y2 - ny },
+            { x = x1 - nx, y = y1 - ny },
+        }, col)
+        return
+    end
+    line(x1, y1, x2, y2, col, half_w * 2)
+end
+local function draw_impact(tr, ap)
+    if not settings.bool(P_IMPACT, true) then return end
+    local sx, sy, ok = project(1, tr)
+    if not ok then return end
+    local r = (4 + ap.bloom * 18 + (1 - ap.u) * 10) * (0.7 + settings.num(P_GLOW, 1) * 0.3)
+    local a = ap.alpha * (0.35 + 0.65 * (1 - ap.u))
+    local c = col_mul_a(tr.c2 or tr.c1, a)
+    draw_util.circle(sx, sy, r, c, false)
+    draw_util.circle(sx, sy, r * 0.45, col_mul_a(c, 0.85), true)
+end
+local function draw_one(tr, now)
+    local ap = anim_params(tr, now)
+    if ap.done then return false end
+    local style = settings.combo_index(P_STYLE, STYLE_NAMES, 1)
+    local segs = math.floor(clamp(tonumber(settings.num(P_SEGS, 18)) or 18, 4, 48))
+    local c1 = tr.c1 or DEFAULT_COLOR
+    local c2 = tr.c2 or DEFAULT_COLOR2
+    local prev_sx, prev_sy, prev_ok = nil, nil, false
+    local t_end = ap.reveal
+    if t_end < 0.02 then
+        draw_impact(tr, ap)
+        return true
+    end
+    for i = 0, segs do
+        local t = (i / segs) * t_end
+        local sx, sy, ok = project(t, tr)
+        if prev_ok and ok then
+            local col
+            if style == 2 then
+                col = col_lerp(c1, c2, t)
+            else
+                col = col_lerp(c1, c2, t * 0.65)
+            end
+            col = col_mul_a(col, ap.alpha)
+            local draw_it = true
+            if style == 3 then
+                local dash_t = (t * 10 + tick_s() * (3 + settings.num(P_ANIM_SPD, 1) * 4)) % 1
+                draw_it = dash_t < 0.58
+            end
+            if ap.anim == 4 then
+                local dist = math.abs(t - ap.travel)
+                if dist > 0.5 then dist = 1 - dist end
+                local boost = clamp(1 - dist * 6, 0, 1)
+                col = col_mul_a(col, 0.35 + 0.65 * (0.4 + boost))
+                if boost > 0.55 then
+                    draw_segment(prev_sx, prev_sy, sx, sy, col_mul_a(c2, ap.alpha * boost), ap.thick * 1.8, 1, true)
+                end
+            end
+            if draw_it then
+                if style == 4 then
+                    draw_ribbon_segment(prev_sx, prev_sy, sx, sy, col, ap.thick * 0.9)
+                    if settings.bool(P_OUTLINE, true) then
+                        line(prev_sx, prev_sy, sx, sy, col_mul_a({ 0, 0, 0, 1 }, ap.alpha * 0.5), 1)
+                    end
+                else
+                    draw_segment(prev_sx, prev_sy, sx, sy, col, ap.thick, style, true)
+                end
+            end
+        end
+        prev_sx, prev_sy, prev_ok = sx, sy, ok
+    end
+    draw_impact(tr, ap)
+    return true
+end
+function M.register_menu()
+    local G = menu_util.G
+    local T = menu_util.group(G.GUN_MODS)
+    local root = menu_util.parent(P)
+    menu_util.section(T, G.GUN_MODS, "Bullet Tracers")
+    menu_util.register_keybind(T, G.GUN_MODS, P, "Enable Tracers", false)
+    menu.add_colorpicker(T, G.GUN_MODS, P_COLOR, "Tracer Color", DEFAULT_COLOR, root)
+    menu.add_colorpicker(T, G.GUN_MODS, P_COLOR2, "Tracer End Color", DEFAULT_COLOR2, root)
+    menu.add_combo(T, G.GUN_MODS, P_STYLE, "Tracer Style", STYLE_NAMES, 1, root)
+    menu.add_combo(T, G.GUN_MODS, P_ANIM, "Tracer Animation", ANIM_NAMES, 1, root)
+    menu.add_slider_float(T, G.GUN_MODS, P_ANIM_SPD, "Anim Speed", 0.25, 3, 1, "%.2f", root)
+    menu.add_slider_int(T, G.GUN_MODS, P_LIFE, "Lifetime (ms)", 100, 1500, 550, root)
+    menu.add_slider_float(T, G.GUN_MODS, P_THICK, "Tracer Thickness", 0.5, 8, 2.2, "%.1f", root)
+    menu.add_slider_float(T, G.GUN_MODS, P_TRANS, "Tracer Fade", 0, 0.9, 0.05, "%.2f", root)
+    menu.add_slider_int(T, G.GUN_MODS, P_SEGS, "Tracer Segments", 4, 48, 18, root)
+    menu.add_slider_float(T, G.GUN_MODS, P_GLOW, "Glow Strength", 0.2, 3, 1, "%.2f", root)
+    menu.add_slider_int(T, G.GUN_MODS, P_DMG, "Min Damage", 1, 50, 10, root)
+    menu.add_checkbox(T, G.GUN_MODS, P_OUTLINE, "Tracer Outline", true, root)
+    menu.add_checkbox(T, G.GUN_MODS, P_IMPACT, "Impact Flash", true, root)
+    menu.add_checkbox(T, G.GUN_MODS, P_RAINBOW, "Tracer Rainbow", false, root)
+    menu_util.bind_children(P, {
+        P_COLOR, P_COLOR2, P_STYLE, P_ANIM, P_ANIM_SPD, P_LIFE, P_THICK, P_TRANS,
+        P_SEGS, P_GLOW, P_DMG, P_OUTLINE, P_IMPACT, P_RAINBOW,
+    })
+    settings.on_change(P, function(v)
+        if not (v == true or v == 1) then
+            clear_tracers()
+        end
+    end)
+end
+function M.update(_dt)
+    if not settings.enabled(P) then
+        if #tracers > 0 then clear_tracers() end
+        hp_cache = {}
+        return
+    end
+    poll_damage(tick_ms())
+end
+function M.draw()
+    if not settings.enabled(P) then return end
+    if not draw then return end
+    local now = tick_ms()
+    local keep = {}
+    for i = 1, #tracers do
+        local tr = tracers[i]
+        if tr and draw_one(tr, now) then
+            keep[#keep + 1] = tr
+        end
+    end
+    tracers = keep
+end
+M.STYLE_NAMES = STYLE_NAMES
+M.ANIM_NAMES = ANIM_NAMES
+return M
+end)()
+
 April._mods["features.utility.mod_checker"] = (function()
 local settings = April.require("core.settings")
 local notify = April.require("core.notify")
@@ -19119,9 +20656,12 @@ local ROLE_MISS_TTL_MS = 3000
 local seen = {}
 local active = {}
 local role_misses = {}
+local settled_nonstaff = {}
 local panel_rows = {}
 local last_scan = -1
 local last_meta_refresh = 0
+local last_progressive = 0
+local PROGRESSIVE_MS = 100
 M._session = nil
 M._was_enabled = false
 M._group_started = false
@@ -19145,9 +20685,11 @@ function M.reset_state()
 seen = {}
 active = {}
 role_misses = {}
+settled_nonstaff = {}
 panel_rows = {}
 last_scan = -1
 last_meta_refresh = 0
+last_progressive = 0
 end
 function M.on_session_changed()
 M.reset_state()
@@ -19204,6 +20746,11 @@ menu_util.section(T, G.MISC, "Utility")
 menu.add_checkbox(T, G.MISC, P, "Mod Checker", false)
 menu_util.section(T, G.MISC, "Mod Checker Scan")
 menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Scan Interval (ms)", 1000, 10000, 2500, root)
+pcall(function()
+local gs = April.require("ui.gs_state")
+gs.define(X_ID, -1)
+gs.define(Y_ID, -1)
+end)
 menu_util.bind_master(P, { "april_mod_checker_interval" })
 end
 function M.init()
@@ -19232,21 +20779,35 @@ entry.role = role
 entry.player = p
 end
 end
+local function numeric_uid(p)
+return ep.user_id(p)
+end
 function M.check_player(p, lookup_budget)
 if not settings.enabled(P) then return lookup_budget end
 if not p or p.is_local then return lookup_budget end
+local uid_num = numeric_uid(p)
+if uid_num and settled_nonstaff[uid_num] then
+return lookup_budget
+end
 local role = mod_ids.role_for_player(p, {
 queue_lookup = true,
 mark_unknown = false,
 live_lookup = true,
 })
-if not role then return lookup_budget end
+if not role then
+if uid_num then
+settled_nonstaff[uid_num] = true
+end
+return lookup_budget
+end
 local uid = player_uid(p)
 if not uid or uid == "" then return lookup_budget end
+if uid_num then settled_nonstaff[uid_num] = nil end
 M.track_player(p, role)
 if seen[uid] then return lookup_budget end
 seen[uid] = true
 notify.warning(string.format("%s: %s (%s)", mod_ids.short_label(role), player_label(p), p.name or "?"), 6000)
+rebuild_panel_rows(tick_ms())
 return lookup_budget
 end
 local function rebuild_panel_rows(now)
@@ -19315,10 +20876,25 @@ seen[uid] = nil
 end
 end
 end
+function M.scan_progressive()
+if not settings.enabled(P) then return end
+local players = April.require("core.cache").players
+local lookup_budget = LOOKUP_BUDGET
+for _, p in ipairs(players) do
+local uid = player_uid(p)
+if uid and seen[uid] then
+goto continue
+end
+lookup_budget = M.check_player(p, lookup_budget)
+::continue::
+end
+last_meta_refresh = tick_ms()
+end
 function M.scan_all()
 if not settings.enabled(P) then return end
 local players = April.require("core.cache").players
 local lookup_budget = LOOKUP_BUDGET
+settled_nonstaff = {}
 M.reconcile_active(players)
 for _, p in ipairs(players) do
 lookup_budget = M.check_player(p, lookup_budget)
@@ -19327,12 +20903,16 @@ rebuild_panel_rows(tick_ms())
 last_meta_refresh = tick_ms()
 end
 function M.on_player_added(p)
+local uid_num = numeric_uid(p)
+if uid_num then settled_nonstaff[uid_num] = nil end
 M.check_player(p, LOOKUP_BUDGET)
 rebuild_panel_rows(tick_ms())
 end
 function M.on_player_removed(p)
 if not p then return end
 local uid = player_uid(p)
+local uid_num = numeric_uid(p)
+if uid_num then settled_nonstaff[uid_num] = nil end
 if uid and uid ~= "" then
 seen[uid] = nil
 active[uid] = nil
@@ -19367,11 +20947,16 @@ end
 M._was_enabled = false
 return
 end
+local just_enabled = not M._was_enabled
 M._was_enabled = true
 if not M._group_started then
 M._group_started = mod_ids.ensure_started() == true
 end
 local now = tick_ms()
+if just_enabled or last_progressive < 0 or (now - last_progressive) >= PROGRESSIVE_MS then
+last_progressive = now
+M.scan_progressive()
+end
 local interval = settings.num("april_mod_checker_interval", SCAN_MS)
 if last_scan < 0 or (now - last_scan) >= interval then
 last_scan = now
@@ -19443,14 +21028,25 @@ local sw, sh = draw_util.screen_size()
 local row_h = 38
 local count = math.max(#panel_rows, 1)
 local height = TITLE_H + count * row_h + 6
+local default_x = sw - PANEL_W - 16
+local default_y = 72
+local stored_x = settings.num(X_ID, -1)
+local stored_y = settings.num(Y_ID, -1)
+if stored_x < 0 then
+if menu and menu.set then pcall(menu.set, X_ID, default_x) end
+end
+if stored_y < 0 then
+if menu and menu.set then pcall(menu.set, Y_ID, default_y) end
+end
 local x, y = panel_drag.update(
 "mod_checker",
 X_ID, Y_ID,
 PANEL_W, TITLE_H,
 sw, sh,
-sw - PANEL_W - 16, 72
+default_x, default_y,
+true
 )
-x, y = panel_drag.clamp(x, y, PANEL_W, height, sw, sh)
+x, y = panel_drag.clamp(x, y, PANEL_W, height, sw, sh, X_ID, Y_ID)
 draw_staff_panel(x, y, PANEL_W, panel_rows)
 end
 return M
@@ -20580,6 +22176,115 @@ function M.update(_dt)
     end
     M.refresh_target()
 end
+local function target_distance_m(target)
+    if not target then return nil end
+    local ox, oy, oz = local_origin()
+    local origin = (ox and { x = ox, y = oy, z = oz }) or nil
+    local dist = ep.distance_to(target, origin)
+    if dist then return dist end
+    if not ox then return nil end
+    local hx, hy, hz = esp_util.vec3_pos(ep.head_position(target) or ep.position(target))
+    if not hx then return nil end
+    return math_util.distance3(hx - ox, hy - oy, hz - oz)
+end
+local function target_hp(target)
+    local hp = ep.health(target)
+    local max_hp = ep.max_health(target)
+    if not hp then
+        local ok, v = pcall(function()
+            return target.Health or target.health
+        end)
+        if ok then hp = tonumber(v) end
+    end
+    if not max_hp then
+        local ok, v = pcall(function()
+            return target.MaxHealth or target.max_health
+        end)
+        if ok then max_hp = tonumber(v) end
+    end
+    if not max_hp or max_hp <= 0 then max_hp = 100 end
+    if not hp then hp = max_hp end
+    if hp < 0 then hp = 0 end
+    if hp > max_hp then hp = max_hp end
+    return hp, max_hp
+end
+local function hp_fill_color(pct)
+    if pct > 0.5 then
+        local t = (pct - 0.5) * 2
+        return { (1 - t) * 0.95, 0.92 + t * 0.08, 0.22, 1 }
+    end
+    local t = pct * 2
+    return { 1, 0.22 + t * 0.7, 0.18, 1 }
+end
+local function truncate_text(text, max_w, fs)
+    if not text or text == "" then return "" end
+    if select(1, draw.get_text_size(text, fs)) <= max_w then
+        return text
+    end
+    local out = text
+    while #out > 1 and select(1, draw.get_text_size(out .. "..", fs)) > max_w do
+        out = out:sub(1, -2)
+    end
+    return out .. ".."
+end
+local function resolve_player_name(target)
+    local name = ep.display_name(target) or ep.name(target)
+    if (not name or name == "") and target then
+        name = target.DisplayName or target.display_name or target.Name or target.name
+    end
+    name = text_util.sanitize(name or "")
+    if name == "" then name = "Unknown" end
+    return name
+end
+local function draw_info_band(panel_x, y, panel_w, target)
+    local pad = 12
+    local name = resolve_player_name(target)
+    local dist = target_distance_m(target)
+    local dist_txt = dist and string.format("%dm", math.floor(dist + 0.5)) or "--"
+    local hp, max_hp = target_hp(target)
+    local pct = max_hp > 0 and (hp / max_hp) or 0
+    if pct < 0 then pct = 0 end
+    if pct > 1 then pct = 1 end
+    local hp_txt = string.format("%d", math.floor(hp + 0.5))
+    local hp_col = hp_fill_color(pct)
+    local name_fs = 13
+    local meta_fs = 11
+    local dist_w = select(1, draw.get_text_size(dist_txt, meta_fs)) or 0
+    local hp_w = select(1, draw.get_text_size(hp_txt, meta_fs)) or 0
+    local name_max = panel_w - pad * 2 - dist_w - 14
+    local shown = truncate_text(name, name_max, name_fs)
+    draw.text(panel_x + pad, y, shown, overlay_theme.text(), name_fs)
+    draw.text(
+        panel_x + panel_w - pad - dist_w, y + 1,
+        dist_txt, overlay_theme.text_muted(), meta_fs
+    )
+    local bar_y = y + 17
+    local bar_h = 6
+    local gap = 8
+    local bar_x = panel_x + pad
+    local bar_w = panel_w - pad * 2 - hp_w - gap
+    if bar_w < 48 then
+        bar_w = panel_w - pad * 2
+        hp_w = 0
+    end
+    if draw.rect_filled then
+        draw.rect_filled(bar_x, bar_y, bar_w, bar_h, { 0.07, 0.08, 0.10, 0.95 }, 2)
+        local fill_w = math.floor(bar_w * pct + 0.5)
+        if fill_w > 0 then
+            draw.rect_filled(bar_x, bar_y, fill_w, bar_h, hp_col, 2)
+        end
+    end
+    if hp_w > 0 then
+        draw.text(
+            panel_x + panel_w - pad - hp_w,
+            bar_y - 2,
+            hp_txt,
+            hp_col,
+            meta_fs
+        )
+    end
+    return 30
+end
 function M.draw()
     if not settings.enabled(P) then return end
     if not draw or not draw.text or not draw.rect_filled then return end
@@ -20589,25 +22294,19 @@ function M.draw()
     local sw, _ = draw_util.screen_size()
     local top = settings.num(P .. "_top", 88)
     local cx = sw * 0.5
-    local name = text_util.sanitize(target.display_name or target.name or "Unknown")
     local content_w = math.max(layout.held_row_w, layout.row_w)
-    local panel_w = math.max(220, content_w + 18)
-    local panel_h = 24 + 8 + layout.held_sz + layout.row_gap + layout.gear_sz + 9
+    local panel_w = math.max(248, content_w + 20)
+    local info_h = 30
+    local title_h = 24
+    local panel_h = title_h + 4 + info_h + 10 + layout.held_sz + layout.row_gap + layout.gear_sz + 10
     if not held_piece(layout.held) and layout.filled == 0 then
         panel_h = panel_h + 16
     end
     local panel_x = cx - panel_w * 0.5
     local i18n = April.require("ui.i18n")
     overlay_theme.draw_panel(panel_x, top, panel_w, panel_h, i18n.t("TARGET LOADOUT"), { title_center = true })
-    local max_name_w = panel_w - 114
-    local header_name = name
-    while #header_name > 1 and select(1, draw.get_text_size(header_name, 10)) > max_name_w do
-        header_name = header_name:sub(1, -2)
-    end
-    if header_name ~= name then header_name = header_name .. ".." end
-    local nw = select(1, draw.get_text_size(header_name, 10))
-    draw.text(panel_x + panel_w - nw - 8, top + 7, header_name, overlay_theme.accent(), 10)
-    local y = top + 32
+    local y = top + title_h + 4
+    y = y + draw_info_band(panel_x, y, panel_w, target) + 8
     local held = held_piece(layout.held)
     local row_x = cx - layout.held_row_w * 0.5
     draw_slot(row_x, y, layout.held_sz, layout.held_key, held, held and "held" or "empty")
@@ -25373,8 +27072,10 @@ entry.started = now
 entry.expires = now + duration
 current = entry
 last_emit_ms = now
-local key = "anime_baddie:" .. entry.character.id .. ":" .. entry.expression
-image_cache.preload(key, entry.character.urls(entry.expression))
+local ch = entry.character
+local sprite = ch.sprite_file and ch.sprite_file(entry.expression) or (entry.expression .. ".png")
+local key = "anime_baddie:" .. ch.id .. ":" .. tostring(sprite):gsub("%.png$", "")
+image_cache.preload(key, ch.urls(entry.expression))
 end
 local function emit(event_name, force)
 if not settings.bool(P, false) or not event_enabled(event_name) then return end
@@ -25729,7 +27430,8 @@ local tail = {
 }
 draw.poly_filled(tail, panel)
 end
-draw_util.text(bx + BUBBLE_PAD, by + 7, "APRIL", accent_col, 11)
+local title = string.upper(tostring(character and character.name or "April"))
+draw_util.text(bx + BUBBLE_PAD, by + 7, title, accent_col, 11)
 for i = 1, #entry.lines do
 local tx = bx + BUBBLE_PAD
 local ty = by + BUBBLE_HEADER_H + (i - 1) * BUBBLE_LINE_H
@@ -25742,11 +27444,15 @@ installed = true
 session_key = session_id()
 pcall(data.load_remote)
 for _, character in ipairs(data.characters) do
-for _, expression in ipairs({ "neutral", "smile" }) do
+local seen = {}
+for expression, file in pairs(character.expressions or {}) do
+if not seen[file] then
+seen[file] = true
 image_cache.preload(
-"anime_baddie:" .. character.id .. ":" .. expression,
+"anime_baddie:" .. character.id .. ":" .. tostring(file),
 character.urls(expression)
 )
+end
 end
 end
 end
@@ -25849,7 +27555,9 @@ end
 x, y = panel_drag.clamp(x, y, character_w, character_h, sw, sh, X_ID, Y_ID)
 local now = now_ms()
 local expression = current and current.expression or "neutral"
-local key = "anime_baddie:" .. character.id .. ":" .. expression
+local sprite = character.sprite_file and character.sprite_file(expression)
+or (expression .. ".png")
+local key = "anime_baddie:" .. character.id .. ":" .. tostring(sprite):gsub("%.png$", "")
 image_cache.ensure(key, character.urls(expression))
 local pop = 1
 if current and not settings.bool("april_ui_reduce_motion", false) then
@@ -27118,10 +28826,51 @@ M.LANG_ID = "april_ui_russian"
 local STRINGS = {
     ["Aim"] = "Aim",
     ["Aimbot"] = "Aimbot",
+    ["FOV Flags"] = "FOV flagi",
+    ["Enable FOV Flags"] = "Vklyuchit FOV flagi",
+    ["Visible Flag"] = "Flag Visible",
+    ["Distance Flag"] = "Flag Distance",
+    ["VISIBLE"] = "VISIBLE",
     ["Visuals"] = "Vizualy",
     ["World"] = "Mir",
     ["Guns"] = "Oruzhie",
     ["Gun Mods"] = "Mody oruzhiya",
+    ["Bullet Tracers"] = "Trassery pul",
+    ["Enable Tracers"] = "Vklyuchit trassery",
+    ["Tracer Color"] = "Tsvet trassera",
+    ["Tracer End Color"] = "Konechnyy tsvet",
+    ["Tracer Style"] = "Stil trassera",
+    ["Tracer Animation"] = "Animatsiya trassera",
+    ["Anim Speed"] = "Skorost animatsii",
+    ["Lifetime (ms)"] = "Vremya zhizni (ms)",
+    ["Tracer Thickness"] = "Tolshchina trassera",
+    ["Tracer Fade"] = "Zatuhanie trassera",
+    ["Tracer Segments"] = "Segmenty trassera",
+    ["Glow Strength"] = "Sila svecheniya",
+    ["Min Damage"] = "Min. uron",
+    ["Tracer Outline"] = "Kontur trassera",
+    ["Impact Flash"] = "Vspyshka popadaniya",
+    ["Tracer Rainbow"] = "Raduga trassera",
+    ["Beam"] = "Beam",
+    ["Glow"] = "Glow",
+    ["Gradient"] = "Gradient",
+    ["Dashed"] = "Dashed",
+    ["Ribbon"] = "Ribbon",
+    ["Fade"] = "Fade",
+    ["Sweep"] = "Sweep",
+    ["Shrink"] = "Shrink",
+    ["Pulse"] = "Pulse",
+    ["Travel"] = "Travel",
+    ["Bloom"] = "Bloom",
+    ["Thickness"] = "Tolshchina",
+    ["Transparency"] = "Prozrachnost",
+    ["Material"] = "Material",
+    ["Neon"] = "Neon",
+    ["ForceField"] = "ForceField",
+    ["SmoothPlastic"] = "SmoothPlastic",
+    ["Glass"] = "Glass",
+    ["Plastic"] = "Plastic",
+    ["Custom"] = "Custom",
     ["Misc"] = "Raznoe",
     ["Radar"] = "Radar",
     ["Config"] = "Konfig",
@@ -27172,6 +28921,7 @@ local STRINGS = {
     ["Events"] = "Iventy",
     ["Map"] = "Karta",
     ["April"] = "April",
+    ["VectorChan"] = "VectorChan",
     ["STAFF"] = "PERSONAL",
     ["MAP"] = "KARTA",
     ["EVENTS"] = "IVENTY",
@@ -27257,7 +29007,12 @@ local STRINGS = {
     ["Extend Distance"] = "Distantsiya rasshireniya",
     ["Body Peek (desync)"] = "Body Peek (desink)",
     ["Hitbox Override"] = "Overrayd hitboksa",
+    ["Resolver"] = "Rezolver",
+    ["UG Resolver"] = "UG rezolver",
     ["Override Size"] = "Razmer overrayda",
+    ["TP Scan"] = "TP skan",
+    ["Visible"] = "Vidimo",
+    ["Override"] = "Overrayd",
     ["Status HUD"] = "Status HUD",
     ["Peek Visual"] = "Vizual pika",
     ["Head"] = "Golova",
@@ -27666,16 +29421,20 @@ local STRINGS = {
 local TIPS = {
     april_ui_russian = "Pereklyuchaet ves interfeys April i tekst HUD na russkiy (latinitsey — shrift Vector ne risuet kirillitsu).",
     april_aimbot = "Plavnyy aim assist kameroy po tekuschey tseli. Bind na chipe (Vsegda / Uderzhanie / Pereklyuchenie).",
+    april_fov_flags_enabled = "Risuet flagi statusa pod bolshim vklyuchennym FOV Aimbot / Silent (ili tem chto vklyucheno).",
+    april_fov_flags_visible = "Pokazyvaet VISIBLE pod FOV, kogda tekushchaya aim/silent tsel vidima. Tolko display — ne filtr Visible Only.",
+    april_fov_flags_distance = "Pokazyvaet distantsiyu v metrah pod FOV do tekuschey aim/silent tseli.",
     april_aim_key = "Uderzhivayte ili pereklyuchayte etu klavishu, chtoby aktivirovat aimbot.",
     april_silent_aim = "Perenapravlyaet vystrely v zalochennuyu tsel bez dvizheniya kamery.",
     april_bullet_enabled = "Glavnyy pereklyuchatel prodvinutogo marshruta puli (hitscan, bullet TP, silent manip). Rezhim Always / Hold / Toggle — s chipa klavishi.",
     april_silent_hitscan = "Mgnovenno registriruet popadaniya po zalochennoy tseli. Server mozhet otklonit nevalidnye vystrely.",
-    april_silent_bullet_tp = "Ischet na golove blizhayshuyu k pritselu vidimuyu tochku (matematika manip), spavnit luch na tseli i strelyaet cherez nee. Smescheniya tsikliruyutsya kazhdyy kadr.",
+    april_silent_bullet_tp = "Ischet na golove blizhayshuyu k pritselu vidimuyu tochku, spavnit luch na tseli i strelyaet cherez nee. Pri Hitbox Override skalyatsya pod Override Size.",
     april_silent_bullet_manip = "Ischet ugol dlya vystrela iz-za ukrytiya. Server mozhet otklonit nevalidnye vystrely.",
     april_silent_manip_extend = "Ischet dalshe ot tela, esli blizkiy peek ne nayden.",
     april_bullet_body_peek = "Dvigaet vas k peek s desinkom dlya serverno-validnyh vystrelov. Mozhet davat invalids ili kiki.",
-    april_thick_bullet = "Uvelichivaet hitboksy golov drugih igrokov na kliente i delaet ih poluprozrachnymi. Boksy Player ESP ostayutsya naturalnogo razmera — Override Size skryt ot ESP. Pomogaet lokalnym hit-testam; server vse ravno mozhet otklonit vystrely, zadevshie tolko razdutuyu obolochku.",
-    april_thick_bullet_mult = "Naskolko krupnymi stanovyatsya hitboksy golov vragov (1x = norma, do 4x). Boksy ESP ostayutsya obychnogo razmera.",
+    april_thick_bullet = "Uvelichivaet hitboksy golov na kliente. Bullet TP / hitscan skalyatsya pod Override Size. Boksy ESP ostayutsya naturalnymi. Server mozhet otklonit shell-only klipy.",
+    april_thick_bullet_mult = "Razmer hitboksa golovy (1x–4x). Takzhe skaliruet radius skana Bullet TP pri vklyuchennom Override.",
+    april_bullet_ug_resolver = "Poka v tseli Bullet aim/silent: hitboks golovy 4x i podnimaet VSE telo +2 studa na kliente kazhdyy kadr. Otklyuchaet Hitbox Override poka vklyuchen.",
     april_aim_targets = "Vyberite, tselitsya li aimbot v igrokov, NPC ili i teh i drugih.",
     april_aim_filters = "Filtry, kakie tseli aimbot budet uchityvat.",
     april_aim_sticky = "Poka klavisha aima zazhata, derzhit pervuyu tsel dazhe vne FOV. Pri otpuskanii binda tsel sbrasyvaetsya.",
@@ -27697,7 +29456,7 @@ local TIPS = {
     april_player_show_held = "Pokazyvaet predmet v rukah igroka (tot zhe put chteniya, chto u Target Gear).",
     april_player_esp_filters = "Filtr, kakie igroki poyavlyayutsya na ESP.",
     april_player_esp_flags = "Pokazyvat status-flagi (daun, SZ, personal, revayv, dvizhenie, VIP, chiter).",
-    april_target_overlay = "Pokazyvaet oruzhie i snaryazhenie igroka, blizhayshego k pritselu.",
+    april_target_overlay = "Pokazyvaet imya, HP, distantsiyu, oruzhie i snaryazhenie igroka, blizhayshego k pritselu.",
     april_target_overlay_fov = "Otdelnyy FOV (pikseli ot pritsela) tolko dlya Target Gear Overlay.",
     april_target_overlay_max_dist = "Maksimalnaya mirovaya distantsiya (studs) dlya vybora Target Gear Overlay.",
     april_crosshair_enabled = "Risuet svoy pritsel na ekrane.",
@@ -27737,6 +29496,21 @@ local TIPS = {
     april_gm_speed = "Povyshaet skorost puli cherez SpeedMult v zhivyh tablitsah oruzhiya. Eto ne stat vlozheniya — Swift Heavy Ammo tozhe daet skorost; ekipiruyte oruzhie pered vklyucheniem.",
     april_gm_range = "Uvelichivaet maks. dalnost cherez RangeMult. Glushitel i kompensator rezhut dalnost; eto patchit suschestvuyuschie mnozhiteli dalnosti na vashem oruzhii.",
     april_gm_double_tap = "Forsiruet 2-patronnyy berst na oruzhii v rukah. Patchit ToolInfo napryamuyu — ne ispolzuet GC-mnozhiteli.",
+    april_tracers_enabled = "Pri hite (padenie HP, poka derzhish Mouse 1 na aim/silent tseli) risuet animirovannyy trasser na ekrane ot tebya k nim.",
+    april_tracers_color = "Osnovnoy / startovyy tsvet trassera.",
+    april_tracers_color2 = "Konechnyy / aktsentnyy tsvet (gradient, travel, impact).",
+    april_tracers_style = "Beam, Glow, Gradient, Dashed ili Ribbon.",
+    april_tracers_anim = "Fade, Sweep, Shrink, Pulse, Travel ili Bloom.",
+    april_tracers_anim_speed = "Skorost sweep / pulse / travel / rainbow.",
+    april_tracers_lifetime = "Skolko trasser ostaetsya na ekrane.",
+    april_tracers_thickness = "Bazovaya tolshchina linii v pikselyah.",
+    april_tracers_transparency = "Nachalnaya prozrachnost (vyshe = prozrachnee).",
+    april_tracers_segments = "Chislo segmentov puti — bolshe = plavnee.",
+    april_tracers_glow = "Sila bloom dlya Glow i impact.",
+    april_tracers_damage = "Min. summa poteri HP za ~350ms u fokusa/spray dlya triggera.",
+    april_tracers_outline = "Temnyy kontur dlya kontrasta.",
+    april_tracers_impact = "Malen'kaya vspyshka v tochke popadaniya.",
+    april_tracers_rainbow = "Tsiklit cveta trassera.",
     april_fly_enabled = "Polet skorostyu HRP otnositelno kamery (WASD + Space/Ctrl). Vstroennyy prised (HipHeight 0.01) i jump-state v vozduhe — ne pereklyuchaet Fake Duck. Nikogda ne menyaet WalkSpeed ili JumpPower.",
     april_fly_noclip = "Otklyuchaet kolliziyu klyuchevyh chastey personazha v polete. Kolliziya vosstanavlivaetsya pri posadke ili vyklyuchenii Fly.",
     april_spider_enabled = "Lezete vverh, nazhimayas v blizhayshuyu stenu. Pulsiruet jump-state tolko posle proverok steny na neskolkih vysotah — menshe otskokov.",
@@ -28057,16 +29831,20 @@ april_fakeduck_spam = true,
 }
 M.BY_ID = {
 april_aimbot = "Smooth camera aim assist on your current target. Bind a key on the chip (Always / Hold / Toggle).",
+april_fov_flags_enabled = "Draw status flags under the larger enabled Aimbot / Silent Aim FOV (or whichever is on).",
+april_fov_flags_visible = "Shows VISIBLE under the FOV when your current aim/silent target is visible. Display only — not the Filters Visible Only gate.",
+april_fov_flags_distance = "Shows distance in meters under the FOV to your current aim/silent target.",
 april_aim_key = "Hold or toggle this key to activate aimbot.",
 april_silent_aim = "Redirects shots to your locked target without moving the camera.",
 april_bullet_enabled = "Master toggle for advanced bullet routing (hitscan, bullet TP, silent manip). Bind Always / Hold / Toggle from the key chip.",
 april_silent_hitscan = "Registers hits instantly on your locked target. Server may reject invalid shots.",
-april_silent_bullet_tp = "Scans the head for the closest visible point to your crosshair (manip-style math), spawns the ray on the target, and shoots through that point. Cycles offsets every frame.",
+april_silent_bullet_tp = "Scans the head for the closest visible point to your crosshair, spawns the ray on the target, and shoots through that point. Scales with Hitbox Override Size when both are on.",
 april_silent_bullet_manip = "Finds a shootable angle around cover. Server may reject invalid shots.",
 april_silent_manip_extend = "Searches farther from your body when no close peek is found.",
 april_bullet_body_peek = "Moves you to the peek with desync for server-valid shots. Can cause invalids or kicks.",
-april_thick_bullet = "Expands other players' head hitboxes on your client and fades them. Player ESP boxes still use natural head size so Override Size stays hidden. Helps local hit tests; the server can still reject shots that only clip the inflated shell.",
-april_thick_bullet_mult = "How large enemy head hitboxes become (1x = normal, up to 4x). ESP boxes stay normal-sized.",
+april_thick_bullet = "Expands other players' head hitboxes on your client and fades them. Bullet TP / hitscan aim samples scale to Override Size. ESP boxes still use natural head size. Server can still reject shell-only clips.",
+april_thick_bullet_mult = "How large enemy head hitboxes become (1x–4x). Also scales Bullet TP head-scan radius when Override is on.",
+april_bullet_ug_resolver = "While targeting with Bullet aim/silent: expands their head hitbox to 4x and lifts their entire body 2 studs on your client every frame. Disables Hitbox Override while on.",
 april_aim_targets = "Choose whether aimbot targets players, NPCs, or both.",
 april_aim_filters = "Filters which targets aimbot will consider.",
 april_aim_sticky = "While your aim key is held, stays on the first target even if they leave FOV. Releases and forgets the target when you let go of the bind.",
@@ -28088,7 +29866,7 @@ april_ui_player_elements = "Choose which info to show on player ESP.",
 april_player_show_held = "Shows the item a player is holding (same read path as Target Gear).",
 april_player_esp_filters = "Filter which players appear on ESP.",
 april_player_esp_flags = "Show status flags (downed, SZ, staff, revive, movement state, VIP, cheater).",
-april_target_overlay = "Shows held weapon and gear for the player closest to your crosshair.",
+april_target_overlay = "Shows name, health, distance, held weapon, and gear for the player closest to your crosshair.",
 april_target_overlay_fov = "Independent FOV (pixels from crosshair) used only by Target Gear Overlay.",
 april_target_overlay_max_dist = "Maximum world distance (studs) for Target Gear Overlay selection.",
 april_crosshair_enabled = "Draws a custom crosshair on screen.",
@@ -28129,6 +29907,21 @@ april_gm_fire_rate = "Boosts RPM via FireRateMult. Usually needs Muzzle Boost on
 april_gm_speed = "Boosts bullet speed via SpeedMult on live weapon tables. Not an attachment stat — Swift Heavy Ammo also adds speed; equip a gun before enabling.",
 april_gm_range = "Extends max range via RangeMult. Silencer and Compensator reduce range; this patches whatever range mults exist on your gun.",
 april_gm_double_tap = "Forces a 2-round burst on your held gun. Patches ToolInfo directly — does not use GC mults.",
+april_tracers_enabled = "On hit (enemy HP drop while holding Mouse 1 on your aim/silent target), draws an animated screen-space tracer from you to them.",
+april_tracers_color = "Start / primary tracer color.",
+april_tracers_color2 = "End / accent color (gradient, travel head, impact).",
+april_tracers_style = "Beam (clean), Glow (bloom layers), Gradient, Dashed (moving), or Ribbon (filled).",
+april_tracers_anim = "How the tracer plays out: Fade, Sweep (grows to target), Shrink, Pulse, Travel (moving hotspot), Bloom.",
+april_tracers_anim_speed = "Speed of sweep / pulse / travel / rainbow motion.",
+april_tracers_lifetime = "How long each tracer stays on screen.",
+april_tracers_thickness = "Base line thickness in pixels.",
+april_tracers_transparency = "Starting fade amount (higher = more transparent).",
+april_tracers_segments = "How many segments make up the path — higher is smoother.",
+april_tracers_glow = "Extra bloom strength for Glow style and impact rings.",
+april_tracers_damage = "Minimum accumulated HP lost within ~350ms on a focused/sprayed enemy before a tracer fires.",
+april_tracers_outline = "Dark outline behind the tracer for contrast.",
+april_tracers_impact = "Small expanding flash at the hit point.",
+april_tracers_rainbow = "Cycles tracer colors over time.",
 april_fly_enabled = "Camera-relative HRP velocity fly (WASD + Space/Ctrl). Built-in duck (HipHeight 0.01) and jump state while airborne — does not toggle Fake Duck. Never changes WalkSpeed or JumpPower.",
 april_fly_noclip = "Disables collision on your key character parts while flying. Collision is restored when you land or turn Fly off.",
 april_spider_enabled = "Climbs upward while you press into a nearby wall. It pulses the jump state only after multi-height wall checks, reducing wall snap-back.",
@@ -30512,6 +32305,15 @@ combo("april_aim_fov_style", "FOV Style", { "Outline", "Filled Circle" }, 1, "ap
 cb("april_aim_target_line", "Target Line", false, { 0.2, 1, 0.45, 1 }),
 },
 }
+local fov_flags = {
+title = "FOV Flags",
+items = {
+cb("april_fov_flags_enabled", "Enable FOV Flags", false),
+sep(),
+cb("april_fov_flags_visible", "Visible Flag", true, nil, "april_fov_flags_enabled"),
+cb("april_fov_flags_distance", "Distance Flag", true, nil, "april_fov_flags_enabled"),
+},
+}
 local silent = {
 title = "Silent Aim",
 master = "april_silent_aim",
@@ -30561,7 +32363,7 @@ cb("april_silent_manip_status", "Status HUD", false, nil, "april_bullet_enabled"
 cb("april_silent_manip_peek_vis", "Peek Visual", false, nil, "april_bullet_enabled"),
 },
 }
-return { regular, silent, bullet }
+return { regular, fov_flags, silent, bullet }
 end
 local function build_visuals()
 local left = {
@@ -30783,6 +32585,33 @@ sep(),
 cb("april_gm_double_tap", "Double Tap", false),
 },
 },
+{
+title = "Bullet Tracers",
+items = {
+kb("april_tracers_enabled", "Enable Tracers", false),
+sep(),
+color("april_tracers_color", "Tracer Color", { 1.0, 0.55, 0.18, 1.0 }, "april_tracers_enabled"),
+color("april_tracers_color2", "Tracer End Color", { 1.0, 0.2, 0.35, 1.0 }, "april_tracers_enabled"),
+combo("april_tracers_style", "Tracer Style", {
+"Beam", "Glow", "Gradient", "Dashed", "Ribbon",
+}, 1, "april_tracers_enabled"),
+combo("april_tracers_anim", "Tracer Animation", {
+"Fade", "Sweep", "Shrink", "Pulse", "Travel", "Bloom",
+}, 1, "april_tracers_enabled"),
+sl("april_tracers_anim_speed", "Anim Speed", 0.25, 3, 1, true, "april_tracers_enabled"),
+sep(),
+sl("april_tracers_lifetime", "Lifetime (ms)", 100, 1500, 550, false, "april_tracers_enabled"),
+sl("april_tracers_thickness", "Tracer Thickness", 0.5, 8, 2.2, true, "april_tracers_enabled"),
+sl("april_tracers_transparency", "Tracer Fade", 0, 0.9, 0.05, true, "april_tracers_enabled"),
+sl("april_tracers_segments", "Tracer Segments", 4, 48, 18, false, "april_tracers_enabled"),
+sl("april_tracers_glow", "Glow Strength", 0.2, 3, 1, true, "april_tracers_enabled"),
+sl("april_tracers_damage", "Min Damage", 1, 50, 10, false, "april_tracers_enabled"),
+sep(),
+cb("april_tracers_outline", "Tracer Outline", true, nil, "april_tracers_enabled"),
+cb("april_tracers_impact", "Impact Flash", true, nil, "april_tracers_enabled"),
+cb("april_tracers_rainbow", "Tracer Rainbow", false, nil, "april_tracers_enabled"),
+},
+},
 }
 end
 local function build_misc()
@@ -30996,7 +32825,7 @@ master = "april_anime_baddie_enabled",
 items = {
 cb("april_anime_baddie_enabled", "Anime Baddie", false),
 label("Also toggled from the top dock.", true),
-combo("april_anime_baddie_character", "Character", { "April" }, 0,
+combo("april_anime_baddie_character", "Character", { "April", "VectorChan" }, 0,
 "april_anime_baddie_enabled"),
 combo("april_anime_baddie_personality", "Personality", {
 "Mixed", "Roasty", "Supportive",
@@ -31156,6 +32985,8 @@ end
 function M.init()
 state.define("april_keybinds_enabled", false)
 state.define("april_mod_checker_enabled", false)
+state.define("april_mod_checker_x", -1)
+state.define("april_mod_checker_y", -1)
 state.define("april_event_status_enabled", false)
 state.define("april_event_status_active_only", false)
 state.define("april_map_enabled", false)
@@ -32069,6 +33900,16 @@ handle_column_scroll(x, y, w, h, scroll_key, total)
 draw_scrollbar(x + w - 5, y + pad, h - pad * 2, total, scroll_key, h)
 end
 local function split_groups(groups, tab_id)
+if tab_id == "guns" and #groups >= 2 then
+local right = {}
+for i = 2, #groups do
+right[#right + 1] = groups[i]
+end
+return { groups[1] }, right
+end
+if tab_id == "aim" and #groups >= 4 then
+return { groups[1], groups[2] }, { groups[3], groups[4] }
+end
 if tab_id == "aim" and #groups >= 3 then
 return { groups[1] }, { groups[2], groups[3] }
 end
@@ -32297,10 +34138,12 @@ M.features = {}
 M._menu_registered = false
 M.FEATURE_ORDER = {
     "features.combat.camera_aimbot",
-    "features.combat.aimbot",
-    "features.combat.body_peek",
     "features.combat.thick_bullet",
+    "features.combat.aimbot",
+    "features.combat.fov_flags",
+    "features.combat.body_peek",
     "features.combat.gun_mods",
+    "features.visuals.bullet_tracers",
     "features.visuals.target_overlay",
     "features.visuals.target_visuals",
     "features.visuals.player_esp",

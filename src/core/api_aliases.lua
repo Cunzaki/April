@@ -124,6 +124,7 @@ function M.apply()
         alias(raycast, "track_silent_target", "TrackSilentTarget")
         alias(raycast, "stop_silent_tracking", "StopSilentTracking")
     end
+
 end
 
 return M

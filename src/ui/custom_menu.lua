@@ -459,7 +459,18 @@ local function draw_group_column(groups, x, y, w, h, scroll_key)
 end
 
 local function split_groups(groups, tab_id)
-    -- Aim: Aimbot left, Silent Aim + Bullet right.
+    -- Guns: Gun Mods left, Bullet Tracers right.
+    if tab_id == "guns" and #groups >= 2 then
+        local right = {}
+        for i = 2, #groups do
+            right[#right + 1] = groups[i]
+        end
+        return { groups[1] }, right
+    end
+    -- Aim: Aimbot + FOV Flags left, Silent Aim + Bullet right.
+    if tab_id == "aim" and #groups >= 4 then
+        return { groups[1], groups[2] }, { groups[3], groups[4] }
+    end
     if tab_id == "aim" and #groups >= 3 then
         return { groups[1] }, { groups[2], groups[3] }
     end

@@ -377,7 +377,8 @@ function M.role_for_player(player, opts)
 
     local uid = player_uid(player)
     if not uid then
-        write_cached_role(key, false)
+        -- Player still streaming in — do not cache a miss under name/key or we
+        -- skip them when UserId appears a moment later.
         return nil
     end
 

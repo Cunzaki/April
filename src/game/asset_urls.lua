@@ -4,7 +4,7 @@ M.CDN_BASE = "https://raw.githubusercontent.com/Cunzaki/April/refs/heads/main/as
 -- jsDelivr mirrors the same assets and is more reliable for LoadImage tile fetches.
 M.JSDELIVR_BASE = "https://cdn.jsdelivr.net/gh/Cunzaki/April@main/assets"
 -- Bump when anime sprites change so jsDelivr serves the new PNGs immediately.
-M.ANIME_SPRITE_REF = "69aff26"
+M.ANIME_SPRITE_REF = "e026538"
 
 local function digits(id)
     return id and tostring(id):match("(%d+)")

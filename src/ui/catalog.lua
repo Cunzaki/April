@@ -187,6 +187,16 @@ local function build_aim()
         },
     }
 
+    local fov_flags = {
+        title = "FOV Flags",
+        items = {
+            cb("april_fov_flags_enabled", "Enable FOV Flags", false),
+            sep(),
+            cb("april_fov_flags_visible", "Visible Flag", true, nil, "april_fov_flags_enabled"),
+            cb("april_fov_flags_distance", "Distance Flag", true, nil, "april_fov_flags_enabled"),
+        },
+    }
+
     local silent = {
         title = "Silent Aim",
         master = "april_silent_aim",
@@ -238,7 +248,7 @@ local function build_aim()
         },
     }
 
-    return { regular, silent, bullet }
+    return { regular, fov_flags, silent, bullet }
 end
 
 local function build_visuals()
@@ -329,6 +339,7 @@ local function build_visuals()
             color("april_player_flag_cheater", "Cheater", { 1, 0.05, 0.05, 1 }),
         },
     }
+
     return { left, gear, target_vis, colors }
 end
 
@@ -471,6 +482,33 @@ local function build_guns()
                 sl("april_gm_range_mult", "Range Mult", 1, 20, 10, false, "april_gm_range"),
                 sep(),
                 cb("april_gm_double_tap", "Double Tap", false),
+            },
+        },
+        {
+            title = "Bullet Tracers",
+            items = {
+                kb("april_tracers_enabled", "Enable Tracers", false),
+                sep(),
+                color("april_tracers_color", "Tracer Color", { 1.0, 0.55, 0.18, 1.0 }, "april_tracers_enabled"),
+                color("april_tracers_color2", "Tracer End Color", { 1.0, 0.2, 0.35, 1.0 }, "april_tracers_enabled"),
+                combo("april_tracers_style", "Tracer Style", {
+                    "Beam", "Glow", "Gradient", "Dashed", "Ribbon",
+                }, 1, "april_tracers_enabled"),
+                combo("april_tracers_anim", "Tracer Animation", {
+                    "Fade", "Sweep", "Shrink", "Pulse", "Travel", "Bloom",
+                }, 1, "april_tracers_enabled"),
+                sl("april_tracers_anim_speed", "Anim Speed", 0.25, 3, 1, true, "april_tracers_enabled"),
+                sep(),
+                sl("april_tracers_lifetime", "Lifetime (ms)", 100, 1500, 550, false, "april_tracers_enabled"),
+                sl("april_tracers_thickness", "Tracer Thickness", 0.5, 8, 2.2, true, "april_tracers_enabled"),
+                sl("april_tracers_transparency", "Tracer Fade", 0, 0.9, 0.05, true, "april_tracers_enabled"),
+                sl("april_tracers_segments", "Tracer Segments", 4, 48, 18, false, "april_tracers_enabled"),
+                sl("april_tracers_glow", "Glow Strength", 0.2, 3, 1, true, "april_tracers_enabled"),
+                sl("april_tracers_damage", "Min Damage", 1, 50, 10, false, "april_tracers_enabled"),
+                sep(),
+                cb("april_tracers_outline", "Tracer Outline", true, nil, "april_tracers_enabled"),
+                cb("april_tracers_impact", "Impact Flash", true, nil, "april_tracers_enabled"),
+                cb("april_tracers_rainbow", "Tracer Rainbow", false, nil, "april_tracers_enabled"),
             },
         },
     }
@@ -693,7 +731,7 @@ local function build_config()
         items = {
             cb("april_anime_baddie_enabled", "Anime Baddie", false),
             label("Also toggled from the top dock.", true),
-            combo("april_anime_baddie_character", "Character", { "April" }, 0,
+            combo("april_anime_baddie_character", "Character", { "April", "VectorChan" }, 0,
                 "april_anime_baddie_enabled"),
             combo("april_anime_baddie_personality", "Personality", {
                 "Mixed", "Roasty", "Supportive",

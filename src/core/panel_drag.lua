@@ -39,18 +39,37 @@ end
 
 local function persist_num(id, value)
     value = math.floor(tonumber(value) or 0)
+    resolve_ui_modules()
+    -- Ensure the id exists in gs_state so settings.num keeps the dragged value
+    -- even when register_menu never added a slider for panel x/y.
+    if gs_state and gs_state.define then pcall(gs_state.define, id, value) end
     if menu and menu.set then
         pcall(menu.set, id, value)
     end
-    resolve_ui_modules()
     if gs_state and gs_state.set then pcall(gs_state.set, id, value) end
+end
+
+local function read_num(id, default)
+    resolve_ui_modules()
+    local v = nil
+    if gs_state and gs_state.get then
+        v = gs_state.get(id, nil)
+    end
+    if v == nil then
+        v = settings.num(id, default)
+    end
+    v = tonumber(v)
+    if v == nil then return default end
+    return v
 end
 
 local function blocked(mx, my, allow_menu)
     resolve_ui_modules()
-    if custom_menu and custom_menu.contains_point
+    -- Overlay panels may sit over the Gamesense window; allow_menu lets the
+    -- title bar stay draggable while the menu is open.
+    if not allow_menu
+        and custom_menu and custom_menu.contains_point
         and custom_menu.contains_point(mx or 0, my or 0)
-        and not allow_menu
     then
         return true
     end
@@ -83,10 +102,16 @@ function M.update(id, x_id, y_id, title_w, title_h, sw, sh, default_x, default_y
         state[id] = st
     end
 
-    local x = settings.num(x_id, default_x)
-    local y = settings.num(y_id, default_y)
+    resolve_ui_modules()
+    if gs_state and gs_state.define then
+        pcall(gs_state.define, x_id, math.floor(tonumber(default_x) or 0))
+        pcall(gs_state.define, y_id, math.floor(tonumber(default_y) or 0))
+    end
+
+    local x = read_num(x_id, default_x)
+    local y = read_num(y_id, default_y)
     local mx, my = mouse_pos()
-    local lmb = lmb_down()
+    local lmb = lmb_down() == true
     local over_title = mx >= x and my >= y
         and mx <= x + title_w and my <= y + title_h
 

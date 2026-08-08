@@ -25,9 +25,14 @@ local ROLE_MISS_TTL_MS = 3000
 local seen = {}
 local active = {}
 local role_misses = {}
+-- Progressive skip: UserIds already resolved as non-staff (static/tag). Cleared on
+-- full interval scan so live group lookups can still catch late staff.
+local settled_nonstaff = {}
 local panel_rows = {}
 local last_scan = -1
 local last_meta_refresh = 0
+local last_progressive = 0
+local PROGRESSIVE_MS = 100
 M._session = nil
 M._was_enabled = false
 M._group_started = false
@@ -55,9 +60,11 @@ function M.reset_state()
     seen = {}
     active = {}
     role_misses = {}
+    settled_nonstaff = {}
     panel_rows = {}
     last_scan = -1
     last_meta_refresh = 0
+    last_progressive = 0
 end
 
 function M.on_session_changed()
@@ -123,6 +130,13 @@ function M.register_menu()
     menu_util.section(T, G.MISC, "Mod Checker Scan")
     menu.add_slider_int(T, G.MISC, "april_mod_checker_interval", "Scan Interval (ms)", 1000, 10000, 2500, root)
 
+    -- Hidden persisted panel position (drag writes these; define so get/set stick).
+    pcall(function()
+        local gs = April.require("ui.gs_state")
+        gs.define(X_ID, -1)
+        gs.define(Y_ID, -1)
+    end)
+
     menu_util.bind_master(P, { "april_mod_checker_interval" })
 end
 
@@ -158,25 +172,43 @@ function M.track_player(p, role)
     end
 end
 
+local function numeric_uid(p)
+    return ep.user_id(p)
+end
+
 function M.check_player(p, lookup_budget)
     if not settings.enabled(P) then return lookup_budget end
     if not p or p.is_local then return lookup_budget end
+
+    local uid_num = numeric_uid(p)
+    if uid_num and settled_nonstaff[uid_num] then
+        return lookup_budget
+    end
 
     local role = mod_ids.role_for_player(p, {
         queue_lookup = true,
         mark_unknown = false,
         live_lookup = true,
     })
-    if not role then return lookup_budget end
+    if not role then
+        -- Only settle when we have a real UserId. Nameless/streaming players stay
+        -- open so the next progressive tick can catch staff as soon as id/tag lands.
+        if uid_num then
+            settled_nonstaff[uid_num] = true
+        end
+        return lookup_budget
+    end
 
     local uid = player_uid(p)
     if not uid or uid == "" then return lookup_budget end
 
+    if uid_num then settled_nonstaff[uid_num] = nil end
     M.track_player(p, role)
 
     if seen[uid] then return lookup_budget end
     seen[uid] = true
     notify.warning(string.format("%s: %s (%s)", mod_ids.short_label(role), player_label(p), p.name or "?"), 6000)
+    rebuild_panel_rows(tick_ms())
     return lookup_budget
 end
 
@@ -262,11 +294,33 @@ function M.reconcile_active(players)
     end
 end
 
+-- Immediate pass over whoever is already in cache (does not wait for a "full" list).
+function M.scan_progressive()
+    if not settings.enabled(P) then return end
+
+    local players = April.require("core.cache").players
+    local lookup_budget = LOOKUP_BUDGET
+
+    for _, p in ipairs(players) do
+        local uid = player_uid(p)
+        if uid and seen[uid] then
+            goto continue
+        end
+        lookup_budget = M.check_player(p, lookup_budget)
+        ::continue::
+    end
+
+    last_meta_refresh = tick_ms()
+end
+
 function M.scan_all()
     if not settings.enabled(P) then return end
 
     local players = April.require("core.cache").players
     local lookup_budget = LOOKUP_BUDGET
+
+    -- Allow live group / late tag resolution to re-evaluate non-staff.
+    settled_nonstaff = {}
 
     M.reconcile_active(players)
 
@@ -279,6 +333,9 @@ function M.scan_all()
 end
 
 function M.on_player_added(p)
+    -- Fire as soon as Vector streams the player — do not wait for lobby-complete.
+    local uid_num = numeric_uid(p)
+    if uid_num then settled_nonstaff[uid_num] = nil end
     M.check_player(p, LOOKUP_BUDGET)
     rebuild_panel_rows(tick_ms())
 end
@@ -286,6 +343,8 @@ end
 function M.on_player_removed(p)
     if not p then return end
     local uid = player_uid(p)
+    local uid_num = numeric_uid(p)
+    if uid_num then settled_nonstaff[uid_num] = nil end
     if uid and uid ~= "" then
         seen[uid] = nil
         active[uid] = nil
@@ -324,6 +383,8 @@ function M.update(_dt)
         M._was_enabled = false
         return
     end
+
+    local just_enabled = not M._was_enabled
     M._was_enabled = true
 
     if not M._group_started then
@@ -331,6 +392,14 @@ function M.update(_dt)
     end
 
     local now = tick_ms()
+
+    -- Progressive: check whoever is in cache already (and re-check pending UserIds)
+    -- instead of waiting for the full lobby + scan interval before first notifies.
+    if just_enabled or last_progressive < 0 or (now - last_progressive) >= PROGRESSIVE_MS then
+        last_progressive = now
+        M.scan_progressive()
+    end
+
     local interval = settings.num("april_mod_checker_interval", SCAN_MS)
     if last_scan < 0 or (now - last_scan) >= interval then
         last_scan = now
@@ -425,14 +494,27 @@ function M.draw()
     local count = math.max(#panel_rows, 1)
     local height = TITLE_H + count * row_h + 6
 
+    local default_x = sw - PANEL_W - 16
+    local default_y = 72
+    -- Seed defaults when unset (-1) so drag has a real stored position.
+    local stored_x = settings.num(X_ID, -1)
+    local stored_y = settings.num(Y_ID, -1)
+    if stored_x < 0 then
+        if menu and menu.set then pcall(menu.set, X_ID, default_x) end
+    end
+    if stored_y < 0 then
+        if menu and menu.set then pcall(menu.set, Y_ID, default_y) end
+    end
+
     local x, y = panel_drag.update(
         "mod_checker",
         X_ID, Y_ID,
         PANEL_W, TITLE_H,
         sw, sh,
-        sw - PANEL_W - 16, 72
+        default_x, default_y,
+        true -- keep draggable while April menu is open
     )
-    x, y = panel_drag.clamp(x, y, PANEL_W, height, sw, sh)
+    x, y = panel_drag.clamp(x, y, PANEL_W, height, sw, sh, X_ID, Y_ID)
 
     draw_staff_panel(x, y, PANEL_W, panel_rows)
 end

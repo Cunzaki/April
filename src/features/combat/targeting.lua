@@ -511,10 +511,25 @@ function M.resolve_bone_world(target, bone, cx, cy, opts)
     if bone == "Random" then
         bone = M.pick_random_bone(target, opts.prefix, opts.reroll_random == true)
     end
+    local world
     if bone == "Closest" then
-        return M.closest_bone_world(target, cx, cy)
+        world = M.closest_bone_world(target, cx, cy)
+    else
+        world = M.bone_world(target, bone, cx, cy)
     end
-    return M.bone_world(target, bone, cx, cy)
+    if not world or M.is_npc_target(target) then
+        return world
+    end
+    -- UG resolver: 4x head + client body lift on the current aim target.
+    local ok, ug = pcall(function()
+        return April.require("features.combat.ug_resolver")
+    end)
+    if ok and ug and ug.enabled and ug.enabled() and ug.apply then
+        local head_world = M.bone_world(target, "Head", cx, cy)
+        local probe = head_world or world
+        return ug.apply(target, probe) or probe
+    end
+    return world
 end
 
 function M.get_aim_point(target, prefix, bone, origin, cx, cy, use_prediction, opts)

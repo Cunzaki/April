@@ -280,15 +280,19 @@ function M.update(dt)
     local hit = info.hitpart or aim
     local track_aim = aim
 
-    -- Docs: SetSilentTarget every OnFrame. TrackSilentTarget while LMB held.
+    -- Docs: SetSilentTarget every OnFrame. TrackSilentTarget only while LMB held.
     local ok_set = false
     local ok_track = false
     if use_silent_fov then
         if info.use_curve and silent_ray.track_curve then
-            ok_track = silent_ray.track_curve(
-                origin, hit, info.weapon, SHOOT_VK, hit
-            ) == true
-            ok_set = silent_ray.last_ok() == true
+            -- Keep aim vector live; only engage track while firing.
+            ok_set = silent_ray.set_target(origin, hit, hit) == true
+            if firing then
+                ok_track = silent_ray.track_curve(
+                    origin, hit, info.weapon, SHOOT_VK, hit
+                ) == true
+                ok_set = ok_set or silent_ray.last_ok() == true
+            end
             if not info.curve_path and silent_ray.last_curve then
                 local curve = silent_ray.last_curve()
                 if curve and curve.path then
@@ -297,11 +301,13 @@ function M.update(dt)
             end
         else
             ok_set = silent_ray.set_target(origin, track_aim, hit) == true
-            ok_track = silent_ray.track(origin, track_aim, SHOOT_VK, hit) == true
+            if firing then
+                ok_track = silent_ray.track(origin, track_aim, SHOOT_VK, hit) == true
+            end
         end
     else
         ok_set = silent_ray.set_target(origin, track_aim, hit) == true
-        ok_track = ok_set
+        ok_track = firing and ok_set
     end
 
     cached_track.aim = track_aim
