@@ -211,7 +211,11 @@ local function update_target(cx, cy, fov)
         was_aiming = holding
 
         if not holding then
-            -- Soft FOV pick for overlays while unbound (not a sticky lock).
+            -- Soft FOV pick for overlays while unbound (throttled — same look, less cost).
+            if now - last_target_scan < TARGET_SCAN_MS then
+                return
+            end
+            last_target_scan = now
             locked_target = targeting.find_target(cx, cy, fov, PREFIX)
             return
         end
@@ -395,12 +399,25 @@ function M.get_target()
     return locked_target
 end
 
+local scoped_cache = { t = 0, target = nil }
+
 function M.get_scoped_target()
     if locked_target then return locked_target end
-    if not enabled() then return nil end
+    if not enabled() then
+        scoped_cache.target = nil
+        return nil
+    end
+
+    local now = tick_ms()
+    if (now - (scoped_cache.t or 0)) < TARGET_SCAN_MS then
+        return scoped_cache.target
+    end
+    scoped_cache.t = now
+
     local sw, sh = targeting.screen_center()
     local fov = settings.num(PREFIX .. "fov", 120)
-    return targeting.find_target(sw * 0.5, sh * 0.5, fov, PREFIX)
+    scoped_cache.target = targeting.find_target(sw * 0.5, sh * 0.5, fov, PREFIX)
+    return scoped_cache.target
 end
 
 function M.draw()
@@ -417,10 +434,10 @@ function M.draw()
         if filled and draw and draw.circle_filled then
             local fill = settings.color(PREFIX .. "draw_fov", { 0.2, 1, 0.45, 0.12 })
             local c = { fill[1], fill[2], fill[3], (fill[4] or 1) * 0.25 }
-            draw.circle_filled(cx, cy, fov, c, 64)
+            draw.circle_filled(cx, cy, fov, c, 32)
         end
         if draw and draw.circle then
-            draw.circle(cx, cy, fov, col, 64, 1)
+            draw.circle(cx, cy, fov, col, 32, 1)
         else
             draw_util.circle(cx, cy, fov, col, false)
         end

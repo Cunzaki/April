@@ -62,6 +62,13 @@ local PRIORITY = {
     safe_leave = 34, safe_enter = 32,
 }
 
+local RARITY_WEIGHTS = {
+    { name = "common", weight = 70 },
+    { name = "uncommon", weight = 22 },
+    { name = "rare", weight = 7 },
+    { name = "mythic", weight = 1 },
+}
+
 local installed = false
 local was_enabled = false
 local seeded = false
@@ -90,7 +97,9 @@ local BUBBLE_PAD = 14
 local BUBBLE_FONT = 14
 local BUBBLE_LINE_H = 18
 local BUBBLE_HEADER_H = 24
-local NEARBY_PLAYER_RANGE = 500
+-- Sound-ESP-style nearby scan (Audio Radar default range band).
+local NEARBY_PLAYER_RANGE = 300
+local NEARBY_RANGE_SQ = NEARBY_PLAYER_RANGE * NEARBY_PLAYER_RANGE
 
 local function now_ms()
     local fn = utility and (utility.get_tick_count or utility.GetTickCount)
@@ -158,6 +167,55 @@ local function personality_name()
     return math.random(1, 100) <= 58 and "roasty" or "supportive"
 end
 
+local function entry_rarity(entry)
+    local r = entry and (entry[3] or entry.rarity)
+    if type(r) ~= "string" or r == "" then return "common" end
+    r = r:lower()
+    if r == "uncommon" or r == "rare" or r == "mythic" or r == "common" then
+        return r
+    end
+    return "common"
+end
+
+local function roll_rarity_name()
+    local roll = math.random(1, 100)
+    local acc = 0
+    for i = 1, #RARITY_WEIGHTS do
+        acc = acc + RARITY_WEIGHTS[i].weight
+        if roll <= acc then return RARITY_WEIGHTS[i].name end
+    end
+    return "common"
+end
+
+local function pick_from_pool(pool, repeat_key)
+    if type(pool) ~= "table" or #pool == 0 then return nil, nil end
+    local by = { common = {}, uncommon = {}, rare = {}, mythic = {} }
+    for i = 1, #pool do
+        local entry = pool[i]
+        local bucket = by[entry_rarity(entry)]
+        bucket[#bucket + 1] = { i = i, entry = entry }
+    end
+
+    local wanted = roll_rarity_name()
+    local order = { wanted, "common", "uncommon", "rare", "mythic" }
+    local bucket = nil
+    for oi = 1, #order do
+        local name = order[oi]
+        if by[name] and #by[name] > 0 then
+            bucket = by[name]
+            break
+        end
+    end
+    if not bucket or #bucket == 0 then return nil, nil end
+
+    local pick = math.random(1, #bucket)
+    if #bucket > 1 and last_line[repeat_key] == bucket[pick].i then
+        pick = (pick % #bucket) + 1
+    end
+    last_line[repeat_key] = bucket[pick].i
+    return bucket[pick].entry, bucket[pick].i
+end
+
 local function choose_line(event_name)
     local character = active_character()
     local dialogue = data.dialogue_for(character)
@@ -172,17 +230,14 @@ local function choose_line(event_name)
         if April.require("ui.i18n").is_ru() then lang = "ru" end
     end)
     local repeat_key = character.id .. ":" .. lang .. ":" .. event_name .. ":" .. tone
-    local index = math.random(1, #pool)
-    if #pool > 1 and index == last_line[repeat_key] then
-        index = (index % #pool) + 1
-    end
-    last_line[repeat_key] = index
-    local entry = pool[index]
+    local entry = pick_from_pool(pool, repeat_key)
+    if not entry then return nil end
     return {
         character = character,
         event = event_name,
         expression = entry[1] or "neutral",
         text = entry[2] or "",
+        rarity = entry_rarity(entry),
         priority = PRIORITY[event_name] or 1,
     }
 end
@@ -352,12 +407,32 @@ local function nearby_flags(local_player)
     local enemy = false
     if not me_pos then return staff, enemy end
 
-    for _, player in ipairs(cache.players or {}) do
-        if player and not ep.is_local(player) and player_state.is_combat_target(player) then
-            local dist = ep.distance_to(player, me_pos)
-            if dist and dist <= NEARBY_PLAYER_RANGE then
-                if player_state.staff_tag(player) then staff = true end
-                if not team_state.is_teammate(player) then enemy = true end
+    local mx = tonumber(me_pos.x or me_pos.X)
+    local my = tonumber(me_pos.y or me_pos.Y)
+    local mz = tonumber(me_pos.z or me_pos.Z)
+    if not mx then return staff, enemy end
+
+    -- Cheap range check (squared distance) — same 300 stud band as Audio Radar.
+    local players = cache.players or {}
+    for i = 1, #players do
+        local player = players[i]
+        if player and not ep.is_local(player) then
+            local hp = ep.health(player)
+            local alive = ep.is_alive(player)
+            if alive ~= false and (hp == nil or hp > 0) then
+                local pos = ep.position(player)
+                local px = pos and tonumber(pos.x or pos.X)
+                local py = pos and tonumber(pos.y or pos.Y)
+                local pz = pos and tonumber(pos.z or pos.Z)
+                if px then
+                    local dx, dy, dz = px - mx, py - my, pz - mz
+                    if (dx * dx + dy * dy + dz * dz) <= NEARBY_RANGE_SQ then
+                        if player_state.staff_tag(player) then staff = true end
+                        if not team_state.is_teammate(player) and player_state.passes_team_check(player) then
+                            enemy = true
+                        end
+                    end
+                end
             end
             if staff and enemy then break end
         end
@@ -395,17 +470,28 @@ local function local_state()
             or as_bool(player_state.player_attr(local_player, "InSafeZone"))
     end
 
-    if alive and now - last_scan_ms >= 450 then
+    local want_nearby = event_enabled("enemy_nearby") or event_enabled("staff_nearby")
+        or event_enabled("reviving") or event_enabled("party_join")
+    if alive and want_nearby and now - last_scan_ms >= 700 then
         last_scan_ms = now
-        sensed.staff_nearby, sensed.enemy_nearby = nearby_flags(local_player)
+        if event_enabled("enemy_nearby") or event_enabled("staff_nearby") then
+            sensed.staff_nearby, sensed.enemy_nearby = nearby_flags(local_player)
+        else
+            sensed.staff_nearby, sensed.enemy_nearby = false, false
+        end
         sensed.party = team_state.in_party() == true
         sensed.reviving = not downed and player_state.is_reviving(local_player) == true
+    elseif not want_nearby then
+        sensed.staff_nearby, sensed.enemy_nearby = false, false
     end
 
-    if now - last_world_ms >= 900 then
+    local want_world = event_enabled("boss_spawn") or event_enabled("timed_crate")
+    if want_world and now - last_world_ms >= 1200 then
         last_world_ms = now
-        sensed.boss = boss_present()
-        sensed.timed_crate = timed_crate_present()
+        sensed.boss = event_enabled("boss_spawn") and boss_present() or false
+        sensed.timed_crate = event_enabled("timed_crate") and timed_crate_present() or false
+    elseif not want_world then
+        sensed.boss, sensed.timed_crate = false, false
     end
 
     return {

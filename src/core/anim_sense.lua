@@ -2,8 +2,8 @@
   Playing action labels for Player ESP → Animation flag.
 
   AnimationTracks are NOT instance children — walk Animator.ActiveAnimations
-  (Theo linked list). Also fall back to playing character Sounds + held tool,
-  which reliably catches Bandage / Medkit / Reload on Fallen.
+  (Theo linked list). Sound / held fallbacks are cheap paths only (no full
+  character GetDescendants) and refreshes are budgeted to avoid frame spikes.
 ]]
 
 local rbx_offsets = April.require("core.rbx_offsets")
@@ -19,13 +19,16 @@ local function gear()
     return player_gear
 end
 
-local CACHE_MS = 70
-local cache = {}
+-- Label TTL; soft stale window serves last label when refresh budget is spent.
+local CACHE_MS = 120
+local STALE_OK_MS = 450
+local ANIMATOR_TTL_MS = 1500
+local MAX_TRACKS = 16
+local MAX_HRP_SOUNDS = 24
+local MAX_REFRESH_PER_TICK = 3
+local EARLY_PRI = 85
 
--- ActiveAnimations node → AnimationTrack pointer (Roblox stdlist layout).
 local TRACK_IN_NODE = 0x10
-local MAX_TRACKS = 24
-local MAX_SOUNDS = 40
 
 local RULES = {
     { "reload", "RELOAD" },
@@ -77,6 +80,16 @@ local HELD_ACTIONS = {
     BANDAGE = true, HEAL = true, REVIVE = true, EAT = true, DRINK = true, MELEE = true,
 }
 
+local CLASSIFY_MAX = 768
+local cache = {}
+local animator_cache = {}
+local classify_cache = {}
+local classify_n = 0
+local mem_fn = nil
+local name_off = 112
+local refresh_budget = 0
+local refresh_budget_tick = -1
+
 local function tick_ms()
     local fn = utility and (utility.get_tick_count or utility.GetTickCount)
     if type(fn) ~= "function" then return 0 end
@@ -85,9 +98,13 @@ local function tick_ms()
 end
 
 local function mem_read()
+    if mem_fn then return mem_fn end
     if not memory then return nil end
     local fn = memory.Read or memory.read
-    if type(fn) == "function" then return fn end
+    if type(fn) == "function" then
+        mem_fn = fn
+        return mem_fn
+    end
     return nil
 end
 
@@ -108,17 +125,9 @@ local function mem_bool(addr, off)
     return ok and value == true
 end
 
-local function mem_float(addr, off)
-    local fn = mem_read()
-    if not fn or not addr or not off then return nil end
-    local ok, value = pcall(fn, addr + off, "float")
-    if ok then return tonumber(value) end
-    return nil
-end
-
 local function read_string_at(addr)
     if not addr or not memory or not memory.ReadString then return nil end
-    local ok, s = pcall(memory.ReadString, addr, 128)
+    local ok, s = pcall(memory.ReadString, addr, 96)
     if ok and type(s) == "string" and s ~= "" then return s end
     return nil
 end
@@ -132,15 +141,38 @@ local function player_key(p)
     return tostring(p)
 end
 
+local function character_key(character)
+    if not character then return nil end
+    return tonumber(character.Address or character.address)
+end
+
+local function ptr_ok(addr)
+    addr = tonumber(addr)
+    return addr and addr >= 0x10000
+end
+
 local function classify(raw)
     if type(raw) ~= "string" or raw == "" then return nil end
+    local hit = classify_cache[raw]
+    if hit ~= nil then
+        if hit == false then return nil end
+        return hit
+    end
+    if classify_n >= CLASSIFY_MAX then
+        classify_cache = {}
+        classify_n = 0
+    end
     local low = raw:lower()
     for i = 1, #RULES do
         local rule = RULES[i]
         if low:find(rule[1], 1, true) then
+            classify_cache[raw] = rule[2]
+            classify_n = classify_n + 1
             return rule[2]
         end
     end
+    classify_cache[raw] = false
+    classify_n = classify_n + 1
     return nil
 end
 
@@ -155,15 +187,12 @@ end
 
 local function instance_name(addr)
     if not addr then return nil end
-    -- Theo Instance.NameContainer / Name
-    local name_off = 112
     local s = read_string_at(addr + name_off)
     if s then return s end
     local ptr = read_ptr(addr + name_off)
     if ptr then
         s = read_string_at(ptr)
         if s then return s end
-        -- Name field offset inside string container
         s = read_string_at(ptr + 8)
         if s then return s end
     end
@@ -188,60 +217,35 @@ local function track_label(track_addr)
     local anim_off = rbx_offsets.anim_track("Animation") or 184
     local anim = read_ptr(track_addr + anim_off)
     local raw = animation_id(anim) or instance_name(track_addr)
-    return classify(raw), raw
+    return classify(raw)
 end
 
+-- ActiveAnimations membership is the source of truth; avoid extra float probes.
 local function track_is_active(track_addr)
     if not track_addr then return false end
     local play_off = rbx_offsets.anim_track("IsPlaying")
-    if play_off and mem_bool(track_addr, play_off) then return true end
-
-    local spd = mem_float(track_addr, rbx_offsets.anim_track("Speed"))
-    local tp = mem_float(track_addr, rbx_offsets.anim_track("TimePosition"))
-    -- ActiveAnimations entries are usually live; accept mild signals too.
-    if spd and spd > 0.01 then return true end
-    if tp and tp > 0.02 then return true end
-    -- Linked-list membership is enough when IsPlaying offset is stale.
+    if play_off then
+        local fn = mem_read()
+        if fn then
+            local ok, value = pcall(fn, track_addr + play_off, "bool")
+            if ok and value == false then return false end
+        end
+    end
     return true
 end
 
-local function ptr_ok(addr)
-    addr = tonumber(addr)
-    return addr and addr >= 0x10000
-end
-
-local function walk_active_tracks(animator_addr)
-    local out = {}
-    if not ptr_ok(animator_addr) then return out end
-    local active_off = rbx_offsets.animator("ActiveAnimations") or 2944
-    local head = read_ptr(animator_addr + active_off)
-    if not ptr_ok(head) then return out end
-
-    local node = read_ptr(head)
-    local guard = 0
-    while ptr_ok(node) and node ~= head and guard < MAX_TRACKS do
-        guard = guard + 1
-        local track = read_ptr(node + TRACK_IN_NODE)
-        if ptr_ok(track) then
-            out[#out + 1] = track
-        end
-        local next_node = read_ptr(node)
-        if not next_node or next_node == node then break end
-        node = next_node
+local function resolve_animator_addr(character, key, now)
+    local char_addr = character_key(character)
+    local ac = key and animator_cache[key]
+    if ac and (now - (ac.t or 0)) < ANIMATOR_TTL_MS and ac.char == char_addr and ptr_ok(ac.addr) then
+        return ac.addr
     end
-    return out
-end
 
-local function find_animator(character)
-    if not character then return nil, nil end
     local animator = nil
     pcall(function()
         local hum = character.FindFirstChildOfClass and character:FindFirstChildOfClass("Humanoid")
         if hum and hum.FindFirstChildOfClass then
             animator = hum:FindFirstChildOfClass("Animator")
-        end
-        if not animator and character.FindFirstChildOfClass then
-            animator = character:FindFirstChildOfClass("Animator")
         end
         if not animator and character.FindFirstChild then
             local hum2 = character:FindFirstChild("Humanoid")
@@ -249,10 +253,50 @@ local function find_animator(character)
                 animator = hum2:FindFirstChild("Animator")
             end
         end
+        if not animator and character.FindFirstChildOfClass then
+            animator = character:FindFirstChildOfClass("Animator")
+        end
     end)
-    if not animator then return nil, nil end
-    local addr = tonumber(animator.Address or animator.address)
-    return animator, addr
+
+    local addr = animator and tonumber(animator.Address or animator.address) or nil
+    if key then
+        animator_cache[key] = { t = now, addr = addr, char = char_addr }
+    end
+    return addr
+end
+
+-- Walk ActiveAnimations in-place; stop once we have a strong label.
+local function scan_tracks(animator_addr)
+    local best_label, best_pri = nil, -1
+    local saw_use = false
+    if not ptr_ok(animator_addr) or not mem_read() then
+        return best_label, best_pri, saw_use
+    end
+
+    local active_off = rbx_offsets.animator("ActiveAnimations") or 2944
+    local head = read_ptr(animator_addr + active_off)
+    if not ptr_ok(head) then
+        return best_label, best_pri, saw_use
+    end
+
+    local node = read_ptr(head)
+    local guard = 0
+    while ptr_ok(node) and node ~= head and guard < MAX_TRACKS do
+        guard = guard + 1
+        local track = read_ptr(node + TRACK_IN_NODE)
+        if ptr_ok(track) and track_is_active(track) then
+            local label = track_label(track)
+            if label == "USE" then saw_use = true end
+            best_label, best_pri = consider(best_label, best_pri, label)
+            if best_pri >= EARLY_PRI then
+                break
+            end
+        end
+        local next_node = read_ptr(node)
+        if not next_node or next_node == node then break end
+        node = next_node
+    end
+    return best_label, best_pri, saw_use
 end
 
 local function held_action(player)
@@ -272,42 +316,45 @@ local function held_action(player)
     return nil, base
 end
 
+-- Cheap sound path only: HRP children. Full GetDescendants was the lag spike.
 local function sound_action(character)
     if not character then return nil end
     local off_play = rbx_offsets.sound_is_playing()
-    local best, best_pri = nil, -1
-
-    local function consider_sound(child)
-        if not child or (child.ClassName or child.class_name) ~= "Sound" then return end
-        local addr = tonumber(child.Address or child.address)
-        if not addr or addr <= 0 then return end
-        if not mem_bool(addr, off_play) then return end
-        local label = classify(child.Name or child.name)
-        best, best_pri = consider(best, best_pri, label)
-    end
+    if not off_play or not mem_read() then return nil end
 
     local hrp = nil
     pcall(function()
         hrp = character:FindFirstChild("HumanoidRootPart")
     end)
-    if hrp and hrp.GetChildren then
-        local ok, kids = pcall(function() return hrp:GetChildren() end)
-        if ok and type(kids) == "table" then
-            for i = 1, #kids do consider_sound(kids[i]) end
+    if not hrp or not hrp.GetChildren then return nil end
+
+    local ok, kids = pcall(function() return hrp:GetChildren() end)
+    if not ok or type(kids) ~= "table" then return nil end
+
+    local best, best_pri = nil, -1
+    local n = math.min(#kids, MAX_HRP_SOUNDS)
+    for i = 1, n do
+        local child = kids[i]
+        if child and (child.ClassName or child.class_name) == "Sound" then
+            local addr = tonumber(child.Address or child.address)
+            if addr and addr > 0 and mem_bool(addr, off_play) then
+                local label = classify(child.Name or child.name)
+                best, best_pri = consider(best, best_pri, label)
+                if best_pri >= EARLY_PRI then break end
+            end
         end
     end
-
-    if character.GetDescendantsOfClass then
-        local ok, list = pcall(function()
-            return character:GetDescendantsOfClass("Sound")
-        end)
-        if ok and type(list) == "table" then
-            local n = math.min(#list, MAX_SOUNDS)
-            for i = 1, n do consider_sound(list[i]) end
-        end
-    end
-
     return best
+end
+
+local function take_refresh_budget(now)
+    if refresh_budget_tick ~= now then
+        refresh_budget_tick = now
+        refresh_budget = MAX_REFRESH_PER_TICK
+    end
+    if refresh_budget <= 0 then return false end
+    refresh_budget = refresh_budget - 1
+    return true
 end
 
 function M.label_for(player)
@@ -319,6 +366,17 @@ function M.label_for(player)
         return hit.label
     end
 
+    -- Serve slightly stale labels when many players expire in the same frame.
+    if hit and (now - (hit.t or 0)) < STALE_OK_MS then
+        if not take_refresh_budget(now) then
+            return hit.label
+        end
+    elseif hit and not take_refresh_budget(now) then
+        return hit.label
+    elseif not hit and not take_refresh_budget(now) then
+        return nil
+    end
+
     local character = player.Character
     if not character then
         if key then cache[key] = { t = now, label = nil } end
@@ -328,36 +386,31 @@ function M.label_for(player)
     local best_label, best_pri = nil, -1
     local saw_use = false
 
-    local _, animator_addr = find_animator(character)
-    if animator_addr and mem_read() then
-        local tracks = walk_active_tracks(animator_addr)
-        for i = 1, #tracks do
-            local track = tracks[i]
-            if track_is_active(track) then
-                local label = track_label(track)
-                if label == "USE" then saw_use = true end
-                best_label, best_pri = consider(best_label, best_pri, label)
-            end
-        end
+    local animator_addr = resolve_animator_addr(character, key, now)
+    if animator_addr then
+        best_label, best_pri, saw_use = scan_tracks(animator_addr)
     end
 
-    local sound_label = sound_action(character)
-    best_label, best_pri = consider(best_label, best_pri, sound_label)
+    local sound_label = nil
+    if best_pri < EARLY_PRI then
+        sound_label = sound_action(character)
+        best_label, best_pri = consider(best_label, best_pri, sound_label)
+    end
 
-    local held_label, held_name = held_action(player)
-    if held_label then
-        -- Bandage/Medkit "Use" anims are named Use — bind them to the held item.
-        if saw_use or sound_label == held_label or sound_label == "USE" then
-            best_label, best_pri = consider(best_label, best_pri, held_label)
-        elseif best_label == "USE" or best_label == nil then
-            -- Holding a consumable with an active Use-like track / no better label.
-            if saw_use or best_label == "USE" then
+    local held_label, held_name = nil, nil
+    if best_pri < EARLY_PRI or best_label == "USE" or saw_use then
+        held_label, held_name = held_action(player)
+        if held_label then
+            if saw_use or sound_label == held_label or sound_label == "USE" then
                 best_label, best_pri = consider(best_label, best_pri, held_label)
+            elseif best_label == "USE" or best_label == nil then
+                if saw_use or best_label == "USE" then
+                    best_label, best_pri = consider(best_label, best_pri, held_label)
+                end
             end
         end
     end
 
-    -- Final: if we only saw USE, map via held name keywords.
     if best_label == "USE" and held_name then
         local mapped = classify(held_name)
         if mapped and mapped ~= "USE" then
@@ -365,7 +418,6 @@ function M.label_for(player)
         end
     end
 
-    -- Never show bare USE — not useful without an item context.
     if best_label == "USE" then
         best_label = nil
     end
@@ -377,10 +429,16 @@ end
 function M.prune(live_keys)
     if type(live_keys) ~= "table" then
         cache = {}
+        animator_cache = {}
+        classify_cache = {}
+        classify_n = 0
         return
     end
     for key in pairs(cache) do
         if not live_keys[key] then cache[key] = nil end
+    end
+    for key in pairs(animator_cache) do
+        if not live_keys[key] then animator_cache[key] = nil end
     end
 end
 

@@ -320,13 +320,25 @@ function M.get_target()
 end
 
 -- Gear / tracers: FOV target while silent aim is on (even without a gun out).
+local scoped_cache = { t = 0, target = nil }
+
 function M.get_scoped_target()
     if locked_target then return locked_target end
-    if not settings.enabled(P_MASTER) then return nil end
+    if not settings.enabled(P_MASTER) then
+        scoped_cache.target = nil
+        return nil
+    end
+
+    local now = tick_ms()
+    if (now - (scoped_cache.t or 0)) < TARGET_SCAN_MS then
+        return scoped_cache.target
+    end
+    scoped_cache.t = now
 
     local sw, sh = targeting.screen_center()
     local fov = settings.num(PREFIX .. "fov", 150)
-    return targeting.find_target(sw * 0.5, sh * 0.5, fov, PREFIX)
+    scoped_cache.target = targeting.find_target(sw * 0.5, sh * 0.5, fov, PREFIX)
+    return scoped_cache.target
 end
 
 local function snapline_aim_point(cx, cy)
@@ -352,10 +364,10 @@ function M.draw()
         if filled and draw and draw.circle_filled then
             local fill = settings.color(PREFIX .. "draw_fov", { 0.4, 0.9, 1, 0.12 })
             local c = { fill[1], fill[2], fill[3], (fill[4] or 1) * 0.25 }
-            draw.circle_filled(cx, cy, fov, c, 64)
+            draw.circle_filled(cx, cy, fov, c, 32)
         end
         if draw and draw.circle then
-            draw.circle(cx, cy, fov, col, 64, 1)
+            draw.circle(cx, cy, fov, col, 32, 1)
         else
             draw_util.circle(cx, cy, fov, col, false)
         end

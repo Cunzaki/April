@@ -57,8 +57,10 @@ local DEFAULT_FLAG = {
 }
 local held_cache = {}
 local last_held_prune_ms = 0
+local last_anim_prune_ms = 0
 local HELD_TTL_MS = 300
 local HELD_PRUNE_MS = 2000
+local ANIM_PRUNE_MS = 2500
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -324,6 +326,29 @@ function M.draw()
 
     if flags[FL_CHEATER] then
         cheater_detect.tick()
+    end
+
+    if flags[FL_ANIM] then
+        if now - last_anim_prune_ms >= ANIM_PRUNE_MS then
+            last_anim_prune_ms = now
+            local live = {}
+            for i = 1, #players do
+                local p = players[i]
+                if p then
+                    local uid = p.UserId or p.user_id
+                    if uid and uid ~= 0 then
+                        live[uid] = true
+                    else
+                        local addr = p.Address or p.address
+                        if addr then live[tostring(addr)] = true end
+                    end
+                end
+            end
+            anim_sense.prune(live)
+        end
+    elseif last_anim_prune_ms ~= 0 then
+        last_anim_prune_ms = 0
+        anim_sense.prune(nil)
     end
 
     local need_snap = show_clan or filter_sz or skip_downed

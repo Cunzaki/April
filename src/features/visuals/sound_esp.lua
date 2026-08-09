@@ -36,8 +36,13 @@ local PLAYER_RANGE = "april_player_range"
 
 local CF_FOOT, CF_COMBAT, CF_UTIL, CF_WORLD, CF_OTHER = 1, 2, 3, 4, 5
 
-local SCAN_MS = 70
-local HRP_CACHE_MS = 450
+local SCAN_MS = 110
+local HRP_CACHE_MS = 1000
+local MAX_SOUNDS_PER_PLAYER = 24
+local MAX_GATHER_PER_SCAN = 4
+local CLASSIFY_MAX = 1024
+local VOL_DEADBAND = 0.025
+local SPD_DEADBAND = 0.02
 local DEFAULT_MAX_DIST = 450
 local DEFAULT_UNDER = 2.8
 local DEFAULT_SCREEN_Y = 2
@@ -112,9 +117,12 @@ local CAT_ORDER = { "FOOT", "GUN", "RELOAD", "HIT", "EXPL", "HEAL", "MELEE", "VE
 local indicators = {}
 local sound_prev = {}
 local player_cache = {}
+local classify_cache = {}
+local classify_n = 0
 local last_scan_ms = 0
 local mem_read_fn = nil
 local cached_off = nil
+local gather_budget = 0
 
 local function tick_ms()
     local fn = utility and (utility.get_tick_count or utility.GetTickCount)
@@ -222,8 +230,13 @@ local function pretty_name(raw)
     return raw
 end
 
-local function classify_sound(name, sound_id)
-    local blob = (tostring(name or "") .. " " .. tostring(sound_id or "")):lower()
+local function classify_blob(blob)
+    local hit = classify_cache[blob]
+    if hit then return hit end
+    if classify_n >= CLASSIFY_MAX then
+        classify_cache = {}
+        classify_n = 0
+    end
     for i = 1, #CAT_ORDER do
         local key = CAT_ORDER[i]
         if key ~= "OTHER" then
@@ -231,12 +244,25 @@ local function classify_sound(name, sound_id)
             local rules = def.rules
             for ri = 1, #rules do
                 if blob:find(rules[ri], 1, true) then
+                    classify_cache[blob] = def
+                    classify_n = classify_n + 1
                     return def
                 end
             end
         end
     end
+    classify_cache[blob] = CAT.OTHER
+    classify_n = classify_n + 1
     return CAT.OTHER
+end
+
+local function classify_sound(name, sound_id)
+    local n = tostring(name or "")
+    local by_name = classify_blob(n:lower())
+    if by_name.key ~= "OTHER" or not sound_id or sound_id == "" then
+        return by_name
+    end
+    return classify_blob((n .. " " .. tostring(sound_id)):lower())
 end
 
 local function filter_allows(cat_def)
@@ -269,12 +295,17 @@ local function read_sound_id(child, addr, off)
     return nil
 end
 
-local function gather_sounds(character, hrp)
+local function gather_sounds(character, hrp, prev_entry)
     local sounds = {}
     local seen = {}
+    local deep_done = prev_entry and prev_entry.deep_done == true
+    local char_addr = character and tonumber(character.Address or character.address) or nil
 
     local function push(child)
-        if not child or child.ClassName ~= "Sound" then return end
+        if not child then return end
+        local class_name = child.ClassName or child.class_name
+        if class_name ~= "Sound" then return end
+        if #sounds >= MAX_SOUNDS_PER_PLAYER then return end
         local addr = tonumber(child.Address or child.address)
         if not addr or addr <= 0 or seen[addr] then return end
         seen[addr] = true
@@ -285,41 +316,64 @@ local function gather_sounds(character, hrp)
         }
     end
 
-    if hrp and hrp.GetChildren then
-        local ok, kids = pcall(function() return hrp:GetChildren() end)
-        if ok and type(kids) == "table" then
-            for i = 1, #kids do push(kids[i]) end
+    local function push_children(inst)
+        if not inst or not inst.GetChildren then return end
+        local ok, kids = pcall(function() return inst:GetChildren() end)
+        if not ok or type(kids) ~= "table" then return end
+        for i = 1, #kids do
+            push(kids[i])
+            if #sounds >= MAX_SOUNDS_PER_PLAYER then return end
         end
     end
 
-    if character then
-        if character.GetDescendantsOfClass then
+    -- HRP-local sounds cover footsteps / gunfire / most combat cues.
+    push_children(hrp)
+
+    -- Held tool sounds before any full-character walk.
+    if #sounds == 0 and character and character.FindFirstChildOfClass then
+        local ok_tool, tool = pcall(function()
+            return character:FindFirstChildOfClass("Tool")
+        end)
+        if ok_tool and tool then
+            push_children(tool)
+            local handle = tool.FindFirstChild and tool:FindFirstChild("Handle")
+            if handle then push_children(handle) end
+        end
+    end
+
+    -- Deep-scan at most once per character instance; reuse until respawn.
+    if #sounds == 0 then
+        if prev_entry and prev_entry.char_addr == char_addr and prev_entry.deep_done and prev_entry.sounds then
+            return prev_entry.sounds, char_addr, true
+        end
+        if character and character.GetDescendantsOfClass then
             local ok, list = pcall(function()
                 return character:GetDescendantsOfClass("Sound")
             end)
             if ok and type(list) == "table" then
-                for i = 1, #list do push(list[i]) end
+                local n = math.min(#list, MAX_SOUNDS_PER_PLAYER)
+                for i = 1, n do push(list[i]) end
             end
-        elseif character.GetDescendants then
-            local ok, list = pcall(function() return character:GetDescendants() end)
-            if ok and type(list) == "table" then
-                for i = 1, math.min(#list, 80) do
-                    local d = list[i]
-                    if d and (d.ClassName or d.class_name) == "Sound" then
-                        push(d)
-                    end
-                end
-            end
+            deep_done = true
         end
     end
 
-    return sounds
+    return sounds, char_addr, deep_done
 end
 
 local function refresh_player_sounds(p, now)
     local key = player_key(p)
     local entry = player_cache[key]
-    if entry and (now - (entry.t or 0)) < HRP_CACHE_MS and entry.sounds then
+    if entry and entry.sounds and (now - (entry.t or 0)) < HRP_CACHE_MS then
+        local px, py, pz = esp_util.vec3_pos(p.Position)
+        if px then
+            entry.px, entry.py, entry.pz = px, py, pz
+        end
+        return entry
+    end
+
+    -- Reuse the previous sound list when gather budget is spent (position only).
+    if entry and entry.sounds and gather_budget <= 0 then
         local px, py, pz = esp_util.vec3_pos(p.Position)
         if px then
             entry.px, entry.py, entry.pz = px, py, pz
@@ -341,18 +395,22 @@ local function refresh_player_sounds(p, now)
         return nil
     end
 
+    gather_budget = gather_budget - 1
     local px, py, pz = esp_util.vec3_pos(p.Position or hrp.Position)
+    local sounds, char_addr, deep_done = gather_sounds(character, hrp, entry)
     entry = {
         hrp = hrp,
-        sounds = gather_sounds(character, hrp),
+        sounds = sounds,
         t = now,
         px = px, py = py, pz = pz,
+        char_addr = char_addr,
+        deep_done = deep_done == true,
     }
     player_cache[key] = entry
     return entry
 end
 
-local function read_sound_state(child, addr, off)
+local function read_sound_state(child, addr, off, want_sid)
     local vol = tonumber(child and child.Volume)
     if vol == nil then vol = mem_float(addr, off.volume) or 0 end
 
@@ -369,7 +427,10 @@ local function read_sound_state(child, addr, off)
     local rolloff = tonumber(child and child.RollOffMaxDistance)
     if rolloff == nil then rolloff = mem_float(addr, off.rolloff) or 0 end
 
-    local sid = read_sound_id(child, addr, off)
+    local sid = nil
+    if want_sid then
+        sid = read_sound_id(child, addr, off)
+    end
     return vol, spd, looped, rolloff, sid
 end
 
@@ -468,6 +529,7 @@ local function scan_sounds(now)
     local detail = settings.bool(ID_DETAIL, true)
     local use_cat_color = settings.bool(ID_CAT_COLOR, true)
     local max_per = settings.num(ID_MAX_PER, DEFAULT_MAX_PER)
+    gather_budget = MAX_GATHER_PER_SCAN
 
     for _, prev in pairs(sound_prev) do
         prev.seen = false
@@ -498,13 +560,20 @@ local function scan_sounds(now)
                             local s = sounds[si]
                             local addr = s.addr
                             local child = s.child
-                            local vol, spd, looped, rolloff, sid = read_sound_state(child, addr, off)
-                            local is_playing = mem_bool(addr, off.is_playing)
-                            local is_audible = rolloff <= 0 or dist <= rolloff
-                            local cat = classify_sound(s.name, sid)
+                            local cat = classify_sound(s.name, nil)
                             if not filter_allows(cat) then
                                 goto next_sound
                             end
+                            local need_sid = cat.key == "OTHER"
+                            local vol, spd, looped, rolloff, sid = read_sound_state(child, addr, off, need_sid)
+                            if need_sid and sid then
+                                cat = classify_sound(s.name, sid)
+                                if not filter_allows(cat) then
+                                    goto next_sound
+                                end
+                            end
+                            local is_playing = mem_bool(addr, off.is_playing)
+                            local is_audible = rolloff <= 0 or dist <= rolloff
 
                             local prev = sound_prev[addr]
                             if not prev then
@@ -518,10 +587,10 @@ local function scan_sounds(now)
                                 local started = false
                                 local stopped = false
 
-                                if vol > prev.vol then started = true end
-                                if vol < prev.vol then stopped = true end
-                                if spd > prev.spd then started = true end
-                                if spd < prev.spd then stopped = true end
+                                if vol > (prev.vol + VOL_DEADBAND) then started = true end
+                                if vol < (prev.vol - VOL_DEADBAND) then stopped = true end
+                                if spd > (prev.spd + SPD_DEADBAND) then started = true end
+                                if spd < (prev.spd - SPD_DEADBAND) then stopped = true end
                                 if looped and not prev.looped then started = true end
                                 if (not looped) and prev.looped then stopped = true end
                                 if is_playing and not prev.playing then started = true end
@@ -657,6 +726,10 @@ function M.update(dt)
         if next(indicators) then indicators = {} end
         if next(sound_prev) then sound_prev = {} end
         if next(player_cache) then player_cache = {} end
+        if next(classify_cache) then
+            classify_cache = {}
+            classify_n = 0
+        end
         return
     end
 

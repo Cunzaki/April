@@ -543,7 +543,8 @@ end
 function M.update(_dt)
     if not settings.enabled(P) then
         if #tracers > 0 then clear_tracers() end
-        hp_cache = {}
+        if next(hp_cache) then hp_cache = {} end
+        if next(focus_ms) then focus_ms = {} end
         return
     end
     poll_damage(tick_ms())

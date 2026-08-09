@@ -1,5 +1,5 @@
 April = {
-    version = "4.1.83",
+    version = "4.1.89",
     debug = false,
     crash_logging = false,
     crash_trace = false,
@@ -1657,11 +1657,17 @@ function M.tick()
     if not players then return end
     local ok, list = pcall(players)
     if not ok or type(list) ~= "table" then return end
+    local live = {}
     for i = 1, #list do
         local p = list[i]
         if p and not ep.is_local(p) then
+            local key = cache_key(p)
+            if key then live[key] = true end
             M.is_cheater(p)
         end
+    end
+    for key in pairs(cache) do
+        if not live[key] then cache[key] = nil end
     end
 end
 function M.clear()
@@ -10796,6 +10802,9 @@ local env = April.require("core.env")
 local weapons = April.require("game.weapons")
 local M = {}
 local frame = { t = 0, weapon = nil, muzzle = nil, server = nil }
+local flash_lookup = {}
+local FLASH_TTL_MS = 450
+local FLASH_CACHE_MAX = 48
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
@@ -10849,14 +10858,48 @@ local function viewmodel_cframe_origin()
     end
     return pos
 end
+local function flash_cache_get(model)
+    local addr = model and tonumber(model.Address or model.address)
+    if not addr then return nil, false end
+    local hit = flash_lookup[addr]
+    if not hit then return nil, false end
+    if (tick_ms() - (hit.t or 0)) >= FLASH_TTL_MS then
+        flash_lookup[addr] = nil
+        return nil, false
+    end
+    return hit.pos, true
+end
+local function flash_cache_set(model, pos)
+    local addr = model and tonumber(model.Address or model.address)
+    if not addr then return end
+    local n = 0
+    for _ in pairs(flash_lookup) do
+        n = n + 1
+        if n >= FLASH_CACHE_MAX then
+            flash_lookup = {}
+            break
+        end
+    end
+    flash_lookup[addr] = { t = tick_ms(), pos = pos }
+end
 local function find_flash_in(model)
     if not model then return nil end
+    local cached, ok = flash_cache_get(model)
+    if ok then return cached end
     local flash = find_child(model, "FlashPart") or find_child(model, "Flash")
-    if flash then return part_pos(flash) end
+    if flash then
+        local pos = part_pos(flash)
+        flash_cache_set(model, pos)
+        return pos
+    end
     local weapon = find_child(model, "Weapon")
     if weapon then
         flash = find_child(weapon, "FlashPart") or find_child(weapon, "Flash")
-        if flash then return part_pos(flash) end
+        if flash then
+            local pos = part_pos(flash)
+            flash_cache_set(model, pos)
+            return pos
+        end
     end
     local desc = env.safe_call(function()
         if model.get_descendants then return model:get_descendants() end
@@ -10865,9 +10908,12 @@ local function find_flash_in(model)
     for _, d in ipairs(desc) do
         local n = d.Name or d.name
         if n == "FlashPart" or n == "Flash" then
-            return part_pos(d)
+            local pos = part_pos(d)
+            flash_cache_set(model, pos)
+            return pos
         end
     end
+    flash_cache_set(model, nil)
     return nil
 end
 local function camera_viewmodel()
@@ -10945,6 +10991,7 @@ function M.invalidate()
     frame.weapon = nil
     frame.muzzle = nil
     frame.server = nil
+    flash_lookup = {}
 end
 function M.sync_weapon(weapon)
     weapon = weapon or weapons.cached_held_ranged()
@@ -11864,593 +11911,1378 @@ sad = "sad", disgusted = "angry", evil = "angry", surprised = "angry",
 dialogue = {},
 })
 local DIALOGUE_EN = {
-"greeting|roasty|smug|Oh, you enabled me? Fine. Try not to embarrass us.",
-"greeting|roasty|pout|I was having a nice day until you clicked that toggle.",
-"greeting|roasty|evil|Your personal commentator has arrived. This should be funny.",
-"greeting|roasty|laugh|I'm ready. Give me something worth making fun of.",
-"greeting|roasty|neutral|April online. Expectations remain dangerously low.",
-"greeting|roasty|disgusted|You called? I hope your gameplay improved while I was gone.",
-"greeting|supportive|smile|April online. I'll keep an eye on you.",
-"greeting|supportive|happy|Ready when you are. Let's survive this one.",
-"greeting|supportive|neutral|I'm here. Stay sharp and we'll be fine.",
-"greeting|supportive|smile|All set! Try to come back in one piece.",
-"greeting|supportive|happy|Your favorite announcer is ready to go.",
-"greeting|supportive|neutral|Systems ready. I'll call out anything important.",
-"death|roasty|laugh|You suck, lol. Want to try that again?",
-"death|roasty|disgusted|That was your plan? Seriously?",
-"death|roasty|smug|Another tactical donation to the enemy.",
-"death|roasty|pout|I looked away for one second and you died.",
-"death|roasty|evil|Excellent performance. Zero notes. Zero pulse, too.",
-"death|roasty|laugh|Speedrunning the respawn screen again?",
-"death|roasty|disgusted|Maybe the bullets will miss if you stand even stiller next time.",
-"death|roasty|smug|Good news: the ground successfully caught you.",
-"death|roasty|pout|Please stop making death look like a hobby.",
-"death|roasty|laugh|They barely had to try. That's almost impressive.",
-"death|roasty|evil|A flawless demonstration of what not to do.",
-"death|roasty|disgusted|Your survival instincts filed for resignation.",
-"death|roasty|smug|I have seen training dummies with better positioning.",
-"death|roasty|pout|That life had a shorter runtime than this speech bubble.",
-"death|supportive|sad|That one hurt. Reset and take it slower.",
-"death|supportive|worried|You're down, but it isn't over. Learn the angle.",
-"death|supportive|smile|Bad round. Fresh start.",
-"death|supportive|sad|Unlucky. We'll get it back next life.",
-"death|supportive|worried|Breathe. Think about what exposed you.",
-"death|supportive|neutral|Death confirmed. Time to adjust the plan.",
-"death|supportive|smile|Shake it off. The next life is yours.",
-"death|supportive|sad|That was rough, but now you know where they were.",
-"death|supportive|worried|Review the mistake, then leave it behind.",
-"death|supportive|neutral|One bad fight does not decide the session.",
-"respawn|roasty|smug|Back already? Try keeping this body for a minute.",
-"respawn|roasty|pout|New life, same questionable decision-making.",
-"respawn|roasty|evil|Round two. Surely nothing could go wrong.",
-"respawn|roasty|laugh|The respawn button deserves overtime pay.",
-"respawn|roasty|neutral|Welcome back. I saved your dignity. There wasn't much.",
-"respawn|roasty|smug|Fresh body delivered. Handle with slightly more care.",
-"respawn|roasty|pout|Okay, no dying immediately. That's the whole assignment.",
-"respawn|roasty|laugh|Look who escaped the loading screen.",
-"respawn|supportive|happy|You're back. New life, clean slate.",
-"respawn|supportive|smile|Respawned and ready. Take your time.",
-"respawn|supportive|neutral|Fresh start. Check your surroundings first.",
-"respawn|supportive|happy|There you are. Let's make this life count.",
-"respawn|supportive|smile|Back in action. Recover your rhythm.",
-"respawn|supportive|neutral|Respawn complete. Rebuild before taking another fight.",
-"respawn|supportive|happy|New life ready. Start with a safe route.",
-"respawn|supportive|smile|Welcome back. Focus on one good decision at a time.",
-"downed|roasty|laugh|Floor inspection going well?",
-"downed|roasty|smug|You found the downed state. Very thorough testing.",
-"downed|roasty|pout|Crawling is not a combat strategy.",
-"downed|roasty|disgusted|This is why I told you to use cover.",
-"downed|roasty|evil|Technically alive. Emotionally? Debatable.",
-"downed|roasty|laugh|Wave to your teammates from down there.",
-"downed|roasty|worried|Someone revive the professional floor ornament.",
-"downed|roasty|smug|Outstanding posture. Ten out of ten.",
-"downed|supportive|worried|You're downed. Get behind cover and call for help.",
-"downed|supportive|fear|Stay low. A teammate may still reach you.",
-"downed|supportive|sad|Don't give up yet. Crawl somewhere safe.",
-"downed|supportive|worried|Downed, not dead. Break line of sight.",
-"downed|supportive|neutral|Save your movement and wait for the revive.",
-"downed|supportive|fear|Careful, one more hit could finish this.",
-"downed|supportive|sad|Keep moving toward cover if it is safe.",
-"downed|supportive|worried|Call your position and let your team work.",
-"revived|roasty|smug|Someone actually picked you up. Be grateful.",
-"revived|roasty|pout|You're standing again. Please make it worth their time.",
-"revived|roasty|laugh|Revived! The floor will miss you.",
-"revived|roasty|evil|Second chance acquired. Bad ideas re-enabled.",
-"revived|roasty|neutral|Back on your feet. Try using them this time.",
-"revived|roasty|smug|Your teammate has unreasonable faith in you.",
-"revived|supportive|happy|You're up! Heal before re-engaging.",
-"revived|supportive|smile|Nice recovery. Find cover and reset.",
-"revived|supportive|worried|Revived. Don't peek until you're healthy.",
-"revived|supportive|happy|Good save. Stay with your team now.",
-"revived|supportive|neutral|Back on your feet. Stabilize first.",
-"revived|supportive|smile|Second chance secured. Make it count.",
-"low_health|roasty|worried|Your health bar is practically decorative now.",
-"low_health|roasty|pout|One sneeze and you're back at respawn.",
-"low_health|roasty|smug|Bold strategy, fighting with three pixels of health.",
-"low_health|roasty|fear|Maybe stop peeking? Just a thought.",
-"low_health|roasty|disgusted|Heal. The red screen is not an aesthetic choice.",
-"low_health|roasty|worried|You are held together by confidence and bad math.",
-"low_health|roasty|pout|Please locate medicine before locating another bullet.",
-"low_health|roasty|smug|Living on one hit point is not a personality.",
-"low_health|supportive|worried|Low health. Disengage and heal now.",
-"low_health|supportive|fear|You're critical. Find hard cover.",
-"low_health|supportive|sad|Don't take another fight until you recover.",
-"low_health|supportive|worried|Health is low. Slow down and reset.",
-"low_health|supportive|neutral|Critical health. Prioritize survival.",
-"low_health|supportive|fear|Break line of sight and heal.",
-"low_health|supportive|worried|Do not trade damage right now.",
-"low_health|supportive|neutral|Find safety, heal, then reassess.",
-"recovered|roasty|smug|Health restored. Common sense still pending.",
-"recovered|roasty|smile|Patched up and ready to make new mistakes.",
-"recovered|roasty|laugh|Look at that, you discovered healing.",
-"recovered|roasty|pout|Better. Don't immediately waste it.",
-"recovered|roasty|evil|Fuller health bar, renewed capacity for chaos.",
-"recovered|roasty|neutral|You survived the medicine tutorial.",
-"recovered|supportive|happy|Health recovered. You're ready again.",
-"recovered|supportive|smile|Good reset. Choose the next fight carefully.",
-"recovered|supportive|neutral|Stable again. Recheck ammo and surroundings.",
-"recovered|supportive|happy|Nice recovery. Keep that momentum.",
-"recovered|supportive|smile|Much better. Stay disciplined.",
-"recovered|supportive|neutral|Recovery complete. Return when the timing is right.",
-"safe_enter|roasty|smug|Safe zone reached. Even you should survive in here.",
-"safe_enter|roasty|laugh|Congratulations, the game is protecting you now.",
-"safe_enter|roasty|pout|You're safe. Try not to trip over anything.",
-"safe_enter|roasty|neutral|Safe zone. Your danger privileges are temporarily revoked.",
-"safe_enter|roasty|smile|A peaceful moment for your overworked respawn key.",
-"safe_enter|roasty|evil|Enjoy safety while it lasts.",
-"safe_enter|supportive|happy|Safe zone reached. Take a moment to reset.",
-"safe_enter|supportive|smile|You're safe. Sort your inventory and plan ahead.",
-"safe_enter|supportive|neutral|Safe zone entered. Good time to regroup.",
-"safe_enter|supportive|happy|Made it safely. Restock before leaving.",
-"safe_enter|supportive|smile|You're protected here. Use the breathing room.",
-"safe_enter|supportive|neutral|Take stock of what you need before heading out.",
-"safe_leave|roasty|evil|Leaving safety? This should be entertaining.",
-"safe_leave|roasty|smug|Protection off. Let's see how long this lasts.",
-"safe_leave|roasty|pout|Back into danger with absolutely no supervision.",
-"safe_leave|roasty|laugh|Safe zone left. Respawn screen standing by.",
-"safe_leave|roasty|neutral|You're vulnerable again. Pretend to be careful.",
-"safe_leave|roasty|evil|And there goes your last good excuse.",
-"safe_leave|supportive|worried|Leaving the safe zone. Check your route.",
-"safe_leave|supportive|neutral|Protection ended. Stay aware of nearby players.",
-"safe_leave|supportive|smile|Back outside. Move with purpose.",
-"safe_leave|supportive|worried|You're exposed again. Keep cover nearby.",
-"safe_leave|supportive|neutral|Safe zone left. Watch your surroundings.",
-"safe_leave|supportive|smile|Route checked? Then let's move.",
-"combat_enter|roasty|evil|Combat started. Try not to feed them.",
-"combat_enter|roasty|smug|Oh, a fight. This should be educational.",
-"combat_enter|roasty|surprised|Guns out already? Bold for you.",
-"combat_enter|roasty|laugh|You're in combat. Act like it for once.",
-"combat_enter|roasty|pout|Someone wants your inventory. Don't donate.",
-"combat_enter|roasty|evil|Fight mode. Please aim at them, not the floor.",
-"combat_enter|supportive|worried|You're in combat. Keep cover and track angles.",
-"combat_enter|supportive|fear|Fight started. Focus and don't overextend.",
-"combat_enter|supportive|neutral|Combat engaged. Watch flanks and reload timing.",
-"combat_enter|supportive|worried|Stay composed. Win the trade, then heal.",
-"combat_enter|supportive|smile|You've got this. Play smart, not loud.",
-"combat_enter|supportive|neutral|In combat. Prioritize info and positioning.",
-"combat_leave|roasty|smug|Combat over. Somehow you're still breathing.",
-"combat_leave|roasty|pout|Fight ended. Hide your celebration.",
-"combat_leave|roasty|laugh|Out of combat. Don't immediately dive back in.",
-"combat_leave|roasty|neutral|Threat gone. Check ammo before looting.",
-"combat_leave|supportive|happy|Combat cleared. Reset and heal up.",
-"combat_leave|supportive|smile|You're clear. Patch wounds and reload.",
-"combat_leave|supportive|neutral|Out of combat. Take a second to stabilize.",
-"combat_leave|supportive|happy|Nice. Use the downtime wisely.",
-"bleeding|roasty|disgusted|You're bleeding. Congrats on the leak.",
-"bleeding|roasty|pout|Bandage. Now. Your HP is dripping away.",
-"bleeding|roasty|worried|Bleed tick going. Medicine would be smart.",
-"bleeding|roasty|laugh|Red trail unlocked. Stealth is cancelled.",
-"bleeding|roasty|evil|Bleeding already? Peak efficiency.",
-"bleeding|supportive|worried|You're bleeding. Stop and bandage immediately.",
-"bleeding|supportive|fear|Bleed status active. Prioritize a medkit.",
-"bleeding|supportive|sad|Don't ignore the bleed. Fix it before fighting.",
-"bleeding|supportive|worried|Apply a bandage before you lose the fight to ticks.",
-"bleeding|supportive|neutral|Bleeding. Heal, then reassess.",
-"bleed_stopped|roasty|smug|Bleed stopped. Miracles do happen.",
-"bleed_stopped|roasty|smile|Finally patched. Try keeping the blood inside.",
-"bleed_stopped|roasty|neutral|Bleed cleared. Don't reopen it instantly.",
-"bleed_stopped|supportive|happy|Bleed stopped. Nice recovery.",
-"bleed_stopped|supportive|smile|You're sealed up. Stay careful.",
-"bleed_stopped|supportive|neutral|Bleeding resolved. Good timing.",
-"hunger_low|roasty|pout|You're starving. Eat something that isn't a bullet.",
-"hunger_low|roasty|disgusted|Hunger low. Your stomach is louder than your footsteps.",
-"hunger_low|roasty|smug|Hungry already? Professional scavenger energy.",
-"hunger_low|roasty|laugh|Food. Or keep roleplaying a skeleton.",
-"hunger_low|supportive|worried|Hunger is low. Find food before you weaken.",
-"hunger_low|supportive|neutral|Eat soon. Low hunger will punish you later.",
-"hunger_low|supportive|smile|Grab a snack when it's safe.",
-"hunger_low|supportive|worried|Hunger warning. Don't ignore it in a fight.",
-"thirst_low|roasty|pout|Thirsty? Water exists. Shocking, I know.",
-"thirst_low|roasty|disgusted|Your thirst bar is begging for help.",
-"thirst_low|roasty|smug|Dehydration speedrun, classic.",
-"thirst_low|roasty|laugh|Drink something. Sand is not hydration.",
-"thirst_low|supportive|worried|Thirst is low. Get water soon.",
-"thirst_low|supportive|neutral|Hydrate before you commit to another fight.",
-"thirst_low|supportive|smile|Find clean water when you can.",
-"thirst_low|supportive|worried|Low thirst will sneak up on you. Fix it.",
-"radiation|roasty|fear|Radiation. Glow-in-the-dark is not a flex.",
-"radiation|roasty|disgusted|You're cooking in rads. Leave. Immediately.",
-"radiation|roasty|worried|Radiation spike. Suit up or get out.",
-"radiation|roasty|evil|Rads rising. This is how people become lore.",
-"radiation|supportive|fear|Radiation detected. Exit the zone now.",
-"radiation|supportive|worried|You're taking rads. Find cleaner ground.",
-"radiation|supportive|neutral|Radiation active. Prioritize gear or escape.",
-"radiation|supportive|fear|Leave the radiation before it stacks.",
-"cold|roasty|pout|You're freezing. Find heat before you become a popsicle.",
-"cold|roasty|worried|Cold status. Campfire energy, please.",
-"cold|roasty|laugh|Shivering already? Tough guy.",
-"cold|roasty|smug|Temperature dropped. Fashion lost to survival.",
-"cold|supportive|worried|You're getting cold. Warm up soon.",
-"cold|supportive|neutral|Cold warning. Seek heat or warmer gear.",
-"cold|supportive|smile|Find a fire or shelter before it gets worse.",
-"cold|supportive|worried|Stay warm. Cold stacks will hurt.",
-"hot|roasty|disgusted|Overheating. Touch grass... preferably wet grass.",
-"hot|roasty|pout|Too hot. Cool down before you melt your braincell.",
-"hot|roasty|laugh|Heatstroke loading. Smart.",
-"hot|roasty|smug|You're cooking. Not in a cute way.",
-"hot|supportive|worried|You're overheating. Cool off soon.",
-"hot|supportive|neutral|Heat is high. Find shade or water.",
-"hot|supportive|smile|Cool down before committing to a long run.",
-"hot|supportive|worried|Hot status. Manage temperature now.",
-"drowning|roasty|fear|You're drowning. Surface. Now.",
-"drowning|roasty|surprised|Underwater panic hour?",
-"drowning|roasty|laugh|Air is free. Go get some.",
-"drowning|roasty|worried|Drowning. Swim up before this gets stupid.",
-"drowning|supportive|fear|You're drowning! Get to the surface!",
-"drowning|supportive|worried|Air is low. Break the water now.",
-"drowning|supportive|fear|Swim up. Don't fight under there.",
-"drowning|supportive|worried|Drowning status. Prioritize oxygen.",
-"staff_nearby|roasty|surprised|Staff nearby. Behave. Or at least pretend.",
-"staff_nearby|roasty|worried|Mod energy detected. Maybe hide the crimes.",
-"staff_nearby|roasty|smug|Staff in range. Your villain arc is postponed.",
-"staff_nearby|roasty|neutral|Admin proximity. Play nice.",
-"staff_nearby|supportive|worried|Staff nearby. Stay clean and careful.",
-"staff_nearby|supportive|neutral|A staff member is close. Keep it normal.",
-"staff_nearby|supportive|smile|Staff in the area. No funny business.",
-"staff_nearby|supportive|worried|Mod nearby. Focus on surviving, not flexing.",
-"enemy_nearby|roasty|evil|Hostile nearby. Smile for the crosshair.",
-"enemy_nearby|roasty|smug|Someone's close. Don't get caught looking AFK.",
-"enemy_nearby|roasty|surprised|Enemy in range. Ears up.",
-"enemy_nearby|roasty|laugh|Company. Hopefully not smarter than you.",
-"enemy_nearby|roasty|worried|Threat nearby. Check your corners.",
-"enemy_nearby|supportive|worried|Enemy nearby. Slow down and listen.",
-"enemy_nearby|supportive|fear|Hostile close. Ready your aim and cover.",
-"enemy_nearby|supportive|neutral|Someone's in your bubble. Stay alert.",
-"enemy_nearby|supportive|worried|Nearby threat. Don't sprint into them.",
-"enemy_nearby|supportive|smile|Keep composure. You can win this fight.",
-"party_join|roasty|smug|You're in a party. Try not to drag them down.",
-"party_join|roasty|laugh|Teammates acquired. Their mistake.",
-"party_join|roasty|pout|Party up. Share loot like an adult.",
-"party_join|roasty|evil|Squad formed. Chaos with friends.",
-"party_join|supportive|happy|Party joined. Stick together and callouts help.",
-"party_join|supportive|smile|You're teamed up. Watch each other's backs.",
-"party_join|supportive|neutral|In a party now. Share info and stay linked.",
-"party_join|supportive|happy|Nice. Team play wins more than ego.",
-"party_leave|roasty|pout|Party left. Solo queue dignity restored.",
-"party_leave|roasty|smug|Alone again. Just how your decision-making likes it.",
-"party_leave|roasty|neutral|Out of party. Don't get lonely and die.",
-"party_leave|supportive|neutral|You left the party. Stay aware solo.",
-"party_leave|supportive|worried|Solo now. Play safer angles.",
-"party_leave|supportive|smile|Party ended. You've got this alone too.",
-"reviving|roasty|smug|Look at you, being useful for once.",
-"reviving|roasty|smile|Reviving someone. Don't get beamed mid-animation.",
-"reviving|roasty|pout|Hero moment. Cover first, then the revive.",
-"reviving|roasty|laugh|Saving them? Bold charity.",
-"reviving|supportive|smile|Nice revive. Watch your surroundings while you do it.",
-"reviving|supportive|worried|Reviving. Keep an eye on flanks.",
-"reviving|supportive|happy|Good teammate play. Finish the revive safely.",
-"reviving|supportive|neutral|Hold the revive and stay ready to cancel if pushed.",
-"boss_spawn|roasty|evil|Boss event up. Go be brave. Or loot later. I don't care.",
-"boss_spawn|roasty|surprised|Big NPC online. Don't feed it for free.",
-"boss_spawn|roasty|smug|Event boss spotted. Try not to be the highlight reel.",
-"boss_spawn|roasty|laugh|World event. Perfect time for bad decisions.",
-"boss_spawn|roasty|neutral|Boss presence detected. Gear check.",
-"boss_spawn|supportive|surprised|A boss event is active. Prepare before engaging.",
-"boss_spawn|supportive|worried|Boss nearby or up. Watch the area carefully.",
-"boss_spawn|supportive|neutral|World boss event. Coordinate if you can.",
-"boss_spawn|supportive|smile|Event spawn. Opportunity if you're ready.",
-"boss_spawn|supportive|worried|Big threat event. Don't rush blind.",
-"timed_crate|roasty|smug|Timed crate. Race for loot, or race for death. Your call.",
-"timed_crate|roasty|evil|Crate timer up. Campers incoming.",
-"timed_crate|roasty|laugh|Timed crate. Perfect bait for greedy players.",
-"timed_crate|roasty|surprised|Crate event. Don't get third-partied mid-loot.",
-"timed_crate|roasty|pout|Go get shiny boxes. Try surviving the audience.",
-"timed_crate|supportive|happy|Timed crate is up. Approach carefully.",
-"timed_crate|supportive|worried|Crate event active. Check for campers first.",
-"timed_crate|supportive|neutral|Timed crate spotted. Plan your approach.",
-"timed_crate|supportive|smile|Good loot opportunity. Stay aware while opening.",
-"timed_crate|supportive|worried|Crate means contest. Don't tunnel vision.",
-"greeting|roasty|smug|April reporting in. Please be less tragic today.",
-"greeting|roasty|evil|Commentator online. Feed me mistakes.",
-"greeting|supportive|happy|April online. I've got your back.",
-"greeting|supportive|smile|Ready. Call me when it gets spicy.",
-"death|roasty|laugh|Dead again. Collectible achievement unlocked.",
-"death|supportive|sad|Down hard. Reset and come back smarter.",
-"respawn|roasty|smug|Respawned. Let's pretend that was intentional.",
-"respawn|supportive|happy|Fresh life. Start clean.",
-"downed|roasty|laugh|Horizontal again. Iconic.",
-"downed|supportive|worried|Downed. Crawl smart.",
-"safe_enter|roasty|smug|Safe zone. Even chaos needs a break.",
-"safe_leave|supportive|worried|Leaving safety. Eyes open.",
+"greeting|roasty|smug|common|Oh, you enabled me? Fine. Try not to embarrass us.",
+"greeting|roasty|laugh|common|I was having a nice day until you clicked that toggle.",
+"greeting|roasty|evil|common|Your personal commentator has arrived. This should be funny.",
+"greeting|roasty|pout|common|I'm ready. Give me something worth making fun of.",
+"greeting|roasty|neutral|common|April online. Expectations remain dangerously low.",
+"greeting|roasty|disgusted|common|You called? I hope your gameplay improved while I was gone.",
+"greeting|roasty|worried|common|April reporting in. Please be less tragic today.",
+"greeting|roasty|surprised|common|Commentator online. Feed me mistakes.",
+"greeting|roasty|smile|common|Boot sequence done. Chaos privileges restored.",
+"greeting|roasty|happy|common|I'm awake. Try not to make this a highlight reel of fails.",
+"greeting|roasty|sad|common|Hello again. I brought snacks and low expectations.",
+"greeting|roasty|fear|common|Presence confirmed. Dignity optional.",
+"greeting|roasty|smug|common|Toggled on. The roast schedule is open.",
+"greeting|roasty|laugh|common|You really re-enabled me. Bold. Optimistic, even.",
+"greeting|roasty|evil|common|Systems green. Your decision-making remains yellow.",
+"greeting|roasty|pout|common|Back in your pocket. Don't make me regret it.",
+"greeting|roasty|neutral|common|Announcer online. Please aim at enemies, not lore.",
+"greeting|roasty|disgusted|common|I missed you. Mostly the comedy.",
+"greeting|roasty|smug|uncommon|Aww, you missed me? Cute. Don't die in the first minute.",
+"greeting|roasty|laugh|uncommon|I polished my smug face just for this session.",
+"greeting|roasty|evil|uncommon|If you survive ten minutes I might clap. Quietly.",
+"greeting|roasty|smug|rare|Cunzaki was here… and so am I. Try not to disgrace the brand.",
+"greeting|roasty|laugh|rare|Secret greeting unlocked: please be slightly less chaotic.",
+"greeting|roasty|smug|mythic|Mythic hello. The stars aligned and still chose you. Wild.",
+"greeting|supportive|smug|common|April online. I'll keep an eye on you.",
+"greeting|supportive|laugh|common|Ready when you are. Let's survive this one.",
+"greeting|supportive|evil|common|I'm here. Stay sharp and we'll be fine.",
+"greeting|supportive|pout|common|All set! Try to come back in one piece.",
+"greeting|supportive|neutral|common|Your favorite announcer is ready to go.",
+"greeting|supportive|disgusted|common|Systems ready. I'll call out anything important.",
+"greeting|supportive|worried|common|April online. I've got your back.",
+"greeting|supportive|surprised|common|Ready. Call me when it gets spicy.",
+"greeting|supportive|smile|common|Hey! Fresh session energy. You've got this.",
+"greeting|supportive|happy|common|I'm with you. Slow is smooth, smooth is fast.",
+"greeting|supportive|sad|common|Good to see you. Let's make smart plays.",
+"greeting|supportive|fear|common|Online and smiling. Check your kit, then move.",
+"greeting|supportive|smug|common|Here for the wins and the lessons.",
+"greeting|supportive|laugh|common|Soft landing complete. Take a breath, then loot.",
+"greeting|supportive|evil|common|I'll nudge you when it matters. Stay curious.",
+"greeting|supportive|pout|common|Friendly mode engaged. Survive cute, fight smart.",
+"greeting|supportive|neutral|common|Welcome back, captain. Route first, ego later.",
+"greeting|supportive|disgusted|common|Hype but careful. That's the vibe.",
+"greeting|supportive|smug|uncommon|Little pep talk: hydrate, reload, and trust your ears.",
+"greeting|supportive|laugh|uncommon|You're not alone out there. I'm loud on purpose.",
+"greeting|supportive|smug|rare|Cunzaki was here — so play like the trailer.",
+"greeting|supportive|smug|mythic|Mythic cheer unlocked. Today feels lucky. Don't waste it.",
+"death|roasty|smug|common|You suck, lol. Want to try that again?",
+"death|roasty|laugh|common|That was your plan? Seriously?",
+"death|roasty|evil|common|Another tactical donation to the enemy.",
+"death|roasty|pout|common|I looked away for one second and you died.",
+"death|roasty|neutral|common|Excellent performance. Zero notes. Zero pulse, too.",
+"death|roasty|disgusted|common|Speedrunning the respawn screen again?",
+"death|roasty|worried|common|Maybe the bullets will miss if you stand even stiller next time.",
+"death|roasty|surprised|common|Good news: the ground successfully caught you.",
+"death|roasty|smile|common|Please stop making death look like a hobby.",
+"death|roasty|happy|common|They barely had to try. That's almost impressive.",
+"death|roasty|sad|common|A flawless demonstration of what not to do.",
+"death|roasty|fear|common|Your survival instincts filed for resignation.",
+"death|roasty|smug|common|I have seen training dummies with better positioning.",
+"death|roasty|laugh|common|That life had a shorter runtime than this speech bubble.",
+"death|roasty|evil|common|Dead again. Collectible achievement unlocked.",
+"death|roasty|pout|common|Respawn button sends its regards.",
+"death|roasty|neutral|common|You lost a fight and a personality point.",
+"death|roasty|disgusted|common|That angle hated you personally.",
+"death|roasty|worried|common|Died with full pockets. Classic.",
+"death|roasty|surprised|common|Outplayed, outpositioned, out of excuses.",
+"death|roasty|smile|common|The enemy thanks you for the care package.",
+"death|roasty|happy|common|Horizontal again. At least you're consistent.",
+"death|roasty|sad|common|Death. Again. Shocked? I'm not.",
+"death|roasty|fear|common|You peaked at spawning.",
+"death|roasty|smug|common|Next time, try cover. Wild concept.",
+"death|roasty|laugh|common|They pressed shoot. You pressed exist.",
+"death|roasty|evil|common|Inventory relocated without your consent.",
+"death|roasty|pout|common|That was less of a fight and more of a tutorial.",
+"death|supportive|smug|common|That one hurt. Reset and take it slower.",
+"death|supportive|laugh|common|You're down, but it isn't over. Learn the angle.",
+"death|supportive|evil|common|Bad round. Fresh start.",
+"death|supportive|pout|common|Unlucky. We'll get it back next life.",
+"death|supportive|neutral|common|Breathe. Think about what exposed you.",
+"death|supportive|disgusted|common|Death confirmed. Time to adjust the plan.",
+"death|supportive|worried|common|Shake it off. The next life is yours.",
+"death|supportive|surprised|common|That was rough, but now you know where they were.",
+"death|supportive|smile|common|Review the mistake, then leave it behind.",
+"death|supportive|happy|common|One bad fight does not decide the session.",
+"death|supportive|sad|common|Down hard. Reset and come back smarter.",
+"death|supportive|fear|common|It's okay. Info is still a win.",
+"death|supportive|smug|common|Soft reset. New route, new timing.",
+"death|supportive|laugh|common|You learned something expensive. Spend it well.",
+"death|supportive|evil|common|Hug the lesson, not the ego.",
+"death|supportive|pout|common|We'll convert this into better peeks.",
+"death|supportive|neutral|common|Stay kind to yourself. Stay sharper next spawn.",
+"death|supportive|disgusted|common|Death happens. Panic doesn't have to.",
+"death|supportive|worried|common|Next life: slower feet, quicker ears.",
+"death|supportive|surprised|common|You're still in the story. Rewrite the ending.",
+"death|supportive|smile|common|Take a breath. Check what got you.",
+"death|supportive|happy|common|Unlucky timing. Lucky next time.",
+"death|supportive|sad|common|Reset clean. Don't tilt into another.",
+"death|supportive|fear|common|I'm here. We'll tighten it up.",
+"death|roasty|smug|uncommon|Aww, you died cute. Still dead though.",
+"death|roasty|laugh|uncommon|Tragic but aesthetic. Don't make it a brand.",
+"death|supportive|smug|uncommon|Gentle nudge: that was a hard fight. You've got the next.",
+"death|roasty|smug|rare|Cunzaki was here… watching that death. Ouch.",
+"death|supportive|smug|rare|Rare comfort: even Cunzaki wipes sometimes. Reset soft.",
+"respawn|roasty|smug|common|Back already? Try keeping this body for a minute.",
+"respawn|roasty|laugh|common|New life, same questionable decision-making.",
+"respawn|roasty|evil|common|Round two. Surely nothing could go wrong.",
+"respawn|roasty|pout|common|The respawn button deserves overtime pay.",
+"respawn|roasty|neutral|common|Welcome back. I saved your dignity. There wasn't much.",
+"respawn|roasty|disgusted|common|Fresh body delivered. Handle with slightly more care.",
+"respawn|roasty|worried|common|Okay, no dying immediately. That's the whole assignment.",
+"respawn|roasty|surprised|common|Look who escaped the loading screen.",
+"respawn|roasty|smile|common|Respawned. Let's pretend that was intentional.",
+"respawn|roasty|happy|common|New meat suit. Same chaos agent.",
+"respawn|roasty|sad|common|Spawned. Please invent caution.",
+"respawn|roasty|fear|common|Another life token spent. Budget wisely.",
+"respawn|roasty|smug|common|Back online. Don't refund it instantly.",
+"respawn|roasty|laugh|common|Fresh spawn smell. Don't ruin it.",
+"respawn|roasty|evil|common|You returned. The floor is disappointed.",
+"respawn|roasty|pout|common|Life two (or twelve). Act surprised.",
+"respawn|roasty|neutral|common|Spawn protection is not a personality.",
+"respawn|roasty|disgusted|common|Welcome back to the consequences.",
+"respawn|supportive|smug|common|You're back. New life, clean slate.",
+"respawn|supportive|laugh|common|Respawned and ready. Take your time.",
+"respawn|supportive|evil|common|Fresh start. Check your surroundings first.",
+"respawn|supportive|pout|common|There you are. Let's make this life count.",
+"respawn|supportive|neutral|common|Back in action. Recover your rhythm.",
+"respawn|supportive|disgusted|common|Respawn complete. Rebuild before taking another fight.",
+"respawn|supportive|worried|common|New life ready. Start with a safe route.",
+"respawn|supportive|surprised|common|Welcome back. Focus on one good decision at a time.",
+"respawn|supportive|smile|common|Fresh life. Start clean.",
+"respawn|supportive|happy|common|Soft reset done. Loot smart, peek smarter.",
+"respawn|supportive|sad|common|You're up. Breathe, kit check, move.",
+"respawn|supportive|fear|common|New chance. Play the info you earned.",
+"respawn|supportive|smug|common|Spawned safe-ish. Don't sprint into ghosts.",
+"respawn|supportive|laugh|common|Welcome back. We'll do this carefully.",
+"respawn|supportive|evil|common|Fresh boots. Choose a quieter path.",
+"respawn|supportive|pout|common|Respawn hugs. Now go be sensible.",
+"respawn|supportive|neutral|common|Clean slate energy. Keep it.",
+"respawn|supportive|disgusted|common|Back with you. One play at a time.",
+"respawn|roasty|smug|uncommon|Cute respawn. Try a cute survival next.",
+"respawn|supportive|smug|uncommon|Aww, new life. I'm rooting for a longer one.",
+"respawn|roasty|smug|rare|Cunzaki was here — don't waste the respawn.",
+"downed|roasty|smug|common|Floor inspection going well?",
+"downed|roasty|laugh|common|You found the downed state. Very thorough testing.",
+"downed|roasty|evil|common|Crawling is not a combat strategy.",
+"downed|roasty|pout|common|This is why I told you to use cover.",
+"downed|roasty|neutral|common|Technically alive. Emotionally? Debatable.",
+"downed|roasty|disgusted|common|Wave to your teammates from down there.",
+"downed|roasty|worried|common|Someone revive the professional floor ornament.",
+"downed|roasty|surprised|common|Outstanding posture. Ten out of ten.",
+"downed|roasty|smile|common|Horizontal again. Iconic.",
+"downed|roasty|happy|common|You're a temporary rug. Expensive one.",
+"downed|roasty|sad|common|Bleed timer loading. Romance later.",
+"downed|roasty|fear|common|Crawl with purpose, not vibes.",
+"downed|roasty|smug|common|Downed and dramatic. Stay small.",
+"downed|roasty|laugh|common|The floor says hi. Say less.",
+"downed|roasty|evil|common|You faceplanted with style. Still bad.",
+"downed|roasty|pout|common|Need a revive and a reality check.",
+"downed|supportive|smug|common|You're downed. Get behind cover and call for help.",
+"downed|supportive|laugh|common|Stay low. A teammate may still reach you.",
+"downed|supportive|evil|common|Don't give up yet. Crawl somewhere safe.",
+"downed|supportive|pout|common|Downed, not dead. Break line of sight.",
+"downed|supportive|neutral|common|Save your movement and wait for the revive.",
+"downed|supportive|disgusted|common|Careful, one more hit could finish this.",
+"downed|supportive|worried|common|Keep moving toward cover if it is safe.",
+"downed|supportive|surprised|common|Call your position and let your team work.",
+"downed|supportive|smile|common|Downed. Crawl smart.",
+"downed|supportive|happy|common|Stay quiet. Help is possible.",
+"downed|supportive|sad|common|Hug cover while you crawl.",
+"downed|supportive|fear|common|You're still in it. Small movements.",
+"downed|supportive|smug|common|Ping if you can. Stay hopeful.",
+"downed|supportive|laugh|common|Protect the timer. Don't greed peeks.",
+"downed|supportive|evil|common|Soft crawl to safety. You've got friends… maybe.",
+"downed|supportive|pout|common|Breathe. Revive windows open and close.",
+"downed|supportive|smug|uncommon|Aww, hang in there. Cute determination counts.",
+"revived|roasty|smug|common|Someone actually picked you up. Be grateful.",
+"revived|roasty|laugh|common|You're standing again. Please make it worth their time.",
+"revived|roasty|evil|common|Revived! The floor will miss you.",
+"revived|roasty|pout|common|Second chance acquired. Bad ideas re-enabled.",
+"revived|roasty|neutral|common|Back on your feet. Try using them this time.",
+"revived|roasty|disgusted|common|Your teammate has unreasonable faith in you.",
+"revived|roasty|worried|common|Up again. Don't speedrun the floor sequel.",
+"revived|roasty|surprised|common|Vertical privileges restored. Temporarily.",
+"revived|roasty|smile|common|They spent the revive. Spend it wiser.",
+"revived|roasty|happy|common|Standing. Shocking character development.",
+"revived|roasty|sad|common|Don't repay the revive with an instant peek.",
+"revived|roasty|fear|common|You're up. Ego still recommended off.",
+"revived|supportive|smug|common|You're up! Heal before re-engaging.",
+"revived|supportive|laugh|common|Nice recovery. Find cover and reset.",
+"revived|supportive|evil|common|Revived. Don't peek until you're healthy.",
+"revived|supportive|pout|common|Good save. Stay with your team now.",
+"revived|supportive|neutral|common|Back on your feet. Stabilize first.",
+"revived|supportive|disgusted|common|Second chance secured. Make it count.",
+"revived|supportive|worried|common|Heal, reload, thank your savior silently.",
+"revived|supportive|surprised|common|You're safe-ish. Reset together.",
+"revived|supportive|smile|common|Soft stand-up. Hard discipline next.",
+"revived|supportive|happy|common|Good. Stick close until you're topped off.",
+"revived|supportive|sad|common|Revived clean. Play the next thirty seconds carefully.",
+"revived|supportive|fear|common|Up! Cover first, heroics later.",
+"low_health|roasty|smug|common|Your health bar is practically decorative now.",
+"low_health|roasty|laugh|common|One sneeze and you're back at respawn.",
+"low_health|roasty|evil|common|Bold strategy, fighting with three pixels of health.",
+"low_health|roasty|pout|common|Maybe stop peeking? Just a thought.",
+"low_health|roasty|neutral|common|Heal. The red screen is not an aesthetic choice.",
+"low_health|roasty|disgusted|common|You are held together by confidence and bad math.",
+"low_health|roasty|worried|common|Please locate medicine before locating another bullet.",
+"low_health|roasty|surprised|common|Living on one hit point is not a personality.",
+"low_health|roasty|smile|common|Red vibes only. Medkit, not ego.",
+"low_health|roasty|happy|common|You're a glass cannon without the cannon.",
+"low_health|roasty|sad|common|HP crisis. Drama optional, bandage not.",
+"low_health|roasty|fear|common|Critical. Stop roleplaying invincible.",
+"low_health|roasty|smug|common|Your health bar filed a complaint.",
+"low_health|roasty|laugh|common|One more trade and you're lore.",
+"low_health|roasty|evil|common|Meds. Now. I'm not joking. Much.",
+"low_health|roasty|pout|common|Low HP arc. Skip to the healing chapter.",
+"low_health|supportive|smug|common|Low health. Disengage and heal now.",
+"low_health|supportive|laugh|common|You're critical. Find hard cover.",
+"low_health|supportive|evil|common|Don't take another fight until you recover.",
+"low_health|supportive|pout|common|Health is low. Slow down and reset.",
+"low_health|supportive|neutral|common|Critical health. Prioritize survival.",
+"low_health|supportive|disgusted|common|Break line of sight and heal.",
+"low_health|supportive|worried|common|Do not trade damage right now.",
+"low_health|supportive|surprised|common|Find safety, heal, then reassess.",
+"low_health|supportive|smile|common|Soft retreat. Hard heal.",
+"low_health|supportive|happy|common|You're fragile right now. Play small.",
+"low_health|supportive|sad|common|Patch up. The fight can wait.",
+"low_health|supportive|fear|common|Low HP — choose life, not loot.",
+"low_health|supportive|smug|common|Cover, bandage, breathe.",
+"low_health|supportive|laugh|common|Survival mode. Peek later.",
+"low_health|supportive|evil|common|Heal window. Take it.",
+"low_health|supportive|pout|common|Critical. I'm worried in a helpful way.",
+"low_health|supportive|smug|uncommon|Aww, you're hurt. Let's fix that gently.",
+"low_health|roasty|smug|rare|Cunzaki was here — and even he would heal.",
+"recovered|roasty|smug|common|Health restored. Common sense still pending.",
+"recovered|roasty|laugh|common|Patched up and ready to make new mistakes.",
+"recovered|roasty|evil|common|Look at that, you discovered healing.",
+"recovered|roasty|pout|common|Better. Don't immediately waste it.",
+"recovered|roasty|neutral|common|Fuller health bar, renewed capacity for chaos.",
+"recovered|roasty|disgusted|common|You survived the medicine tutorial.",
+"recovered|roasty|worried|common|Green again. Try staying that color.",
+"recovered|roasty|surprised|common|Healed. Ego already loading — cancel it.",
+"recovered|roasty|smile|common|HP topped. Brain still buffering.",
+"recovered|roasty|happy|common|Medicine worked. Miracles aside.",
+"recovered|roasty|sad|common|Recovered. Don't speedrun low HP again.",
+"recovered|roasty|fear|common|Healthy. Temporarily trustworthy.",
+"recovered|supportive|smug|common|Health recovered. You're ready again.",
+"recovered|supportive|laugh|common|Good reset. Choose the next fight carefully.",
+"recovered|supportive|evil|common|Stable again. Recheck ammo and surroundings.",
+"recovered|supportive|pout|common|Nice recovery. Keep that momentum.",
+"recovered|supportive|neutral|common|Much better. Stay disciplined.",
+"recovered|supportive|disgusted|common|Recovery complete. Return when the timing is right.",
+"recovered|supportive|worried|common|Feeling better? Play like it.",
+"recovered|supportive|surprised|common|Topped off. Soft feet forward.",
+"recovered|supportive|smile|common|Healed clean. Info next.",
+"recovered|supportive|happy|common|Good job resetting. That's real skill.",
+"recovered|supportive|sad|common|Stable. Ready when you are.",
+"recovered|supportive|fear|common|Recovery hugs. Now go be smart.",
+"safe_enter|roasty|smug|common|Safe zone reached. Even you should survive in here.",
+"safe_enter|roasty|laugh|common|Congratulations, the game is protecting you now.",
+"safe_enter|roasty|evil|common|You're safe. Try not to trip over anything.",
+"safe_enter|roasty|pout|common|Safe zone. Your danger privileges are temporarily revoked.",
+"safe_enter|roasty|neutral|common|A peaceful moment for your overworked respawn key.",
+"safe_enter|roasty|disgusted|common|Enjoy safety while it lasts.",
+"safe_enter|roasty|worried|common|Safe zone. Even chaos needs a break.",
+"safe_enter|roasty|surprised|common|Bubble of safety. Don't pop it with ego.",
+"safe_enter|roasty|smile|common|Protected. Sort loot like an adult.",
+"safe_enter|roasty|happy|common|Safe. Your enemies are on a coffee break. Probably not.",
+"safe_enter|roasty|sad|common|Zoning out in the zone. Fine. Briefly.",
+"safe_enter|roasty|fear|common|Safe zone hug. Temporary.",
+"safe_enter|supportive|smug|common|Safe zone reached. Take a moment to reset.",
+"safe_enter|supportive|laugh|common|You're safe. Sort your inventory and plan ahead.",
+"safe_enter|supportive|evil|common|Safe zone entered. Good time to regroup.",
+"safe_enter|supportive|pout|common|Made it safely. Restock before leaving.",
+"safe_enter|supportive|neutral|common|You're protected here. Use the breathing room.",
+"safe_enter|supportive|disgusted|common|Take stock of what you need before heading out.",
+"safe_enter|supportive|worried|common|Soft landing. Heal, eat, think.",
+"safe_enter|supportive|surprised|common|Safe. Breathe and rebuild the plan.",
+"safe_enter|supportive|smile|common|Good. Use this calm.",
+"safe_enter|supportive|happy|common|Protected. Check ammo and food.",
+"safe_enter|supportive|sad|common|Safe zone vibes. Stay ready anyway.",
+"safe_enter|supportive|fear|common|Restock window. Make it count.",
+"safe_leave|roasty|smug|common|Leaving safety? This should be entertaining.",
+"safe_leave|roasty|laugh|common|Protection off. Let's see how long this lasts.",
+"safe_leave|roasty|evil|common|Back into danger with absolutely no supervision.",
+"safe_leave|roasty|pout|common|Safe zone left. Respawn screen standing by.",
+"safe_leave|roasty|neutral|common|You're vulnerable again. Pretend to be careful.",
+"safe_leave|roasty|disgusted|common|And there goes your last good excuse.",
+"safe_leave|roasty|worried|common|Out of the bubble. Into the bit.",
+"safe_leave|roasty|surprised|common|Danger privileges restored. Don't abuse them.",
+"safe_leave|roasty|smile|common|Leaving safety with that loot? Bold fashion.",
+"safe_leave|roasty|happy|common|Unprotected. Act surprised when bullets appear.",
+"safe_leave|roasty|sad|common|Safe zone in the rearview. Chaos ahead.",
+"safe_leave|roasty|fear|common|You left safety. I brought commentary.",
+"safe_leave|supportive|smug|common|Leaving the safe zone. Check your route.",
+"safe_leave|supportive|laugh|common|Protection ended. Stay aware of nearby players.",
+"safe_leave|supportive|evil|common|Back outside. Move with purpose.",
+"safe_leave|supportive|pout|common|You're exposed again. Keep cover nearby.",
+"safe_leave|supportive|neutral|common|Safe zone left. Watch your surroundings.",
+"safe_leave|supportive|disgusted|common|Route checked? Then let's move.",
+"safe_leave|supportive|worried|common|Leaving safety. Eyes open.",
+"safe_leave|supportive|surprised|common|Soft exit. Hard awareness.",
+"safe_leave|supportive|smile|common|Out we go. Ears first.",
+"safe_leave|supportive|happy|common|Unprotected. Play the quiet game.",
+"safe_leave|supportive|sad|common|Leaving the bubble. Stick to cover lines.",
+"safe_leave|supportive|fear|common|Ready? Then step out carefully.",
+"combat_enter|roasty|smug|common|Combat started. Try not to feed them.",
+"combat_enter|roasty|laugh|common|Oh, a fight. This should be educational.",
+"combat_enter|roasty|evil|common|Guns out already? Bold for you.",
+"combat_enter|roasty|pout|common|You're in combat. Act like it for once.",
+"combat_enter|roasty|neutral|common|Someone wants your inventory. Don't donate.",
+"combat_enter|roasty|disgusted|common|Fight mode. Please aim at them, not the floor.",
+"combat_enter|roasty|worried|common|Combat ping. Ego check recommended.",
+"combat_enter|roasty|surprised|common|Fight's on. Cover isn't optional DLC.",
+"combat_enter|roasty|smile|common|Bullets incoming. Personality outgoing.",
+"combat_enter|roasty|happy|common|Engaged. Try winning for once.",
+"combat_enter|roasty|sad|common|Combat! Don't invent fanfiction angles.",
+"combat_enter|roasty|fear|common|They're shooting. Shocking plot twist.",
+"combat_enter|roasty|smug|common|Fight started. Reload exists. Use it.",
+"combat_enter|roasty|laugh|common|Combat mode. Soft peeks, hard discipline.",
+"combat_enter|roasty|evil|common|Here we go. Don't become the lesson.",
+"combat_enter|roasty|pout|common|Adrenaline unlocked. Brain still needed.",
+"combat_enter|supportive|smug|common|You're in combat. Keep cover and track angles.",
+"combat_enter|supportive|laugh|common|Fight started. Focus and don't overextend.",
+"combat_enter|supportive|evil|common|Combat engaged. Watch flanks and reload timing.",
+"combat_enter|supportive|pout|common|Stay composed. Win the trade, then heal.",
+"combat_enter|supportive|neutral|common|You've got this. Play smart, not loud.",
+"combat_enter|supportive|disgusted|common|In combat. Prioritize info and positioning.",
+"combat_enter|supportive|worried|common|Breathe. One angle at a time.",
+"combat_enter|supportive|surprised|common|Fight on. Soft feet, sharp eyes.",
+"combat_enter|supportive|smile|common|Stay calm. Information wins fights.",
+"combat_enter|supportive|happy|common|Engage smart. Exit smarter.",
+"combat_enter|supportive|sad|common|Combat. Callouts help if you're partied.",
+"combat_enter|supportive|fear|common|You've trained for this. Trust the crosshair.",
+"combat_enter|supportive|smug|common|Focus. Cover. Commit when it's free.",
+"combat_enter|supportive|laugh|common|Fight window. Don't panic-spray.",
+"combat_enter|supportive|evil|common|Stay composed. You've got answers.",
+"combat_enter|supportive|pout|common|Combat start. I'm with you.",
+"combat_enter|supportive|smug|uncommon|Aww, fight time. You've got cute courage. Use cover too.",
+"combat_enter|roasty|smug|rare|Cunzaki was here — win this clean.",
+"combat_leave|roasty|smug|common|Combat over. Somehow you're still breathing.",
+"combat_leave|roasty|laugh|common|Fight ended. Hide your celebration.",
+"combat_leave|roasty|evil|common|Out of combat. Don't immediately dive back in.",
+"combat_leave|roasty|pout|common|Threat gone. Check ammo before looting.",
+"combat_leave|roasty|neutral|common|Clear-ish. Don't invent a sequel fight.",
+"combat_leave|roasty|disgusted|common|Combat faded. Ego still loud — mute it.",
+"combat_leave|roasty|worried|common|You're clear. Loot like a thief, not a tourist.",
+"combat_leave|roasty|surprised|common|Out. Heal the pride quietly.",
+"combat_leave|roasty|smile|common|Fight done. Ears still working, right?",
+"combat_leave|roasty|happy|common|Disengaged. Don't re-engage for clout.",
+"combat_leave|roasty|sad|common|Combat left the chat. You shouldn't leave cover yet.",
+"combat_leave|roasty|fear|common|Clear. Soft reset.",
+"combat_leave|supportive|smug|common|Combat cleared. Reset and heal up.",
+"combat_leave|supportive|laugh|common|You're clear. Patch wounds and reload.",
+"combat_leave|supportive|evil|common|Out of combat. Take a second to stabilize.",
+"combat_leave|supportive|pout|common|Nice. Use the downtime wisely.",
+"combat_leave|supportive|neutral|common|Soft clear. Check flanks anyway.",
+"combat_leave|supportive|disgusted|common|Breathe. Reload. Reassess.",
+"combat_leave|supportive|worried|common|Good disengage. That's skill too.",
+"combat_leave|supportive|surprised|common|Quiet again. Stay ready.",
+"combat_leave|supportive|smile|common|Clear for now. Don't rush greed.",
+"combat_leave|supportive|happy|common|Reset complete mindset. Then move.",
+"combat_leave|supportive|sad|common|You're okay. Keep composure.",
+"combat_leave|supportive|fear|common|Downtime. Make it useful.",
+"bleeding|roasty|smug|common|You're bleeding. Congrats on the leak.",
+"bleeding|roasty|laugh|common|Bandage. Now. Your HP is dripping away.",
+"bleeding|roasty|evil|common|Bleed tick going. Medicine would be smart.",
+"bleeding|roasty|pout|common|Red trail unlocked. Stealth is cancelled.",
+"bleeding|roasty|neutral|common|Bleeding already? Peak efficiency.",
+"bleeding|roasty|disgusted|common|You're leaking. Plug it.",
+"bleeding|roasty|worried|common|Bleed status. Fashionably late to meds?",
+"bleeding|roasty|surprised|common|Drip drip. That's your future.",
+"bleeding|roasty|smile|common|Bandage speedrun, please.",
+"bleeding|roasty|happy|common|Bleeding. The floor wants autographs in red.",
+"bleeding|roasty|sad|common|Stop the leak before the fight does.",
+"bleeding|roasty|fear|common|Bleed ticks don't negotiate.",
+"bleeding|supportive|smug|common|You're bleeding. Stop and bandage immediately.",
+"bleeding|supportive|laugh|common|Bleed status active. Prioritize a medkit.",
+"bleeding|supportive|evil|common|Don't ignore the bleed. Fix it before fighting.",
+"bleeding|supportive|pout|common|Apply a bandage before you lose the fight to ticks.",
+"bleeding|supportive|neutral|common|Bleeding. Heal, then reassess.",
+"bleeding|supportive|disgusted|common|Soft stop. Bandage first.",
+"bleeding|supportive|worried|common|Bleed hurts fights. Fix it.",
+"bleeding|supportive|surprised|common|Meds now, heroics later.",
+"bleeding|supportive|smile|common|You're dripping. Cover and heal.",
+"bleeding|supportive|happy|common|Bandage window. Take it.",
+"bleeding|supportive|sad|common|Bleed active. I'm gently yelling.",
+"bleeding|supportive|fear|common|Heal the bleed. Then we talk peeks.",
+"bleed_stopped|roasty|smug|common|Bleed stopped. Miracles do happen.",
+"bleed_stopped|roasty|laugh|common|Finally patched. Try keeping the blood inside.",
+"bleed_stopped|roasty|evil|common|Bleed cleared. Don't reopen it instantly.",
+"bleed_stopped|roasty|pout|common|Sealed. Don't audition for sequel bleed.",
+"bleed_stopped|roasty|neutral|common|Leak fixed. Common sense pending.",
+"bleed_stopped|roasty|disgusted|common|Blood stayed home. Progress.",
+"bleed_stopped|supportive|smug|common|Bleed stopped. Nice recovery.",
+"bleed_stopped|supportive|laugh|common|You're sealed up. Stay careful.",
+"bleed_stopped|supportive|evil|common|Bleeding resolved. Good timing.",
+"bleed_stopped|supportive|pout|common|Patched. Soft reset complete.",
+"bleed_stopped|supportive|neutral|common|Good heal. Keep it that way.",
+"bleed_stopped|supportive|disgusted|common|Bleed gone. Ready when stable.",
+"hunger_low|roasty|smug|common|You're starving. Eat something that isn't a bullet.",
+"hunger_low|roasty|laugh|common|Hunger low. Your stomach is louder than your footsteps.",
+"hunger_low|roasty|evil|common|Hungry already? Professional scavenger energy.",
+"hunger_low|roasty|pout|common|Food. Or keep roleplaying a skeleton.",
+"hunger_low|roasty|neutral|common|Eat. Hangry aim is a real debuff.",
+"hunger_low|roasty|disgusted|common|Hunger bar crying. Feed it.",
+"hunger_low|roasty|worried|common|Snacks exist. Imagine that.",
+"hunger_low|roasty|surprised|common|Starvation speedrun cancelled, please.",
+"hunger_low|roasty|smile|common|Your stomach filed a ticket.",
+"hunger_low|roasty|happy|common|Food break. Not optional.",
+"hunger_low|supportive|smug|common|Hunger is low. Find food before you weaken.",
+"hunger_low|supportive|laugh|common|Eat soon. Low hunger will punish you later.",
+"hunger_low|supportive|evil|common|Grab a snack when it's safe.",
+"hunger_low|supportive|pout|common|Hunger warning. Don't ignore it in a fight.",
+"hunger_low|supportive|neutral|common|Soft reminder: food keeps you sharp.",
+"hunger_low|supportive|disgusted|common|Eat when you can. Weakness sneaks.",
+"hunger_low|supportive|worried|common|Hunger low. Plan a safe bite.",
+"hunger_low|supportive|surprised|common|Fuel up. Fights cost calories.",
+"hunger_low|supportive|smile|common|Food run. Careful route.",
+"hunger_low|supportive|happy|common|Hungry. Let's fix that kindly.",
+"thirst_low|roasty|smug|common|Thirsty? Water exists. Shocking, I know.",
+"thirst_low|roasty|laugh|common|Your thirst bar is begging for help.",
+"thirst_low|roasty|evil|common|Dehydration speedrun, classic.",
+"thirst_low|roasty|pout|common|Drink something. Sand is not hydration.",
+"thirst_low|roasty|neutral|common|Thirsty thoughts. Wet solutions.",
+"thirst_low|roasty|disgusted|common|Water. Not vibes.",
+"thirst_low|roasty|worried|common|Hydrate or die-rate. Pick.",
+"thirst_low|roasty|surprised|common|Thirst low. Mouth dry, aim drier.",
+"thirst_low|roasty|smile|common|Drink. I'm not above nagging.",
+"thirst_low|roasty|happy|common|Your cells want a beverage.",
+"thirst_low|supportive|smug|common|Thirst is low. Get water soon.",
+"thirst_low|supportive|laugh|common|Hydrate before you commit to another fight.",
+"thirst_low|supportive|evil|common|Find clean water when you can.",
+"thirst_low|supportive|pout|common|Low thirst will sneak up on you. Fix it.",
+"thirst_low|supportive|neutral|common|Soft sip break. Stay sharp.",
+"thirst_low|supportive|disgusted|common|Water run. Stay safe.",
+"thirst_low|supportive|worried|common|Hydration check. Please pass it.",
+"thirst_low|supportive|surprised|common|Thirst warning. Easy fix, big payoff.",
+"thirst_low|supportive|smile|common|Drink when safe. You'll thank yourself.",
+"thirst_low|supportive|happy|common|Low thirst. Gentle priority bump.",
+"radiation|roasty|smug|common|Radiation. Glow-in-the-dark is not a flex.",
+"radiation|roasty|laugh|common|You're cooking in rads. Leave. Immediately.",
+"radiation|roasty|evil|common|Radiation spike. Suit up or get out.",
+"radiation|roasty|pout|common|Rads rising. This is how people become lore.",
+"radiation|roasty|neutral|common|Glowing is not a skin unlock.",
+"radiation|roasty|disgusted|common|Rad zone. Exit stage left.",
+"radiation|roasty|worried|common|Geiger says no. Listen.",
+"radiation|roasty|surprised|common|Rads stacking. Fashion last.",
+"radiation|roasty|smile|common|You're pickling. Leave.",
+"radiation|roasty|happy|common|Radiation hug. Decline it.",
+"radiation|supportive|smug|common|Radiation detected. Exit the zone now.",
+"radiation|supportive|laugh|common|You're taking rads. Find cleaner ground.",
+"radiation|supportive|evil|common|Radiation active. Prioritize gear or escape.",
+"radiation|supportive|pout|common|Leave the radiation before it stacks.",
+"radiation|supportive|neutral|common|Soft exit from rads. Now.",
+"radiation|supportive|disgusted|common|Rads hurt. Move clean.",
+"radiation|supportive|worried|common|Get out. Heal later.",
+"radiation|supportive|surprised|common|Radiation. Route to safety.",
+"radiation|supportive|smile|common|Leave the glow. Keep the life.",
+"radiation|supportive|happy|common|Rad warning. I'm serious-soft.",
+"cold|roasty|smug|common|You're freezing. Find heat before you become a popsicle.",
+"cold|roasty|laugh|common|Cold status. Campfire energy, please.",
+"cold|roasty|evil|common|Shivering already? Tough guy.",
+"cold|roasty|pout|common|Temperature dropped. Fashion lost to survival.",
+"cold|roasty|neutral|common|Cold. Hugs from a fire, not from me.",
+"cold|roasty|disgusted|common|Frostbite is not an accessory.",
+"cold|roasty|worried|common|Warmth. Seek it.",
+"cold|roasty|surprised|common|Brr. Survival > drip.",
+"cold|roasty|smile|common|Cold stacks loading. Cancel with heat.",
+"cold|roasty|happy|common|You're ice. Melt intentionally.",
+"cold|supportive|smug|common|You're getting cold. Warm up soon.",
+"cold|supportive|laugh|common|Cold warning. Seek heat or warmer gear.",
+"cold|supportive|evil|common|Find a fire or shelter before it gets worse.",
+"cold|supportive|pout|common|Stay warm. Cold stacks will hurt.",
+"cold|supportive|neutral|common|Soft warmth quest. Start it.",
+"cold|supportive|disgusted|common|Cold. Prioritize heat safely.",
+"cold|supportive|worried|common|Warm up. Then loot.",
+"cold|supportive|surprised|common|Temperature drop. Adjust gear.",
+"cold|supportive|smile|common|Shelter sounds nice right now.",
+"cold|supportive|happy|common|Cold nudge. Take care.",
+"hot|roasty|smug|common|Overheating. Touch grass... preferably wet grass.",
+"hot|roasty|laugh|common|Too hot. Cool down before you melt your braincell.",
+"hot|roasty|evil|common|Heatstroke loading. Smart.",
+"hot|roasty|pout|common|You're cooking. Not in a cute way.",
+"hot|roasty|neutral|common|Hot. Shade exists.",
+"hot|roasty|disgusted|common|Melting arc. Skip it.",
+"hot|roasty|worried|common|Cool down. Ego heats enough.",
+"hot|roasty|surprised|common|Heat warning. Water helps.",
+"hot|roasty|smile|common|You're a walking stove. Fix it.",
+"hot|roasty|happy|common|Hot status. Fashion can wait.",
+"hot|supportive|smug|common|You're overheating. Cool off soon.",
+"hot|supportive|laugh|common|Heat is high. Find shade or water.",
+"hot|supportive|evil|common|Cool down before committing to a long run.",
+"hot|supportive|pout|common|Hot status. Manage temperature now.",
+"hot|supportive|neutral|common|Soft cool-down. Please.",
+"hot|supportive|disgusted|common|Heat check. Shade route.",
+"hot|supportive|worried|common|Overheating. Slow the sprint.",
+"hot|supportive|surprised|common|Cool off. Stay effective.",
+"hot|supportive|smile|common|Temperature high. Adjust plan.",
+"hot|supportive|happy|common|Hot nudge. Take a breather.",
+"drowning|roasty|smug|common|You're drowning. Surface. Now.",
+"drowning|roasty|laugh|common|Underwater panic hour?",
+"drowning|roasty|evil|common|Air is free. Go get some.",
+"drowning|roasty|pout|common|Drowning. Swim up before this gets stupid.",
+"drowning|roasty|neutral|common|Oxygen is not optional DLC.",
+"drowning|roasty|disgusted|common|Surface. I'm yelling underwater.",
+"drowning|roasty|worried|common|Gurgle arc cancelled. Swim.",
+"drowning|roasty|surprised|common|Air. Immediately.",
+"drowning|roasty|smile|common|You're becoming a fish wrong.",
+"drowning|roasty|happy|common|Drowning speedrun? Uninstall it.",
+"drowning|supportive|smug|common|You're drowning! Get to the surface!",
+"drowning|supportive|laugh|common|Air is low. Break the water now.",
+"drowning|supportive|evil|common|Swim up. Don't fight under there.",
+"drowning|supportive|pout|common|Drowning status. Prioritize oxygen.",
+"drowning|supportive|neutral|common|Surface! Soft panic, hard swim.",
+"drowning|supportive|disgusted|common|Air first. Always.",
+"drowning|supportive|worried|common|Up. Now. Please.",
+"drowning|supportive|surprised|common|Break water. Breathe.",
+"drowning|supportive|smile|common|Oxygen low. Exit the drink.",
+"drowning|supportive|happy|common|Drowning. I've got loud concern.",
+"staff_nearby|roasty|smug|common|Staff nearby. Behave. Or at least pretend.",
+"staff_nearby|roasty|laugh|common|Mod energy detected. Maybe hide the crimes.",
+"staff_nearby|roasty|evil|common|Staff in range. Your villain arc is postponed.",
+"staff_nearby|roasty|pout|common|Admin proximity. Play nice.",
+"staff_nearby|roasty|neutral|common|Staff radar ping. Soft crimes only. Actually none.",
+"staff_nearby|roasty|disgusted|common|Moderator nearby. Become a model citizen. Briefly.",
+"staff_nearby|roasty|worried|common|Staff. Smile with your inventory closed.",
+"staff_nearby|roasty|surprised|common|Behave. I'm watching you watch them.",
+"staff_nearby|roasty|smile|common|Mod in the neighborhood. Chill.",
+"staff_nearby|roasty|happy|common|Staff proximity. Comedy mute recommended.",
+"staff_nearby|supportive|smug|common|Staff nearby. Stay clean and careful.",
+"staff_nearby|supportive|laugh|common|A staff member is close. Keep it normal.",
+"staff_nearby|supportive|evil|common|Staff in the area. No funny business.",
+"staff_nearby|supportive|pout|common|Mod nearby. Focus on surviving, not flexing.",
+"staff_nearby|supportive|neutral|common|Soft reminder: play fair, stay sharp.",
+"staff_nearby|supportive|disgusted|common|Staff close. Keep composure.",
+"staff_nearby|supportive|worried|common|Normal gameplay mode. You've got this.",
+"staff_nearby|supportive|surprised|common|Mods nearby. Survive cute, play clean.",
+"staff_nearby|supportive|smile|common|Staff presence. Eyes on the game.",
+"staff_nearby|supportive|happy|common|Stay wholesome. Stay alive.",
+"enemy_nearby|roasty|smug|common|Hostile nearby. Smile for the crosshair.",
+"enemy_nearby|roasty|laugh|common|Someone's close. Don't get caught looking AFK.",
+"enemy_nearby|roasty|evil|common|Enemy in range. Ears up.",
+"enemy_nearby|roasty|pout|common|Company. Hopefully not smarter than you.",
+"enemy_nearby|roasty|neutral|common|Threat nearby. Check your corners.",
+"enemy_nearby|roasty|disgusted|common|Footstep romance. Load a mag.",
+"enemy_nearby|roasty|worried|common|Close contact. Soft feet.",
+"enemy_nearby|roasty|surprised|common|Hostile bubble. Don't sprint into it.",
+"enemy_nearby|roasty|smile|common|Someone's hunting. Or lost. Assume hunting.",
+"enemy_nearby|roasty|happy|common|Enemy nearby. Pretend you have game sense.",
+"enemy_nearby|roasty|sad|common|Threat ping. Cover > vibes.",
+"enemy_nearby|roasty|fear|common|Close. Peek smart or don't peek.",
+"enemy_nearby|roasty|smug|common|Hostile in 300. Yes, I said three hundred.",
+"enemy_nearby|roasty|laugh|common|Ears first. Ego later.",
+"enemy_nearby|roasty|evil|common|They're close enough to smell your loot.",
+"enemy_nearby|roasty|pout|common|Company. Invite them to the respawn screen.",
+"enemy_nearby|roasty|neutral|common|Threat. Check audio, then angles.",
+"enemy_nearby|roasty|disgusted|common|Nearby hostile. Don't donate the spray.",
+"enemy_nearby|supportive|smug|common|Enemy nearby. Slow down and listen.",
+"enemy_nearby|supportive|laugh|common|Hostile close. Ready your aim and cover.",
+"enemy_nearby|supportive|evil|common|Someone's in your bubble. Stay alert.",
+"enemy_nearby|supportive|pout|common|Nearby threat. Don't sprint into them.",
+"enemy_nearby|supportive|neutral|common|Keep composure. You can win this fight.",
+"enemy_nearby|supportive|disgusted|common|Soft footsteps. Hard focus.",
+"enemy_nearby|supportive|worried|common|Threat close. Breathe and hold an angle.",
+"enemy_nearby|supportive|surprised|common|Enemy in range. Info over panic.",
+"enemy_nearby|supportive|smile|common|Close contact. You've got this.",
+"enemy_nearby|supportive|happy|common|Stay quiet. Stay ready.",
+"enemy_nearby|supportive|sad|common|Hostile nearby. Play the sound.",
+"enemy_nearby|supportive|fear|common|Within 300. Careful pathing.",
+"enemy_nearby|supportive|smug|common|Threat bubble. Soft peeks.",
+"enemy_nearby|supportive|laugh|common|Someone's close. Team if you can.",
+"enemy_nearby|supportive|evil|common|Alert mode. Smart fights only.",
+"enemy_nearby|supportive|pout|common|Nearby enemy. Choose the fight.",
+"enemy_nearby|supportive|neutral|common|Ears up. Crosshair honest.",
+"enemy_nearby|supportive|disgusted|common|Close threat. I'm with you.",
+"enemy_nearby|roasty|smug|uncommon|Aww, a visitor. Make them regret the doorbell.",
+"enemy_nearby|supportive|smug|uncommon|Cute tension. Stay calm — you've practiced this.",
+"enemy_nearby|roasty|smug|rare|Cunzaki was here — clear the nearby first.",
+"party_join|roasty|smug|common|You're in a party. Try not to drag them down.",
+"party_join|roasty|laugh|common|Teammates acquired. Their mistake.",
+"party_join|roasty|evil|common|Party up. Share loot like an adult.",
+"party_join|roasty|pout|common|Squad formed. Chaos with friends.",
+"party_join|roasty|neutral|common|Friends online. Don't farm their trust.",
+"party_join|roasty|disgusted|common|Party linked. Callouts > ego.",
+"party_join|roasty|worried|common|Squad. Try teamwork. Novel.",
+"party_join|roasty|surprised|common|You're not solo. Act accordingly.",
+"party_join|roasty|smile|common|Party joined. Share meds, not blame.",
+"party_join|roasty|happy|common|Team mode. Comedy optional, coordination not.",
+"party_join|supportive|smug|common|Party joined. Stick together and callouts help.",
+"party_join|supportive|laugh|common|You're teamed up. Watch each other's backs.",
+"party_join|supportive|evil|common|In a party now. Share info and stay linked.",
+"party_join|supportive|pout|common|Nice. Team play wins more than ego.",
+"party_join|supportive|neutral|common|Squad up. Soft comms, hard cover.",
+"party_join|supportive|disgusted|common|Together. Move as one brain.",
+"party_join|supportive|worried|common|Party hugs. Stay linked.",
+"party_join|supportive|surprised|common|Team energy. Use it.",
+"party_join|supportive|smile|common|Callouts welcome. You've got friends.",
+"party_join|supportive|happy|common|Party on. Play kind, play sharp.",
+"party_leave|roasty|smug|common|Party left. Solo queue dignity restored.",
+"party_leave|roasty|laugh|common|Alone again. Just how your decision-making likes it.",
+"party_leave|roasty|evil|common|Out of party. Don't get lonely and die.",
+"party_leave|roasty|pout|common|Solo mode. Blame redistribution complete.",
+"party_leave|roasty|neutral|common|Party ended. Chaos goes freelance.",
+"party_leave|roasty|disgusted|common|Alone. Cover still exists.",
+"party_leave|roasty|worried|common|Squad left the chat. You didn't leave caution.",
+"party_leave|roasty|surprised|common|Solo. Try not to invent fair fights.",
+"party_leave|supportive|smug|common|You left the party. Stay aware solo.",
+"party_leave|supportive|laugh|common|Solo now. Play safer angles.",
+"party_leave|supportive|evil|common|Party ended. You've got this alone too.",
+"party_leave|supportive|pout|common|Soft solo. Hard discipline.",
+"party_leave|supportive|neutral|common|Alone but not careless.",
+"party_leave|supportive|disgusted|common|Solo path. Quieter routes.",
+"party_leave|supportive|worried|common|Party over. Adapt calmly.",
+"party_leave|supportive|surprised|common|You've got solo tools. Use them.",
+"reviving|roasty|smug|common|Look at you, being useful for once.",
+"reviving|roasty|laugh|common|Reviving someone. Don't get beamed mid-animation.",
+"reviving|roasty|evil|common|Hero moment. Cover first, then the revive.",
+"reviving|roasty|pout|common|Saving them? Bold charity.",
+"reviving|roasty|neutral|common|Revive channel. Please don't AFK in it.",
+"reviving|roasty|disgusted|common|Hero arc loading. Cover check.",
+"reviving|roasty|worried|common|You're the medic now. Own it.",
+"reviving|roasty|surprised|common|Revive. Watch the doors like they owe you money.",
+"reviving|roasty|smile|common|Charity work. Armored charity preferred.",
+"reviving|roasty|happy|common|Hold revive. Hold your life too.",
+"reviving|supportive|smug|common|Nice revive. Watch your surroundings while you do it.",
+"reviving|supportive|laugh|common|Reviving. Keep an eye on flanks.",
+"reviving|supportive|evil|common|Good teammate play. Finish the revive safely.",
+"reviving|supportive|pout|common|Hold the revive and stay ready to cancel if pushed.",
+"reviving|supportive|neutral|common|Soft hands, hard awareness.",
+"reviving|supportive|disgusted|common|You're saving them. I've got loud pride.",
+"reviving|supportive|worried|common|Revive carefully. You're exposed.",
+"reviving|supportive|surprised|common|Good. Finish safe.",
+"reviving|supportive|smile|common|Team play. Beautiful.",
+"reviving|supportive|happy|common|Hold strong. Almost up.",
+"boss_spawn|roasty|smug|common|Boss event up. Go be brave. Or loot later. I don't care.",
+"boss_spawn|roasty|laugh|common|Big NPC online. Don't feed it for free.",
+"boss_spawn|roasty|evil|common|Event boss spotted. Try not to be the highlight reel.",
+"boss_spawn|roasty|pout|common|World event. Perfect time for bad decisions.",
+"boss_spawn|roasty|neutral|common|Boss presence detected. Gear check.",
+"boss_spawn|roasty|disgusted|common|Boss. Bring bullets and humility.",
+"boss_spawn|roasty|worried|common|Event NPC. Don't ego peek the raid boss.",
+"boss_spawn|roasty|surprised|common|Big threat. Bigger third parties.",
+"boss_spawn|roasty|smile|common|Boss up. Loot or legend — pick one plan.",
+"boss_spawn|roasty|happy|common|World boss. Camera ready for your fail? Rude.",
+"boss_spawn|supportive|smug|common|A boss event is active. Prepare before engaging.",
+"boss_spawn|supportive|laugh|common|Boss nearby or up. Watch the area carefully.",
+"boss_spawn|supportive|evil|common|World boss event. Coordinate if you can.",
+"boss_spawn|supportive|pout|common|Event spawn. Opportunity if you're ready.",
+"boss_spawn|supportive|neutral|common|Big threat event. Don't rush blind.",
+"boss_spawn|supportive|disgusted|common|Boss. Soft approach, hard prep.",
+"boss_spawn|supportive|worried|common|Event live. Check kit first.",
+"boss_spawn|supportive|surprised|common|Boss window. Play smart.",
+"boss_spawn|supportive|smile|common|Prepare, then commit.",
+"boss_spawn|supportive|happy|common|Boss up. Stay with the plan.",
+"timed_crate|roasty|smug|common|Timed crate. Race for loot, or race for death. Your call.",
+"timed_crate|roasty|laugh|common|Crate timer up. Campers incoming.",
+"timed_crate|roasty|evil|common|Timed crate. Perfect bait for greedy players.",
+"timed_crate|roasty|pout|common|Crate event. Don't get third-partied mid-loot.",
+"timed_crate|roasty|neutral|common|Go get shiny boxes. Try surviving the audience.",
+"timed_crate|roasty|disgusted|common|Crate. Free loot with paid bullets.",
+"timed_crate|roasty|worried|common|Timer crate. Greed meter rising.",
+"timed_crate|roasty|surprised|common|Crate ping. Assume company.",
+"timed_crate|roasty|smile|common|Shiny box. Shiny ambush.",
+"timed_crate|roasty|happy|common|Timed crate. Soft loot, hard exits.",
+"timed_crate|supportive|smug|common|Timed crate is up. Approach carefully.",
+"timed_crate|supportive|laugh|common|Crate event active. Check for campers first.",
+"timed_crate|supportive|evil|common|Timed crate spotted. Plan your approach.",
+"timed_crate|supportive|pout|common|Good loot opportunity. Stay aware while opening.",
+"timed_crate|supportive|neutral|common|Crate means contest. Don't tunnel vision.",
+"timed_crate|supportive|disgusted|common|Soft crate run. Hard awareness.",
+"timed_crate|supportive|worried|common|Crate up. Ears first.",
+"timed_crate|supportive|surprised|common|Approach from cover. Loot second.",
+"timed_crate|supportive|smile|common|Opportunity. Don't gift the third party.",
+"timed_crate|supportive|happy|common|Crate plan: in smart, out smarter.",
 }
 local DIALOGUE_RU = {
-"greeting|roasty|smug|O, ty menya vklyuchil? Ladno. Tolko ne pozor nas.",
-"greeting|roasty|pout|U menya byl normalnyy den, poka ty ne nazhal etot toggle.",
-"greeting|roasty|evil|Tvoy lichnyy commentator pribyl. Eto budet smeshno.",
-"greeting|roasty|laugh|Ya gotova. Day mne chto-to, nad chem mozhno porugat.",
-"greeting|roasty|neutral|April online. Ozhidaniya opasno nizkie.",
-"greeting|roasty|disgusted|Ty zval? Nadeyus, tvoy gameplay podros, poka menya ne bylo.",
-"greeting|supportive|smile|April online. Ya budu za toboy sledit.",
-"greeting|supportive|happy|Gotova, kogda ty gotov. Davay vyzhivem.",
-"greeting|supportive|neutral|Ya zdes. Bud na cheku - i vse budet ok.",
-"greeting|supportive|smile|Vse set! Postaraysya vernutsya v odnom kuske.",
-"greeting|supportive|happy|Tvoy lyubimyy announcer gotov k startu.",
-"greeting|supportive|neutral|Sistemy ready. Ya skazhu, esli chto-to vazhnoe.",
-"death|roasty|laugh|Ty otstoy, lol. Khochesh poprobovat snova?",
-"death|roasty|disgusted|Eto byl tvoy plan? Serezno?",
-"death|roasty|smug|Eshche odna tactical donation vragu.",
-"death|roasty|pout|Ya otvernulas na sekundu - i ty uzhe mertv.",
-"death|roasty|evil|Otlichnoe performance. Zero notes. Zero pulse tozhe.",
-"death|roasty|laugh|Speedrunish respawn screen snova?",
-"death|roasty|disgusted|Mozhet, puli promahnetsya, esli v sleduyushchiy raz postoyish eshche nepodvizhnee.",
-"death|roasty|smug|Khoroshie novosti: zemlya uspeshno tebya poymala.",
-"death|roasty|pout|Prekrati delat smert kak hobby.",
-"death|roasty|laugh|Oni dazhe ne napryaglis. Pochti impressive.",
-"death|roasty|evil|Bezuprechnaya demonstratsiya togo, kak ne nado.",
-"death|roasty|disgusted|Tvoi instincty vyzhivaniya podali v otstavku.",
-"death|roasty|smug|Ya videla training dummy s luchshim positioning.",
-"death|roasty|pout|Eta zhizn byla koroche, chem etot speech bubble.",
-"death|supportive|sad|Eto bylo bolno. Reset i medlennee.",
-"death|supportive|worried|Ty down, no eto ne konets. Uchish angle.",
-"death|supportive|smile|Plokhoy round. Fresh start.",
-"death|supportive|sad|Ne povezlo. Vernem v sleduyushchey zhizni.",
-"death|supportive|worried|Dysh. Podumay, chto tebya otkrylo.",
-"death|supportive|neutral|Death confirmed. Vremya menyat plan.",
-"death|supportive|smile|Otryasnis. Sleduyushchaya zhizn - tvoya.",
-"death|supportive|sad|Bylo zhestko, no teper ty znaesh, gde oni byli.",
-"death|supportive|worried|Razberi oshibku - i ostav ee pozadi.",
-"death|supportive|neutral|Odin plokhoy fight ne reshaet vsyu sessiyu.",
-"respawn|roasty|smug|Uzhe nazad? Poprobuy uderzhat eto telo hotya by minutku.",
-"respawn|roasty|pout|Novaya zhizn, te zhe somnitelnye decision-making.",
-"respawn|roasty|evil|Round two. Nu tochno nichego ne poydet ne tak.",
-"respawn|roasty|laugh|Knopka respawn zasluzhila overtime.",
-"respawn|roasty|neutral|S vozvrashcheniem. Ya sokhranila tvoyu dostoinstvo. Ego pochti ne bylo.",
-"respawn|roasty|smug|Fresh body dostavleno. Obrashchaysya chut berezhnee.",
-"respawn|roasty|pout|Ok, ne umirat srazu. Ves assignment na etom.",
-"respawn|roasty|laugh|Glyan, kto vybralsya s loading screen.",
-"respawn|supportive|happy|Ty vernulsya. Novaya zhizn, clean slate.",
-"respawn|supportive|smile|Respawned i ready. Ne toropis.",
-"respawn|supportive|neutral|Fresh start. Snachala check okrestnosti.",
-"respawn|supportive|happy|Vot i ty. Davay sdelaem etu zhizn znachimoy.",
-"respawn|supportive|smile|Snova v dele. Verni ritm.",
-"respawn|supportive|neutral|Respawn complete. Rebuild, prezhde chem brat fight.",
-"respawn|supportive|happy|Novaya zhizn ready. Nachni s bezopasnogo route.",
-"respawn|supportive|smile|S vozvrashcheniem. Po odnomu khoroshemu resheniyu za raz.",
-"downed|roasty|laugh|Inspektsiya pola idet khorosho?",
-"downed|roasty|smug|Ty nashel downed state. Ochen thorough testing.",
-"downed|roasty|pout|Crawl - eto ne combat strategy.",
-"downed|roasty|disgusted|Vot pochemu ya govorila ispolzovat cover.",
-"downed|roasty|evil|Technically zhiv. Emotionalno? Sporno.",
-"downed|roasty|laugh|Pomashi teammate snizu.",
-"downed|roasty|worried|Kto-nibud, revive etot professionalnyy pol-ornament.",
-"downed|roasty|smug|Vydayushchayasya poza. Ten out of ten.",
-"downed|supportive|worried|Ty downed. Za cover i zovi help.",
-"downed|supportive|fear|Derzhis nizko. Teammate eshche mozhet doyti.",
-"downed|supportive|sad|Ne sdavaysya. Polzi tuda, gde bezopasno.",
-"downed|supportive|worried|Downed, ne mertv. Break line of sight.",
-"downed|supportive|neutral|Ekonom movement i zhdi revive.",
-"downed|supportive|fear|Ostorozhno, eshche odin hit mozhet zakonchit.",
-"downed|supportive|sad|Polzi k cover, esli eto safe.",
-"downed|supportive|worried|Skazhi pozitsiyu i day team rabotat.",
-"revived|roasty|smug|Kto-to tebya realno podnyal. Bud blagodaren.",
-"revived|roasty|pout|Ty snova stoish. Sdelay tak, chtoby ono stoilo ih vremeni.",
-"revived|roasty|laugh|Revived! Pol budet skuchat.",
-"revived|roasty|evil|Second chance poluchen. Plokhie idei snova enabled.",
-"revived|roasty|neutral|Snova na nogah. Poprobuy ih ispolzovat v etot raz.",
-"revived|roasty|smug|U tvoego teammate neveroyatnaya vera v tebya.",
-"revived|supportive|happy|Ty up! Heal, prezhde chem re-engage.",
-"revived|supportive|smile|Nice recovery. Naydi cover i reset.",
-"revived|supportive|worried|Revived. Ne peek, poka ne healthy.",
-"revived|supportive|happy|Khoroshiy save. Teper derzhis s team.",
-"revived|supportive|neutral|Snova na nogah. Snachala stabilize.",
-"revived|supportive|smile|Second chance secured. Sdelay ego znachimym.",
-"low_health|roasty|worried|Tvoy health bar teper pochti decorative.",
-"low_health|roasty|pout|Odin chih - i ty snova na respawn.",
-"low_health|roasty|smug|Smelaya strategy: fight s trema pixelami HP.",
-"low_health|roasty|fear|Mozhet, hvatit peek? Prosto mysl.",
-"low_health|roasty|disgusted|Heal. Krasnyy screen - eto ne aesthetic.",
-"low_health|roasty|worried|Ty derzhishsya na confidence i plokhoy matematike.",
-"low_health|roasty|pout|Snachala naydi medicine, potom sleduyushchuyu pulyu.",
-"low_health|roasty|smug|Zhit na odnom hit point - eto ne personality.",
-"low_health|supportive|worried|Low health. Disengage i heal seychas.",
-"low_health|supportive|fear|Ty critical. Naydi hard cover.",
-"low_health|supportive|sad|Ne beri drugoy fight, poka ne vosstanovishsya.",
-"low_health|supportive|worried|Health nizkiy. Zamedlis i reset.",
-"low_health|supportive|neutral|Critical health. Priority - vyzhivanie.",
-"low_health|supportive|fear|Break line of sight i heal.",
-"low_health|supportive|worried|Seychas ne trade damage.",
-"low_health|supportive|neutral|Naydi bezopasnost, heal, potom pereotseni.",
-"recovered|roasty|smug|Health restored. Common sense eshche loading.",
-"recovered|roasty|smile|Patchnul - i gotov delat novye oshibki.",
-"recovered|roasty|laugh|Glyan-ka, ty otkryl healing.",
-"recovered|roasty|pout|Luchshe. Tolko ne trat eto srazu.",
-"recovered|roasty|evil|Polnee health bar, obnovlennyy capacity dlya haosa.",
-"recovered|roasty|neutral|Ty proshe medicine tutorial.",
-"recovered|supportive|happy|Health recovered. Ty snova ready.",
-"recovered|supportive|smile|Khoroshiy reset. Vybiray sleduyushchiy fight ostrozhno.",
-"recovered|supportive|neutral|Snova stable. Pereprover ammo i okrestnosti.",
-"recovered|supportive|happy|Nice recovery. Derzhi momentum.",
-"recovered|supportive|smile|Gorazdo luchshe. Ostavaysya disciplined.",
-"recovered|supportive|neutral|Recovery complete. Vozvrashchaysya, kogda timing pravilnyy.",
-"safe_enter|roasty|smug|Safe zone. Tut dazhe ty dolzhen vyzhit.",
-"safe_enter|roasty|laugh|Pozdravlyayu, igra teper tebya zashchishchaet.",
-"safe_enter|roasty|pout|Ty safe. Tolko ne spotknis ob nichego.",
-"safe_enter|roasty|neutral|Safe zone. Tvoi danger privileges vremenno otozvany.",
-"safe_enter|roasty|smile|Mirnaya minutka dlya tvoego overworked respawn key.",
-"safe_enter|roasty|evil|Naslazhdaysya safety, poka ona est.",
-"safe_enter|supportive|happy|Safe zone. Vozmi moment na reset.",
-"safe_enter|supportive|smile|Ty safe. Razberi inventar i planiruy dalshe.",
-"safe_enter|supportive|neutral|Safe zone. Horoshee vremya na regroup.",
-"safe_enter|supportive|happy|Dobralis safe. Restock, prezhde chem uhodit.",
-"safe_enter|supportive|smile|Tut ty protected. Ispolzuy breathing room.",
-"safe_enter|supportive|neutral|Prover, chto nuzhno, prezhde chem vykhodit.",
-"safe_leave|roasty|evil|Uezzhaesh iz safety? Eto budet entertaining.",
-"safe_leave|roasty|smug|Protection off. Posmotrim, skolko eto prodlitsya.",
-"safe_leave|roasty|pout|Obratno v danger bez vsyakogo supervision.",
-"safe_leave|roasty|laugh|Safe zone ostavlena. Respawn screen na dezhurstve.",
-"safe_leave|roasty|neutral|Ty snova vulnerable. Pritvoryaysya, chto ostorozhen.",
-"safe_leave|roasty|evil|I vot ushel tvoy posledniy khoroshiy excuse.",
-"safe_leave|supportive|worried|Vyhodish iz safe zone. Check route.",
-"safe_leave|supportive|neutral|Protection konchilas. Sledi za nearby players.",
-"safe_leave|supportive|smile|Snova snaruzhi. Dvizhaysya s purpose.",
-"safe_leave|supportive|worried|Ty snova exposed. Derzhi cover ryadom.",
-"safe_leave|supportive|neutral|Safe zone ostavlena. Sledi za okrestnostyami.",
-"safe_leave|supportive|smile|Route checked? Togda idem.",
-"combat_enter|roasty|evil|Combat start. Postaraysya ih ne feedit.",
-"combat_enter|roasty|smug|O, fight. Eto budet educational.",
-"combat_enter|roasty|surprised|Uzhe guns out? Smelo dlya tebya.",
-"combat_enter|roasty|laugh|Ty v combat. Khotya by raz povedi sebya sootvetstvenno.",
-"combat_enter|roasty|pout|Kto-to hochet tvoy inventar. Ne donate.",
-"combat_enter|roasty|evil|Fight mode. Please aim v nih, ne v pol.",
-"combat_enter|supportive|worried|Ty v combat. Derzhi cover i track angles.",
-"combat_enter|supportive|fear|Fight start. Focus i ne overextend.",
-"combat_enter|supportive|neutral|Combat engaged. Sledi flanks i reload timing.",
-"combat_enter|supportive|worried|Spokoyno. Vyigray trade, potom heal.",
-"combat_enter|supportive|smile|Ty spravishsya. Play smart, ne loud.",
-"combat_enter|supportive|neutral|V combat. Priority - info i positioning.",
-"combat_leave|roasty|smug|Combat over. Kak-to ty eshche dyshish.",
-"combat_leave|roasty|pout|Fight konchilsya. Spriach celebration.",
-"combat_leave|roasty|laugh|Out of combat. Ne nyryay obratno srazu.",
-"combat_leave|roasty|neutral|Threat ushel. Check ammo, prezhde chem loot.",
-"combat_leave|supportive|happy|Combat cleared. Reset i heal up.",
-"combat_leave|supportive|smile|Ty clear. Patch wounds i reload.",
-"combat_leave|supportive|neutral|Out of combat. Sekundu na stabilize.",
-"combat_leave|supportive|happy|Nice. Ispolzuy downtime umno.",
-"bleeding|roasty|disgusted|Ty bleeding. Congrats na utechku.",
-"bleeding|roasty|pout|Bandage. Seychas. Tvoy HP kapaet.",
-"bleeding|roasty|worried|Bleed tick idet. Medicine byla by smart.",
-"bleeding|roasty|laugh|Red trail unlocked. Stealth cancelled.",
-"bleeding|roasty|evil|Uzhe bleeding? Peak efficiency.",
-"bleeding|supportive|worried|Ty bleeding. Ostanovis i bandage srazu.",
-"bleeding|supportive|fear|Bleed status active. Priority - medkit.",
-"bleeding|supportive|sad|Ne ignoriruy bleed. Fix, prezhde chem fight.",
-"bleeding|supportive|worried|Kin bandage, poka ticks ne ubili fight.",
-"bleeding|supportive|neutral|Bleeding. Heal, potom pereotseni.",
-"bleed_stopped|roasty|smug|Bleed stopped. Chudesa byvayut.",
-"bleed_stopped|roasty|smile|Nakonets patched. Derzhi krov vnutri.",
-"bleed_stopped|roasty|neutral|Bleed cleared. Ne otkroy srazu snova.",
-"bleed_stopped|supportive|happy|Bleed stopped. Nice recovery.",
-"bleed_stopped|supportive|smile|Ty zapechatan. Bud ostorozhen.",
-"bleed_stopped|supportive|neutral|Bleeding resolved. Khoroshiy timing.",
-"hunger_low|roasty|pout|Ty golodayesh. Sesh chto-to, chto ne pulya.",
-"hunger_low|roasty|disgusted|Hunger low. Zheludok gromche footsteps.",
-"hunger_low|roasty|smug|Uzhe hungry? Professional scavenger energy.",
-"hunger_low|roasty|laugh|Food. Ili prodolzhay roleplay skeleton.",
-"hunger_low|supportive|worried|Hunger nizkiy. Naydi food, poka ne oslabel.",
-"hunger_low|supportive|neutral|Poesh skoro. Low hunger potom nakazhet.",
-"hunger_low|supportive|smile|Vozmi snack, kogda safe.",
-"hunger_low|supportive|worried|Hunger warning. Ne ignoriruy v fight.",
-"thirst_low|roasty|pout|Thirsty? Voda sushchestvuet. Shocking, ya znayu.",
-"thirst_low|roasty|disgusted|Tvoy thirst bar molit o help.",
-"thirst_low|roasty|smug|Dehydration speedrun, classic.",
-"thirst_low|roasty|laugh|Vypey chto-nibud. Pesok - eto ne hydration.",
-"thirst_low|supportive|worried|Thirst nizkiy. Voda skoro.",
-"thirst_low|supportive|neutral|Hydrate, prezhde chem brat drugoy fight.",
-"thirst_low|supportive|smile|Naydi clean water, kogda smozhesh.",
-"thirst_low|supportive|worried|Low thirst podkradetsya. Fix eto.",
-"radiation|roasty|fear|Radiation. Glow-in-the-dark - eto ne flex.",
-"radiation|roasty|disgusted|Ty zharishsya v rads. Vali. Immediately.",
-"radiation|roasty|worried|Radiation spike. Suit up ili vali.",
-"radiation|roasty|evil|Rads rastut. Tak lyudi stanovyatsya lore.",
-"radiation|supportive|fear|Radiation detected. Vali iz zone seychas.",
-"radiation|supportive|worried|Ty beresh rads. Naydi cleaner ground.",
-"radiation|supportive|neutral|Radiation active. Priority - gear ili escape.",
-"radiation|supportive|fear|Uydi ot radiation, poka ne stacks.",
-"cold|roasty|pout|Ty merznesh. Naydi heat, poka ne stal popsicle.",
-"cold|roasty|worried|Cold status. Campfire energy, please.",
-"cold|roasty|laugh|Uzhe drozhish? Tough guy.",
-"cold|roasty|smug|Temperature upala. Fashion proigral survival.",
-"cold|supportive|worried|Tebe holodno. Sogreysya skoro.",
-"cold|supportive|neutral|Cold warning. Ishchi heat ili teplee gear.",
-"cold|supportive|smile|Naydi fire ili shelter, poka ne khuzhe.",
-"cold|supportive|worried|Derzhi teplo. Cold stacks budut bolno.",
-"hot|roasty|disgusted|Overheating. Touch grass... zhelatelno mokryy grass.",
-"hot|roasty|pout|Slishkom hot. Cool down, poka ne rasplavil braincell.",
-"hot|roasty|laugh|Heatstroke loading. Smart.",
-"hot|roasty|smug|Ty zharishsya. Ne v cute smysle.",
-"hot|supportive|worried|Ty overheating. Cool off skoro.",
-"hot|supportive|neutral|Heat vysokiy. Naydi shade ili water.",
-"hot|supportive|smile|Cool down, prezhde chem long run.",
-"hot|supportive|worried|Hot status. Manage temperature seychas.",
-"drowning|roasty|fear|Ty drowning. Na poverhnost. Seychas.",
-"drowning|roasty|surprised|Underwater panic hour?",
-"drowning|roasty|laugh|Vozduh free. Idi vozmi.",
-"drowning|roasty|worried|Drowning. Plyvi vverh, poka ne stalo stupid.",
-"drowning|supportive|fear|Ty drowning! Na poverhnost!",
-"drowning|supportive|worried|Air nizkiy. Break water seychas.",
-"drowning|supportive|fear|Plyvi vverh. Ne fight tam vnizu.",
-"drowning|supportive|worried|Drowning status. Priority - oxygen.",
-"staff_nearby|roasty|surprised|Staff nearby. Behave. Ili hotya by pritvoryaysya.",
-"staff_nearby|roasty|worried|Mod energy detected. Mozhet, spryach crimes.",
-"staff_nearby|roasty|smug|Staff v range. Tvoy villain arc otlozhen.",
-"staff_nearby|roasty|neutral|Admin proximity. Play nice.",
-"staff_nearby|supportive|worried|Staff nearby. Bud clean i ostorozhen.",
-"staff_nearby|supportive|neutral|Staff member ryadom. Derzhi normalno.",
-"staff_nearby|supportive|smile|Staff v zone. Bez funny business.",
-"staff_nearby|supportive|worried|Mod nearby. Focus na survival, ne na flex.",
-"enemy_nearby|roasty|evil|Hostile nearby. Ulybnis dlya crosshair.",
-"enemy_nearby|roasty|smug|Kto-to blizko. Ne popadis looking AFK.",
-"enemy_nearby|roasty|surprised|Enemy v range. Ushi na cheku.",
-"enemy_nearby|roasty|laugh|Company. Nadeyus, ne umnee tebya.",
-"enemy_nearby|roasty|worried|Threat nearby. Check corners.",
-"enemy_nearby|supportive|worried|Enemy nearby. Zamedlis i slushay.",
-"enemy_nearby|supportive|fear|Hostile blizko. Gotov aim i cover.",
-"enemy_nearby|supportive|neutral|Kto-to v tvoem bubble. Stay alert.",
-"enemy_nearby|supportive|worried|Nearby threat. Ne sprint pryamo v nih.",
-"enemy_nearby|supportive|smile|Derzhi composure. Ty mozhesh vyigrat etot fight.",
-"party_join|roasty|smug|Ty v party. Postaraysya ih ne tyanut vniz.",
-"party_join|roasty|laugh|Teammates acquired. Ih oshibka.",
-"party_join|roasty|pout|Party up. Share loot kak adult.",
-"party_join|roasty|evil|Squad formed. Haos s friends.",
-"party_join|supportive|happy|Party joined. Derzhites vmeste - callouts pomogayut.",
-"party_join|supportive|smile|Vy v team. Sledite za spinyami drug druga.",
-"party_join|supportive|neutral|Teper v party. Share info i stay linked.",
-"party_join|supportive|happy|Nice. Team play byot ego.",
-"party_leave|roasty|pout|Party left. Solo queue dignity restored.",
-"party_leave|roasty|smug|Snova alone. Kak raz kak lyubit tvoe decision-making.",
-"party_leave|roasty|neutral|Out of party. Ne umri ot lonely.",
-"party_leave|supportive|neutral|Ty ushel iz party. Stay aware solo.",
-"party_leave|supportive|worried|Teper solo. Play safer angles.",
-"party_leave|supportive|smile|Party ended. Ty spravishsya i alone.",
-"reviving|roasty|smug|Glyan na tebya - useful hotya by raz.",
-"reviving|roasty|smile|Reviving kogo-to. Ne popadis beam mid-animation.",
-"reviving|roasty|pout|Hero moment. Snachala cover, potom revive.",
-"reviving|roasty|laugh|Spasaesh ih? Bold charity.",
-"reviving|supportive|smile|Nice revive. Sledi za okrestnostyami, poka delaesh.",
-"reviving|supportive|worried|Reviving. Sledi flanks.",
-"reviving|supportive|happy|Khoroshiy teammate play. Finish revive safe.",
-"reviving|supportive|neutral|Derzhi revive i bud gotov cancel, esli push.",
-"boss_spawn|roasty|evil|Boss event up. Idi bud brave. Ili loot potom. Mne vse ravno.",
-"boss_spawn|roasty|surprised|Big NPC online. Ne feedi ego za free.",
-"boss_spawn|roasty|smug|Event boss spotted. Postaraysya ne byt highlight reel.",
-"boss_spawn|roasty|laugh|World event. Idealnoe vremya dlya plohih resheniy.",
-"boss_spawn|roasty|neutral|Boss presence detected. Gear check.",
-"boss_spawn|supportive|surprised|Boss event active. Prepare, prezhde chem engage.",
-"boss_spawn|supportive|worried|Boss nearby ili up. Sledi za zonoy ostrozhno.",
-"boss_spawn|supportive|neutral|World boss event. Coordinate, esli mozhesh.",
-"boss_spawn|supportive|smile|Event spawn. Opportunity, esli ready.",
-"boss_spawn|supportive|worried|Big threat event. Ne rush blind.",
-"timed_crate|roasty|smug|Timed crate. Race za loot - ili race za death. Tvoy call.",
-"timed_crate|roasty|evil|Crate timer up. Campers incoming.",
-"timed_crate|roasty|laugh|Timed crate. Idealnyy bait dlya greedy players.",
-"timed_crate|roasty|surprised|Crate event. Ne popadis third-party mid-loot.",
-"timed_crate|roasty|pout|Idi za shiny boxes. Poprobuy vyzhit audience.",
-"timed_crate|supportive|happy|Timed crate up. Approach ostrozhno.",
-"timed_crate|supportive|worried|Crate event active. Snachala check campers.",
-"timed_crate|supportive|neutral|Timed crate spotted. Plan approach.",
-"timed_crate|supportive|smile|Khoroshiy loot opportunity. Stay aware, poka openish.",
-"timed_crate|supportive|worried|Crate = contest. Ne tunnel vision.",
-"greeting|roasty|smug|April na svyazi. Segodnya pomenishe tragic, please.",
-"greeting|roasty|evil|Commentator online. Kormi menya oshibkami.",
-"greeting|supportive|happy|April online. Ya za tebya.",
-"greeting|supportive|smile|Ready. Zovi, kogda stanet spicy.",
-"death|roasty|laugh|Snova dead. Collectible achievement unlocked.",
-"death|supportive|sad|Down hard. Reset i vernis umnee.",
-"respawn|roasty|smug|Respawned. Davay pritvorimsya, chto eto bylo intentional.",
-"respawn|supportive|happy|Fresh life. Start clean.",
-"downed|roasty|laugh|Snova horizontal. Iconic.",
-"downed|supportive|worried|Downed. Crawl umno.",
-"safe_enter|roasty|smug|Safe zone. Dazhe chaosu nuzhen break.",
-"safe_leave|supportive|worried|Uezzhaesh iz safety. Eyes open.",
+"greeting|roasty|smug|common|Oh, ty enabled me? Fine. Try not to embarrass us.",
+"greeting|roasty|laugh|common|Ya was having a nice day until ty clicked that toggle.",
+"greeting|roasty|evil|common|Tvoy personal commentator has arrived. This should be funny.",
+"greeting|roasty|pout|common|Ya ready. Give me something worth making fun of.",
+"greeting|roasty|neutral|common|April online. Expectations remain dangerously low.",
+"greeting|roasty|disgusted|common|Ty called? Ya hope tvoy gameplay improved while Ya was gone.",
+"greeting|roasty|worried|common|April reporting in. Pozhaluysta be less tragic today.",
+"greeting|roasty|surprised|common|Commentator online. Feed me mistakes.",
+"greeting|roasty|smile|common|Boot sequence done. Chaos privileges restored.",
+"greeting|roasty|happy|common|Ya awake. Try not to make this a highlight reel of fails.",
+"greeting|roasty|sad|common|Hello again. Ya brought snacks and low expectations.",
+"greeting|roasty|fear|common|Presence confirmed. Dignity optional.",
+"greeting|roasty|smug|common|Toggled on. The roast schedule is open.",
+"greeting|roasty|laugh|common|Ty really re-enabled me. Bold. Optimistic, even.",
+"greeting|roasty|evil|common|Systems green. Tvoy decision-making remains yellow.",
+"greeting|roasty|pout|common|Back in tvoy pocket. Ne make me regret it.",
+"greeting|roasty|neutral|common|Announcer online. Pozhaluysta aim at enemies, not lore.",
+"greeting|roasty|disgusted|common|Ya missed ty. Mostly the comedy.",
+"greeting|roasty|smug|uncommon|Aww, ty missed me? Cute. Ne die in the first minute.",
+"greeting|roasty|laugh|uncommon|Ya polished my smug face just for this session.",
+"greeting|roasty|evil|uncommon|If ty survive ten minutes Ya might clap. Quietly.",
+"greeting|roasty|smug|rare|Cunzaki was here… and so am Ya. Try not to disgrace the brand.",
+"greeting|roasty|laugh|rare|Secret greeting unlocked: pozhaluysta be slightly less chaotic.",
+"greeting|roasty|smug|mythic|Mythic hello. The stars aligned and still chose ty. Wild.",
+"greeting|supportive|smug|common|April online. Ya'll keep an eye on ty.",
+"greeting|supportive|laugh|common|Ready when ty are. Let's survive this one.",
+"greeting|supportive|evil|common|Ya here. Stay sharp and we'll be fine.",
+"greeting|supportive|pout|common|All set! Try to come back in one piece.",
+"greeting|supportive|neutral|common|Tvoy favorite announcer is ready to go.",
+"greeting|supportive|disgusted|common|Systems ready. Ya'll call out anything important.",
+"greeting|supportive|worried|common|April online. Ya've got tvoy back.",
+"greeting|supportive|surprised|common|Ready. Call me when it gets spicy.",
+"greeting|supportive|smile|common|Hey! Fresh session energy. Ty've got this.",
+"greeting|supportive|happy|common|Ya with ty. Slow is smooth, smooth is fast.",
+"greeting|supportive|sad|common|Good to see ty. Let's make smart plays.",
+"greeting|supportive|fear|common|Online and smiling. Check tvoy kit, then move.",
+"greeting|supportive|smug|common|Here for the wins and the lessons.",
+"greeting|supportive|laugh|common|Soft landing complete. Take a breath, then loot.",
+"greeting|supportive|evil|common|Ya'll nudge ty when it matters. Stay curious.",
+"greeting|supportive|pout|common|Friendly mode engaged. Survive cute, fight smart.",
+"greeting|supportive|neutral|common|Welcome back, captain. Route first, ego later.",
+"greeting|supportive|disgusted|common|Hype but careful. That's the vibe.",
+"greeting|supportive|smug|uncommon|Little pep talk: hydrate, reload, and trust tvoy ears.",
+"greeting|supportive|laugh|uncommon|Ty not alone out there. Ya loud on purpose.",
+"greeting|supportive|smug|rare|Cunzaki was here — so play like the trailer.",
+"greeting|supportive|smug|mythic|Mythic cheer unlocked. Today feels lucky. Ne waste it.",
+"death|roasty|smug|common|Ty suck, lol. Want to try that again?",
+"death|roasty|laugh|common|That was tvoy plan? Seriously?",
+"death|roasty|evil|common|Another tactical donation to the enemy.",
+"death|roasty|pout|common|Ya looked away for one second and ty died.",
+"death|roasty|neutral|common|Excellent performance. Zero notes. Zero pulse, too.",
+"death|roasty|disgusted|common|Speedrunning the respawn screen again?",
+"death|roasty|worried|common|Maybe the bullets will miss if ty stand even stiller next time.",
+"death|roasty|surprised|common|Good news: the ground successfully caught ty.",
+"death|roasty|smile|common|Pozhaluysta stop making death look like a hobby.",
+"death|roasty|happy|common|They barely had to try. That's almost impressive.",
+"death|roasty|sad|common|A flawless demonstration of what not to do.",
+"death|roasty|fear|common|Tvoy survival instincts filed for resignation.",
+"death|roasty|smug|common|Ya have seen training dummies with better positioning.",
+"death|roasty|laugh|common|That life had a shorter runtime than this speech bubble.",
+"death|roasty|evil|common|Dead again. Collectible achievement unlocked.",
+"death|roasty|pout|common|Respawn button sends its regards.",
+"death|roasty|neutral|common|Ty lost a fight and a personality point.",
+"death|roasty|disgusted|common|That angle hated ty personally.",
+"death|roasty|worried|common|Died with full pockets. Classic.",
+"death|roasty|surprised|common|Outplayed, outpositioned, out of excuses.",
+"death|roasty|smile|common|The enemy thanks ty for the care package.",
+"death|roasty|happy|common|Horizontal again. At least ty're consistent.",
+"death|roasty|sad|common|Death. Again. Shocked? Ya not.",
+"death|roasty|fear|common|Ty peaked at spawning.",
+"death|roasty|smug|common|Next time, try cover. Wild concept.",
+"death|roasty|laugh|common|They pressed shoot. Ty pressed exist.",
+"death|roasty|evil|common|Inventory relocated without tvoy consent.",
+"death|roasty|pout|common|That was less of a fight and more of a tutorial.",
+"death|supportive|smug|common|That one hurt. Reset and take it slower.",
+"death|supportive|laugh|common|Ty down, but it isn't over. Learn the angle.",
+"death|supportive|evil|common|Bad round. Fresh start.",
+"death|supportive|pout|common|Unlucky. We'll get it back next life.",
+"death|supportive|neutral|common|Breathe. Think about what exposed ty.",
+"death|supportive|disgusted|common|Death confirmed. Time to adjust the plan.",
+"death|supportive|worried|common|Shake it off. The next life is yours.",
+"death|supportive|surprised|common|That was rough, but seychas ty know where they were.",
+"death|supportive|smile|common|Review the mistake, then leave it behind.",
+"death|supportive|happy|common|One bad fight does not decide the session.",
+"death|supportive|sad|common|Down hard. Reset and come back smarter.",
+"death|supportive|fear|common|It's okay. Info is still a win.",
+"death|supportive|smug|common|Soft reset. New route, new timing.",
+"death|supportive|laugh|common|Ty learned something expensive. Spend it well.",
+"death|supportive|evil|common|Hug the lesson, not the ego.",
+"death|supportive|pout|common|We'll convert this into better peeks.",
+"death|supportive|neutral|common|Stay kind to yourself. Stay sharper next spawn.",
+"death|supportive|disgusted|common|Death happens. Panic doesn't have to.",
+"death|supportive|worried|common|Next life: slower feet, quicker ears.",
+"death|supportive|surprised|common|Ty still in the story. Rewrite the ending.",
+"death|supportive|smile|common|Take a breath. Check what got ty.",
+"death|supportive|happy|common|Unlucky timing. Lucky next time.",
+"death|supportive|sad|common|Reset clean. Ne tilt into another.",
+"death|supportive|fear|common|Ya here. We'll tighten it up.",
+"death|roasty|smug|uncommon|Aww, ty died cute. Still dead though.",
+"death|roasty|laugh|uncommon|Tragic but aesthetic. Ne make it a brand.",
+"death|supportive|smug|uncommon|Gentle nudge: that was a hard fight. Ty've got the next.",
+"death|roasty|smug|rare|Cunzaki was here… watching that death. Ouch.",
+"death|supportive|smug|rare|Rare comfort: even Cunzaki wipes sometimes. Reset soft.",
+"respawn|roasty|smug|common|Back already? Try keeping this body for a minute.",
+"respawn|roasty|laugh|common|New life, same questionable decision-making.",
+"respawn|roasty|evil|common|Round two. Surely nothing could go wrong.",
+"respawn|roasty|pout|common|The respawn button deserves overtime pay.",
+"respawn|roasty|neutral|common|Welcome back. Ya saved tvoy dignity. There wasn't much.",
+"respawn|roasty|disgusted|common|Fresh body delivered. Handle with slightly more care.",
+"respawn|roasty|worried|common|Okay, no dying immediately. That's the whole assignment.",
+"respawn|roasty|surprised|common|Look who escaped the loading screen.",
+"respawn|roasty|smile|common|Respawned. Let's pretend that was intentional.",
+"respawn|roasty|happy|common|New meat suit. Same chaos agent.",
+"respawn|roasty|sad|common|Spawned. Pozhaluysta invent caution.",
+"respawn|roasty|fear|common|Another life token spent. Budget wisely.",
+"respawn|roasty|smug|common|Back online. Ne refund it instantly.",
+"respawn|roasty|laugh|common|Fresh spawn smell. Ne ruin it.",
+"respawn|roasty|evil|common|Ty returned. The floor is disappointed.",
+"respawn|roasty|pout|common|Life two (or twelve). Act surprised.",
+"respawn|roasty|neutral|common|Spawn protection is not a personality.",
+"respawn|roasty|disgusted|common|Welcome back to the consequences.",
+"respawn|supportive|smug|common|Ty back. New life, clean slate.",
+"respawn|supportive|laugh|common|Respawned and ready. Take tvoy time.",
+"respawn|supportive|evil|common|Fresh start. Check tvoy surroundings first.",
+"respawn|supportive|pout|common|There ty are. Let's make this life count.",
+"respawn|supportive|neutral|common|Back in action. Recover tvoy rhythm.",
+"respawn|supportive|disgusted|common|Respawn complete. Rebuild before taking another fight.",
+"respawn|supportive|worried|common|New life ready. Start with a safe route.",
+"respawn|supportive|surprised|common|Welcome back. Focus on one good decision at a time.",
+"respawn|supportive|smile|common|Fresh life. Start clean.",
+"respawn|supportive|happy|common|Soft reset done. Loot smart, peek smarter.",
+"respawn|supportive|sad|common|Ty up. Breathe, kit check, move.",
+"respawn|supportive|fear|common|New chance. Play the info ty earned.",
+"respawn|supportive|smug|common|Spawned safe-ish. Ne sprint into ghosts.",
+"respawn|supportive|laugh|common|Welcome back. We'll do this carefully.",
+"respawn|supportive|evil|common|Fresh boots. Choose a quieter path.",
+"respawn|supportive|pout|common|Respawn hugs. Seychas go be sensible.",
+"respawn|supportive|neutral|common|Clean slate energy. Keep it.",
+"respawn|supportive|disgusted|common|Back with ty. One play at a time.",
+"respawn|roasty|smug|uncommon|Cute respawn. Try a cute survival next.",
+"respawn|supportive|smug|uncommon|Aww, new life. Ya rooting for a longer one.",
+"respawn|roasty|smug|rare|Cunzaki was here — ne waste the respawn.",
+"downed|roasty|smug|common|Floor inspection going well?",
+"downed|roasty|laugh|common|Ty found the downed state. Very thorough testing.",
+"downed|roasty|evil|common|Crawling is not a combat strategy.",
+"downed|roasty|pout|common|This is why Ya told ty to use cover.",
+"downed|roasty|neutral|common|Technically alive. Emotionally? Debatable.",
+"downed|roasty|disgusted|common|Wave to tvoy teammates from down there.",
+"downed|roasty|worried|common|Someone revive the professional floor ornament.",
+"downed|roasty|surprised|common|Outstanding posture. Ten out of ten.",
+"downed|roasty|smile|common|Horizontal again. Iconic.",
+"downed|roasty|happy|common|Ty a temporary rug. Expensive one.",
+"downed|roasty|sad|common|Bleed timer loading. Romance later.",
+"downed|roasty|fear|common|Crawl with purpose, not vibes.",
+"downed|roasty|smug|common|Downed and dramatic. Stay small.",
+"downed|roasty|laugh|common|The floor says hi. Say less.",
+"downed|roasty|evil|common|Ty faceplanted with style. Still bad.",
+"downed|roasty|pout|common|Need a revive and a reality check.",
+"downed|supportive|smug|common|Ty downed. Get behind cover and call for help.",
+"downed|supportive|laugh|common|Stay low. A teammate may still reach ty.",
+"downed|supportive|evil|common|Ne give up yet. Crawl somewhere safe.",
+"downed|supportive|pout|common|Downed, not dead. Break line of sight.",
+"downed|supportive|neutral|common|Save tvoy movement and wait for the revive.",
+"downed|supportive|disgusted|common|Careful, one more hit could finish this.",
+"downed|supportive|worried|common|Keep moving toward cover if it is safe.",
+"downed|supportive|surprised|common|Call tvoy position and let tvoy team work.",
+"downed|supportive|smile|common|Downed. Crawl smart.",
+"downed|supportive|happy|common|Stay quiet. Help is possible.",
+"downed|supportive|sad|common|Hug cover while ty crawl.",
+"downed|supportive|fear|common|Ty still in it. Small movements.",
+"downed|supportive|smug|common|Ping if ty can. Stay hopeful.",
+"downed|supportive|laugh|common|Protect the timer. Ne greed peeks.",
+"downed|supportive|evil|common|Soft crawl to safety. Ty've got friends… maybe.",
+"downed|supportive|pout|common|Breathe. Revive windows open and close.",
+"downed|supportive|smug|uncommon|Aww, hang in there. Cute determination counts.",
+"revived|roasty|smug|common|Someone actually picked ty up. Be grateful.",
+"revived|roasty|laugh|common|Ty standing again. Pozhaluysta make it worth their time.",
+"revived|roasty|evil|common|Revived! The floor will miss ty.",
+"revived|roasty|pout|common|Second chance acquired. Bad ideas re-enabled.",
+"revived|roasty|neutral|common|Back on tvoy feet. Try using them this time.",
+"revived|roasty|disgusted|common|Tvoy teammate has unreasonable faith in ty.",
+"revived|roasty|worried|common|Up again. Ne speedrun the floor sequel.",
+"revived|roasty|surprised|common|Vertical privileges restored. Temporarily.",
+"revived|roasty|smile|common|They spent the revive. Spend it wiser.",
+"revived|roasty|happy|common|Standing. Shocking character development.",
+"revived|roasty|sad|common|Ne repay the revive with an instant peek.",
+"revived|roasty|fear|common|Ty up. Ego still recommended off.",
+"revived|supportive|smug|common|Ty up! Heal before re-engaging.",
+"revived|supportive|laugh|common|Nice recovery. Find cover and reset.",
+"revived|supportive|evil|common|Revived. Ne peek until ty're healthy.",
+"revived|supportive|pout|common|Good save. Stay with tvoy team seychas.",
+"revived|supportive|neutral|common|Back on tvoy feet. Stabilize first.",
+"revived|supportive|disgusted|common|Second chance secured. Make it count.",
+"revived|supportive|worried|common|Heal, reload, thank tvoy savior silently.",
+"revived|supportive|surprised|common|Ty safe-ish. Reset together.",
+"revived|supportive|smile|common|Soft stand-up. Hard discipline next.",
+"revived|supportive|happy|common|Good. Stick close until ty're topped off.",
+"revived|supportive|sad|common|Revived clean. Play the next thirty seconds carefully.",
+"revived|supportive|fear|common|Up! Cover first, heroics later.",
+"low_health|roasty|smug|common|Tvoy health bar is practically decorative seychas.",
+"low_health|roasty|laugh|common|One sneeze and ty're back at respawn.",
+"low_health|roasty|evil|common|Bold strategy, fighting with three pixels of health.",
+"low_health|roasty|pout|common|Maybe stop peeking? Just a thought.",
+"low_health|roasty|neutral|common|Heal. The red screen is not an aesthetic choice.",
+"low_health|roasty|disgusted|common|Ty held together by confidence and bad math.",
+"low_health|roasty|worried|common|Pozhaluysta locate medicine before locating another bullet.",
+"low_health|roasty|surprised|common|Living on one hit point is not a personality.",
+"low_health|roasty|smile|common|Red vibes only. Medkit, not ego.",
+"low_health|roasty|happy|common|Ty a glass cannon without the cannon.",
+"low_health|roasty|sad|common|HP crisis. Drama optional, bandage not.",
+"low_health|roasty|fear|common|Critical. Stop roleplaying invincible.",
+"low_health|roasty|smug|common|Tvoy health bar filed a complaint.",
+"low_health|roasty|laugh|common|One more trade and ty're lore.",
+"low_health|roasty|evil|common|Meds. Seychas. Ya not joking. Much.",
+"low_health|roasty|pout|common|Low HP arc. Skip to the healing chapter.",
+"low_health|supportive|smug|common|Low health. Disengage and heal seychas.",
+"low_health|supportive|laugh|common|Ty critical. Find hard cover.",
+"low_health|supportive|evil|common|Ne take another fight until ty recover.",
+"low_health|supportive|pout|common|Health is low. Slow down and reset.",
+"low_health|supportive|neutral|common|Critical health. Prioritize survival.",
+"low_health|supportive|disgusted|common|Break line of sight and heal.",
+"low_health|supportive|worried|common|Do not trade damage right seychas.",
+"low_health|supportive|surprised|common|Find safety, heal, then reassess.",
+"low_health|supportive|smile|common|Soft retreat. Hard heal.",
+"low_health|supportive|happy|common|Ty fragile right seychas. Play small.",
+"low_health|supportive|sad|common|Patch up. The fight can wait.",
+"low_health|supportive|fear|common|Low HP — choose life, not loot.",
+"low_health|supportive|smug|common|Cover, bandage, breathe.",
+"low_health|supportive|laugh|common|Survival mode. Peek later.",
+"low_health|supportive|evil|common|Heal window. Take it.",
+"low_health|supportive|pout|common|Critical. Ya worried in a helpful way.",
+"low_health|supportive|smug|uncommon|Aww, ty're hurt. Let's fix that gently.",
+"low_health|roasty|smug|rare|Cunzaki was here — and even he would heal.",
+"recovered|roasty|smug|common|Health restored. Common sense still pending.",
+"recovered|roasty|laugh|common|Patched up and ready to make new mistakes.",
+"recovered|roasty|evil|common|Look at that, ty discovered healing.",
+"recovered|roasty|pout|common|Better. Ne immediately waste it.",
+"recovered|roasty|neutral|common|Fuller health bar, renewed capacity for chaos.",
+"recovered|roasty|disgusted|common|Ty survived the medicine tutorial.",
+"recovered|roasty|worried|common|Green again. Try staying that color.",
+"recovered|roasty|surprised|common|Healed. Ego already loading — cancel it.",
+"recovered|roasty|smile|common|HP topped. Brain still buffering.",
+"recovered|roasty|happy|common|Medicine worked. Miracles aside.",
+"recovered|roasty|sad|common|Recovered. Ne speedrun low HP again.",
+"recovered|roasty|fear|common|Healthy. Temporarily trustworthy.",
+"recovered|supportive|smug|common|Health recovered. Ty ready again.",
+"recovered|supportive|laugh|common|Good reset. Choose the next fight carefully.",
+"recovered|supportive|evil|common|Stable again. Recheck ammo and surroundings.",
+"recovered|supportive|pout|common|Nice recovery. Keep that momentum.",
+"recovered|supportive|neutral|common|Much better. Stay disciplined.",
+"recovered|supportive|disgusted|common|Recovery complete. Return when the timing is right.",
+"recovered|supportive|worried|common|Feeling better? Play like it.",
+"recovered|supportive|surprised|common|Topped off. Soft feet forward.",
+"recovered|supportive|smile|common|Healed clean. Info next.",
+"recovered|supportive|happy|common|Good job resetting. That's real skill.",
+"recovered|supportive|sad|common|Stable. Ready when ty are.",
+"recovered|supportive|fear|common|Recovery hugs. Seychas go be smart.",
+"safe_enter|roasty|smug|common|Safe zone reached. Even ty should survive in here.",
+"safe_enter|roasty|laugh|common|Congratulations, the game is protecting ty seychas.",
+"safe_enter|roasty|evil|common|Ty safe. Try not to trip over anything.",
+"safe_enter|roasty|pout|common|Safe zone. Tvoy danger privileges are temporarily revoked.",
+"safe_enter|roasty|neutral|common|A peaceful moment for tvoy overworked respawn key.",
+"safe_enter|roasty|disgusted|common|Enjoy safety while it lasts.",
+"safe_enter|roasty|worried|common|Safe zone. Even chaos needs a break.",
+"safe_enter|roasty|surprised|common|Bubble of safety. Ne pop it with ego.",
+"safe_enter|roasty|smile|common|Protected. Sort loot like an adult.",
+"safe_enter|roasty|happy|common|Safe. Tvoy enemies are on a coffee break. Probably not.",
+"safe_enter|roasty|sad|common|Zoning out in the zone. Fine. Briefly.",
+"safe_enter|roasty|fear|common|Safe zone hug. Temporary.",
+"safe_enter|supportive|smug|common|Safe zone reached. Take a moment to reset.",
+"safe_enter|supportive|laugh|common|Ty safe. Sort tvoy inventory and plan ahead.",
+"safe_enter|supportive|evil|common|Safe zone entered. Good time to regroup.",
+"safe_enter|supportive|pout|common|Made it safely. Restock before leaving.",
+"safe_enter|supportive|neutral|common|Ty protected here. Use the breathing room.",
+"safe_enter|supportive|disgusted|common|Take stock of what ty need before heading out.",
+"safe_enter|supportive|worried|common|Soft landing. Heal, eat, think.",
+"safe_enter|supportive|surprised|common|Safe. Breathe and rebuild the plan.",
+"safe_enter|supportive|smile|common|Good. Use this calm.",
+"safe_enter|supportive|happy|common|Protected. Check ammo and food.",
+"safe_enter|supportive|sad|common|Safe zone vibes. Stay ready anyway.",
+"safe_enter|supportive|fear|common|Restock window. Make it count.",
+"safe_leave|roasty|smug|common|Leaving safety? This should be entertaining.",
+"safe_leave|roasty|laugh|common|Protection off. Let's see how long this lasts.",
+"safe_leave|roasty|evil|common|Back into danger with absolutely no supervision.",
+"safe_leave|roasty|pout|common|Safe zone left. Respawn screen standing by.",
+"safe_leave|roasty|neutral|common|Ty vulnerable again. Pretend to be careful.",
+"safe_leave|roasty|disgusted|common|And there goes tvoy last good excuse.",
+"safe_leave|roasty|worried|common|Out of the bubble. Into the bit.",
+"safe_leave|roasty|surprised|common|Danger privileges restored. Ne abuse them.",
+"safe_leave|roasty|smile|common|Leaving safety with that loot? Bold fashion.",
+"safe_leave|roasty|happy|common|Unprotected. Act surprised when bullets appear.",
+"safe_leave|roasty|sad|common|Safe zone in the rearview. Chaos ahead.",
+"safe_leave|roasty|fear|common|Ty left safety. Ya brought commentary.",
+"safe_leave|supportive|smug|common|Leaving the safe zone. Check tvoy route.",
+"safe_leave|supportive|laugh|common|Protection ended. Stay aware of nearby players.",
+"safe_leave|supportive|evil|common|Back outside. Move with purpose.",
+"safe_leave|supportive|pout|common|Ty exposed again. Keep cover nearby.",
+"safe_leave|supportive|neutral|common|Safe zone left. Watch tvoy surroundings.",
+"safe_leave|supportive|disgusted|common|Route checked? Then let's move.",
+"safe_leave|supportive|worried|common|Leaving safety. Eyes open.",
+"safe_leave|supportive|surprised|common|Soft exit. Hard awareness.",
+"safe_leave|supportive|smile|common|Out we go. Ears first.",
+"safe_leave|supportive|happy|common|Unprotected. Play the quiet game.",
+"safe_leave|supportive|sad|common|Leaving the bubble. Stick to cover lines.",
+"safe_leave|supportive|fear|common|Ready? Then step out carefully.",
+"combat_enter|roasty|smug|common|Combat started. Try not to feed them.",
+"combat_enter|roasty|laugh|common|Oh, a fight. This should be educational.",
+"combat_enter|roasty|evil|common|Guns out already? Bold for ty.",
+"combat_enter|roasty|pout|common|Ty in combat. Act like it for once.",
+"combat_enter|roasty|neutral|common|Someone wants tvoy inventory. Ne donate.",
+"combat_enter|roasty|disgusted|common|Fight mode. Pozhaluysta aim at them, not the floor.",
+"combat_enter|roasty|worried|common|Combat ping. Ego check recommended.",
+"combat_enter|roasty|surprised|common|Fight's on. Cover isn't optional DLC.",
+"combat_enter|roasty|smile|common|Bullets incoming. Personality outgoing.",
+"combat_enter|roasty|happy|common|Engaged. Try winning for once.",
+"combat_enter|roasty|sad|common|Combat! Ne invent fanfiction angles.",
+"combat_enter|roasty|fear|common|They're shooting. Shocking plot twist.",
+"combat_enter|roasty|smug|common|Fight started. Reload exists. Use it.",
+"combat_enter|roasty|laugh|common|Combat mode. Soft peeks, hard discipline.",
+"combat_enter|roasty|evil|common|Here we go. Ne become the lesson.",
+"combat_enter|roasty|pout|common|Adrenaline unlocked. Brain still needed.",
+"combat_enter|supportive|smug|common|Ty in combat. Keep cover and track angles.",
+"combat_enter|supportive|laugh|common|Fight started. Focus and ne overextend.",
+"combat_enter|supportive|evil|common|Combat engaged. Watch flanks and reload timing.",
+"combat_enter|supportive|pout|common|Stay composed. Win the trade, then heal.",
+"combat_enter|supportive|neutral|common|Ty've got this. Play smart, not loud.",
+"combat_enter|supportive|disgusted|common|In combat. Prioritize info and positioning.",
+"combat_enter|supportive|worried|common|Breathe. One angle at a time.",
+"combat_enter|supportive|surprised|common|Fight on. Soft feet, sharp eyes.",
+"combat_enter|supportive|smile|common|Stay calm. Information wins fights.",
+"combat_enter|supportive|happy|common|Engage smart. Exit smarter.",
+"combat_enter|supportive|sad|common|Combat. Callouts help if ty're partied.",
+"combat_enter|supportive|fear|common|Ty've trained for this. Trust the crosshair.",
+"combat_enter|supportive|smug|common|Focus. Cover. Commit when it's free.",
+"combat_enter|supportive|laugh|common|Fight window. Ne panic-spray.",
+"combat_enter|supportive|evil|common|Stay composed. Ty've got answers.",
+"combat_enter|supportive|pout|common|Combat start. Ya with ty.",
+"combat_enter|supportive|smug|uncommon|Aww, fight time. Ty've got cute courage. Use cover too.",
+"combat_enter|roasty|smug|rare|Cunzaki was here — win this clean.",
+"combat_leave|roasty|smug|common|Combat over. Somehow ty're still breathing.",
+"combat_leave|roasty|laugh|common|Fight ended. Hide tvoy celebration.",
+"combat_leave|roasty|evil|common|Out of combat. Ne immediately dive back in.",
+"combat_leave|roasty|pout|common|Threat gone. Check ammo before looting.",
+"combat_leave|roasty|neutral|common|Clear-ish. Ne invent a sequel fight.",
+"combat_leave|roasty|disgusted|common|Combat faded. Ego still loud — mute it.",
+"combat_leave|roasty|worried|common|Ty clear. Loot like a thief, not a tourist.",
+"combat_leave|roasty|surprised|common|Out. Heal the pride quietly.",
+"combat_leave|roasty|smile|common|Fight done. Ears still working, right?",
+"combat_leave|roasty|happy|common|Disengaged. Ne re-engage for clout.",
+"combat_leave|roasty|sad|common|Combat left the chat. Ty shouldn't leave cover yet.",
+"combat_leave|roasty|fear|common|Clear. Soft reset.",
+"combat_leave|supportive|smug|common|Combat cleared. Reset and heal up.",
+"combat_leave|supportive|laugh|common|Ty clear. Patch wounds and reload.",
+"combat_leave|supportive|evil|common|Out of combat. Take a second to stabilize.",
+"combat_leave|supportive|pout|common|Nice. Use the downtime wisely.",
+"combat_leave|supportive|neutral|common|Soft clear. Check flanks anyway.",
+"combat_leave|supportive|disgusted|common|Breathe. Reload. Reassess.",
+"combat_leave|supportive|worried|common|Good disengage. That's skill too.",
+"combat_leave|supportive|surprised|common|Quiet again. Stay ready.",
+"combat_leave|supportive|smile|common|Clear for seychas. Ne rush greed.",
+"combat_leave|supportive|happy|common|Reset complete mindset. Then move.",
+"combat_leave|supportive|sad|common|Ty okay. Keep composure.",
+"combat_leave|supportive|fear|common|Downtime. Make it useful.",
+"bleeding|roasty|smug|common|Ty bleeding. Congrats on the leak.",
+"bleeding|roasty|laugh|common|Bandage. Seychas. Tvoy HP is dripping away.",
+"bleeding|roasty|evil|common|Bleed tick going. Medicine would be smart.",
+"bleeding|roasty|pout|common|Red trail unlocked. Stealth is cancelled.",
+"bleeding|roasty|neutral|common|Bleeding already? Peak efficiency.",
+"bleeding|roasty|disgusted|common|Ty leaking. Plug it.",
+"bleeding|roasty|worried|common|Bleed status. Fashionably late to meds?",
+"bleeding|roasty|surprised|common|Drip drip. That's tvoy future.",
+"bleeding|roasty|smile|common|Bandage speedrun, pozhaluysta.",
+"bleeding|roasty|happy|common|Bleeding. The floor wants autographs in red.",
+"bleeding|roasty|sad|common|Stop the leak before the fight does.",
+"bleeding|roasty|fear|common|Bleed ticks ne negotiate.",
+"bleeding|supportive|smug|common|Ty bleeding. Stop and bandage immediately.",
+"bleeding|supportive|laugh|common|Bleed status active. Prioritize a medkit.",
+"bleeding|supportive|evil|common|Ne ignore the bleed. Fix it before fighting.",
+"bleeding|supportive|pout|common|Apply a bandage before ty lose the fight to ticks.",
+"bleeding|supportive|neutral|common|Bleeding. Heal, then reassess.",
+"bleeding|supportive|disgusted|common|Soft stop. Bandage first.",
+"bleeding|supportive|worried|common|Bleed hurts fights. Fix it.",
+"bleeding|supportive|surprised|common|Meds seychas, heroics later.",
+"bleeding|supportive|smile|common|Ty dripping. Cover and heal.",
+"bleeding|supportive|happy|common|Bandage window. Take it.",
+"bleeding|supportive|sad|common|Bleed active. Ya gently yelling.",
+"bleeding|supportive|fear|common|Heal the bleed. Then we talk peeks.",
+"bleed_stopped|roasty|smug|common|Bleed stopped. Miracles do happen.",
+"bleed_stopped|roasty|laugh|common|Finally patched. Try keeping the blood inside.",
+"bleed_stopped|roasty|evil|common|Bleed cleared. Ne reopen it instantly.",
+"bleed_stopped|roasty|pout|common|Sealed. Ne audition for sequel bleed.",
+"bleed_stopped|roasty|neutral|common|Leak fixed. Common sense pending.",
+"bleed_stopped|roasty|disgusted|common|Blood stayed home. Progress.",
+"bleed_stopped|supportive|smug|common|Bleed stopped. Nice recovery.",
+"bleed_stopped|supportive|laugh|common|Ty sealed up. Stay careful.",
+"bleed_stopped|supportive|evil|common|Bleeding resolved. Good timing.",
+"bleed_stopped|supportive|pout|common|Patched. Soft reset complete.",
+"bleed_stopped|supportive|neutral|common|Good heal. Keep it that way.",
+"bleed_stopped|supportive|disgusted|common|Bleed gone. Ready when stable.",
+"hunger_low|roasty|smug|common|Ty starving. Eat something that isn't a bullet.",
+"hunger_low|roasty|laugh|common|Hunger low. Tvoy stomach is louder than tvoy footsteps.",
+"hunger_low|roasty|evil|common|Hungry already? Professional scavenger energy.",
+"hunger_low|roasty|pout|common|Food. Or keep roleplaying a skeleton.",
+"hunger_low|roasty|neutral|common|Eat. Hangry aim is a real debuff.",
+"hunger_low|roasty|disgusted|common|Hunger bar crying. Feed it.",
+"hunger_low|roasty|worried|common|Snacks exist. Imagine that.",
+"hunger_low|roasty|surprised|common|Starvation speedrun cancelled, pozhaluysta.",
+"hunger_low|roasty|smile|common|Tvoy stomach filed a ticket.",
+"hunger_low|roasty|happy|common|Food break. Not optional.",
+"hunger_low|supportive|smug|common|Hunger is low. Find food before ty weaken.",
+"hunger_low|supportive|laugh|common|Eat soon. Low hunger will punish ty later.",
+"hunger_low|supportive|evil|common|Grab a snack when it's safe.",
+"hunger_low|supportive|pout|common|Hunger warning. Ne ignore it in a fight.",
+"hunger_low|supportive|neutral|common|Soft reminder: food keeps ty sharp.",
+"hunger_low|supportive|disgusted|common|Eat when ty can. Weakness sneaks.",
+"hunger_low|supportive|worried|common|Hunger low. Plan a safe bite.",
+"hunger_low|supportive|surprised|common|Fuel up. Fights cost calories.",
+"hunger_low|supportive|smile|common|Food run. Careful route.",
+"hunger_low|supportive|happy|common|Hungry. Let's fix that kindly.",
+"thirst_low|roasty|smug|common|Thirsty? Water exists. Shocking, Ya know.",
+"thirst_low|roasty|laugh|common|Tvoy thirst bar is begging for help.",
+"thirst_low|roasty|evil|common|Dehydration speedrun, classic.",
+"thirst_low|roasty|pout|common|Drink something. Sand is not hydration.",
+"thirst_low|roasty|neutral|common|Thirsty thoughts. Wet solutions.",
+"thirst_low|roasty|disgusted|common|Water. Not vibes.",
+"thirst_low|roasty|worried|common|Hydrate or die-rate. Pick.",
+"thirst_low|roasty|surprised|common|Thirst low. Mouth dry, aim drier.",
+"thirst_low|roasty|smile|common|Drink. Ya not above nagging.",
+"thirst_low|roasty|happy|common|Tvoy cells want a beverage.",
+"thirst_low|supportive|smug|common|Thirst is low. Get water soon.",
+"thirst_low|supportive|laugh|common|Hydrate before ty commit to another fight.",
+"thirst_low|supportive|evil|common|Find clean water when ty can.",
+"thirst_low|supportive|pout|common|Low thirst will sneak up on ty. Fix it.",
+"thirst_low|supportive|neutral|common|Soft sip break. Stay sharp.",
+"thirst_low|supportive|disgusted|common|Water run. Stay safe.",
+"thirst_low|supportive|worried|common|Hydration check. Pozhaluysta pass it.",
+"thirst_low|supportive|surprised|common|Thirst warning. Easy fix, big payoff.",
+"thirst_low|supportive|smile|common|Drink when safe. Ty'll thank yourself.",
+"thirst_low|supportive|happy|common|Low thirst. Gentle priority bump.",
+"radiation|roasty|smug|common|Radiation. Glow-in-the-dark is not a flex.",
+"radiation|roasty|laugh|common|Ty cooking in rads. Leave. Immediately.",
+"radiation|roasty|evil|common|Radiation spike. Suit up or get out.",
+"radiation|roasty|pout|common|Rads rising. This is how people become lore.",
+"radiation|roasty|neutral|common|Glowing is not a skin unlock.",
+"radiation|roasty|disgusted|common|Rad zone. Exit stage left.",
+"radiation|roasty|worried|common|Geiger says no. Listen.",
+"radiation|roasty|surprised|common|Rads stacking. Fashion last.",
+"radiation|roasty|smile|common|Ty pickling. Leave.",
+"radiation|roasty|happy|common|Radiation hug. Decline it.",
+"radiation|supportive|smug|common|Radiation detected. Exit the zone seychas.",
+"radiation|supportive|laugh|common|Ty taking rads. Find cleaner ground.",
+"radiation|supportive|evil|common|Radiation active. Prioritize gear or escape.",
+"radiation|supportive|pout|common|Leave the radiation before it stacks.",
+"radiation|supportive|neutral|common|Soft exit from rads. Seychas.",
+"radiation|supportive|disgusted|common|Rads hurt. Move clean.",
+"radiation|supportive|worried|common|Get out. Heal later.",
+"radiation|supportive|surprised|common|Radiation. Route to safety.",
+"radiation|supportive|smile|common|Leave the glow. Keep the life.",
+"radiation|supportive|happy|common|Rad warning. Ya serious-soft.",
+"cold|roasty|smug|common|Ty freezing. Find heat before ty become a popsicle.",
+"cold|roasty|laugh|common|Cold status. Campfire energy, pozhaluysta.",
+"cold|roasty|evil|common|Shivering already? Tough guy.",
+"cold|roasty|pout|common|Temperature dropped. Fashion lost to survival.",
+"cold|roasty|neutral|common|Cold. Hugs from a fire, not from me.",
+"cold|roasty|disgusted|common|Frostbite is not an accessory.",
+"cold|roasty|worried|common|Warmth. Seek it.",
+"cold|roasty|surprised|common|Brr. Survival > drip.",
+"cold|roasty|smile|common|Cold stacks loading. Cancel with heat.",
+"cold|roasty|happy|common|Ty ice. Melt intentionally.",
+"cold|supportive|smug|common|Ty getting cold. Warm up soon.",
+"cold|supportive|laugh|common|Cold warning. Seek heat or warmer gear.",
+"cold|supportive|evil|common|Find a fire or shelter before it gets worse.",
+"cold|supportive|pout|common|Stay warm. Cold stacks will hurt.",
+"cold|supportive|neutral|common|Soft warmth quest. Start it.",
+"cold|supportive|disgusted|common|Cold. Prioritize heat safely.",
+"cold|supportive|worried|common|Warm up. Then loot.",
+"cold|supportive|surprised|common|Temperature drop. Adjust gear.",
+"cold|supportive|smile|common|Shelter sounds nice right seychas.",
+"cold|supportive|happy|common|Cold nudge. Take care.",
+"hot|roasty|smug|common|Overheating. Touch grass... preferably wet grass.",
+"hot|roasty|laugh|common|Too hot. Cool down before ty melt tvoy braincell.",
+"hot|roasty|evil|common|Heatstroke loading. Smart.",
+"hot|roasty|pout|common|Ty cooking. Not in a cute way.",
+"hot|roasty|neutral|common|Hot. Shade exists.",
+"hot|roasty|disgusted|common|Melting arc. Skip it.",
+"hot|roasty|worried|common|Cool down. Ego heats enough.",
+"hot|roasty|surprised|common|Heat warning. Water helps.",
+"hot|roasty|smile|common|Ty a walking stove. Fix it.",
+"hot|roasty|happy|common|Hot status. Fashion can wait.",
+"hot|supportive|smug|common|Ty overheating. Cool off soon.",
+"hot|supportive|laugh|common|Heat is high. Find shade or water.",
+"hot|supportive|evil|common|Cool down before committing to a long run.",
+"hot|supportive|pout|common|Hot status. Manage temperature seychas.",
+"hot|supportive|neutral|common|Soft cool-down. Pozhaluysta.",
+"hot|supportive|disgusted|common|Heat check. Shade route.",
+"hot|supportive|worried|common|Overheating. Slow the sprint.",
+"hot|supportive|surprised|common|Cool off. Stay effective.",
+"hot|supportive|smile|common|Temperature high. Adjust plan.",
+"hot|supportive|happy|common|Hot nudge. Take a breather.",
+"drowning|roasty|smug|common|Ty drowning. Surface. Seychas.",
+"drowning|roasty|laugh|common|Underwater panic hour?",
+"drowning|roasty|evil|common|Air is free. Go get some.",
+"drowning|roasty|pout|common|Drowning. Swim up before this gets stupid.",
+"drowning|roasty|neutral|common|Oxygen is not optional DLC.",
+"drowning|roasty|disgusted|common|Surface. Ya yelling underwater.",
+"drowning|roasty|worried|common|Gurgle arc cancelled. Swim.",
+"drowning|roasty|surprised|common|Air. Immediately.",
+"drowning|roasty|smile|common|Ty becoming a fish wrong.",
+"drowning|roasty|happy|common|Drowning speedrun? Uninstall it.",
+"drowning|supportive|smug|common|Ty drowning! Get to the surface!",
+"drowning|supportive|laugh|common|Air is low. Break the water seychas.",
+"drowning|supportive|evil|common|Swim up. Ne fight under there.",
+"drowning|supportive|pout|common|Drowning status. Prioritize oxygen.",
+"drowning|supportive|neutral|common|Surface! Soft panic, hard swim.",
+"drowning|supportive|disgusted|common|Air first. Always.",
+"drowning|supportive|worried|common|Up. Seychas. Pozhaluysta.",
+"drowning|supportive|surprised|common|Break water. Breathe.",
+"drowning|supportive|smile|common|Oxygen low. Exit the drink.",
+"drowning|supportive|happy|common|Drowning. Ya've got loud concern.",
+"staff_nearby|roasty|smug|common|Staff nearby. Behave. Or at least pretend.",
+"staff_nearby|roasty|laugh|common|Mod energy detected. Maybe hide the crimes.",
+"staff_nearby|roasty|evil|common|Staff in range. Tvoy villain arc is postponed.",
+"staff_nearby|roasty|pout|common|Admin proximity. Play nice.",
+"staff_nearby|roasty|neutral|common|Staff radar ping. Soft crimes only. Actually none.",
+"staff_nearby|roasty|disgusted|common|Moderator nearby. Become a model citizen. Briefly.",
+"staff_nearby|roasty|worried|common|Staff. Smile with tvoy inventory closed.",
+"staff_nearby|roasty|surprised|common|Behave. Ya watching ty watch them.",
+"staff_nearby|roasty|smile|common|Mod in the neighborhood. Chill.",
+"staff_nearby|roasty|happy|common|Staff proximity. Comedy mute recommended.",
+"staff_nearby|supportive|smug|common|Staff nearby. Stay clean and careful.",
+"staff_nearby|supportive|laugh|common|A staff member is close. Keep it normal.",
+"staff_nearby|supportive|evil|common|Staff in the area. No funny business.",
+"staff_nearby|supportive|pout|common|Mod nearby. Focus on surviving, not flexing.",
+"staff_nearby|supportive|neutral|common|Soft reminder: play fair, stay sharp.",
+"staff_nearby|supportive|disgusted|common|Staff close. Keep composure.",
+"staff_nearby|supportive|worried|common|Normal gameplay mode. Ty've got this.",
+"staff_nearby|supportive|surprised|common|Mods nearby. Survive cute, play clean.",
+"staff_nearby|supportive|smile|common|Staff presence. Eyes on the game.",
+"staff_nearby|supportive|happy|common|Stay wholesome. Stay alive.",
+"enemy_nearby|roasty|smug|common|Hostile nearby. Smile for the crosshair.",
+"enemy_nearby|roasty|laugh|common|Someone's close. Ne get caught looking AFK.",
+"enemy_nearby|roasty|evil|common|Enemy in range. Ears up.",
+"enemy_nearby|roasty|pout|common|Company. Hopefully not smarter than ty.",
+"enemy_nearby|roasty|neutral|common|Threat nearby. Check tvoy corners.",
+"enemy_nearby|roasty|disgusted|common|Footstep romance. Load a mag.",
+"enemy_nearby|roasty|worried|common|Close contact. Soft feet.",
+"enemy_nearby|roasty|surprised|common|Hostile bubble. Ne sprint into it.",
+"enemy_nearby|roasty|smile|common|Someone's hunting. Or lost. Assume hunting.",
+"enemy_nearby|roasty|happy|common|Enemy nearby. Pretend ty have game sense.",
+"enemy_nearby|roasty|sad|common|Threat ping. Cover > vibes.",
+"enemy_nearby|roasty|fear|common|Close. Peek smart or ne peek.",
+"enemy_nearby|roasty|smug|common|Hostile in 300. Yes, Ya said three hundred.",
+"enemy_nearby|roasty|laugh|common|Ears first. Ego later.",
+"enemy_nearby|roasty|evil|common|They're close enough to smell tvoy loot.",
+"enemy_nearby|roasty|pout|common|Company. Invite them to the respawn screen.",
+"enemy_nearby|roasty|neutral|common|Threat. Check audio, then angles.",
+"enemy_nearby|roasty|disgusted|common|Nearby hostile. Ne donate the spray.",
+"enemy_nearby|supportive|smug|common|Enemy nearby. Slow down and listen.",
+"enemy_nearby|supportive|laugh|common|Hostile close. Ready tvoy aim and cover.",
+"enemy_nearby|supportive|evil|common|Someone's in tvoy bubble. Stay alert.",
+"enemy_nearby|supportive|pout|common|Nearby threat. Ne sprint into them.",
+"enemy_nearby|supportive|neutral|common|Keep composure. Ty can win this fight.",
+"enemy_nearby|supportive|disgusted|common|Soft footsteps. Hard focus.",
+"enemy_nearby|supportive|worried|common|Threat close. Breathe and hold an angle.",
+"enemy_nearby|supportive|surprised|common|Enemy in range. Info over panic.",
+"enemy_nearby|supportive|smile|common|Close contact. Ty've got this.",
+"enemy_nearby|supportive|happy|common|Stay quiet. Stay ready.",
+"enemy_nearby|supportive|sad|common|Hostile nearby. Play the sound.",
+"enemy_nearby|supportive|fear|common|Within 300. Careful pathing.",
+"enemy_nearby|supportive|smug|common|Threat bubble. Soft peeks.",
+"enemy_nearby|supportive|laugh|common|Someone's close. Team if ty can.",
+"enemy_nearby|supportive|evil|common|Alert mode. Smart fights only.",
+"enemy_nearby|supportive|pout|common|Nearby enemy. Choose the fight.",
+"enemy_nearby|supportive|neutral|common|Ears up. Crosshair honest.",
+"enemy_nearby|supportive|disgusted|common|Close threat. Ya with ty.",
+"enemy_nearby|roasty|smug|uncommon|Aww, a visitor. Make them regret the doorbell.",
+"enemy_nearby|supportive|smug|uncommon|Cute tension. Stay calm — ty've practiced this.",
+"enemy_nearby|roasty|smug|rare|Cunzaki was here — clear the nearby first.",
+"party_join|roasty|smug|common|Ty in a party. Try not to drag them down.",
+"party_join|roasty|laugh|common|Teammates acquired. Their mistake.",
+"party_join|roasty|evil|common|Party up. Share loot like an adult.",
+"party_join|roasty|pout|common|Squad formed. Chaos with friends.",
+"party_join|roasty|neutral|common|Friends online. Ne farm their trust.",
+"party_join|roasty|disgusted|common|Party linked. Callouts > ego.",
+"party_join|roasty|worried|common|Squad. Try teamwork. Novel.",
+"party_join|roasty|surprised|common|Ty not solo. Act accordingly.",
+"party_join|roasty|smile|common|Party joined. Share meds, not blame.",
+"party_join|roasty|happy|common|Team mode. Comedy optional, coordination not.",
+"party_join|supportive|smug|common|Party joined. Stick together and callouts help.",
+"party_join|supportive|laugh|common|Ty teamed up. Watch each other's backs.",
+"party_join|supportive|evil|common|In a party seychas. Share info and stay linked.",
+"party_join|supportive|pout|common|Nice. Team play wins more than ego.",
+"party_join|supportive|neutral|common|Squad up. Soft comms, hard cover.",
+"party_join|supportive|disgusted|common|Together. Move as one brain.",
+"party_join|supportive|worried|common|Party hugs. Stay linked.",
+"party_join|supportive|surprised|common|Team energy. Use it.",
+"party_join|supportive|smile|common|Callouts welcome. Ty've got friends.",
+"party_join|supportive|happy|common|Party on. Play kind, play sharp.",
+"party_leave|roasty|smug|common|Party left. Solo queue dignity restored.",
+"party_leave|roasty|laugh|common|Alone again. Just how tvoy decision-making likes it.",
+"party_leave|roasty|evil|common|Out of party. Ne get lonely and die.",
+"party_leave|roasty|pout|common|Solo mode. Blame redistribution complete.",
+"party_leave|roasty|neutral|common|Party ended. Chaos goes freelance.",
+"party_leave|roasty|disgusted|common|Alone. Cover still exists.",
+"party_leave|roasty|worried|common|Squad left the chat. Ty didn't leave caution.",
+"party_leave|roasty|surprised|common|Solo. Try not to invent fair fights.",
+"party_leave|supportive|smug|common|Ty left the party. Stay aware solo.",
+"party_leave|supportive|laugh|common|Solo seychas. Play safer angles.",
+"party_leave|supportive|evil|common|Party ended. Ty've got this alone too.",
+"party_leave|supportive|pout|common|Soft solo. Hard discipline.",
+"party_leave|supportive|neutral|common|Alone but not careless.",
+"party_leave|supportive|disgusted|common|Solo path. Quieter routes.",
+"party_leave|supportive|worried|common|Party over. Adapt calmly.",
+"party_leave|supportive|surprised|common|Ty've got solo tools. Use them.",
+"reviving|roasty|smug|common|Look at ty, being useful for once.",
+"reviving|roasty|laugh|common|Reviving someone. Ne get beamed mid-animation.",
+"reviving|roasty|evil|common|Hero moment. Cover first, then the revive.",
+"reviving|roasty|pout|common|Saving them? Bold charity.",
+"reviving|roasty|neutral|common|Revive channel. Pozhaluysta ne AFK in it.",
+"reviving|roasty|disgusted|common|Hero arc loading. Cover check.",
+"reviving|roasty|worried|common|Ty the medic seychas. Own it.",
+"reviving|roasty|surprised|common|Revive. Watch the doors like they owe ty money.",
+"reviving|roasty|smile|common|Charity work. Armored charity preferred.",
+"reviving|roasty|happy|common|Hold revive. Hold tvoy life too.",
+"reviving|supportive|smug|common|Nice revive. Watch tvoy surroundings while ty do it.",
+"reviving|supportive|laugh|common|Reviving. Keep an eye on flanks.",
+"reviving|supportive|evil|common|Good teammate play. Finish the revive safely.",
+"reviving|supportive|pout|common|Hold the revive and stay ready to cancel if pushed.",
+"reviving|supportive|neutral|common|Soft hands, hard awareness.",
+"reviving|supportive|disgusted|common|Ty saving them. Ya've got loud pride.",
+"reviving|supportive|worried|common|Revive carefully. Ty exposed.",
+"reviving|supportive|surprised|common|Good. Finish safe.",
+"reviving|supportive|smile|common|Team play. Beautiful.",
+"reviving|supportive|happy|common|Hold strong. Almost up.",
+"boss_spawn|roasty|smug|common|Boss event up. Go be brave. Or loot later. Ya ne care.",
+"boss_spawn|roasty|laugh|common|Big NPC online. Ne feed it for free.",
+"boss_spawn|roasty|evil|common|Event boss spotted. Try not to be the highlight reel.",
+"boss_spawn|roasty|pout|common|World event. Perfect time for bad decisions.",
+"boss_spawn|roasty|neutral|common|Boss presence detected. Gear check.",
+"boss_spawn|roasty|disgusted|common|Boss. Bring bullets and humility.",
+"boss_spawn|roasty|worried|common|Event NPC. Ne ego peek the raid boss.",
+"boss_spawn|roasty|surprised|common|Big threat. Bigger third parties.",
+"boss_spawn|roasty|smile|common|Boss up. Loot or legend — pick one plan.",
+"boss_spawn|roasty|happy|common|World boss. Camera ready for tvoy fail? Rude.",
+"boss_spawn|supportive|smug|common|A boss event is active. Prepare before engaging.",
+"boss_spawn|supportive|laugh|common|Boss nearby or up. Watch the area carefully.",
+"boss_spawn|supportive|evil|common|World boss event. Coordinate if ty can.",
+"boss_spawn|supportive|pout|common|Event spawn. Opportunity if ty're ready.",
+"boss_spawn|supportive|neutral|common|Big threat event. Ne rush blind.",
+"boss_spawn|supportive|disgusted|common|Boss. Soft approach, hard prep.",
+"boss_spawn|supportive|worried|common|Event live. Check kit first.",
+"boss_spawn|supportive|surprised|common|Boss window. Play smart.",
+"boss_spawn|supportive|smile|common|Prepare, then commit.",
+"boss_spawn|supportive|happy|common|Boss up. Stay with the plan.",
+"timed_crate|roasty|smug|common|Timed crate. Race for loot, or race for death. Tvoy call.",
+"timed_crate|roasty|laugh|common|Crate timer up. Campers incoming.",
+"timed_crate|roasty|evil|common|Timed crate. Perfect bait for greedy players.",
+"timed_crate|roasty|pout|common|Crate event. Ne get third-partied mid-loot.",
+"timed_crate|roasty|neutral|common|Go get shiny boxes. Try surviving the audience.",
+"timed_crate|roasty|disgusted|common|Crate. Free loot with paid bullets.",
+"timed_crate|roasty|worried|common|Timer crate. Greed meter rising.",
+"timed_crate|roasty|surprised|common|Crate ping. Assume company.",
+"timed_crate|roasty|smile|common|Shiny box. Shiny ambush.",
+"timed_crate|roasty|happy|common|Timed crate. Soft loot, hard exits.",
+"timed_crate|supportive|smug|common|Timed crate is up. Approach carefully.",
+"timed_crate|supportive|laugh|common|Crate event active. Check for campers first.",
+"timed_crate|supportive|evil|common|Timed crate spotted. Plan tvoy approach.",
+"timed_crate|supportive|pout|common|Good loot opportunity. Stay aware while opening.",
+"timed_crate|supportive|neutral|common|Crate means contest. Ne tunnel vision.",
+"timed_crate|supportive|disgusted|common|Soft crate run. Hard awareness.",
+"timed_crate|supportive|worried|common|Crate up. Ears first.",
+"timed_crate|supportive|surprised|common|Approach from cover. Loot second.",
+"timed_crate|supportive|smile|common|Opportunity. Ne gift the third party.",
+"timed_crate|supportive|happy|common|Crate plan: in smart, out smarter.",
 }
+local function normalize_rarity(r)
+r = tostring(r or "common"):lower()
+if r == "uncommon" or r == "rare" or r == "mythic" or r == "common" then
+return r
+end
+return "common"
+end
 local function add_line(target, line)
-local event, tone, expression, text =
-tostring(line):match("^([^|]+)|([^|]+)|([^|]+)|(.+)$")
-if not event then return end
+line = tostring(line or "")
+local event, tone, expression, rarity, text =
+line:match("^([^|]+)|([^|]+)|([^|]+)|([^|]+)|(.+)$")
+if not (event and (rarity == "common" or rarity == "uncommon" or rarity == "rare" or rarity == "mythic")) then
+event, tone, expression, text = line:match("^([^|]+)|([^|]+)|([^|]+)|(.+)$")
+rarity = "common"
+end
+if not event or not text then return end
+rarity = normalize_rarity(rarity)
 target[event] = target[event] or {}
 target[event][tone] = target[event][tone] or {}
 local pool = target[event][tone]
-pool[#pool + 1] = { expression, text }
+pool[#pool + 1] = { expression, text, rarity }
 end
 local function load_lines(target, body)
 for k in pairs(target) do target[k] = nil end
@@ -12488,10 +13320,13 @@ local en_body = fetch_dialogue("dialogue.txt")
 if en_body then
 load_lines(H.dialogue_en, en_body)
 H.dialogue = H.dialogue_en
+V.dialogue_en = H.dialogue_en
+V.dialogue = H.dialogue_en
 end
 local ru_body = fetch_dialogue("dialogue_ru.txt")
 if ru_body then
 load_lines(H.dialogue_ru, ru_body)
+V.dialogue_ru = H.dialogue_ru
 end
 return en_body ~= nil or ru_body ~= nil
 end
@@ -13652,11 +14487,14 @@ local function gear()
     if ok then player_gear = mod end
     return player_gear
 end
-local CACHE_MS = 70
-local cache = {}
+local CACHE_MS = 120
+local STALE_OK_MS = 450
+local ANIMATOR_TTL_MS = 1500
+local MAX_TRACKS = 16
+local MAX_HRP_SOUNDS = 24
+local MAX_REFRESH_PER_TICK = 3
+local EARLY_PRI = 85
 local TRACK_IN_NODE = 0x10
-local MAX_TRACKS = 24
-local MAX_SOUNDS = 40
 local RULES = {
     { "reload", "RELOAD" },
     { "chamber", "RELOAD" },
@@ -13704,6 +14542,15 @@ local PRIORITY = {
 local HELD_ACTIONS = {
     BANDAGE = true, HEAL = true, REVIVE = true, EAT = true, DRINK = true, MELEE = true,
 }
+local CLASSIFY_MAX = 768
+local cache = {}
+local animator_cache = {}
+local classify_cache = {}
+local classify_n = 0
+local mem_fn = nil
+local name_off = 112
+local refresh_budget = 0
+local refresh_budget_tick = -1
 local function tick_ms()
     local fn = utility and (utility.get_tick_count or utility.GetTickCount)
     if type(fn) ~= "function" then return 0 end
@@ -13711,9 +14558,13 @@ local function tick_ms()
     return (ok and tonumber(v)) or 0
 end
 local function mem_read()
+    if mem_fn then return mem_fn end
     if not memory then return nil end
     local fn = memory.Read or memory.read
-    if type(fn) == "function" then return fn end
+    if type(fn) == "function" then
+        mem_fn = fn
+        return mem_fn
+    end
     return nil
 end
 local function read_ptr(addr)
@@ -13731,16 +14582,9 @@ local function mem_bool(addr, off)
     local ok, value = pcall(fn, addr + off, "bool")
     return ok and value == true
 end
-local function mem_float(addr, off)
-    local fn = mem_read()
-    if not fn or not addr or not off then return nil end
-    local ok, value = pcall(fn, addr + off, "float")
-    if ok then return tonumber(value) end
-    return nil
-end
 local function read_string_at(addr)
     if not addr or not memory or not memory.ReadString then return nil end
-    local ok, s = pcall(memory.ReadString, addr, 128)
+    local ok, s = pcall(memory.ReadString, addr, 96)
     if ok and type(s) == "string" and s ~= "" then return s end
     return nil
 end
@@ -13752,15 +14596,36 @@ local function player_key(p)
     if addr then return tostring(addr) end
     return tostring(p)
 end
+local function character_key(character)
+    if not character then return nil end
+    return tonumber(character.Address or character.address)
+end
+local function ptr_ok(addr)
+    addr = tonumber(addr)
+    return addr and addr >= 0x10000
+end
 local function classify(raw)
     if type(raw) ~= "string" or raw == "" then return nil end
+    local hit = classify_cache[raw]
+    if hit ~= nil then
+        if hit == false then return nil end
+        return hit
+    end
+    if classify_n >= CLASSIFY_MAX then
+        classify_cache = {}
+        classify_n = 0
+    end
     local low = raw:lower()
     for i = 1, #RULES do
         local rule = RULES[i]
         if low:find(rule[1], 1, true) then
+            classify_cache[raw] = rule[2]
+            classify_n = classify_n + 1
             return rule[2]
         end
     end
+    classify_cache[raw] = false
+    classify_n = classify_n + 1
     return nil
 end
 local function consider(best_label, best_pri, label)
@@ -13773,7 +14638,6 @@ local function consider(best_label, best_pri, label)
 end
 local function instance_name(addr)
     if not addr then return nil end
-    local name_off = 112
     local s = read_string_at(addr + name_off)
     if s then return s end
     local ptr = read_ptr(addr + name_off)
@@ -13802,52 +14666,31 @@ local function track_label(track_addr)
     local anim_off = rbx_offsets.anim_track("Animation") or 184
     local anim = read_ptr(track_addr + anim_off)
     local raw = animation_id(anim) or instance_name(track_addr)
-    return classify(raw), raw
+    return classify(raw)
 end
 local function track_is_active(track_addr)
     if not track_addr then return false end
     local play_off = rbx_offsets.anim_track("IsPlaying")
-    if play_off and mem_bool(track_addr, play_off) then return true end
-    local spd = mem_float(track_addr, rbx_offsets.anim_track("Speed"))
-    local tp = mem_float(track_addr, rbx_offsets.anim_track("TimePosition"))
-    if spd and spd > 0.01 then return true end
-    if tp and tp > 0.02 then return true end
+    if play_off then
+        local fn = mem_read()
+        if fn then
+            local ok, value = pcall(fn, track_addr + play_off, "bool")
+            if ok and value == false then return false end
+        end
+    end
     return true
 end
-local function ptr_ok(addr)
-    addr = tonumber(addr)
-    return addr and addr >= 0x10000
-end
-local function walk_active_tracks(animator_addr)
-    local out = {}
-    if not ptr_ok(animator_addr) then return out end
-    local active_off = rbx_offsets.animator("ActiveAnimations") or 2944
-    local head = read_ptr(animator_addr + active_off)
-    if not ptr_ok(head) then return out end
-    local node = read_ptr(head)
-    local guard = 0
-    while ptr_ok(node) and node ~= head and guard < MAX_TRACKS do
-        guard = guard + 1
-        local track = read_ptr(node + TRACK_IN_NODE)
-        if ptr_ok(track) then
-            out[#out + 1] = track
-        end
-        local next_node = read_ptr(node)
-        if not next_node or next_node == node then break end
-        node = next_node
+local function resolve_animator_addr(character, key, now)
+    local char_addr = character_key(character)
+    local ac = key and animator_cache[key]
+    if ac and (now - (ac.t or 0)) < ANIMATOR_TTL_MS and ac.char == char_addr and ptr_ok(ac.addr) then
+        return ac.addr
     end
-    return out
-end
-local function find_animator(character)
-    if not character then return nil, nil end
     local animator = nil
     pcall(function()
         local hum = character.FindFirstChildOfClass and character:FindFirstChildOfClass("Humanoid")
         if hum and hum.FindFirstChildOfClass then
             animator = hum:FindFirstChildOfClass("Animator")
-        end
-        if not animator and character.FindFirstChildOfClass then
-            animator = character:FindFirstChildOfClass("Animator")
         end
         if not animator and character.FindFirstChild then
             local hum2 = character:FindFirstChild("Humanoid")
@@ -13855,10 +14698,45 @@ local function find_animator(character)
                 animator = hum2:FindFirstChild("Animator")
             end
         end
+        if not animator and character.FindFirstChildOfClass then
+            animator = character:FindFirstChildOfClass("Animator")
+        end
     end)
-    if not animator then return nil, nil end
-    local addr = tonumber(animator.Address or animator.address)
-    return animator, addr
+    local addr = animator and tonumber(animator.Address or animator.address) or nil
+    if key then
+        animator_cache[key] = { t = now, addr = addr, char = char_addr }
+    end
+    return addr
+end
+local function scan_tracks(animator_addr)
+    local best_label, best_pri = nil, -1
+    local saw_use = false
+    if not ptr_ok(animator_addr) or not mem_read() then
+        return best_label, best_pri, saw_use
+    end
+    local active_off = rbx_offsets.animator("ActiveAnimations") or 2944
+    local head = read_ptr(animator_addr + active_off)
+    if not ptr_ok(head) then
+        return best_label, best_pri, saw_use
+    end
+    local node = read_ptr(head)
+    local guard = 0
+    while ptr_ok(node) and node ~= head and guard < MAX_TRACKS do
+        guard = guard + 1
+        local track = read_ptr(node + TRACK_IN_NODE)
+        if ptr_ok(track) and track_is_active(track) then
+            local label = track_label(track)
+            if label == "USE" then saw_use = true end
+            best_label, best_pri = consider(best_label, best_pri, label)
+            if best_pri >= EARLY_PRI then
+                break
+            end
+        end
+        local next_node = read_ptr(node)
+        if not next_node or next_node == node then break end
+        node = next_node
+    end
+    return best_label, best_pri, saw_use
 end
 local function held_action(player)
     local pg = gear()
@@ -13879,35 +14757,37 @@ end
 local function sound_action(character)
     if not character then return nil end
     local off_play = rbx_offsets.sound_is_playing()
-    local best, best_pri = nil, -1
-    local function consider_sound(child)
-        if not child or (child.ClassName or child.class_name) ~= "Sound" then return end
-        local addr = tonumber(child.Address or child.address)
-        if not addr or addr <= 0 then return end
-        if not mem_bool(addr, off_play) then return end
-        local label = classify(child.Name or child.name)
-        best, best_pri = consider(best, best_pri, label)
-    end
+    if not off_play or not mem_read() then return nil end
     local hrp = nil
     pcall(function()
         hrp = character:FindFirstChild("HumanoidRootPart")
     end)
-    if hrp and hrp.GetChildren then
-        local ok, kids = pcall(function() return hrp:GetChildren() end)
-        if ok and type(kids) == "table" then
-            for i = 1, #kids do consider_sound(kids[i]) end
-        end
-    end
-    if character.GetDescendantsOfClass then
-        local ok, list = pcall(function()
-            return character:GetDescendantsOfClass("Sound")
-        end)
-        if ok and type(list) == "table" then
-            local n = math.min(#list, MAX_SOUNDS)
-            for i = 1, n do consider_sound(list[i]) end
+    if not hrp or not hrp.GetChildren then return nil end
+    local ok, kids = pcall(function() return hrp:GetChildren() end)
+    if not ok or type(kids) ~= "table" then return nil end
+    local best, best_pri = nil, -1
+    local n = math.min(#kids, MAX_HRP_SOUNDS)
+    for i = 1, n do
+        local child = kids[i]
+        if child and (child.ClassName or child.class_name) == "Sound" then
+            local addr = tonumber(child.Address or child.address)
+            if addr and addr > 0 and mem_bool(addr, off_play) then
+                local label = classify(child.Name or child.name)
+                best, best_pri = consider(best, best_pri, label)
+                if best_pri >= EARLY_PRI then break end
+            end
         end
     end
     return best
+end
+local function take_refresh_budget(now)
+    if refresh_budget_tick ~= now then
+        refresh_budget_tick = now
+        refresh_budget = MAX_REFRESH_PER_TICK
+    end
+    if refresh_budget <= 0 then return false end
+    refresh_budget = refresh_budget - 1
+    return true
 end
 function M.label_for(player)
     if not player then return nil end
@@ -13917,6 +14797,15 @@ function M.label_for(player)
     if hit and (now - (hit.t or 0)) < CACHE_MS then
         return hit.label
     end
+    if hit and (now - (hit.t or 0)) < STALE_OK_MS then
+        if not take_refresh_budget(now) then
+            return hit.label
+        end
+    elseif hit and not take_refresh_budget(now) then
+        return hit.label
+    elseif not hit and not take_refresh_budget(now) then
+        return nil
+    end
     local character = player.Character
     if not character then
         if key then cache[key] = { t = now, label = nil } end
@@ -13924,27 +14813,25 @@ function M.label_for(player)
     end
     local best_label, best_pri = nil, -1
     local saw_use = false
-    local _, animator_addr = find_animator(character)
-    if animator_addr and mem_read() then
-        local tracks = walk_active_tracks(animator_addr)
-        for i = 1, #tracks do
-            local track = tracks[i]
-            if track_is_active(track) then
-                local label = track_label(track)
-                if label == "USE" then saw_use = true end
-                best_label, best_pri = consider(best_label, best_pri, label)
-            end
-        end
+    local animator_addr = resolve_animator_addr(character, key, now)
+    if animator_addr then
+        best_label, best_pri, saw_use = scan_tracks(animator_addr)
     end
-    local sound_label = sound_action(character)
-    best_label, best_pri = consider(best_label, best_pri, sound_label)
-    local held_label, held_name = held_action(player)
-    if held_label then
-        if saw_use or sound_label == held_label or sound_label == "USE" then
-            best_label, best_pri = consider(best_label, best_pri, held_label)
-        elseif best_label == "USE" or best_label == nil then
-            if saw_use or best_label == "USE" then
+    local sound_label = nil
+    if best_pri < EARLY_PRI then
+        sound_label = sound_action(character)
+        best_label, best_pri = consider(best_label, best_pri, sound_label)
+    end
+    local held_label, held_name = nil, nil
+    if best_pri < EARLY_PRI or best_label == "USE" or saw_use then
+        held_label, held_name = held_action(player)
+        if held_label then
+            if saw_use or sound_label == held_label or sound_label == "USE" then
                 best_label, best_pri = consider(best_label, best_pri, held_label)
+            elseif best_label == "USE" or best_label == nil then
+                if saw_use or best_label == "USE" then
+                    best_label, best_pri = consider(best_label, best_pri, held_label)
+                end
             end
         end
     end
@@ -13963,10 +14850,16 @@ end
 function M.prune(live_keys)
     if type(live_keys) ~= "table" then
         cache = {}
+        animator_cache = {}
+        classify_cache = {}
+        classify_n = 0
         return
     end
     for key in pairs(cache) do
         if not live_keys[key] then cache[key] = nil end
+    end
+    for key in pairs(animator_cache) do
+        if not live_keys[key] then animator_cache[key] = nil end
     end
 end
 return M
@@ -17930,6 +18823,10 @@ targeting.clear_random_bone(PREFIX)
 end
 was_aiming = holding
 if not holding then
+if now - last_target_scan < TARGET_SCAN_MS then
+return
+end
+last_target_scan = now
 locked_target = targeting.find_target(cx, cy, fov, PREFIX)
 return
 end
@@ -18078,12 +18975,22 @@ end
 function M.get_target()
 return locked_target
 end
+local scoped_cache = { t = 0, target = nil }
 function M.get_scoped_target()
 if locked_target then return locked_target end
-if not enabled() then return nil end
+if not enabled() then
+scoped_cache.target = nil
+return nil
+end
+local now = tick_ms()
+if (now - (scoped_cache.t or 0)) < TARGET_SCAN_MS then
+return scoped_cache.target
+end
+scoped_cache.t = now
 local sw, sh = targeting.screen_center()
 local fov = settings.num(PREFIX .. "fov", 120)
-return targeting.find_target(sw * 0.5, sh * 0.5, fov, PREFIX)
+scoped_cache.target = targeting.find_target(sw * 0.5, sh * 0.5, fov, PREFIX)
+return scoped_cache.target
 end
 function M.draw()
 if not enabled() then return end
@@ -18096,10 +19003,10 @@ local filled = settings.num(PREFIX .. "fov_style", 1) == 1
 if filled and draw and draw.circle_filled then
 local fill = settings.color(PREFIX .. "draw_fov", { 0.2, 1, 0.45, 0.12 })
 local c = { fill[1], fill[2], fill[3], (fill[4] or 1) * 0.25 }
-draw.circle_filled(cx, cy, fov, c, 64)
+draw.circle_filled(cx, cy, fov, c, 32)
 end
 if draw and draw.circle then
-draw.circle(cx, cy, fov, col, 64, 1)
+draw.circle(cx, cy, fov, col, 32, 1)
 else
 draw_util.circle(cx, cy, fov, col, false)
 end
@@ -18921,12 +19828,22 @@ end
 function M.get_target()
 return locked_target
 end
+local scoped_cache = { t = 0, target = nil }
 function M.get_scoped_target()
 if locked_target then return locked_target end
-if not settings.enabled(P_MASTER) then return nil end
+if not settings.enabled(P_MASTER) then
+scoped_cache.target = nil
+return nil
+end
+local now = tick_ms()
+if (now - (scoped_cache.t or 0)) < TARGET_SCAN_MS then
+return scoped_cache.target
+end
+scoped_cache.t = now
 local sw, sh = targeting.screen_center()
 local fov = settings.num(PREFIX .. "fov", 150)
-return targeting.find_target(sw * 0.5, sh * 0.5, fov, PREFIX)
+scoped_cache.target = targeting.find_target(sw * 0.5, sh * 0.5, fov, PREFIX)
+return scoped_cache.target
 end
 local function snapline_aim_point(cx, cy)
 if cached_track.aim then
@@ -18948,10 +19865,10 @@ local filled = settings.num(PREFIX .. "fov_style", 1) == 1
 if filled and draw and draw.circle_filled then
 local fill = settings.color(PREFIX .. "draw_fov", { 0.4, 0.9, 1, 0.12 })
 local c = { fill[1], fill[2], fill[3], (fill[4] or 1) * 0.25 }
-draw.circle_filled(cx, cy, fov, c, 64)
+draw.circle_filled(cx, cy, fov, c, 32)
 end
 if draw and draw.circle then
-draw.circle(cx, cy, fov, col, 64, 1)
+draw.circle(cx, cy, fov, col, 32, 1)
 else
 draw_util.circle(cx, cy, fov, col, false)
 end
@@ -18991,14 +19908,33 @@ local P_VISIBLE = "april_fov_flags_visible"
 local P_DIST = "april_fov_flags_distance"
 local FLAG_GAP = 3
 local FLAG_SIZE = 12
-local VIS_CACHE_MS = 150
+local VIS_CACHE_MS = 200
+local DIST_CACHE_MS = 100
+local RESOLVE_MS = 50
 local vis_cache = { t = 0, key = nil, visible = false }
+local dist_cache = { t = 0, key = nil, dist = nil }
+local resolve_cache = { t = 0, target = nil, prefix = nil }
+local silent_mod = nil
+local aim_mod = nil
 local i18n_mod = nil
+local i18n_tried = false
 local function aimbot_on()
     return settings.enabled("april_aimbot")
 end
 local function silent_on()
     return settings.enabled("april_silent_aim")
+end
+local function ensure_mods()
+    if not silent_mod then
+        pcall(function()
+            silent_mod = April.require("features.combat.aimbot")
+        end)
+    end
+    if not aim_mod then
+        pcall(function()
+            aim_mod = April.require("features.combat.camera_aimbot")
+        end)
+    end
 end
 local function flag_fov_radius()
     local aim_on = aimbot_on()
@@ -19014,26 +19950,41 @@ local function flag_fov_radius()
     if aim_on then return aim_fov end
     return sil_fov
 end
+local function tick_ms()
+    local fn = utility and (utility.get_tick_count or utility.GetTickCount)
+    if type(fn) ~= "function" then return 0 end
+    local ok, v = pcall(fn)
+    return (ok and tonumber(v)) or 0
+end
 local function resolve_target()
-    local silent_mod = April.require("features.combat.aimbot")
-    local aim_mod = April.require("features.combat.camera_aimbot")
+    local now = tick_ms()
+    if resolve_cache.target and (now - (resolve_cache.t or 0)) < RESOLVE_MS then
+        return resolve_cache.target, resolve_cache.prefix
+    end
+    ensure_mods()
+    local target, prefix = nil, nil
     if silent_on() and silent_mod then
-        local t = silent_mod.get_target and silent_mod.get_target()
-        if t then return t, "april_silent_" end
-        if silent_mod.get_scoped_target then
-            t = silent_mod.get_scoped_target()
-            if t then return t, "april_silent_" end
+        if silent_mod.get_target then
+            target = silent_mod.get_target()
         end
-    end
-    if aimbot_on() and aim_mod then
-        local t = aim_mod.get_target and aim_mod.get_target()
-        if t then return t, "april_aim_" end
-        if aim_mod.get_scoped_target then
-            t = aim_mod.get_scoped_target()
-            if t then return t, "april_aim_" end
+        if not target and silent_mod.get_scoped_target then
+            target = silent_mod.get_scoped_target()
         end
+        if target then prefix = "april_silent_" end
     end
-    return nil, nil
+    if not target and aimbot_on() and aim_mod then
+        if aim_mod.get_target then
+            target = aim_mod.get_target()
+        end
+        if not target and aim_mod.get_scoped_target then
+            target = aim_mod.get_scoped_target()
+        end
+        if target then prefix = "april_aim_" end
+    end
+    resolve_cache.t = now
+    resolve_cache.target = target
+    resolve_cache.prefix = prefix
+    return target, prefix
 end
 local function local_origin()
     local me = cache.local_player
@@ -19045,69 +19996,61 @@ local function local_origin()
     end
     return combat_origin.get_camera_origin() or combat_origin.get_server_origin()
 end
-local function target_distance(target)
-    if not target then return nil end
-    local origin = local_origin()
-    local dist = ep.distance_to(target, origin)
-    if dist then return dist end
-    if not origin then return nil end
-    local pos = ep.head_position(target) or ep.position(target)
-    local x, y, z = esp_util.vec3_pos(pos)
-    if not x then return nil end
-    local dx, dy, dz = x - origin.x, y - origin.y, z - origin.z
-    return math.sqrt(dx * dx + dy * dy + dz * dz)
-end
-local function tick_ms()
-    local fn = utility and (utility.get_tick_count or utility.GetTickCount)
-    if type(fn) ~= "function" then return 0 end
-    local ok, v = pcall(fn)
-    return (ok and tonumber(v)) or 0
-end
 local function target_cache_key(target)
     if not target then return nil end
     local uid = ep.user_id(target)
     if uid and uid ~= 0 then return uid end
     return target.Address or target.address or tostring(target)
 end
-local function target_is_visible(target, prefix)
+local function target_distance(target)
+    if not target then return nil end
+    local now = tick_ms()
+    local key = target_cache_key(target)
+    if key and dist_cache.key == key and (now - (dist_cache.t or 0)) < DIST_CACHE_MS then
+        return dist_cache.dist
+    end
+    local origin = local_origin()
+    local dist = ep.distance_to(target, origin)
+    if not dist and origin then
+        local pos = ep.head_position(target) or ep.position(target)
+        local x, y, z = esp_util.vec3_pos(pos)
+        if x then
+            local dx, dy, dz = x - origin.x, y - origin.y, z - origin.z
+            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+        end
+    end
+    dist_cache.t = now
+    dist_cache.key = key
+    dist_cache.dist = dist
+    return dist
+end
+local function target_is_visible(target)
     if not target or not raycast then return false end
     local now = tick_ms()
     local key = target_cache_key(target)
     if key and vis_cache.key == key and (now - (vis_cache.t or 0)) < VIS_CACHE_MS then
         return vis_cache.visible == true
     end
-    pcall(function()
-        April.require("core.api_aliases").apply()
-    end)
     local visible = false
-    local sw, sh = targeting.screen_center()
-    local cx, cy = sw * 0.5, sh * 0.5
-    local origin = combat_origin.get_camera_origin() or combat_origin.get_fire_origin()
-    local aim = targeting.get_aim_point(
-        target, prefix or "april_silent_", nil, origin, cx, cy, false
-    )
-    if targeting.is_npc_target and targeting.is_npc_target(target) then
-        if origin and aim and (raycast.is_visible or raycast.IsVisible) then
-            local fn = raycast.is_visible or raycast.IsVisible
-            local ok, vis = pcall(fn, origin.x, origin.y, origin.z, aim.x, aim.y, aim.z)
-            visible = ok and vis == true
+    local char = target.Character or target.character
+    if (not char) and ep.character then
+        char = ep.character(target)
+    end
+    local is_player_vis = raycast.is_player_visible or raycast.IsPlayerVisible
+    if char and type(is_player_vis) == "function" then
+        local addr = char.Address or char.address
+        local ok, vis = pcall(is_player_vis, addr or char)
+        if ok then
+            visible = vis == true
         end
-    else
-        local char = target.Character or target.character
-        if (not char) and ep.character then
-            char = ep.character(target)
-        end
-        local is_player_vis = raycast.is_player_visible or raycast.IsPlayerVisible
-        if char and type(is_player_vis) == "function" then
-            local addr = char.Address or char.address
-            local ok, vis = pcall(is_player_vis, addr or char)
-            if ok then
-                visible = vis == true
-            end
-        end
-        if not visible and origin and aim and (raycast.is_visible or raycast.IsVisible) then
-            local fn = raycast.is_visible or raycast.IsVisible
-            local ok, vis = pcall(fn, origin.x, origin.y, origin.z, aim.x, aim.y, aim.z)
+    end
+    if not visible then
+        local origin = combat_origin.get_camera_origin()
+        local pos = ep.head_position(target) or ep.position(target)
+        local x, y, z = esp_util.vec3_pos(pos)
+        local fn = raycast.is_visible or raycast.IsVisible
+        if origin and x and type(fn) == "function" then
+            local ok, vis = pcall(fn, origin.x, origin.y, origin.z, x, y, z)
             visible = ok and vis == true
         end
     end
@@ -19117,7 +20060,14 @@ local function target_is_visible(target, prefix)
     return visible
 end
 local function draw_flag(cx, y, text, col)
-    local tw = theme.text_w(text, FLAG_SIZE)
+    local tw = 0
+    if theme.text_w then
+        tw = theme.text_w(text, FLAG_SIZE) or 0
+    elseif draw and (draw.get_text_size or draw.GetTextSize) then
+        local fn = draw.get_text_size or draw.GetTextSize
+        local ok, w = pcall(fn, text, FLAG_SIZE)
+        if ok then tw = tonumber(w) or 0 end
+    end
     draw_util.text(cx - tw * 0.5, y, text, col, FLAG_SIZE)
     return FLAG_SIZE + FLAG_GAP
 end
@@ -19139,20 +20089,21 @@ function M.draw()
     if not draw then return end
     local fov = flag_fov_radius()
     if not fov then return end
+    local target = resolve_target()
+    if not target then return end
     local sw, sh = targeting.screen_center()
     local cx, cy = sw * 0.5, sh * 0.5
     local y = cy + fov + 8
-    local target, prefix = resolve_target()
-    if not target then return end
-    if not i18n_mod then
+    if not i18n_tried then
+        i18n_tried = true
         pcall(function()
             i18n_mod = April.require("ui.i18n")
         end)
     end
-    local t = function(s)
+    local function t(s)
         return (i18n_mod and i18n_mod.t and i18n_mod.t(s)) or s
     end
-    if settings.bool(P_VISIBLE, true) and target_is_visible(target, prefix) then
+    if settings.bool(P_VISIBLE, true) and target_is_visible(target) then
         y = y + draw_flag(cx, y, t("VISIBLE"), theme.GREEN or { 0.35, 1, 0.45, 1 })
     end
     if settings.bool(P_DIST, true) then
@@ -21346,7 +22297,8 @@ end
 function M.update(_dt)
     if not settings.enabled(P) then
         if #tracers > 0 then clear_tracers() end
-        hp_cache = {}
+        if next(hp_cache) then hp_cache = {} end
+        if next(focus_ms) then focus_ms = {} end
         return
     end
     poll_damage(tick_ms())
@@ -22191,8 +23143,10 @@ ANIM = { 0.95, 0.78, 1.0, 1 },
 }
 local held_cache = {}
 local last_held_prune_ms = 0
+local last_anim_prune_ms = 0
 local HELD_TTL_MS = 300
 local HELD_PRUNE_MS = 2000
+local ANIM_PRUNE_MS = 2500
 local function tick_ms()
 return utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
@@ -22422,6 +23376,28 @@ local flags = {
 if flags[FL_CHEATER] then
 cheater_detect.tick()
 end
+if flags[FL_ANIM] then
+if now - last_anim_prune_ms >= ANIM_PRUNE_MS then
+last_anim_prune_ms = now
+local live = {}
+for i = 1, #players do
+local p = players[i]
+if p then
+local uid = p.UserId or p.user_id
+if uid and uid ~= 0 then
+live[uid] = true
+else
+local addr = p.Address or p.address
+if addr then live[tostring(addr)] = true end
+end
+end
+end
+anim_sense.prune(live)
+end
+elseif last_anim_prune_ms ~= 0 then
+last_anim_prune_ms = 0
+anim_sense.prune(nil)
+end
 local need_snap = show_clan or filter_sz or skip_downed
 or flags[FL_DOWNED] or flags[FL_SAFEZONE]
 or flags[FL_STAFF] or flags[FL_REVIVING] or flags[FL_VIP]
@@ -22551,8 +23527,13 @@ local PLAYER_FILTERS = "april_player_esp_filters"
 local F_TEAM, F_SAFEZONE, F_SKIP_DOWNED = 1, 2, 3
 local PLAYER_RANGE = "april_player_range"
 local CF_FOOT, CF_COMBAT, CF_UTIL, CF_WORLD, CF_OTHER = 1, 2, 3, 4, 5
-local SCAN_MS = 70
-local HRP_CACHE_MS = 450
+local SCAN_MS = 110
+local HRP_CACHE_MS = 1000
+local MAX_SOUNDS_PER_PLAYER = 24
+local MAX_GATHER_PER_SCAN = 4
+local CLASSIFY_MAX = 1024
+local VOL_DEADBAND = 0.025
+local SPD_DEADBAND = 0.02
 local DEFAULT_MAX_DIST = 450
 local DEFAULT_UNDER = 2.8
 local DEFAULT_SCREEN_Y = 2
@@ -22623,9 +23604,12 @@ local CAT_ORDER = { "FOOT", "GUN", "RELOAD", "HIT", "EXPL", "HEAL", "MELEE", "VE
 local indicators = {}
 local sound_prev = {}
 local player_cache = {}
+local classify_cache = {}
+local classify_n = 0
 local last_scan_ms = 0
 local mem_read_fn = nil
 local cached_off = nil
+local gather_budget = 0
 local function tick_ms()
     local fn = utility and (utility.get_tick_count or utility.GetTickCount)
     if type(fn) ~= "function" then return 0 end
@@ -22721,8 +23705,13 @@ local function pretty_name(raw)
     end
     return raw
 end
-local function classify_sound(name, sound_id)
-    local blob = (tostring(name or "") .. " " .. tostring(sound_id or "")):lower()
+local function classify_blob(blob)
+    local hit = classify_cache[blob]
+    if hit then return hit end
+    if classify_n >= CLASSIFY_MAX then
+        classify_cache = {}
+        classify_n = 0
+    end
     for i = 1, #CAT_ORDER do
         local key = CAT_ORDER[i]
         if key ~= "OTHER" then
@@ -22730,12 +23719,24 @@ local function classify_sound(name, sound_id)
             local rules = def.rules
             for ri = 1, #rules do
                 if blob:find(rules[ri], 1, true) then
+                    classify_cache[blob] = def
+                    classify_n = classify_n + 1
                     return def
                 end
             end
         end
     end
+    classify_cache[blob] = CAT.OTHER
+    classify_n = classify_n + 1
     return CAT.OTHER
+end
+local function classify_sound(name, sound_id)
+    local n = tostring(name or "")
+    local by_name = classify_blob(n:lower())
+    if by_name.key ~= "OTHER" or not sound_id or sound_id == "" then
+        return by_name
+    end
+    return classify_blob((n .. " " .. tostring(sound_id)):lower())
 end
 local function filter_allows(cat_def)
     local slot = cat_def and cat_def.filter or CF_OTHER
@@ -22763,11 +23764,16 @@ local function read_sound_id(child, addr, off)
     end
     return nil
 end
-local function gather_sounds(character, hrp)
+local function gather_sounds(character, hrp, prev_entry)
     local sounds = {}
     local seen = {}
+    local deep_done = prev_entry and prev_entry.deep_done == true
+    local char_addr = character and tonumber(character.Address or character.address) or nil
     local function push(child)
-        if not child or child.ClassName ~= "Sound" then return end
+        if not child then return end
+        local class_name = child.ClassName or child.class_name
+        if class_name ~= "Sound" then return end
+        if #sounds >= MAX_SOUNDS_PER_PLAYER then return end
         local addr = tonumber(child.Address or child.address)
         if not addr or addr <= 0 or seen[addr] then return end
         seen[addr] = true
@@ -22777,38 +23783,54 @@ local function gather_sounds(character, hrp)
             child = child,
         }
     end
-    if hrp and hrp.GetChildren then
-        local ok, kids = pcall(function() return hrp:GetChildren() end)
-        if ok and type(kids) == "table" then
-            for i = 1, #kids do push(kids[i]) end
+    local function push_children(inst)
+        if not inst or not inst.GetChildren then return end
+        local ok, kids = pcall(function() return inst:GetChildren() end)
+        if not ok or type(kids) ~= "table" then return end
+        for i = 1, #kids do
+            push(kids[i])
+            if #sounds >= MAX_SOUNDS_PER_PLAYER then return end
         end
     end
-    if character then
-        if character.GetDescendantsOfClass then
+    push_children(hrp)
+    if #sounds == 0 and character and character.FindFirstChildOfClass then
+        local ok_tool, tool = pcall(function()
+            return character:FindFirstChildOfClass("Tool")
+        end)
+        if ok_tool and tool then
+            push_children(tool)
+            local handle = tool.FindFirstChild and tool:FindFirstChild("Handle")
+            if handle then push_children(handle) end
+        end
+    end
+    if #sounds == 0 then
+        if prev_entry and prev_entry.char_addr == char_addr and prev_entry.deep_done and prev_entry.sounds then
+            return prev_entry.sounds, char_addr, true
+        end
+        if character and character.GetDescendantsOfClass then
             local ok, list = pcall(function()
                 return character:GetDescendantsOfClass("Sound")
             end)
             if ok and type(list) == "table" then
-                for i = 1, #list do push(list[i]) end
+                local n = math.min(#list, MAX_SOUNDS_PER_PLAYER)
+                for i = 1, n do push(list[i]) end
             end
-        elseif character.GetDescendants then
-            local ok, list = pcall(function() return character:GetDescendants() end)
-            if ok and type(list) == "table" then
-                for i = 1, math.min(#list, 80) do
-                    local d = list[i]
-                    if d and (d.ClassName or d.class_name) == "Sound" then
-                        push(d)
-                    end
-                end
-            end
+            deep_done = true
         end
     end
-    return sounds
+    return sounds, char_addr, deep_done
 end
 local function refresh_player_sounds(p, now)
     local key = player_key(p)
     local entry = player_cache[key]
-    if entry and (now - (entry.t or 0)) < HRP_CACHE_MS and entry.sounds then
+    if entry and entry.sounds and (now - (entry.t or 0)) < HRP_CACHE_MS then
+        local px, py, pz = esp_util.vec3_pos(p.Position)
+        if px then
+            entry.px, entry.py, entry.pz = px, py, pz
+        end
+        return entry
+    end
+    if entry and entry.sounds and gather_budget <= 0 then
         local px, py, pz = esp_util.vec3_pos(p.Position)
         if px then
             entry.px, entry.py, entry.pz = px, py, pz
@@ -22827,17 +23849,21 @@ local function refresh_player_sounds(p, now)
         player_cache[key] = nil
         return nil
     end
+    gather_budget = gather_budget - 1
     local px, py, pz = esp_util.vec3_pos(p.Position or hrp.Position)
+    local sounds, char_addr, deep_done = gather_sounds(character, hrp, entry)
     entry = {
         hrp = hrp,
-        sounds = gather_sounds(character, hrp),
+        sounds = sounds,
         t = now,
         px = px, py = py, pz = pz,
+        char_addr = char_addr,
+        deep_done = deep_done == true,
     }
     player_cache[key] = entry
     return entry
 end
-local function read_sound_state(child, addr, off)
+local function read_sound_state(child, addr, off, want_sid)
     local vol = tonumber(child and child.Volume)
     if vol == nil then vol = mem_float(addr, off.volume) or 0 end
     local spd = tonumber(child and child.PlaybackSpeed)
@@ -22850,7 +23876,10 @@ local function read_sound_state(child, addr, off)
     end
     local rolloff = tonumber(child and child.RollOffMaxDistance)
     if rolloff == nil then rolloff = mem_float(addr, off.rolloff) or 0 end
-    local sid = read_sound_id(child, addr, off)
+    local sid = nil
+    if want_sid then
+        sid = read_sound_id(child, addr, off)
+    end
     return vol, spd, looped, rolloff, sid
 end
 local function format_label(cat_key, name, vol, dist, detail)
@@ -22940,6 +23969,7 @@ local function scan_sounds(now)
     local detail = settings.bool(ID_DETAIL, true)
     local use_cat_color = settings.bool(ID_CAT_COLOR, true)
     local max_per = settings.num(ID_MAX_PER, DEFAULT_MAX_PER)
+    gather_budget = MAX_GATHER_PER_SCAN
     for _, prev in pairs(sound_prev) do
         prev.seen = false
     end
@@ -22967,13 +23997,20 @@ local function scan_sounds(now)
                             local s = sounds[si]
                             local addr = s.addr
                             local child = s.child
-                            local vol, spd, looped, rolloff, sid = read_sound_state(child, addr, off)
-                            local is_playing = mem_bool(addr, off.is_playing)
-                            local is_audible = rolloff <= 0 or dist <= rolloff
-                            local cat = classify_sound(s.name, sid)
+                            local cat = classify_sound(s.name, nil)
                             if not filter_allows(cat) then
                                 goto next_sound
                             end
+                            local need_sid = cat.key == "OTHER"
+                            local vol, spd, looped, rolloff, sid = read_sound_state(child, addr, off, need_sid)
+                            if need_sid and sid then
+                                cat = classify_sound(s.name, sid)
+                                if not filter_allows(cat) then
+                                    goto next_sound
+                                end
+                            end
+                            local is_playing = mem_bool(addr, off.is_playing)
+                            local is_audible = rolloff <= 0 or dist <= rolloff
                             local prev = sound_prev[addr]
                             if not prev then
                                 sound_prev[addr] = {
@@ -22985,10 +24022,10 @@ local function scan_sounds(now)
                                 prev.seen = true
                                 local started = false
                                 local stopped = false
-                                if vol > prev.vol then started = true end
-                                if vol < prev.vol then stopped = true end
-                                if spd > prev.spd then started = true end
-                                if spd < prev.spd then stopped = true end
+                                if vol > (prev.vol + VOL_DEADBAND) then started = true end
+                                if vol < (prev.vol - VOL_DEADBAND) then stopped = true end
+                                if spd > (prev.spd + SPD_DEADBAND) then started = true end
+                                if spd < (prev.spd - SPD_DEADBAND) then stopped = true end
                                 if looped and not prev.looped then started = true end
                                 if (not looped) and prev.looped then stopped = true end
                                 if is_playing and not prev.playing then started = true end
@@ -23111,6 +24148,10 @@ function M.update(dt)
         if next(indicators) then indicators = {} end
         if next(sound_prev) then sound_prev = {} end
         if next(player_cache) then player_cache = {} end
+        if next(classify_cache) then
+            classify_cache = {}
+            classify_n = 0
+        end
         return
     end
     dt = tonumber(dt) or 0
@@ -28372,6 +29413,12 @@ boss_spawn = 48, timed_crate = 46, reviving = 44, party_join = 42,
 party_leave = 40, combat_leave = 38, bleed_stopped = 36,
 safe_leave = 34, safe_enter = 32,
 }
+local RARITY_WEIGHTS = {
+{ name = "common", weight = 70 },
+{ name = "uncommon", weight = 22 },
+{ name = "rare", weight = 7 },
+{ name = "mythic", weight = 1 },
+}
 local installed = false
 local was_enabled = false
 local seeded = false
@@ -28399,7 +29446,8 @@ local BUBBLE_PAD = 14
 local BUBBLE_FONT = 14
 local BUBBLE_LINE_H = 18
 local BUBBLE_HEADER_H = 24
-local NEARBY_PLAYER_RANGE = 500
+local NEARBY_PLAYER_RANGE = 300
+local NEARBY_RANGE_SQ = NEARBY_PLAYER_RANGE * NEARBY_PLAYER_RANGE
 local function now_ms()
 local fn = utility and (utility.get_tick_count or utility.GetTickCount)
 if type(fn) ~= "function" then return 0 end
@@ -28457,6 +29505,50 @@ if index == 1 then return "roasty" end
 if index == 2 then return "supportive" end
 return math.random(1, 100) <= 58 and "roasty" or "supportive"
 end
+local function entry_rarity(entry)
+local r = entry and (entry[3] or entry.rarity)
+if type(r) ~= "string" or r == "" then return "common" end
+r = r:lower()
+if r == "uncommon" or r == "rare" or r == "mythic" or r == "common" then
+return r
+end
+return "common"
+end
+local function roll_rarity_name()
+local roll = math.random(1, 100)
+local acc = 0
+for i = 1, #RARITY_WEIGHTS do
+acc = acc + RARITY_WEIGHTS[i].weight
+if roll <= acc then return RARITY_WEIGHTS[i].name end
+end
+return "common"
+end
+local function pick_from_pool(pool, repeat_key)
+if type(pool) ~= "table" or #pool == 0 then return nil, nil end
+local by = { common = {}, uncommon = {}, rare = {}, mythic = {} }
+for i = 1, #pool do
+local entry = pool[i]
+local bucket = by[entry_rarity(entry)]
+bucket[#bucket + 1] = { i = i, entry = entry }
+end
+local wanted = roll_rarity_name()
+local order = { wanted, "common", "uncommon", "rare", "mythic" }
+local bucket = nil
+for oi = 1, #order do
+local name = order[oi]
+if by[name] and #by[name] > 0 then
+bucket = by[name]
+break
+end
+end
+if not bucket or #bucket == 0 then return nil, nil end
+local pick = math.random(1, #bucket)
+if #bucket > 1 and last_line[repeat_key] == bucket[pick].i then
+pick = (pick % #bucket) + 1
+end
+last_line[repeat_key] = bucket[pick].i
+return bucket[pick].entry, bucket[pick].i
+end
 local function choose_line(event_name)
 local character = active_character()
 local dialogue = data.dialogue_for(character)
@@ -28470,17 +29562,14 @@ pcall(function()
 if April.require("ui.i18n").is_ru() then lang = "ru" end
 end)
 local repeat_key = character.id .. ":" .. lang .. ":" .. event_name .. ":" .. tone
-local index = math.random(1, #pool)
-if #pool > 1 and index == last_line[repeat_key] then
-index = (index % #pool) + 1
-end
-last_line[repeat_key] = index
-local entry = pool[index]
+local entry = pick_from_pool(pool, repeat_key)
+if not entry then return nil end
 return {
 character = character,
 event = event_name,
 expression = entry[1] or "neutral",
 text = entry[2] or "",
+rarity = entry_rarity(entry),
 priority = PRIORITY[event_name] or 1,
 }
 end
@@ -28634,12 +29723,30 @@ local me_pos = ep.position(local_player)
 local staff = false
 local enemy = false
 if not me_pos then return staff, enemy end
-for _, player in ipairs(cache.players or {}) do
-if player and not ep.is_local(player) and player_state.is_combat_target(player) then
-local dist = ep.distance_to(player, me_pos)
-if dist and dist <= NEARBY_PLAYER_RANGE then
+local mx = tonumber(me_pos.x or me_pos.X)
+local my = tonumber(me_pos.y or me_pos.Y)
+local mz = tonumber(me_pos.z or me_pos.Z)
+if not mx then return staff, enemy end
+local players = cache.players or {}
+for i = 1, #players do
+local player = players[i]
+if player and not ep.is_local(player) then
+local hp = ep.health(player)
+local alive = ep.is_alive(player)
+if alive ~= false and (hp == nil or hp > 0) then
+local pos = ep.position(player)
+local px = pos and tonumber(pos.x or pos.X)
+local py = pos and tonumber(pos.y or pos.Y)
+local pz = pos and tonumber(pos.z or pos.Z)
+if px then
+local dx, dy, dz = px - mx, py - my, pz - mz
+if (dx * dx + dy * dy + dz * dz) <= NEARBY_RANGE_SQ then
 if player_state.staff_tag(player) then staff = true end
-if not team_state.is_teammate(player) then enemy = true end
+if not team_state.is_teammate(player) and player_state.passes_team_check(player) then
+enemy = true
+end
+end
+end
 end
 if staff and enemy then break end
 end
@@ -28673,16 +29780,27 @@ sensed.thirst_low = stats.thirst_low == true
 sensed.safe = as_bool(player_state.player_attr(local_player, "SafeZone"))
 or as_bool(player_state.player_attr(local_player, "InSafeZone"))
 end
-if alive and now - last_scan_ms >= 450 then
+local want_nearby = event_enabled("enemy_nearby") or event_enabled("staff_nearby")
+or event_enabled("reviving") or event_enabled("party_join")
+if alive and want_nearby and now - last_scan_ms >= 700 then
 last_scan_ms = now
+if event_enabled("enemy_nearby") or event_enabled("staff_nearby") then
 sensed.staff_nearby, sensed.enemy_nearby = nearby_flags(local_player)
+else
+sensed.staff_nearby, sensed.enemy_nearby = false, false
+end
 sensed.party = team_state.in_party() == true
 sensed.reviving = not downed and player_state.is_reviving(local_player) == true
+elseif not want_nearby then
+sensed.staff_nearby, sensed.enemy_nearby = false, false
 end
-if now - last_world_ms >= 900 then
+local want_world = event_enabled("boss_spawn") or event_enabled("timed_crate")
+if want_world and now - last_world_ms >= 1200 then
 last_world_ms = now
-sensed.boss = boss_present()
-sensed.timed_crate = timed_crate_present()
+sensed.boss = event_enabled("boss_spawn") and boss_present() or false
+sensed.timed_crate = event_enabled("timed_crate") and timed_crate_present() or false
+elseif not want_world then
+sensed.boss, sensed.timed_crate = false, false
 end
 return {
 alive = alive,
@@ -31007,7 +32125,7 @@ local TIPS = {
     april_anime_baddie_enabled = "Pokazyvaet peretaskivaemogo prozrachnogo anime-anonsera, reagiruyuschego na lokalnye sobytiya vyzhivaniya. Tolko otrisovka: ne sozdaet Roblox-instansy i nichego ne pishet v Workspace.",
     april_anime_baddie_character = "Vybor anonsera. Bolshe personazhey mozhno dobavit cherez registry.",
     april_anime_baddie_personality = "Mixed chereduet podkoly i podderzhku; Roasty i Supportive fiksiruyut ton.",
-    april_anime_baddie_events = "Kakie read-only perehody lokalnogo sostoyaniya mogut zapuskat repliki: vyzhivanie, boevoy status, blizhnie ugrozy i mirovye iventy.",
+    april_anime_baddie_events = "Kakie sobytiya zapuskayut repliki: vyzhivanie, boy, blizhnie ugrozy (300m) i mirovye iventy.",
     april_anime_baddie_scale = "Menyaet razmer personazha po poyas.",
     april_anime_baddie_opacity = "Menyaet prozrachnost personazha. Puzyr rechi pochti neprozrachen dlya chitaemosti.",
     april_anime_baddie_duration = "Kak dolgo viden kazhdyy rechevoy puzyr.",
@@ -31432,8 +32550,8 @@ april_ui_menu_overlay = "Darkens the whole screen behind the menu with a smooth 
 april_ui_snow = "Soft falling snow behind the menu. Hidden when Reduce Motion is on.",
 april_anime_baddie_enabled = "Shows a draggable transparent anime announcer that reacts to local survival events. Draw-only: it creates no Roblox instances and writes nothing to Workspace.",
 april_anime_baddie_character = "Selects the announcer. More characters can be added through the character registry.",
-april_anime_baddie_personality = "Mixed alternates between teasing and supportive lines; Roasty and Supportive lock the tone.",
-april_anime_baddie_events = "Choose which read-only local state transitions can trigger dialogue: survival, combat status, nearby threats, and world events.",
+april_anime_baddie_personality = "Mixed alternates between teasing and supportive lines; Roasty and Supportive lock the tone. Lines also roll common/uncommon/rare/mythic weights.",
+april_anime_baddie_events = "Which events can trigger dialogue: survival, combat, nearby threats (300 studs), and world events.",
 april_anime_baddie_scale = "Changes the waist-up character size.",
 april_anime_baddie_opacity = "Changes character transparency. The speech bubble stays nearly opaque for readability.",
 april_anime_baddie_duration = "How long each speech bubble remains visible.",

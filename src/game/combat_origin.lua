@@ -4,6 +4,10 @@ local weapons = April.require("game.weapons")
 local M = {}
 
 local frame = { t = 0, weapon = nil, muzzle = nil, server = nil }
+-- Avoid re-walking viewmodel descendants every sync when FlashPart is missing.
+local flash_lookup = {}
+local FLASH_TTL_MS = 450
+local FLASH_CACHE_MAX = 48
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -68,14 +72,51 @@ local function viewmodel_cframe_origin()
     return pos
 end
 
+local function flash_cache_get(model)
+    local addr = model and tonumber(model.Address or model.address)
+    if not addr then return nil, false end
+    local hit = flash_lookup[addr]
+    if not hit then return nil, false end
+    if (tick_ms() - (hit.t or 0)) >= FLASH_TTL_MS then
+        flash_lookup[addr] = nil
+        return nil, false
+    end
+    return hit.pos, true
+end
+
+local function flash_cache_set(model, pos)
+    local addr = model and tonumber(model.Address or model.address)
+    if not addr then return end
+    local n = 0
+    for _ in pairs(flash_lookup) do
+        n = n + 1
+        if n >= FLASH_CACHE_MAX then
+            flash_lookup = {}
+            break
+        end
+    end
+    flash_lookup[addr] = { t = tick_ms(), pos = pos }
+end
+
 local function find_flash_in(model)
     if not model then return nil end
+    local cached, ok = flash_cache_get(model)
+    if ok then return cached end
+
     local flash = find_child(model, "FlashPart") or find_child(model, "Flash")
-    if flash then return part_pos(flash) end
+    if flash then
+        local pos = part_pos(flash)
+        flash_cache_set(model, pos)
+        return pos
+    end
     local weapon = find_child(model, "Weapon")
     if weapon then
         flash = find_child(weapon, "FlashPart") or find_child(weapon, "Flash")
-        if flash then return part_pos(flash) end
+        if flash then
+            local pos = part_pos(flash)
+            flash_cache_set(model, pos)
+            return pos
+        end
     end
     local desc = env.safe_call(function()
         if model.get_descendants then return model:get_descendants() end
@@ -84,9 +125,12 @@ local function find_flash_in(model)
     for _, d in ipairs(desc) do
         local n = d.Name or d.name
         if n == "FlashPart" or n == "Flash" then
-            return part_pos(d)
+            local pos = part_pos(d)
+            flash_cache_set(model, pos)
+            return pos
         end
     end
+    flash_cache_set(model, nil)
     return nil
 end
 
@@ -181,6 +225,7 @@ function M.invalidate()
     frame.weapon = nil
     frame.muzzle = nil
     frame.server = nil
+    flash_lookup = {}
 end
 
 function M.sync_weapon(weapon)

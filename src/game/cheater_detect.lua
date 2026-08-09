@@ -104,11 +104,18 @@ function M.tick()
     if not players then return end
     local ok, list = pcall(players)
     if not ok or type(list) ~= "table" then return end
+
+    local live = {}
     for i = 1, #list do
         local p = list[i]
         if p and not ep.is_local(p) then
+            local key = cache_key(p)
+            if key then live[key] = true end
             M.is_cheater(p)
         end
+    end
+    for key in pairs(cache) do
+        if not live[key] then cache[key] = nil end
     end
 end
 
