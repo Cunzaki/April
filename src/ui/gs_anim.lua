@@ -1,5 +1,6 @@
 -- Animated accent bars + per-element theme sync for the custom UI.
 local theme = April.require("ui.gs_theme")
+local settings_ref = April.require("core.settings")
 
 local M = {}
 
@@ -32,6 +33,7 @@ M.COL_CHECKBOX = "april_ui_col_checkbox"
 M.COL_OVERLAY = "april_ui_col_overlay"
 
 local transitions = {}
+local last_accent = {}
 
 local function clamp(v, a, b)
     if v < a then return a end
@@ -125,7 +127,7 @@ function M.mix(a, b, t)
 end
 
 local function settings()
-    return April.require("core.settings")
+    return settings_ref
 end
 
 local function hsv_to_rgb(h, s, v)
@@ -226,16 +228,29 @@ function M.anim_target_enabled(target_index)
 end
 
 function M.sync_theme()
-    theme.sync()
+    local theme_changed = theme.sync() == true
     local col = M.base_accent()
-    theme.ACCENT = { col[1], col[2], col[3], col[4] or 1 }
+    local r, g, b, a = col[1], col[2], col[3], col[4] or 1
+    local accent_changed = last_accent[1] ~= r or last_accent[2] ~= g
+        or last_accent[3] ~= b or last_accent[4] ~= a
+    last_accent[1], last_accent[2], last_accent[3], last_accent[4] = r, g, b, a
+    local accent = theme.ACCENT
+    if not accent then
+        accent = { r, g, b, a }
+        theme.ACCENT = accent
+    else
+        accent[1], accent[2], accent[3], accent[4] = r, g, b, a
+    end
+    if theme.capture_alpha then theme.capture_alpha("ACCENT") end
     local pulse = 0.62 + 0.38 * math.sin(M.phase() * 2.2)
-    theme.ACCENT_DIM = {
-        col[1] * pulse * 0.55,
-        col[2] * pulse * 0.55,
-        col[3] * pulse * 0.55,
-        1,
-    }
+    local dim = theme.ACCENT_DIM
+    if not dim then
+        dim = { 0, 0, 0, 1 }
+        theme.ACCENT_DIM = dim
+    end
+    dim[1], dim[2], dim[3], dim[4] = r * pulse * 0.55, g * pulse * 0.55, b * pulse * 0.55, 1
+    if theme.capture_alpha then theme.capture_alpha("ACCENT_DIM") end
+    return theme_changed or accent_changed
 end
 
 function M.accent_at_mode(mode, base, t, alpha)

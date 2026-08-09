@@ -14,6 +14,13 @@ local popup_rect = nil
 local dock_rect = nil
 local settings_opened_this_frame = false
 local visible_settings = {}
+local panel_widths = {}
+local SETTINGS_SEPARATOR = { type = "separator" }
+local SETTINGS_EMPTY = {
+    type = "label",
+    label = "Enable Binds, Staff, Events, Map, or April above.",
+    dim = true,
+}
 
 local PANELS = {
     { id = "april_keybinds_enabled", icon = "keybinds", label = "Binds" },
@@ -46,12 +53,20 @@ local MAP_SETTINGS = {
 local EVENT_SETTINGS = {
     { type = "label", label = "EVENTS", dim = true },
     { type = "checkbox", id = "april_event_status_active_only", label = "Only active events", default = false },
+    { type = "checkbox", id = "april_event_status_notify", label = "Event notifications", default = true },
+    { type = "checkbox", id = "april_event_status_distance", label = "Show distance", default = true },
+    { type = "checkbox", id = "april_event_status_health", label = "Show health", default = true },
+    {
+        type = "combo", id = "april_event_status_sort", label = "Sorting",
+        options = { "Game Order", "Active First", "Nearest First" }, default = 1,
+    },
 }
 
 local function build_visible_settings()
-    local out = {}
+    local out = visible_settings
+    for i = #out, 1, -1 do out[i] = nil end
     local function append_group(group)
-        if #out > 0 then out[#out + 1] = { type = "separator" } end
+        if #out > 0 then out[#out + 1] = SETTINGS_SEPARATOR end
         for _, item in ipairs(group) do out[#out + 1] = item end
     end
 
@@ -65,6 +80,10 @@ local function build_visible_settings()
     state.set_visible("april_keybinds_show_mode", binds)
     state.set_visible("april_mod_checker_interval", staff)
     state.set_visible("april_event_status_active_only", events)
+    state.set_visible("april_event_status_notify", events)
+    state.set_visible("april_event_status_distance", events)
+    state.set_visible("april_event_status_health", events)
+    state.set_visible("april_event_status_sort", events)
     state.set_visible("april_map_reset_position", map)
 
     if binds then append_group(BIND_SETTINGS) end
@@ -72,11 +91,7 @@ local function build_visible_settings()
     if events then append_group(EVENT_SETTINGS) end
     if map then append_group(MAP_SETTINGS) end
     if #out == 0 then
-        out[1] = {
-            type = "label",
-            label = "Enable Binds, Staff, Events, Map, or April above.",
-            dim = true,
-        }
+        out[1] = SETTINGS_EMPTY
     end
     return out
 end
@@ -106,6 +121,10 @@ function M.init()
     state.define("april_mod_checker_y", -1)
     state.define("april_event_status_enabled", false)
     state.define("april_event_status_active_only", false)
+    state.define("april_event_status_notify", true)
+    state.define("april_event_status_distance", true)
+    state.define("april_event_status_health", true)
+    state.define("april_event_status_sort", 1)
     state.define("april_map_enabled", false)
     state.define("april_anime_baddie_enabled", false)
 end
@@ -131,7 +150,8 @@ function M.draw_floating(_default_x, _default_y, sw, _sh)
     local x = math.floor((sw - bar_w) * 0.5)
     local y = math.max(8, math.floor(10 * scale))
 
-    dock_rect = { x = x, y = y, w = bar_w, h = bar_h }
+    if not dock_rect then dock_rect = {} end
+    dock_rect.x, dock_rect.y, dock_rect.w, dock_rect.h = x, y, bar_w, bar_h
     widgets.rect(x, y, bar_w, bar_h, theme.alpha(theme.NAV_BG, 0.97), true, theme.CORNER)
     widgets.rect(x, y, bar_w, bar_h, theme.BORDER, false, theme.CORNER)
 
@@ -187,13 +207,12 @@ function M.draw_floating(_default_x, _default_y, sw, _sh)
         widgets.interacted = true
     end
 
-    visible_settings = build_visible_settings()
-    popup_rect = {
-        x = math.min(x + bar_w - (theme.DOCK_POPUP_W or 270), sw - (theme.DOCK_POPUP_W or 270) - 6),
-        y = y + bar_h + 9,
-        w = theme.DOCK_POPUP_W or 270,
-        h = settings_height(visible_settings),
-    }
+    build_visible_settings()
+    if not popup_rect then popup_rect = {} end
+    popup_rect.x = math.min(x + bar_w - (theme.DOCK_POPUP_W or 270), sw - (theme.DOCK_POPUP_W or 270) - 6)
+    popup_rect.y = y + bar_h + 9
+    popup_rect.w = theme.DOCK_POPUP_W or 270
+    popup_rect.h = settings_height(visible_settings)
     return dock_rect
 end
 
@@ -207,7 +226,7 @@ function M.draw(x, y, w, h)
     local chip_h = theme.DOCK_CHIP_H or math.max(22, h - 8)
     local icon_w = chip_h
     local settings_w = chip_h
-    local widths = {}
+    local widths = panel_widths
     local total = settings_w
 
     local i18n = April.require("ui.i18n")
@@ -265,12 +284,11 @@ function M.draw(x, y, w, h)
         widgets.interacted = true
     end
 
-    popup_rect = {
-        x = x + w - (theme.DOCK_POPUP_W or 270),
-        y = y + h + 7,
-        w = theme.DOCK_POPUP_W or 270,
-        h = theme.DOCK_POPUP_H or 250,
-    }
+    if not popup_rect then popup_rect = {} end
+    popup_rect.x = x + w - (theme.DOCK_POPUP_W or 270)
+    popup_rect.y = y + h + 7
+    popup_rect.w = theme.DOCK_POPUP_W or 270
+    popup_rect.h = theme.DOCK_POPUP_H or 250
     return dock_left
 end
 

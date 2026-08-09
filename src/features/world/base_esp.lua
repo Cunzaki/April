@@ -29,6 +29,18 @@ local CHAMS_COLOR = "april_base_chams_color"
 M._static = {}
 local draw_candidates = {}
 local chams_candidates = {}
+local toggle_index = {}
+local toggle_enabled = {}
+local toggle_colors = {}
+for i, t in ipairs(maps.BASE_TOGGLES) do toggle_index[t.id] = i end
+
+local function refresh_toggle_state(with_colors)
+    for i = 1, #maps.BASE_TOGGLES do
+        local t = maps.BASE_TOGGLES[i]
+        toggle_enabled[t.id] = settings.enabled(t.id)
+        if with_colors then toggle_colors[t.id] = settings.color(t.id, t.color) end
+    end
+end
 
 local function base_chams_labels()
     local labels = {}
@@ -39,10 +51,7 @@ local function base_chams_labels()
 end
 
 local function base_chams_index_for(toggle_id)
-    for i, t in ipairs(maps.BASE_TOGGLES) do
-        if t.id == toggle_id then return i end
-    end
-    return nil
+    return toggle_index[toggle_id]
 end
 
 local function base_chams_active()
@@ -63,6 +72,7 @@ local function collect_base_chams(applied)
 
     local range = settings.num("april_base_range", 150)
     local range_sq = range * range
+    refresh_toggle_state(false)
 
     local entries = cache.query_spatial(
         cache.spatial.base, me_pos.x, me_pos.z, range, chams_candidates
@@ -71,7 +81,7 @@ local function collect_base_chams(applied)
         if not env.is_valid(entry.inst) then goto continue end
         local idx = base_chams_index_for(entry.toggle_id)
         if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
-        if not settings.enabled(entry.toggle_id) then goto continue end
+        if not toggle_enabled[entry.toggle_id] then goto continue end
 
         local lx, ly, lz = esp_scan.entry_coords(entry)
         if not lx then goto continue end
@@ -348,6 +358,7 @@ function M.draw()
     local me = env.get_local_player()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
+    refresh_toggle_state(true)
 
     local entries = cache.base
     if me_pos then
@@ -356,7 +367,7 @@ function M.draw()
         )
     end
     for _, entry in ipairs(entries) do
-        if not settings.enabled(entry.toggle_id) then goto continue end
+        if not toggle_enabled[entry.toggle_id] then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
 
         local lx, ly, lz = esp_scan.entry_coords(entry)
@@ -371,7 +382,7 @@ function M.draw()
             if dist_sq > range_sq then goto continue end
         end
 
-        local col = settings.color(entry.toggle_id, maps.toggle_color(maps.BASE_TOGGLES, entry.toggle_id))
+        local col = toggle_colors[entry.toggle_id]
         if draw_boxes then
             esp_util.draw_entry_boxes(entry, col, 1)
         end

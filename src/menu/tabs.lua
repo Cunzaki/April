@@ -7,11 +7,14 @@ local player_state = April.require("game.player_state")
 local weapons = April.require("game.weapons")
 local runservice = April.require("core.runservice")
 local incremental_scan = April.require("core.incremental_scan")
+local rbx_offsets = April.require("core.rbx_offsets")
 
 local M = {}
 
 M.features = {}
 M._menu_registered = false
+M._update_dispatch = {}
+M._draw_dispatch = {}
 
 M.FEATURE_ORDER = {
     "features.combat.camera_aimbot",
@@ -57,11 +60,25 @@ function M.register_all()
     menu_util.ensure_groups()
 
     M.features = {}
+    M._update_dispatch = {}
+    M._draw_dispatch = {}
     local registered = 0
 
     for _, path in ipairs(M.FEATURE_ORDER) do
         local feat = April.require(path)
         table.insert(M.features, feat)
+        if type(feat.update) == "function" then
+            M._update_dispatch[#M._update_dispatch + 1] = {
+                name = "update:" .. path,
+                fn = feat.update,
+            }
+        end
+        if type(feat.draw) == "function" then
+            M._draw_dispatch[#M._draw_dispatch + 1] = {
+                name = "draw:" .. path,
+                fn = feat.draw,
+            }
+        end
         if feat.register_menu then
             local ok = pcall(feat.register_menu)
             if ok then
@@ -134,23 +151,17 @@ function M.update(dt)
     weapons.tick()
     runservice.dispatch(dt)
     incremental_scan.tick()
-    pcall(function()
-        April.require("core.rbx_offsets").tick_fps()
-    end)
-    for i, feat in ipairs(M.features) do
-        if feat.update then
-            local name = M.FEATURE_ORDER[i] or ("#" .. i)
-            debug.guard_fast("update:" .. name, feat.update, dt)
-        end
+    pcall(rbx_offsets.tick_fps)
+    for i = 1, #M._update_dispatch do
+        local call = M._update_dispatch[i]
+        debug.guard_fast(call.name, call.fn, dt)
     end
 end
 
 function M.draw()
-    for i, feat in ipairs(M.features) do
-        if feat.draw then
-            local name = M.FEATURE_ORDER[i] or ("#" .. i)
-            debug.guard_fast("draw:" .. name, feat.draw)
-        end
+    for i = 1, #M._draw_dispatch do
+        local call = M._draw_dispatch[i]
+        debug.guard_fast(call.name, call.fn)
     end
 end
 

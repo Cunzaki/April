@@ -233,9 +233,6 @@ function M.draw()
     local fov = flag_fov_radius()
     if not fov then return end
 
-    local target = resolve_target()
-    if not target then return end
-
     local sw, sh = targeting.screen_center()
     local cx, cy = sw * 0.5, sh * 0.5
     local y = cy + fov + 8
@@ -250,17 +247,19 @@ function M.draw()
         return (i18n_mod and i18n_mod.t and i18n_mod.t(s)) or s
     end
 
-    if settings.bool(P_VISIBLE, true) and target_is_visible(target) then
+    local target = resolve_target()
+    if target and settings.bool(P_VISIBLE, true) and target_is_visible(target) then
         y = y + draw_flag(cx, y, t("VISIBLE"), theme.GREEN or { 0.35, 1, 0.45, 1 })
     end
 
-    if settings.bool(P_DIST, true) then
+    if target and settings.bool(P_DIST, true) then
         local dist = target_distance(target)
         if dist then
             local col = theme.TEXT or { 0.9, 0.92, 0.95, 1 }
             y = y + draw_flag(cx, y, string.format("%dm", math.floor(dist + 0.5)), col)
         end
     end
+
 end
 
 return M

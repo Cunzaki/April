@@ -19,6 +19,8 @@ local APPLY_MS = 100
 
 -- [head_addr] = { sx, sy, sz, transp, head?, next_apply? }
 local tracked = {}
+local update_seen = {}
+local fallback_bounds_opts = { body_h = 5.0, top_pad = 0.55, bot_pad = 0.12, width_mul = 0.52 }
 local was_on = false
 
 local function tick_ms_local()
@@ -290,12 +292,8 @@ function M.esp_bounds(player)
     )
     if not hx then return nil end
     local px, py, pz = esp_util.vec3_pos(player.Position or player.position)
-    local opts = {
-        body_h = 5.0,
-        top_pad = 0.55,
-        bot_pad = 0.12,
-        width_mul = 0.52,
-    }
+    local opts = fallback_bounds_opts
+    opts.fx, opts.fy, opts.fz = nil, nil, nil
     if px then
         opts.fx, opts.fy, opts.fz = px, py - 3.05, pz
     end
@@ -318,7 +316,8 @@ function M.update(_dt)
     if type(players) ~= "table" then return end
     local now = tick_ms_local()
 
-    local seen = {}
+    local seen = update_seen
+    for key in pairs(seen) do seen[key] = nil end
     for i = 1, #players do
         local p = players[i]
         if not p or ep.is_local(p) then goto continue end

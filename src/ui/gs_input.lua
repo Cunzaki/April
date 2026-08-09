@@ -324,24 +324,39 @@ function M.clicked(x, y, w, h)
     return M.lmb_click and M.hover(x, y, w, h)
 end
 
+local cursor_settings = nil
+local cursor_theme = nil
+local cursor_anim = nil
+
 function M.draw_cursor()
     if not draw then return end
+    if not cursor_settings then
+        local ok, mod = pcall(April.require, "core.settings")
+        if ok then cursor_settings = mod end
+    end
+    if not cursor_theme then
+        local ok, mod = pcall(April.require, "ui.gs_theme")
+        if ok then cursor_theme = mod end
+    end
+    if not cursor_anim then
+        local ok, mod = pcall(April.require, "ui.gs_anim")
+        if ok then cursor_anim = mod end
+    end
+    if not cursor_settings or not cursor_theme or not cursor_anim then return end
     local show = true
     pcall(function()
-        show = April.require("core.settings").bool("april_ui_show_cursor_dot", true)
+        show = cursor_settings.bool("april_ui_show_cursor_dot", true)
     end)
     if not show then return end
     local x, y = M.mx, M.my
-    local theme = April.require("ui.gs_theme")
-    local anim = April.require("ui.gs_anim")
-    local col = theme.ACCENT or { 0.75, 0.15, 0.83, 1 }
-    local press = anim.transition("cursor:press", M.lmb, anim.motion_rate(26))
+    local col = cursor_theme.ACCENT or { 0.75, 0.15, 0.83, 1 }
+    local press = cursor_anim.transition("cursor:press", M.lmb, cursor_anim.motion_rate(26))
     local inner = 3.5 + press * 1.5
     if draw.circle_filled then
         draw.circle_filled(x, y, inner, col, 14)
     end
     if draw.circle then
-        draw.circle(x, y, 5.5 + press, theme.TEXT_ACTIVE, 16, 1.2)
+        draw.circle(x, y, 5.5 + press, cursor_theme.TEXT_ACTIVE, 16, 1.2)
     end
 end
 

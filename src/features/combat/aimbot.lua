@@ -284,26 +284,9 @@ function M.update(dt)
     local ok_set = false
     local ok_track = false
     if use_silent_fov then
-        if info.use_curve and silent_ray.track_curve then
-            -- Keep aim vector live; only engage track while firing.
-            ok_set = silent_ray.set_target(origin, hit, hit) == true
-            if firing then
-                ok_track = silent_ray.track_curve(
-                    origin, hit, info.weapon, SHOOT_VK, hit
-                ) == true
-                ok_set = ok_set or silent_ray.last_ok() == true
-            end
-            if not info.curve_path and silent_ray.last_curve then
-                local curve = silent_ray.last_curve()
-                if curve and curve.path then
-                    info.curve_path = curve.path
-                end
-            end
-        else
-            ok_set = silent_ray.set_target(origin, track_aim, hit) == true
-            if firing then
-                ok_track = silent_ray.track(origin, track_aim, SHOOT_VK, hit) == true
-            end
+        ok_set = silent_ray.set_target(origin, track_aim, hit) == true
+        if firing then
+            ok_track = silent_ray.track(origin, track_aim, SHOOT_VK, hit) == true
         end
     else
         ok_set = silent_ray.set_target(origin, track_aim, hit) == true

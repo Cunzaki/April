@@ -7,6 +7,7 @@ local api_aliases = April.require("core.api_aliases")
 local feature_bind = April.require("core.feature_bind")
 local aim_key = April.require("core.aim_key")
 local overlay_theme = April.require("core.overlay_theme")
+local settings = April.require("core.settings")
 
 local M = {}
 local initialized = false
@@ -28,6 +29,7 @@ end
 function M.on_frame()
     if not initialized then return end
     debug.tick_frame()
+    settings.begin_frame(debug.frame_count())
 
     pcall(feature_bind.tick)
     pcall(aim_key.tick, "april_aim_key", "april_aim_key_mode")

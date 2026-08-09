@@ -7,12 +7,14 @@ local draw_util = April.require("core.draw_util")
 local panel_drag = April.require("core.panel_drag")
 local overlay_theme = April.require("core.overlay_theme")
 local theme = April.require("core.ui_theme")
+local notify = April.require("core.notify")
+local esp_util = April.require("core.esp_util")
 
 local M = {}
 local P = "april_event_status_enabled"
 local X_ID = "april_event_status_x"
 local Y_ID = "april_event_status_y"
-local PANEL_W = 314
+local PANEL_W = 350
 local TITLE_H = 30
 local ROW_H = 36
 -- The crate countdown only changes once per second, while NPC presence is
@@ -39,9 +41,21 @@ local session_token = nil
 local btr_was_destroyed = false
 local btr_loot_until = nil
 local btr_crate_seen_at = nil
+local known_active = {}
+local initial_event_scan = true
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+local function local_position()
+    local me = cache.local_player
+    if not me then return nil end
+    local x, y, z = esp_util.vec3_pos(
+        me.Position or me.position or me.HeadPosition or me.head_position
+    )
+    if not x then return nil end
+    return x, y, z
 end
 
 local function session_id()
@@ -60,6 +74,8 @@ local function reset_session_state()
     btr_was_destroyed = false
     btr_loot_until = nil
     btr_crate_seen_at = nil
+    known_active = {}
+    initial_event_scan = true
 end
 
 local function tick_session()
@@ -128,6 +144,7 @@ end
 
 local function npc_event_state()
     local state = {}
+    local local_x, local_y, local_z = local_position()
     for _, entry in ipairs(cache.npcs or {}) do
         local id = entry and entry.kind
         if id == "heli" then id = "attack_heli" end
@@ -136,7 +153,16 @@ local function npc_event_state()
         then
             local item = state[id] or { count = 0 }
             item.count = item.count + 1
-            item.location = item.location or entry.location
+            local dist = nil
+            if local_x and entry.lx and entry.ly and entry.lz then
+                local dx, dy, dz = entry.lx - local_x, entry.ly - local_y, entry.lz - local_z
+                dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+            end
+            if not item.distance or (dist and dist < item.distance) then
+                item.distance = dist or item.distance
+                item.location = entry.location or item.location
+                item.x, item.y, item.z = entry.lx, entry.ly, entry.lz
+            end
             if entry.entity then
                 item.hp = tonumber(entry.entity.Health or entry.entity.health) or item.hp
                 item.max_hp = tonumber(entry.entity.MaxHealth or entry.entity.max_health) or item.max_hp
@@ -260,6 +286,17 @@ local function rebuild_rows(now)
     for _, definition in ipairs(DEFINITIONS) do
         local item = active[definition.id]
         local is_active = item ~= nil and (item.count or 0) > 0
+        if not initial_event_scan and known_active[definition.id] ~= is_active and settings.bool("april_event_status_notify", true) then
+            local detail = ""
+            if is_active and item then
+                if item.location and item.location ~= "" then detail = " at " .. tostring(item.location) end
+                if settings.bool("april_event_status_distance", true) and item.distance then
+                    detail = detail .. string.format(" (%dm)", math.floor(item.distance + 0.5))
+                end
+            end
+            notify.info(definition.label .. (is_active and " event active" or " event ended") .. detail, 3500)
+        end
+        known_active[definition.id] = is_active
         local loot_left = nil
         if definition.id == "btr" and btr_loot_until then
             loot_left = btr_loot_until - now
@@ -289,7 +326,9 @@ local function rebuild_rows(now)
             local meta = elapsed
             if item and item.timer then
                 meta = item.timer
-            elseif item and item.hp and item.max_hp and item.max_hp > 0 and not loot_cooling then
+            elseif settings.bool("april_event_status_health", true)
+                and item and item.hp and item.max_hp and item.max_hp > 0 and not loot_cooling
+            then
                 meta = string.format(
                     "%d / %d HP  |  %s",
                     math.floor(item.hp + 0.5),
@@ -311,6 +350,9 @@ local function rebuild_rows(now)
             if item and item.location and not loot_cooling then
                 meta = tostring(item.location) .. "  |  " .. meta
             end
+            if settings.bool("april_event_status_distance", true) and item and item.distance and not loot_cooling then
+                meta = string.format("%dm  |  %s", math.floor(item.distance + 0.5), meta)
+            end
             if item and (item.count or 0) > 1 then
                 meta = tostring(item.count) .. " active  |  " .. meta
             end
@@ -321,10 +363,23 @@ local function rebuild_rows(now)
                 active = is_active or loot_cooling or loot_ready,
                 status = status,
                 meta = meta,
+                distance = item and item.distance or nil,
+                order = #next_rows + 1,
             }
         end
     end
+    local sort_mode = math.floor(settings.num("april_event_status_sort", 1))
+    if sort_mode ~= 0 then
+        table.sort(next_rows, function(a, b)
+            if sort_mode == 1 and a.active ~= b.active then return a.active end
+            local ad, bd = a.distance or math.huge, b.distance or math.huge
+            if ad ~= bd then return ad < bd end
+            if a.active ~= b.active then return a.active end
+            return a.order < b.order
+        end)
+    end
     rows = next_rows
+    initial_event_scan = false
 end
 
 function M.register_menu()
@@ -333,7 +388,15 @@ function M.register_menu()
     local root = menu_util.parent(P)
     menu.add_checkbox(T, G.MISC, P, "Event Status", false)
     menu.add_checkbox(T, G.MISC, "april_event_status_active_only", "Only Show Active Events", false, root)
-    menu_util.bind_master(P, { "april_event_status_active_only" })
+    menu.add_checkbox(T, G.MISC, "april_event_status_notify", "Event Notifications", true, root)
+    menu.add_checkbox(T, G.MISC, "april_event_status_distance", "Show Event Distance", true, root)
+    menu.add_checkbox(T, G.MISC, "april_event_status_health", "Show Event Health", true, root)
+    menu.add_combo(T, G.MISC, "april_event_status_sort", "Event Sorting",
+        { "Game Order", "Active First", "Nearest First" }, 1, root)
+    menu_util.bind_master(P, {
+        "april_event_status_active_only", "april_event_status_notify",
+        "april_event_status_distance", "april_event_status_health", "april_event_status_sort",
+    })
 end
 
 function M.update(_dt)

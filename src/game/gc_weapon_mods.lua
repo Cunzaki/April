@@ -180,6 +180,18 @@ function M.apply_weapon(mods, opts)
         return false, 0, "GC warming - equip gun and wait a moment"
     end
 
+    -- A multi-key warm count only proves that one of the requested keys exists.
+    -- Verify every selected field before patching so weapons without a matching
+    -- GC stat cluster are skipped instead of receiving a speculative payload.
+    for i = 1, #patch_keys do
+        local key = patch_keys[i]
+        local key_warm = warm_nodes(key)
+        if key_warm <= 0 then
+            note_failure("missing " .. key)
+            return false, 0, "Weapon stat unavailable: " .. key
+        end
+    end
+
     local patched = 0
     local ok, result = pcall(applygc, patch_keys, payload)
     if ok and type(result) == "number" then

@@ -131,7 +131,7 @@ function M.build_mods_for_apply(_held)
 end
 
 function M.build_toolinfo_for_apply(held)
-    if not M.editor_has_active_mods() then return nil, nil end
+    if not M.editor_has_active_mods() or not weapons.is_ranged_weapon_name(held) then return nil, nil end
     return M.build_toolinfo_opts(M.read_settings()), held
 end
 

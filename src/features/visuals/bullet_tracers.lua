@@ -555,14 +555,16 @@ function M.draw()
     if not draw then return end
 
     local now = tick_ms()
-    local keep = {}
-    for i = 1, #tracers do
-        local tr = tracers[i]
+    local count = #tracers
+    local write = 1
+    for read = 1, count do
+        local tr = tracers[read]
         if tr and draw_one(tr, now) then
-            keep[#keep + 1] = tr
+            tracers[write] = tr
+            write = write + 1
         end
     end
-    tracers = keep
+    for i = write, count do tracers[i] = nil end
 end
 
 M.STYLE_NAMES = STYLE_NAMES

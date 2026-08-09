@@ -1,0 +1,132 @@
+greeting|roasty|smug|Oh, you enabled me? Fine. Try not to embarrass us.
+greeting|roasty|pout|I was having a nice day until you clicked that toggle.
+greeting|roasty|evil|Your personal commentator has arrived. This should be funny.
+greeting|roasty|laugh|I'm ready. Give me something worth making fun of.
+greeting|roasty|neutral|Hiyori online. Expectations remain dangerously low.
+greeting|roasty|disgusted|You called? I hope your gameplay improved while I was gone.
+greeting|supportive|smile|Hiyori online. I'll keep an eye on you.
+greeting|supportive|happy|Ready when you are. Let's survive this one.
+greeting|supportive|neutral|I'm here. Stay sharp and we'll be fine.
+greeting|supportive|smile|All set! Try to come back in one piece.
+greeting|supportive|happy|Your favorite announcer is ready to go.
+greeting|supportive|neutral|Systems ready. I'll call out anything important.
+death|roasty|laugh|You suck, lol. Want to try that again?
+death|roasty|disgusted|That was your plan? Seriously?
+death|roasty|smug|Another tactical donation to the enemy.
+death|roasty|pout|I looked away for one second and you died.
+death|roasty|evil|Excellent performance. Zero notes. Zero pulse, too.
+death|roasty|laugh|Speedrunning the respawn screen again?
+death|roasty|disgusted|Maybe the bullets will miss if you stand even stiller next time.
+death|roasty|smug|Good news: the ground successfully caught you.
+death|roasty|pout|Please stop making death look like a hobby.
+death|roasty|laugh|They barely had to try. That's almost impressive.
+death|roasty|evil|A flawless demonstration of what not to do.
+death|roasty|disgusted|Your survival instincts filed for resignation.
+death|roasty|smug|I have seen training dummies with better positioning.
+death|roasty|pout|That life had a shorter runtime than this speech bubble.
+death|supportive|sad|That one hurt. Reset and take it slower.
+death|supportive|worried|You're down, but it isn't over. Learn the angle.
+death|supportive|smile|Bad round. Fresh start.
+death|supportive|sad|Unlucky. We'll get it back next life.
+death|supportive|worried|Breathe. Think about what exposed you.
+death|supportive|neutral|Death confirmed. Time to adjust the plan.
+death|supportive|smile|Shake it off. The next life is yours.
+death|supportive|sad|That was rough, but now you know where they were.
+death|supportive|worried|Review the mistake, then leave it behind.
+death|supportive|neutral|One bad fight does not decide the session.
+respawn|roasty|smug|Back already? Try keeping this body for a minute.
+respawn|roasty|pout|New life, same questionable decision-making.
+respawn|roasty|evil|Round two. Surely nothing could go wrong.
+respawn|roasty|laugh|The respawn button deserves overtime pay.
+respawn|roasty|neutral|Welcome back. I saved your dignity. There wasn't much.
+respawn|roasty|smug|Fresh body delivered. Handle with slightly more care.
+respawn|roasty|pout|Okay, no dying immediately. That's the whole assignment.
+respawn|roasty|laugh|Look who escaped the loading screen.
+respawn|supportive|happy|You're back. New life, clean slate.
+respawn|supportive|smile|Respawned and ready. Take your time.
+respawn|supportive|neutral|Fresh start. Check your surroundings first.
+respawn|supportive|happy|There you are. Let's make this life count.
+respawn|supportive|smile|Back in action. Recover your rhythm.
+respawn|supportive|neutral|Respawn complete. Rebuild before taking another fight.
+respawn|supportive|happy|New life ready. Start with a safe route.
+respawn|supportive|smile|Welcome back. Focus on one good decision at a time.
+downed|roasty|laugh|Floor inspection going well?
+downed|roasty|smug|You found the downed state. Very thorough testing.
+downed|roasty|pout|Crawling is not a combat strategy.
+downed|roasty|disgusted|This is why I told you to use cover.
+downed|roasty|evil|Technically alive. Emotionally? Debatable.
+downed|roasty|laugh|Wave to your teammates from down there.
+downed|roasty|worried|Someone revive the professional floor ornament.
+downed|roasty|smug|Outstanding posture. Ten out of ten.
+downed|supportive|worried|You're downed. Get behind cover and call for help.
+downed|supportive|fear|Stay low. A teammate may still reach you.
+downed|supportive|sad|Don't give up yet. Crawl somewhere safe.
+downed|supportive|worried|Downed, not dead. Break line of sight.
+downed|supportive|neutral|Save your movement and wait for the revive.
+downed|supportive|fear|Careful, one more hit could finish this.
+downed|supportive|sad|Keep moving toward cover if it is safe.
+downed|supportive|worried|Call your position and let your team work.
+revived|roasty|smug|Someone actually picked you up. Be grateful.
+revived|roasty|pout|You're standing again. Please make it worth their time.
+revived|roasty|laugh|Revived! The floor will miss you.
+revived|roasty|evil|Second chance acquired. Bad ideas re-enabled.
+revived|roasty|neutral|Back on your feet. Try using them this time.
+revived|roasty|smug|Your teammate has unreasonable faith in you.
+revived|supportive|happy|You're up! Heal before re-engaging.
+revived|supportive|smile|Nice recovery. Find cover and reset.
+revived|supportive|worried|Revived. Don't peek until you're healthy.
+revived|supportive|happy|Good save. Stay with your team now.
+revived|supportive|neutral|Back on your feet. Stabilize first.
+revived|supportive|smile|Second chance secured. Make it count.
+low_health|roasty|worried|Your health bar is practically decorative now.
+low_health|roasty|pout|One sneeze and you're back at respawn.
+low_health|roasty|smug|Bold strategy, fighting with three pixels of health.
+low_health|roasty|fear|Maybe stop peeking? Just a thought.
+low_health|roasty|disgusted|Heal. The red screen is not an aesthetic choice.
+low_health|roasty|worried|You are held together by confidence and bad math.
+low_health|roasty|pout|Please locate medicine before locating another bullet.
+low_health|roasty|smug|Living on one hit point is not a personality.
+low_health|supportive|worried|Low health. Disengage and heal now.
+low_health|supportive|fear|You're critical. Find hard cover.
+low_health|supportive|sad|Don't take another fight until you recover.
+low_health|supportive|worried|Health is low. Slow down and reset.
+low_health|supportive|neutral|Critical health. Prioritize survival.
+low_health|supportive|fear|Break line of sight and heal.
+low_health|supportive|worried|Do not trade damage right now.
+low_health|supportive|neutral|Find safety, heal, then reassess.
+recovered|roasty|smug|Health restored. Common sense still pending.
+recovered|roasty|smile|Patched up and ready to make new mistakes.
+recovered|roasty|laugh|Look at that, you discovered healing.
+recovered|roasty|pout|Better. Don't immediately waste it.
+recovered|roasty|evil|Fuller health bar, renewed capacity for chaos.
+recovered|roasty|neutral|You survived the medicine tutorial.
+recovered|supportive|happy|Health recovered. You're ready again.
+recovered|supportive|smile|Good reset. Choose the next fight carefully.
+recovered|supportive|neutral|Stable again. Recheck ammo and surroundings.
+recovered|supportive|happy|Nice recovery. Keep that momentum.
+recovered|supportive|smile|Much better. Stay disciplined.
+recovered|supportive|neutral|Recovery complete. Return when the timing is right.
+safe_enter|roasty|smug|Safe zone reached. Even you should survive in here.
+safe_enter|roasty|laugh|Congratulations, the game is protecting you now.
+safe_enter|roasty|pout|You're safe. Try not to trip over anything.
+safe_enter|roasty|neutral|Safe zone. Your danger privileges are temporarily revoked.
+safe_enter|roasty|smile|A peaceful moment for your overworked respawn key.
+safe_enter|roasty|evil|Enjoy safety while it lasts.
+safe_enter|supportive|happy|Safe zone reached. Take a moment to reset.
+safe_enter|supportive|smile|You're safe. Sort your inventory and plan ahead.
+safe_enter|supportive|neutral|Safe zone entered. Good time to regroup.
+safe_enter|supportive|happy|Made it safely. Restock before leaving.
+safe_enter|supportive|smile|You're protected here. Use the breathing room.
+safe_enter|supportive|neutral|Take stock of what you need before heading out.
+safe_leave|roasty|evil|Leaving safety? This should be entertaining.
+safe_leave|roasty|smug|Protection off. Let's see how long this lasts.
+safe_leave|roasty|pout|Back into danger with absolutely no supervision.
+safe_leave|roasty|laugh|Safe zone left. Respawn screen standing by.
+safe_leave|roasty|neutral|You're vulnerable again. Pretend to be careful.
+safe_leave|roasty|evil|And there goes your last good excuse.
+safe_leave|supportive|worried|Leaving the safe zone. Check your route.
+safe_leave|supportive|neutral|Protection ended. Stay aware of nearby players.
+safe_leave|supportive|smile|Back outside. Move with purpose.
+safe_leave|supportive|worried|You're exposed again. Keep cover nearby.
+safe_leave|supportive|neutral|Safe zone left. Watch your surroundings.
+safe_leave|supportive|smile|Route checked? Then let's move.

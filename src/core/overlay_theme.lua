@@ -2,21 +2,21 @@
 local ui_theme = April.require("core.ui_theme")
 
 local M = {}
+local cached_theme = nil
+local cached_anim = nil
 
 local function gs_theme()
-    local ok, theme = pcall(function()
-        return April.require("ui.gs_theme")
-    end)
-    if ok then return theme end
-    return nil
+    if cached_theme then return cached_theme end
+    local ok, theme = pcall(April.require, "ui.gs_theme")
+    if ok then cached_theme = theme end
+    return cached_theme
 end
 
 local function anim_mod()
-    local ok, anim = pcall(function()
-        return April.require("ui.gs_anim")
-    end)
-    if ok then return anim end
-    return nil
+    if cached_anim then return cached_anim end
+    local ok, anim = pcall(April.require, "ui.gs_anim")
+    if ok then cached_anim = anim end
+    return cached_anim
 end
 
 function M.sync()

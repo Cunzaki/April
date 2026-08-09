@@ -3,6 +3,8 @@ local debug = April.require("core.debug")
 local M = {}
 
 local jobs = {}
+local job_order = {}
+local round_robin_start = 1
 local BUDGET_MS = 5
 local ITEMS_PER_STEP = 16
 local MAX_STARTS_PER_TICK = 1
@@ -19,6 +21,9 @@ function M.configure(opts)
 end
 
 function M.register(id, interval_ms, when_fn, create_state_fn, step_fn, complete_fn, phase_ms)
+    if jobs[id] == nil then
+        job_order[#job_order + 1] = id
+    end
     jobs[id] = {
         id = id,
         interval = interval_ms,
@@ -50,8 +55,21 @@ function M.tick()
     local budget_left = BUDGET_MS
     local now = tick_ms()
 
-    for id, job in pairs(jobs) do
+    local count = #job_order
+    if count == 0 then return end
+
+    local visited = 0
+    local index = round_robin_start
+    while visited < count do
+        local id = job_order[index]
+        local job = jobs[id]
+        visited = visited + 1
+        index = index + 1
+        if index > count then index = 1 end
+
         if budget_left <= 0 then break end
+
+        if not job then goto continue end
 
         if job.when then
             local ok, pass = pcall(job.when)
@@ -94,6 +112,11 @@ function M.tick()
 
         ::continue::
     end
+
+    -- Rotate the first job each frame so a consistently expensive scan cannot
+    -- starve later jobs while preserving every job's interval and batch size.
+    round_robin_start = round_robin_start + 1
+    if round_robin_start > count then round_robin_start = 1 end
 end
 
 return M

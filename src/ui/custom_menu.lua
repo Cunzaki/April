@@ -34,6 +34,7 @@ local scroll_visual = { left = 0, right = 0 }
 local middle_scroll = nil
 local collapsed_groups = {}
 local last_menu_rect = nil
+local group_layout_cache = {}
 
 local SCROLL_EDGE = 36
 local SCROLL_SPEED = 5
@@ -459,41 +460,39 @@ local function draw_group_column(groups, x, y, w, h, scroll_key)
 end
 
 local function split_groups(groups, tab_id)
+    local cached = group_layout_cache[tab_id]
+    if cached and cached.source == groups then return cached.left, cached.right end
+    local left, right
     -- Guns: Gun Mods left, Bullet Tracers right.
     if tab_id == "guns" and #groups >= 2 then
-        local right = {}
+        right = {}
         for i = 2, #groups do
             right[#right + 1] = groups[i]
         end
-        return { groups[1] }, right
+        left = { groups[1] }
     end
     -- Aim: Aimbot + FOV Flags left, Silent Aim + Bullet right.
-    if tab_id == "aim" and #groups >= 4 then
-        return { groups[1], groups[2] }, { groups[3], groups[4] }
-    end
-    if tab_id == "aim" and #groups >= 3 then
-        return { groups[1] }, { groups[2], groups[3] }
-    end
-    if tab_id == "config" and #groups >= 5 then
-        return { groups[1], groups[2], groups[3], groups[4] }, { groups[5] }
-    end
-    if tab_id == "config" and #groups >= 4 then
-        return { groups[1], groups[2], groups[3] }, { groups[4] }
-    end
-    if tab_id == "config" and #groups >= 2 then
-        return { groups[1] }, { groups[2] }
-    end
-    if #groups == 2 then
-        return { groups[1] }, { groups[2] }
-    end
-    local left, right = {}, {}
-    for i, g in ipairs(groups) do
-        if i % 2 == 1 then
-            left[#left + 1] = g
+    if not left then
+        if tab_id == "aim" and #groups >= 4 then
+            left, right = { groups[1], groups[2] }, { groups[3], groups[4] }
+        elseif tab_id == "aim" and #groups >= 3 then
+            left, right = { groups[1] }, { groups[2], groups[3] }
+        elseif tab_id == "config" and #groups >= 5 then
+            left, right = { groups[1], groups[2], groups[3], groups[4] }, { groups[5] }
+        elseif tab_id == "config" and #groups >= 4 then
+            left, right = { groups[1], groups[2], groups[3] }, { groups[4] }
+        elseif tab_id == "config" and #groups >= 2 then
+            left, right = { groups[1] }, { groups[2] }
+        elseif #groups == 2 then
+            left, right = { groups[1] }, { groups[2] }
         else
-            right[#right + 1] = g
+            left, right = {}, {}
+            for i, g in ipairs(groups) do
+                if i % 2 == 1 then left[#left + 1] = g else right[#right + 1] = g end
+            end
         end
     end
+    group_layout_cache[tab_id] = { source = groups, left = left, right = right }
     return left, right
 end
 
@@ -617,7 +616,8 @@ function M.draw()
     local x = win_x
     local y = win_y + math.floor((1 - open_progress) * 10 * (theme.SCALE or 1))
     local w, h = theme.WINDOW_W, theme.WINDOW_H
-    last_menu_rect = { x = x, y = y, w = w, h = h }
+    if not last_menu_rect then last_menu_rect = {} end
+    last_menu_rect.x, last_menu_rect.y, last_menu_rect.w, last_menu_rect.h = x, y, w, h
 
     -- Fullscreen dim/snow first (no clip, behind every menu element).
     widgets.clip = nil

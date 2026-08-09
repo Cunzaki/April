@@ -11,6 +11,7 @@ local gpu_chams = April.require("core.gpu_chams")
 
 local M = {}
 local P = "april_loot_enabled"
+local CHAMS_MASTER = "april_loot_chams_enabled"
 local CHAMS_ID = "april_loot_chams"
 local CHAMS_MODE = "april_loot_chams_mode"
 local CHAMS_COLOR = "april_loot_chams_color"
@@ -21,6 +22,18 @@ M._unlimited = {}
 local draw_candidates = {}
 local chams_candidates = {}
 local candidate_seen = {}
+local toggle_index = {}
+local toggle_enabled = {}
+local toggle_colors = {}
+for i, t in ipairs(maps.LOOT_TOGGLES) do toggle_index[t.id] = i end
+
+local function refresh_toggle_state(with_colors)
+    for i = 1, #maps.LOOT_TOGGLES do
+        local t = maps.LOOT_TOGGLES[i]
+        toggle_enabled[t.id] = settings.enabled(t.id)
+        if with_colors then toggle_colors[t.id] = settings.color(t.id, t.color) end
+    end
+end
 
 local UNLIMITED_RANGE = {
     april_timed_crate = true,
@@ -47,15 +60,13 @@ local function loot_chams_labels()
 end
 
 local function loot_chams_index_for(toggle_id)
-    for i, t in ipairs(maps.LOOT_TOGGLES) do
-        if t.id == toggle_id then return i end
-    end
-    return nil
+    return toggle_index[toggle_id]
 end
 
 local function loot_chams_active()
     if not gpu_chams.available() then return false end
     if not settings.enabled(P) then return false end
+    if not settings.enabled(CHAMS_MASTER) then return false end
     for i = 1, #maps.LOOT_TOGGLES do
         if gpu_chams.multicombo_selected(CHAMS_ID, i) then
             return true
@@ -72,13 +83,14 @@ local function collect_loot_chams(applied)
 
     local range = settings.num("april_loot_range", 300)
     local range_sq = range * range
+    refresh_toggle_state(false)
 
     local entries = nearby_with_unlimited(me_pos, range, chams_candidates)
     for _, entry in ipairs(entries) do
         if not env.is_valid(entry.inst) then goto continue end
         local idx = loot_chams_index_for(entry.toggle_id)
         if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
-        if not settings.enabled(entry.toggle_id) then goto continue end
+        if not toggle_enabled[entry.toggle_id] then goto continue end
 
         local lx, ly, lz = esp_scan.entry_coords(entry)
         if not lx then goto continue end
@@ -339,16 +351,18 @@ function M.register_menu()
     local chams_ids = {}
     if gpu_chams.available() then
         menu_util.section(T, G.WORLD, "Loot Mesh Chams")
+        menu.add_checkbox(T, G.WORLD, CHAMS_MASTER, "Enable Mesh Chams", false, { parent = P })
+        child_ids[#child_ids + 1] = CHAMS_MASTER
         chams_ids = gpu_chams.wire_esp_chams({
             tab = T,
             group = G.WORLD,
-            parent = P,
+            parent = CHAMS_MASTER,
             chams_id = CHAMS_ID,
             mode_id = CHAMS_MODE,
             color_id = CHAMS_COLOR,
             labels = loot_chams_labels(),
             owner_id = "loot",
-            master_id = P,
+            master_id = CHAMS_MASTER,
             is_active = loot_chams_active,
             collect = collect_loot_chams,
             rescan_ms = 1200,
@@ -400,13 +414,14 @@ function M.draw()
     local me = env.get_local_player()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
+    refresh_toggle_state(true)
 
     local entries = cache.loot
     if me_pos then
         entries = nearby_with_unlimited(me_pos, range, draw_candidates)
     end
     for _, entry in ipairs(entries) do
-        if not settings.enabled(entry.toggle_id) then goto continue end
+        if not toggle_enabled[entry.toggle_id] then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
 
         local lx, ly, lz = esp_scan.entry_coords(entry)
@@ -421,7 +436,7 @@ function M.draw()
             if not UNLIMITED_RANGE[entry.toggle_id] and dist_sq > range_sq then goto continue end
         end
 
-        local col = settings.color(entry.toggle_id, maps.toggle_color(maps.LOOT_TOGGLES, entry.toggle_id))
+        local col = toggle_colors[entry.toggle_id]
         if draw_boxes then
             esp_util.draw_entry_boxes(entry, col, 1)
         end

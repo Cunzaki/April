@@ -4,8 +4,6 @@ local silent_ray = April.require("core.silent_ray")
 local manip_math = April.require("core.manip_math")
 local targeting = April.require("features.combat.targeting")
 local bullet_tp_ray = April.require("features.combat.bullet_tp_ray")
-local weapons = April.require("game.weapons")
-local ballistic = April.require("core.ballistic")
 
 local M = {}
 
@@ -182,30 +180,13 @@ local function resolve_manip(body, hitpart, muzzle, target)
     return nil, extra
 end
 
-local function apply_drop_aim(origin, hitpart, weapon, state, manip_extra, flags)
-    local muzzle = origin or combat_origin.get_muzzle_origin()
-    local curve = ballistic.curve_for_weapon(muzzle, hitpart, weapon, 24)
-    local info = merge_info({
-        state = state or "curve",
-        peek = nil,
-        radius = manip_extra and manip_extra.radius or 0,
-        use_curve = true,
-        weapon = weapon,
-        hitpart = hitpart,
-        curve_path = curve and curve.path or nil,
-        launch_dir = curve and curve.launch_dir or nil,
-    }, manip_extra, flags)
-    return muzzle, hitpart, info
-end
-
-local function apply_ray_aim(origin, aim, hitpart, weapon, state, manip_extra, meta, flags)
+local function apply_ray_aim(origin, aim, hitpart, state, manip_extra, meta, flags)
     meta = meta or {}
     local info = merge_info({
         state = state,
         peek = manip_extra and manip_extra.peek or nil,
         radius = manip_extra and manip_extra.radius or 0,
         use_curve = false,
-        weapon = weapon,
         hitpart = hitpart,
         tp_path = meta.tp_path,
         tp_method = meta.method,
@@ -239,7 +220,6 @@ function M.resolve_track(target, prefix, cx, cy)
     if not camera then return nil, nil, OFF_INFO end
 
     local flags = feature_flags()
-    local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
     local bone = targeting.bone_name(prefix)
     local hitpart = targeting.resolve_bone_world(target, bone, cx, cy, { prefix = prefix })
     if not hitpart then return nil, nil, OFF_INFO end
@@ -279,7 +259,7 @@ function M.resolve_track(target, prefix, cx, cy)
             if manip_extra.peek and manip_fire then
                 path = bullet_tp_ray.build_path(manip_fire, head, muzzle) or path
             end
-            return apply_ray_aim(tp.origin, tp.aim, tp.hitpart or head, weapon, "tp", manip_extra, {
+            return apply_ray_aim(tp.origin, tp.aim, tp.hitpart or head, "tp", manip_extra, {
                 tp_path = path,
                 method = tp.method,
                 tp_scan_visible = tp.tp_scan_visible,
@@ -290,23 +270,21 @@ function M.resolve_track(target, prefix, cx, cy)
     end
 
     if manip_extra.state == "ready" and manip_fire then
-        return apply_ray_aim(manip_fire, hitpart, hitpart, weapon, "ready", manip_extra, {
+        return apply_ray_aim(manip_fire, hitpart, hitpart, "ready", manip_extra, {
             tp_path = bullet_tp_ray.build_path(manip_fire, hitpart, muzzle),
             method = "Manip",
         }, flags)
     end
 
     if hitscan_on then
-        return apply_ray_aim(muzzle or fire, hitpart, hitpart, weapon, "hitscan", manip_extra, {
+        return apply_ray_aim(muzzle or fire, hitpart, hitpart, "hitscan", manip_extra, {
             head_scale = flags.hitbox_on and flags.hitbox_mult or 1,
         }, flags)
     end
 
-    if manip_extra.state == "direct" then
-        return apply_drop_aim(muzzle, hitpart, weapon, "direct", manip_extra, flags)
-    end
-
-    return apply_drop_aim(muzzle, hitpart, weapon, "curve", manip_extra, flags)
+    -- Vector's silent-target hook redirects the ray directly to this point;
+    -- do not apply projectile gravity, target velocity, or weapon ballistics.
+    return apply_ray_aim(muzzle or fire, hitpart, hitpart, "direct", manip_extra, nil, flags)
 end
 
 function M.any_bullet_feature()

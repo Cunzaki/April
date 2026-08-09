@@ -5,6 +5,7 @@ local move = April.require("core.cframe_move")
 local runservice = April.require("core.runservice")
 
 local M = {}
+local update_seen = {}
 
 local P = "april_antifling_enabled"
 local REAPPLY_MS = 125
@@ -98,7 +99,8 @@ local function tick()
     was_enabled = true
 
     local now = now_ms()
-    local seen = {}
+    local seen = update_seen
+    for id in pairs(seen) do seen[id] = nil end
     for i = 1, #cache.players do
         local player = cache.players[i]
         local id = player_key(player)

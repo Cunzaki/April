@@ -3,6 +3,9 @@ local text_util = April.require("core.text_util")
 local mod_ids = April.require("game.mod_ids")
 
 local M = {}
+local gs_theme_ref = nil
+local gs_anim_ref = nil
+local synced = false
 
 M.BG          = { 13 / 255, 13 / 255, 13 / 255, 0.94 }
 M.PANEL       = { 18 / 255, 18 / 255, 20 / 255, 0.92 }
@@ -50,17 +53,22 @@ end
 -- Synchronize every draw HUD token with the active custom-menu theme.
 -- Called before feature drawing, so it also works while the menu is closed.
 function M.sync()
-    local ok_anim, anim = pcall(function()
-        return April.require("ui.gs_anim")
-    end)
-    if ok_anim and anim and anim.sync_theme then
-        pcall(anim.sync_theme)
+    if not gs_anim_ref then
+        local ok_anim, anim = pcall(April.require, "ui.gs_anim")
+        if ok_anim then gs_anim_ref = anim end
     end
-
-    local ok, gs = pcall(function()
-        return April.require("ui.gs_theme")
-    end)
-    if not ok or not gs then return false end
+    local changed = false
+    if gs_anim_ref and gs_anim_ref.sync_theme then
+        local ok_sync, result = pcall(gs_anim_ref.sync_theme)
+        changed = ok_sync and result == true
+    end
+    if not gs_theme_ref then
+        local ok, gs = pcall(April.require, "ui.gs_theme")
+        if ok then gs_theme_ref = gs end
+    end
+    local gs = gs_theme_ref
+    if not gs then return false end
+    if synced and not changed then return false end
 
     local accent = gs.ACCENT or M.CYAN
     M.ACCENT = copy_alpha(accent, 1)
@@ -87,6 +95,7 @@ function M.sync()
     M.ROUND = 0
     M.MAP_BG = copy_alpha(gs.BG_INNER or M.BG, 0.90)
     M.MAP_GRID = copy_alpha(accent, 0.10)
+    synced = true
     return true
 end
 

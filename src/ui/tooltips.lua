@@ -197,9 +197,11 @@ M.BY_ID = {
 
     -- GPU mesh chams (exploits preset indices — see docs/API.md §15)
     april_world_chams = "GPU mesh chams on selected resource types (in-range only).",
+    april_world_chams_enabled = "Master switch for resource mesh chams.",
     april_world_chams_mode = "Fill, Wireframe, Fill Glow, or Wireframe Glow.",
     april_world_chams_color = "Glow preset color (Fill Glow / Wireframe Glow only).",
     april_loot_chams = "GPU mesh chams on selected loot types (in-range only).",
+    april_loot_chams_enabled = "Master switch for loot mesh chams.",
     april_loot_chams_mode = "Fill, Wireframe, Fill Glow, or Wireframe Glow.",
     april_loot_chams_color = "Glow preset color (Fill Glow / Wireframe Glow only).",
     april_base_chams = "GPU mesh chams on selected base structures (in-range only).",

@@ -1,4 +1,3 @@
-local ballistic = April.require("core.ballistic")
 
 local M = {}
 
@@ -8,7 +7,6 @@ local tracking = false
 M._last_origin = nil
 M._last_target = nil
 M._last_ok = false
-M._last_curve = nil
 
 local function unpack_pos(v)
     if not v then return nil end
@@ -102,7 +100,6 @@ end
 function M.stop()
     M._last_origin = nil
     M._last_target = nil
-    M._last_curve = nil
 
     local was_active = tracking or M._last_ok
     M._last_ok = false
@@ -118,10 +115,6 @@ end
 
 function M.last_segment()
     return M._last_origin, M._last_target
-end
-
-function M.last_curve()
-    return M._last_curve
 end
 
 local function build_dir(origin, aim_point)
@@ -156,7 +149,6 @@ end
 -- Docs primary path: SetSilentTarget every OnFrame with Vector3 origin/dir.
 function M.set_target(origin, aim_point, hitpart)
     M._last_ok = false
-    M._last_curve = nil
 
     if not aim_point then
         return false
@@ -201,7 +193,6 @@ end
 -- Docs secondary path: TrackSilentTarget while key held.
 function M.track(origin, aim_point, shoot_vk, hitpart)
     M._last_ok = false
-    M._last_curve = nil
 
     if not aim_point then
         return false
@@ -243,29 +234,6 @@ function M.track(origin, aim_point, shoot_vk, hitpart)
     M._last_ok = ok
     tracking = ok
     return ok
-end
-
-function M.track_curve(origin, aim_point, weapon_name, shoot_vk, hitpart)
-    origin = origin or M.get_camera_origin()
-    if not origin or not aim_point then
-        M._last_ok = false
-        M._last_curve = nil
-        return false
-    end
-
-    local hit = hitpart or aim_point
-    local curve = ballistic.curve_for_weapon(origin, hit, weapon_name, 24)
-
-    -- Docs: SetSilentTarget every frame is the reliable override.
-    -- TrackSilentTarget is additional while LMB is held.
-    local ok_set = M.set_target(origin, hit, hit)
-    local ok_track = M.track(origin, hit, shoot_vk, hit)
-    M._last_curve = curve
-    local hx, hy, hz = unpack_pos(hit)
-    M._last_target = hx and { x = hx, y = hy, z = hz } or nil
-    M._last_ok = ok_set or ok_track
-    tracking = M._last_ok
-    return M._last_ok
 end
 
 return M

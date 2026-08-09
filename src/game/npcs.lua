@@ -28,6 +28,8 @@ M.NPC_NAMES = {
 local EVENT_REFRESH_MS = 750
 
 local entity_entries = {}
+local entity_seen = {}
+local heli_seen = {}
 local event_entries = {}
 local last_event_refresh = -EVENT_REFRESH_MS
 
@@ -121,7 +123,8 @@ end
 function M.collect_heli_weak_points(model)
     if not model or not env.is_valid(model) then return {} end
     local out = {}
-    local seen = {}
+    local seen = heli_seen
+    for key in pairs(seen) do seen[key] = nil end
 
     local function add(part, score)
         if not part or not env.is_valid(part) then return end
@@ -411,7 +414,8 @@ function M.refresh_cache(workspace_entities)
     local out = cache.npcs
     clear_array(out)
 
-    local seen = {}
+    local seen = entity_seen
+    for key in pairs(seen) do seen[key] = nil end
     for i = 1, #(workspace_entities or {}) do
         local player = workspace_entities[i]
         local character = player and (player.Character or player.character)

@@ -1,21 +1,49 @@
 local env = April.require("core.env")
-local items = April.require("game.items")
 local item_catalog = April.require("game.item_catalog")
 
 local M = {}
 
-function M.get_local_inventory()
+local CACHE_MS = 120
+local cached_inventory = nil
+local cached_at = -CACHE_MS
+
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+
+function M.get_local_inventory(force)
+    local now = tick_ms()
+    if not force and cached_inventory and now - cached_at < CACHE_MS then
+        return cached_inventory
+    end
     local lp = env.get_local_player()
-    if not lp or not lp.character then return nil end
-    local char = lp.character
+    local char = lp and (lp.character or lp.Character)
+    if not char then return nil end
     if not env.is_valid(char) then return nil end
     local ic = env.safe_call(function() return char:find_first_child("InventoryController") end)
     if not ic then return nil end
     local fetch = env.safe_call(function() return ic:find_first_child("Fetch") end)
     if not fetch or not fetch.Invoke then return nil end
-    local ok, inv, toolbar, armor = pcall(function() return fetch:Invoke() end)
-    if not ok or not inv then return nil end
-    return { inventory = inv, toolbar = toolbar, armor = armor }
+    local ok, data, toolbar, armor = pcall(function() return fetch:Invoke() end)
+    if not ok or not data then return nil end
+    if type(data) == "table" and (data.Inventory or data.inventory or data.Toolbar or data.toolbar) then
+        cached_inventory = {
+            inventory = data.Inventory or data.inventory,
+            toolbar = data.Toolbar or data.toolbar,
+            armor = data.Armor or data.armor,
+            raw = data,
+        }
+        cached_at = now
+        return cached_inventory
+    end
+    cached_inventory = { inventory = data, toolbar = toolbar, armor = armor }
+    cached_at = now
+    return cached_inventory
+end
+
+function M.invalidate()
+    cached_inventory = nil
+    cached_at = -CACHE_MS
 end
 
 function M.resolve_item_name(id)
@@ -70,10 +98,8 @@ function M.get_toolbar_entry(char)
     end
     if type(slot) ~= "number" or slot <= 0 then return nil, nil end
 
-    local ok, data = pcall(function() return fetch:Invoke() end)
-    if not ok or type(data) ~= "table" then return nil, nil end
-
-    local toolbar = data.Toolbar or data.toolbar
+    local data = M.get_local_inventory()
+    local toolbar = data and data.toolbar
     if type(toolbar) ~= "table" then return nil, nil end
 
     local entry = toolbar[slot]
@@ -81,39 +107,6 @@ function M.get_toolbar_entry(char)
     if type(entry) == "table" and entry.Amount and entry.Amount <= 0 then return nil, nil end
 
     return entry, slot
-end
-
-function M.get_equipped_ammo_stats()
-    local lp = env.get_local_player()
-    local char = lp and lp.character
-    if not char or not env.is_valid(char) then return nil end
-
-    local entry = M.get_toolbar_entry(char)
-    if not entry or type(entry) ~= "table" then return nil end
-
-    local ammo = entry.Ammo
-    if not ammo or type(ammo) ~= "table" then return nil end
-
-    local ammo_id = ammo.ID
-    if type(ammo_id) ~= "number" then return nil end
-
-    items.load()
-    local row = items.get_by_id and items.get_by_id(ammo_id)
-    if row and row.AmmoStats then return row.AmmoStats end
-
-    local rep = env.get_replicated_storage()
-    if rep then
-        local modules = env.safe_call(function() return rep:find_first_child("Modules") end)
-        local items_mod = modules and env.safe_call(function() return modules:find_first_child("Items") end)
-        if items_mod then
-            local ok, data = pcall(function() return require(items_mod) end)
-            if ok and data and data[ammo_id] and data[ammo_id].AmmoStats then
-                return data[ammo_id].AmmoStats
-            end
-        end
-    end
-
-    return nil
 end
 
 function M.get_toolbar_held_name(char)
@@ -131,7 +124,7 @@ function M.get_held_tool_name()
     if not lp then return nil end
     if lp.tool_name and lp.tool_name ~= "" then return lp.tool_name end
 
-    local char = lp.character
+    local char = lp.character or lp.Character
     if not char or not env.is_valid(char) then return nil end
 
     local toolbar_name = M.get_toolbar_held_name(char)

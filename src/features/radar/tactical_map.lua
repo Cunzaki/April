@@ -12,6 +12,7 @@ local panel_drag = April.require("core.panel_drag")
 local map_image = April.require("game.map_image")
 local math_util = April.require("core.math_util")
 local npcs = April.require("game.npcs")
+local debug = April.require("core.debug")
 
 local M = {}
 local P = "april_map_enabled"
@@ -567,7 +568,6 @@ end
 function M.draw()
     if not settings.enabled(P) then return end
     if not draw then return end
-    local debug = April.require("core.debug")
     debug.guard("radar:draw", M.draw_inner)
 end
 

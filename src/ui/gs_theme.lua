@@ -1,6 +1,8 @@
 -- Runtime dark-glass palette for April's draw-only UI.
 -- Vector exposes alpha + rounded primitives, but no backdrop blur or custom fonts.
 local M = {}
+local settings_ref = April.require("core.settings")
+local last_sync_frame = -1
 
 M.DENSITY_NAMES = { "Compact", "Balanced", "Comfortable" }
 M.CORNER_NAMES = { "Sharp", "Soft", "Rounded" }
@@ -107,9 +109,7 @@ local function mix_rgb(a, b, t, alpha)
 end
 
 local function setting(id, fallback)
-    local ok, value = pcall(function()
-        return April.require("core.settings").get(id, fallback)
-    end)
+    local ok, value = pcall(settings_ref.get, id, fallback)
     if ok and value ~= nil then return value end
     return fallback
 end
@@ -126,7 +126,32 @@ M.RAINBOW = {
     { 0.35, 0.95, 0.45, 1 },
 }
 
+local ALPHA_KEYS = {
+    "BG", "BG_INNER", "PANEL", "PANEL_ALT", "PANEL_RAISED", "OVERLAY",
+    "SHADOW", "SHADOW_DEEP", "GLASS_HIGHLIGHT", "BORDER", "BORDER_SOFT",
+    "BORDER_HOT", "SIDEBAR", "SIDEBAR_ACTIVE", "TEXT", "TEXT_DIM",
+    "TEXT_ACTIVE", "TEXT_TITLE", "ACCENT", "ACCENT_DIM", "CHECK_OFF",
+    "SLIDER_BG", "BUTTON", "BUTTON_HOVER", "HOVER", "FOCUS", "HEADER_BG",
+    "NAV_BG", "NAV_IDLE", "NAV_HOVER", "NAV_ACTIVE", "NAV_INDICATOR", "DOCK_BG",
+    "DOCK_HOVER", "DOCK_ACTIVE", "DOCK_BORDER", "DOCK_BADGE",
+}
+local base_alpha = {}
+local last_sync = {}
+
+local function restore_base_alpha()
+    for i = 1, #ALPHA_KEYS do
+        local key = ALPHA_KEYS[i]
+        local c = M[key]
+        local a = base_alpha[key]
+        if c and a ~= nil then c[4] = a end
+    end
+    M.GLOBAL_ALPHA = 1
+end
+
 function M.sync()
+    local frame = settings_ref.frame and settings_ref.frame() or 0
+    if frame > 0 and frame == last_sync_frame then return false end
+    last_sync_frame = frame
     local preset_idx = math.floor(clamp(setting("april_ui_theme_preset", 0), 0, #PRESETS - 1)) + 1
     local p = PRESETS[preset_idx] or PRESETS[1]
     local scale = clamp(setting("april_ui_scale", 100), 80, 125) * 0.01
@@ -137,6 +162,25 @@ function M.sync()
     local border_alpha = clamp(setting("april_ui_border_strength", 58), 10, 100) * 0.01
     local corner_style = math.floor(clamp(setting("april_ui_corner_style", 2), 0, 2))
     local corner_base = ({ 2, 6, 10 })[corner_style + 1]
+
+    if last_sync.preset == preset_idx
+        and last_sync.scale == scale
+        and last_sync.density == density
+        and last_sync.window_alpha == window_alpha
+        and last_sync.panel_alpha == panel_alpha
+        and last_sync.border_alpha == border_alpha
+        and last_sync.corner_style == corner_style
+    then
+        restore_base_alpha()
+        return false
+    end
+    last_sync.preset = preset_idx
+    last_sync.scale = scale
+    last_sync.density = density
+    last_sync.window_alpha = window_alpha
+    last_sync.panel_alpha = panel_alpha
+    last_sync.border_alpha = border_alpha
+    last_sync.corner_style = corner_style
 
     M.SCALE = scale
     M.DENSITY = density
@@ -240,6 +284,12 @@ function M.sync()
     M.SLIDER_ROW_H = M.LABEL_H + M.LABEL_GAP + M.SLIDER_H + scaled(10, scale) + M.CTRL_PAD
     M.CORNER = scaled(corner_base, scale)
     M.CORNER_SMALL = math.max(2, scaled(corner_base * 0.60, scale))
+    for i = 1, #ALPHA_KEYS do
+        local key = ALPHA_KEYS[i]
+        local c = M[key]
+        if c then base_alpha[key] = c[4] or 1 end
+    end
+    return true
 end
 
 function M.alpha(col, a)
@@ -267,21 +317,22 @@ end
 function M.apply_global_alpha(a)
     a = clamp(a, 0, 1)
     M.GLOBAL_ALPHA = a
-    local keys = {
-        "BG", "BG_INNER", "PANEL", "PANEL_ALT", "PANEL_RAISED", "OVERLAY",
-        "SHADOW", "SHADOW_DEEP", "GLASS_HIGHLIGHT", "BORDER", "BORDER_SOFT",
-        "BORDER_HOT", "SIDEBAR", "SIDEBAR_ACTIVE", "TEXT", "TEXT_DIM",
-        "TEXT_ACTIVE", "TEXT_TITLE", "ACCENT", "ACCENT_DIM", "CHECK_OFF",
-        "SLIDER_BG", "BUTTON", "BUTTON_HOVER", "HOVER", "FOCUS", "HEADER_BG",
-        "NAV_BG", "NAV_IDLE", "NAV_HOVER", "NAV_ACTIVE", "NAV_INDICATOR", "DOCK_BG",
-        "DOCK_HOVER", "DOCK_ACTIVE", "DOCK_BORDER", "DOCK_BADGE",
-    }
-    for _, key in ipairs(keys) do
+    for i = 1, #ALPHA_KEYS do
+        local key = ALPHA_KEYS[i]
         local c = M[key]
         if c then
-            M[key] = { c[1], c[2], c[3], (c[4] or 1) * a }
+            c[4] = (base_alpha[key] or c[4] or 1) * a
         end
     end
+end
+
+function M.restore_global_alpha()
+    restore_base_alpha()
+end
+
+function M.capture_alpha(key)
+    local c = M[key]
+    if c then base_alpha[key] = c[4] or 1 end
 end
 
 M.sync()

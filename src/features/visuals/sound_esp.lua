@@ -15,6 +15,9 @@ local rbx_offsets = April.require("core.rbx_offsets")
 local player_state = April.require("game.player_state")
 
 local M = {}
+local draw_cells = {}
+local touched_cells = {}
+local gather_seen = {}
 
 local P = "april_sound_esp"
 local ID_FADE_IN = P .. "_fade_in"
@@ -297,7 +300,8 @@ end
 
 local function gather_sounds(character, hrp, prev_entry)
     local sounds = {}
-    local seen = {}
+    local seen = gather_seen
+    for addr in pairs(seen) do seen[addr] = nil end
     local deep_done = prev_entry and prev_entry.deep_done == true
     local char_addr = character and tonumber(character.Address or character.address) or nil
 
@@ -788,21 +792,30 @@ function M.draw()
     local base = settings.color(ID_COLOR, { 0.78, 0.9, 1.0, 0.92 })
     local br, bg, bb, ba = base[1] or 0.78, base[2] or 0.9, base[3] or 1, base[4] or 0.92
 
-    local drawn = {}
+    for i = 1, #touched_cells do
+        draw_cells[touched_cells[i]] = nil
+        touched_cells[i] = nil
+    end
     for _, ind in pairs(indicators) do
         local a = (ind.alpha or 0) * ba
         if a > 0.02 and ind.x then
             local sx, sy, vis = esp_util.w2s(ind.x, ind.y, ind.z)
             if vis and esp_util.screen_point_ok(sx, sy, 64) then
                 local key = math.floor(sx / 10) .. ":" .. math.floor(sy / 10)
-                local slot = drawn[key] or 0
-                drawn[key] = slot + 1
+                local slot = draw_cells[key] or 0
+                if slot == 0 then touched_cells[#touched_cells + 1] = key end
+                draw_cells[key] = slot + 1
                 local y = sy + screen_y + slot * (size + 2)
-                local col = ind.color
-                if type(col) ~= "table" then
-                    col = { br, bg, bb, a }
+                local source = ind.color
+                local col = ind._draw_color
+                if not col then
+                    col = {}
+                    ind._draw_color = col
+                end
+                if type(source) ~= "table" then
+                    col[1], col[2], col[3], col[4] = br, bg, bb, a
                 else
-                    col = { col[1] or br, col[2] or bg, col[3] or bb, a }
+                    col[1], col[2], col[3], col[4] = source[1] or br, source[2] or bg, source[3] or bb, a
                 end
                 draw_label(sx, y, ind.text or ind.cat or ind.name or "Sound", col, size, chip)
             end

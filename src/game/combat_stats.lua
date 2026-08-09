@@ -3,24 +3,10 @@ local weapons = April.require("game.weapons")
 
 local M = {}
 
-local function inventory_mod()
-    return April.require("game.inventory")
-end
-
 local function profile_speed_mult()
     if not settings.enabled("april_gunmods_enabled") then return 0 end
     if not settings.enabled("april_gm_speed") then return 0 end
     return settings.num("april_gm_speed_mult", 100)
-end
-
-local function ammo_modifiers()
-    local inv = inventory_mod()
-    if not inv or not inv.get_equipped_ammo_stats then
-        return 1, 1
-    end
-    local ammo = inv.get_equipped_ammo_stats()
-    if not ammo then return 1, 1 end
-    return ammo.speed_mult or 1, ammo.gravity_mult or 1
 end
 
 function M.get_effective_stats(weapon_name)
@@ -40,10 +26,6 @@ function M.get_effective_stats(weapon_name)
         speed = speed * (1 + sm)
     end
 
-    local ammo_speed, ammo_grav = ammo_modifiers()
-    speed = speed * ammo_speed
-    gravity = gravity * ammo_grav
-
     return {
         speed = speed,
         gravity = gravity,
@@ -51,8 +33,6 @@ function M.get_effective_stats(weapon_name)
         is_bow = is_bow == true,
         base_speed = base.speed,
         speed_mult = sm,
-        ammo_speed_mult = ammo_speed,
-        ammo_gravity_mult = ammo_grav,
     }
 end
 

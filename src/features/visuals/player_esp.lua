@@ -61,6 +61,8 @@ local last_anim_prune_ms = 0
 local HELD_TTL_MS = 300
 local HELD_PRUNE_MS = 2000
 local ANIM_PRUNE_MS = 2500
+local frame_flags = {}
+local frame_flag_cols = {}
 
 local function tick_ms()
     return utility and utility.get_tick_count and utility.get_tick_count() or 0
@@ -313,16 +315,15 @@ function M.draw()
     local skip_downed = settings.multi(FILTERS, F_SKIP_DOWNED, false)
 
     -- Defaults must be false for optional flags so missing multi slots stay off.
-    local flags = {
-        [FL_DOWNED] = settings.multi(FLAGS, FL_DOWNED, false),
-        [FL_SAFEZONE] = settings.multi(FLAGS, FL_SAFEZONE, false),
-        [FL_STAFF] = settings.multi(FLAGS, FL_STAFF, false),
-        [FL_REVIVING] = settings.multi(FLAGS, FL_REVIVING, false),
-        [FL_MOVEMENT] = settings.multi(FLAGS, FL_MOVEMENT, false),
-        [FL_VIP] = settings.multi(FLAGS, FL_VIP, false),
-        [FL_CHEATER] = settings.multi(FLAGS, FL_CHEATER, false),
-        [FL_ANIM] = settings.multi(FLAGS, FL_ANIM, false),
-    }
+    local flags = frame_flags
+    flags[FL_DOWNED] = settings.multi(FLAGS, FL_DOWNED, false)
+    flags[FL_SAFEZONE] = settings.multi(FLAGS, FL_SAFEZONE, false)
+    flags[FL_STAFF] = settings.multi(FLAGS, FL_STAFF, false)
+    flags[FL_REVIVING] = settings.multi(FLAGS, FL_REVIVING, false)
+    flags[FL_MOVEMENT] = settings.multi(FLAGS, FL_MOVEMENT, false)
+    flags[FL_VIP] = settings.multi(FLAGS, FL_VIP, false)
+    flags[FL_CHEATER] = settings.multi(FLAGS, FL_CHEATER, false)
+    flags[FL_ANIM] = settings.multi(FLAGS, FL_ANIM, false)
 
     if flags[FL_CHEATER] then
         cheater_detect.tick()
@@ -362,16 +363,15 @@ function M.draw()
     local held_col = settings.color(ID_HELD, DEFAULT_HELD)
     local dist_col = settings.color(ID_DIST, DEFAULT_MUTED)
     local box_col = settings.color(ID_BOX_COLOR, DEFAULT_BOX)
-    local flag_cols = {
-        down = settings.color(ID_FLAG_DOWN, DEFAULT_FLAG.DOWN),
-        sz = settings.color(ID_FLAG_SZ, DEFAULT_FLAG.SZ),
-        staff = settings.color(ID_FLAG_STAFF, DEFAULT_FLAG.STAFF),
-        revive = settings.color(ID_FLAG_REVIVE, DEFAULT_FLAG.REVIVE),
-        move = settings.color(ID_FLAG_MOVE, DEFAULT_FLAG.MOVE),
-        vip = settings.color(ID_FLAG_VIP, DEFAULT_FLAG.VIP),
-        cheater = settings.color(ID_FLAG_CHEATER, DEFAULT_FLAG.CHEATER),
-        anim = settings.color(ID_FLAG_ANIM, DEFAULT_FLAG.ANIM),
-    }
+    local flag_cols = frame_flag_cols
+    flag_cols.down = settings.color(ID_FLAG_DOWN, DEFAULT_FLAG.DOWN)
+    flag_cols.sz = settings.color(ID_FLAG_SZ, DEFAULT_FLAG.SZ)
+    flag_cols.staff = settings.color(ID_FLAG_STAFF, DEFAULT_FLAG.STAFF)
+    flag_cols.revive = settings.color(ID_FLAG_REVIVE, DEFAULT_FLAG.REVIVE)
+    flag_cols.move = settings.color(ID_FLAG_MOVE, DEFAULT_FLAG.MOVE)
+    flag_cols.vip = settings.color(ID_FLAG_VIP, DEFAULT_FLAG.VIP)
+    flag_cols.cheater = settings.color(ID_FLAG_CHEATER, DEFAULT_FLAG.CHEATER)
+    flag_cols.anim = settings.color(ID_FLAG_ANIM, DEFAULT_FLAG.ANIM)
     local base_ts = esp_util.text_size()
 
     local me = cache.local_player

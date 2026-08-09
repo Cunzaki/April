@@ -157,10 +157,6 @@ end
 
 local SPATIAL_CELL = 128
 
-local function spatial_key(cx, cz)
-    return tostring(cx) .. ":" .. tostring(cz)
-end
-
 -- Build once when a scan cache changes; draw paths query nearby cells and still
 -- perform their exact range checks every frame.
 function M.build_spatial(list)
@@ -171,11 +167,15 @@ function M.build_spatial(list)
         if x and z then
             local cx = math.floor(x / SPATIAL_CELL)
             local cz = math.floor(z / SPATIAL_CELL)
-            local key = spatial_key(cx, cz)
-            local bucket = index.cells[key]
+            local column = index.cells[cx]
+            if not column then
+                column = {}
+                index.cells[cx] = column
+            end
+            local bucket = column[cz]
             if not bucket then
                 bucket = {}
-                index.cells[key] = bucket
+                column[cz] = bucket
             end
             bucket[#bucket + 1] = entry
         end
@@ -193,10 +193,13 @@ function M.query_spatial(index, x, z, radius, out)
     local min_z = math.floor((z - radius) / cell)
     local max_z = math.floor((z + radius) / cell)
     for cx = min_x, max_x do
-        for cz = min_z, max_z do
-            local bucket = index.cells[spatial_key(cx, cz)]
-            if bucket then
-                for i = 1, #bucket do out[#out + 1] = bucket[i] end
+        local column = index.cells[cx]
+        if column then
+            for cz = min_z, max_z do
+                local bucket = column[cz]
+                if bucket then
+                    for i = 1, #bucket do out[#out + 1] = bucket[i] end
+                end
             end
         end
     end

@@ -5,6 +5,11 @@ local notify = April.require("core.notify")
 
 local M = {}
 
+local function invalidate_config_catalog()
+    local ok, catalog = pcall(April.require, "ui.catalog")
+    if ok and catalog and catalog.invalidate then catalog.invalidate("config") end
+end
+
 local function profile_label()
     return settings.str("april_cfg_profile_name", "Default")
 end
@@ -22,6 +27,7 @@ function M.save_config(name)
     local ok, stem, path = store.save_config(name or profile_label())
     if ok then
         store.save_meta()
+        invalidate_config_catalog()
         local file = path and path:match("([^\\]+)$") or (tostring(stem) .. ".cfg")
         local folder = (path and path:find("April_configs", 1, true)) and "April_configs\\" or ""
         notify.success(string.format('Saved "%s" -> %s%s', profile_label(), folder, file), 3500)
@@ -37,6 +43,7 @@ function M.load_config(name)
     local ok = store.load_config(stem)
     if ok then
         store.save_meta()
+        invalidate_config_catalog()
         notify.success(string.format('Loaded "%s"', store.display_name(stem)), 3500)
         return true
     end
@@ -50,6 +57,7 @@ function M.delete_config(name)
     local ok = store.delete_config(stem)
     if ok then
         store.save_meta()
+        invalidate_config_catalog()
         notify.warning(string.format('Deleted "%s"', store.display_name(stem)), 3500)
         return true
     end
@@ -100,6 +108,7 @@ function M.register_menu()
     menu_util.button(T, G.CONFIG, "april_cfg_refresh", "Refresh List", function()
         store.migrate_legacy()
         store.refresh_index()
+        invalidate_config_catalog()
         notify.info("Config list refreshed", 2000)
     end)
 

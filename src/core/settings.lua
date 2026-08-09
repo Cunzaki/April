@@ -2,14 +2,54 @@ local M = {}
 
 local _callbacks = {}
 local feature_bind = nil
+local _frame = 0
+local _value_cache = {}
+local _color_cache = {}
 
-function M.invalidate() end
+local NIL = {}
+
+local function clear_table(t)
+    for key in pairs(t) do t[key] = nil end
+end
+
+-- Menu values are immutable for the duration of one April frame. Cache the
+-- first bridge read per id so every consumer observes the same current value
+-- without paying for duplicate host calls. UI/config writes invalidate the
+-- affected entry immediately through invalidate().
+function M.begin_frame(frame)
+    frame = tonumber(frame) or (_frame + 1)
+    if frame == _frame then return end
+    _frame = frame
+    clear_table(_value_cache)
+    clear_table(_color_cache)
+end
+
+function M.frame()
+    return _frame
+end
+
+function M.invalidate(id)
+    if id ~= nil then
+        _value_cache[id] = nil
+        _color_cache[id] = nil
+        return
+    end
+    clear_table(_value_cache)
+    clear_table(_color_cache)
+end
 
 function M.get(id, default)
+    local cached = _value_cache[id]
+    if cached ~= nil then
+        if cached == NIL then return default end
+        return cached
+    end
     if menu and menu.get then
         local v = menu.get(id)
+        _value_cache[id] = v == nil and NIL or v
         if v ~= nil then return v end
     end
+    _value_cache[id] = NIL
     return default
 end
 
@@ -88,10 +128,17 @@ function M.str(id, default)
 end
 
 function M.color(id, default)
+    local cached = _color_cache[id]
+    if cached ~= nil then
+        if cached == NIL then return default or { 1, 1, 1, 1 } end
+        return cached
+    end
     if menu and menu.get_color then
         local c = menu.get_color(id)
+        _color_cache[id] = c or NIL
         if c then return c end
     end
+    _color_cache[id] = NIL
     return default or { 1, 1, 1, 1 }
 end
 
@@ -103,6 +150,7 @@ function M.on_change(id, fn)
 
     if menu and menu.set_callback then
         menu.set_callback(id, function(new_val)
+            M.invalidate(id)
             for _, cb in ipairs(_callbacks[id] or {}) do
                 pcall(cb, new_val)
             end

@@ -127,14 +127,16 @@ end
 -- GPU mesh chams block (see docs/API.md §15 — preset mode + glow color indices).
 local function mesh_chams_block(prefix, toggle_list, master)
     local chams_id = prefix .. "_chams"
+    local chams_master = prefix .. "_chams_enabled"
     local mode_id = prefix .. "_chams_mode"
     local color_id = prefix .. "_chams_color"
     return {
         sep(master),
         label("Mesh Chams (GPU)", false, master),
-        multi(chams_id, "Cham Types", toggle_labels(toggle_list), {}, master),
-        combo(mode_id, "Chams Mode", gpu_chams.MODE_LABELS, 0, master),
-        combo(color_id, "Glow Preset", gpu_chams.COLOR_LABELS, 0, master, {
+        cb(chams_master, "Enable Mesh Chams", false, nil, master),
+        multi(chams_id, "Cham Types", toggle_labels(toggle_list), {}, chams_master),
+        combo(mode_id, "Chams Mode", gpu_chams.MODE_LABELS, 0, chams_master),
+        combo(color_id, "Glow Preset", gpu_chams.COLOR_LABELS, 0, chams_master, {
             gate_any_combo = {
                 { mode_id, { 2, 3 } },
             },
@@ -607,6 +609,15 @@ local function build_misc()
                 sep(),
                 cb("april_anti_afk", "Anti AFK", false),
                 kb("april_antifling_enabled", "Anti Fling", false),
+                sep(),
+                kb("april_event_status_enabled", "Event Status", false),
+                cb("april_event_status_active_only", "Only Show Active Events", false, nil, "april_event_status_enabled"),
+                cb("april_event_status_notify", "Event Notifications", true, nil, "april_event_status_enabled"),
+                cb("april_event_status_distance", "Show Event Distance", true, nil, "april_event_status_enabled"),
+                cb("april_event_status_health", "Show Event Health", true, nil, "april_event_status_enabled"),
+                combo("april_event_status_sort", "Event Sorting", {
+                    "Game Order", "Active First", "Nearest First",
+                }, 1, "april_event_status_enabled"),
                 label("HUD panels are managed from the top dock."),
             },
         },
@@ -822,15 +833,31 @@ local function build_config()
     return { appearance, motion, accent, anime_baddie, config_group }
 end
 
+local group_cache = {}
+local EMPTY_GROUPS = {}
+
+function M.invalidate(tab_id)
+    if tab_id then
+        group_cache[tab_id] = nil
+    else
+        for key in pairs(group_cache) do group_cache[key] = nil end
+    end
+end
+
 function M.groups_for(tab_id)
-    if tab_id == "aim" then return build_aim() end
-    if tab_id == "visuals" then return build_visuals() end
-    if tab_id == "world" then return build_world() end
-    if tab_id == "guns" then return build_guns() end
-    if tab_id == "misc" then return build_misc() end
-    if tab_id == "radar" then return build_radar() end
-    if tab_id == "config" then return build_config() end
-    return {}
+    local cached = group_cache[tab_id]
+    if cached then return cached end
+    local groups
+    if tab_id == "aim" then groups = build_aim()
+    elseif tab_id == "visuals" then groups = build_visuals()
+    elseif tab_id == "world" then groups = build_world()
+    elseif tab_id == "guns" then groups = build_guns()
+    elseif tab_id == "misc" then groups = build_misc()
+    elseif tab_id == "radar" then groups = build_radar()
+    elseif tab_id == "config" then groups = build_config()
+    else return EMPTY_GROUPS end
+    group_cache[tab_id] = groups
+    return groups
 end
 
 return M

@@ -1,5 +1,5 @@
 April = {
-    version = "4.1.89",
+    version = "4.3.0",
     debug = false,
     crash_logging = false,
     crash_trace = false,
@@ -599,9 +599,6 @@ end
 return write - 1
 end
 local SPATIAL_CELL = 128
-local function spatial_key(cx, cz)
-return tostring(cx) .. ":" .. tostring(cz)
-end
 function M.build_spatial(list)
 local index = { cells = {}, all = list or {}, cell = SPATIAL_CELL }
 local esp_scan = April.require("game.esp_scan")
@@ -610,11 +607,15 @@ local x, _, z = esp_scan.entry_coords(entry)
 if x and z then
 local cx = math.floor(x / SPATIAL_CELL)
 local cz = math.floor(z / SPATIAL_CELL)
-local key = spatial_key(cx, cz)
-local bucket = index.cells[key]
+local column = index.cells[cx]
+if not column then
+column = {}
+index.cells[cx] = column
+end
+local bucket = column[cz]
 if not bucket then
 bucket = {}
-index.cells[key] = bucket
+column[cz] = bucket
 end
 bucket[#bucket + 1] = entry
 end
@@ -631,10 +632,13 @@ local max_x = math.floor((x + radius) / cell)
 local min_z = math.floor((z - radius) / cell)
 local max_z = math.floor((z + radius) / cell)
 for cx = min_x, max_x do
+local column = index.cells[cx]
+if column then
 for cz = min_z, max_z do
-local bucket = index.cells[spatial_key(cx, cz)]
+local bucket = column[cz]
 if bucket then
 for i = 1, #bucket do out[#out + 1] = bucket[i] end
+end
 end
 end
 end
@@ -1681,12 +1685,44 @@ April._mods["core.settings"] = (function()
 local M = {}
 local _callbacks = {}
 local feature_bind = nil
-function M.invalidate() end
+local _frame = 0
+local _value_cache = {}
+local _color_cache = {}
+local NIL = {}
+local function clear_table(t)
+    for key in pairs(t) do t[key] = nil end
+end
+function M.begin_frame(frame)
+    frame = tonumber(frame) or (_frame + 1)
+    if frame == _frame then return end
+    _frame = frame
+    clear_table(_value_cache)
+    clear_table(_color_cache)
+end
+function M.frame()
+    return _frame
+end
+function M.invalidate(id)
+    if id ~= nil then
+        _value_cache[id] = nil
+        _color_cache[id] = nil
+        return
+    end
+    clear_table(_value_cache)
+    clear_table(_color_cache)
+end
 function M.get(id, default)
+    local cached = _value_cache[id]
+    if cached ~= nil then
+        if cached == NIL then return default end
+        return cached
+    end
     if menu and menu.get then
         local v = menu.get(id)
+        _value_cache[id] = v == nil and NIL or v
         if v ~= nil then return v end
     end
+    _value_cache[id] = NIL
     return default
 end
 function M.bool(id, default)
@@ -1752,10 +1788,17 @@ function M.str(id, default)
     return tostring(v)
 end
 function M.color(id, default)
+    local cached = _color_cache[id]
+    if cached ~= nil then
+        if cached == NIL then return default or { 1, 1, 1, 1 } end
+        return cached
+    end
     if menu and menu.get_color then
         local c = menu.get_color(id)
+        _color_cache[id] = c or NIL
         if c then return c end
     end
+    _color_cache[id] = NIL
     return default or { 1, 1, 1, 1 }
 end
 function M.on_change(id, fn)
@@ -1764,6 +1807,7 @@ function M.on_change(id, fn)
     _callbacks[id][#_callbacks[id] + 1] = fn
     if menu and menu.set_callback then
         menu.set_callback(id, function(new_val)
+            M.invalidate(id)
             for _, cb in ipairs(_callbacks[id] or {}) do
                 pcall(cb, new_val)
             end
@@ -2403,6 +2447,9 @@ local draw_util = April.require("core.draw_util")
 local text_util = April.require("core.text_util")
 local mod_ids = April.require("game.mod_ids")
 local M = {}
+local gs_theme_ref = nil
+local gs_anim_ref = nil
+local synced = false
 M.BG          = { 13 / 255, 13 / 255, 13 / 255, 0.94 }
 M.PANEL       = { 18 / 255, 18 / 255, 20 / 255, 0.92 }
 M.PANEL_DEEP  = { 10 / 255, 10 / 255, 12 / 255, 0.90 }
@@ -2439,16 +2486,22 @@ local function mix(a, b, t, alpha)
     }
 end
 function M.sync()
-    local ok_anim, anim = pcall(function()
-        return April.require("ui.gs_anim")
-    end)
-    if ok_anim and anim and anim.sync_theme then
-        pcall(anim.sync_theme)
+    if not gs_anim_ref then
+        local ok_anim, anim = pcall(April.require, "ui.gs_anim")
+        if ok_anim then gs_anim_ref = anim end
     end
-    local ok, gs = pcall(function()
-        return April.require("ui.gs_theme")
-    end)
-    if not ok or not gs then return false end
+    local changed = false
+    if gs_anim_ref and gs_anim_ref.sync_theme then
+        local ok_sync, result = pcall(gs_anim_ref.sync_theme)
+        changed = ok_sync and result == true
+    end
+    if not gs_theme_ref then
+        local ok, gs = pcall(April.require, "ui.gs_theme")
+        if ok then gs_theme_ref = gs end
+    end
+    local gs = gs_theme_ref
+    if not gs then return false end
+    if synced and not changed then return false end
     local accent = gs.ACCENT or M.CYAN
     M.ACCENT = copy_alpha(accent, 1)
     M.CYAN = copy_alpha(accent, 1)
@@ -2470,6 +2523,7 @@ function M.sync()
     M.ROUND = 0
     M.MAP_BG = copy_alpha(gs.BG_INNER or M.BG, 0.90)
     M.MAP_GRID = copy_alpha(accent, 0.10)
+    synced = true
     return true
 end
 function M.alpha(col, a)
@@ -2679,19 +2733,19 @@ end)()
 April._mods["core.overlay_theme"] = (function()
 local ui_theme = April.require("core.ui_theme")
 local M = {}
+local cached_theme = nil
+local cached_anim = nil
 local function gs_theme()
-local ok, theme = pcall(function()
-return April.require("ui.gs_theme")
-end)
-if ok then return theme end
-return nil
+if cached_theme then return cached_theme end
+local ok, theme = pcall(April.require, "ui.gs_theme")
+if ok then cached_theme = theme end
+return cached_theme
 end
 local function anim_mod()
-local ok, anim = pcall(function()
-return April.require("ui.gs_anim")
-end)
-if ok then return anim end
-return nil
+if cached_anim then return cached_anim end
+local ok, anim = pcall(April.require, "ui.gs_anim")
+if ok then cached_anim = anim end
+return cached_anim
 end
 function M.sync()
 if ui_theme.sync then pcall(ui_theme.sync) end
@@ -4185,6 +4239,8 @@ April._mods["core.incremental_scan"] = (function()
 local debug = April.require("core.debug")
 local M = {}
 local jobs = {}
+local job_order = {}
+local round_robin_start = 1
 local BUDGET_MS = 5
 local ITEMS_PER_STEP = 16
 local MAX_STARTS_PER_TICK = 1
@@ -4198,6 +4254,9 @@ function M.configure(opts)
     if opts.items_per_step then ITEMS_PER_STEP = opts.items_per_step end
 end
 function M.register(id, interval_ms, when_fn, create_state_fn, step_fn, complete_fn, phase_ms)
+    if jobs[id] == nil then
+        job_order[#job_order + 1] = id
+    end
     jobs[id] = {
         id = id,
         interval = interval_ms,
@@ -4225,8 +4284,18 @@ function M.tick()
     starts_this_tick = 0
     local budget_left = BUDGET_MS
     local now = tick_ms()
-    for id, job in pairs(jobs) do
+    local count = #job_order
+    if count == 0 then return end
+    local visited = 0
+    local index = round_robin_start
+    while visited < count do
+        local id = job_order[index]
+        local job = jobs[id]
+        visited = visited + 1
+        index = index + 1
+        if index > count then index = 1 end
         if budget_left <= 0 then break end
+        if not job then goto continue end
         if job.when then
             local ok, pass = pcall(job.when)
             if not ok or not pass then
@@ -4262,6 +4331,8 @@ function M.tick()
         end
         ::continue::
     end
+    round_robin_start = round_robin_start + 1
+    if round_robin_start > count then round_robin_start = 1 end
 end
 return M
 end)()
@@ -4704,14 +4775,12 @@ return M
 end)()
 
 April._mods["core.silent_ray"] = (function()
-local ballistic = April.require("core.ballistic")
 local M = {}
 local hook_ready = false
 local tracking = false
 M._last_origin = nil
 M._last_target = nil
 M._last_ok = false
-M._last_curve = nil
 local function unpack_pos(v)
     if not v then return nil end
     if v.x ~= nil then return v.x, v.y, v.z end
@@ -4792,7 +4861,6 @@ end
 function M.stop()
     M._last_origin = nil
     M._last_target = nil
-    M._last_curve = nil
     local was_active = tracking or M._last_ok
     M._last_ok = false
     tracking = false
@@ -4805,9 +4873,6 @@ function M.stop()
 end
 function M.last_segment()
     return M._last_origin, M._last_target
-end
-function M.last_curve()
-    return M._last_curve
 end
 local function build_dir(origin, aim_point)
     local ox, oy, oz = unpack_pos(origin)
@@ -4836,7 +4901,6 @@ local function build_dir(origin, aim_point)
 end
 function M.set_target(origin, aim_point, hitpart)
     M._last_ok = false
-    M._last_curve = nil
     if not aim_point then
         return false
     end
@@ -4872,7 +4936,6 @@ function M.set_target(origin, aim_point, hitpart)
 end
 function M.track(origin, aim_point, shoot_vk, hitpart)
     M._last_ok = false
-    M._last_curve = nil
     if not aim_point then
         return false
     end
@@ -4906,24 +4969,6 @@ function M.track(origin, aim_point, shoot_vk, hitpart)
     M._last_ok = ok
     tracking = ok
     return ok
-end
-function M.track_curve(origin, aim_point, weapon_name, shoot_vk, hitpart)
-    origin = origin or M.get_camera_origin()
-    if not origin or not aim_point then
-        M._last_ok = false
-        M._last_curve = nil
-        return false
-    end
-    local hit = hitpart or aim_point
-    local curve = ballistic.curve_for_weapon(origin, hit, weapon_name, 24)
-    local ok_set = M.set_target(origin, hit, hit)
-    local ok_track = M.track(origin, hit, shoot_vk, hit)
-    M._last_curve = curve
-    local hx, hy, hz = unpack_pos(hit)
-    M._last_target = hx and { x = hx, y = hy, z = hz } or nil
-    M._last_ok = ok_set or ok_track
-    tracking = M._last_ok
-    return M._last_ok
 end
 return M
 end)()
@@ -7117,14 +7162,14 @@ local MENU_KEYS = {
     "april_raspberry_plant", "april_blueberry_plant", "april_wool_plant",
     "april_deer", "april_boar", "april_wolf",
     "april_world_boxes", "april_world_show_name", "april_world_show_distance", "april_world_range",
-    "april_world_chams", "april_world_chams_mode", "april_world_chams_color",
+    "april_world_chams_enabled", "april_world_chams", "april_world_chams_mode", "april_world_chams_color",
     "april_loot_enabled", "april_loot_enabled_mode", "april_dropped_item", "april_wooden_crate", "april_metal_crate",
     "april_steel_crate", "april_food_crate", "april_timed_crate", "april_care_package", "april_btr_crate",
     "april_body_bag", "april_sleeper", "april_trash_can", "april_oil_barrel",
     "april_small_egg", "april_medium_egg", "april_large_egg",
     "april_wooden_boat", "april_military_boat", "april_flycopter", "april_heli_crate",
     "april_loot_boxes", "april_loot_show_name", "april_loot_show_distance", "april_loot_range",
-    "april_loot_chams", "april_loot_chams_mode", "april_loot_chams_color",
+    "april_loot_chams_enabled", "april_loot_chams", "april_loot_chams_mode", "april_loot_chams_color",
     "april_npc_enabled", "april_npc_enabled_mode",
     "april_npc_soldier", "april_npc_bruno", "april_npc_boris", "april_npc_brutus",
     "april_npc_attack_heli", "april_npc_btr", "april_npc_diver_dave", "april_npc_pilot_pete",
@@ -7171,7 +7216,8 @@ local MENU_KEYS = {
     "april_keybinds_x", "april_keybinds_y",
     "april_mod_checker_enabled", "april_mod_checker_interval",
     "april_mod_checker_x", "april_mod_checker_y",
-    "april_event_status_enabled", "april_event_status_active_only",
+    "april_event_status_enabled", "april_event_status_active_only", "april_event_status_notify",
+    "april_event_status_distance", "april_event_status_health", "april_event_status_sort",
     "april_event_status_x", "april_event_status_y",
 }
 local COLOR_KEYS = {
@@ -10563,6 +10609,14 @@ function M.apply_weapon(mods, opts)
         debug.warn_once("gun_mods:nodes", "GC still warming - equip a gun, enable a mod option, keep master on")
         return false, 0, "GC warming - equip gun and wait a moment"
     end
+    for i = 1, #patch_keys do
+        local key = patch_keys[i]
+        local key_warm = warm_nodes(key)
+        if key_warm <= 0 then
+            note_failure("missing " .. key)
+            return false, 0, "Weapon stat unavailable: " .. key
+        end
+    end
     local patched = 0
     local ok, result = pcall(applygc, patch_keys, payload)
     if ok and type(result) == "number" then
@@ -10735,7 +10789,7 @@ function M.build_mods_for_apply(_held)
     return M.build_mods_from_profile(M.read_settings())
 end
 function M.build_toolinfo_for_apply(held)
-    if not M.editor_has_active_mods() then return nil, nil end
+    if not M.editor_has_active_mods() or not weapons.is_ranged_weapon_name(held) then return nil, nil end
     return M.build_toolinfo_opts(M.read_settings()), held
 end
 function M.should_apply_for_held(held)
@@ -10749,22 +10803,10 @@ April._mods["game.combat_stats"] = (function()
 local settings = April.require("core.settings")
 local weapons = April.require("game.weapons")
 local M = {}
-local function inventory_mod()
-    return April.require("game.inventory")
-end
 local function profile_speed_mult()
     if not settings.enabled("april_gunmods_enabled") then return 0 end
     if not settings.enabled("april_gm_speed") then return 0 end
     return settings.num("april_gm_speed_mult", 100)
-end
-local function ammo_modifiers()
-    local inv = inventory_mod()
-    if not inv or not inv.get_equipped_ammo_stats then
-        return 1, 1
-    end
-    local ammo = inv.get_equipped_ammo_stats()
-    if not ammo then return 1, 1 end
-    return ammo.speed_mult or 1, ammo.gravity_mult or 1
 end
 function M.get_effective_stats(weapon_name)
     weapon_name = weapon_name or weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
@@ -10780,9 +10822,6 @@ function M.get_effective_stats(weapon_name)
     if sm ~= 0 then
         speed = speed * (1 + sm)
     end
-    local ammo_speed, ammo_grav = ammo_modifiers()
-    speed = speed * ammo_speed
-    gravity = gravity * ammo_grav
     return {
         speed = speed,
         gravity = gravity,
@@ -10790,8 +10829,6 @@ function M.get_effective_stats(weapon_name)
         is_bow = is_bow == true,
         base_speed = base.speed,
         speed_mult = sm,
-        ammo_speed_mult = ammo_speed,
-        ammo_gravity_mult = ammo_grav,
     }
 end
 return M
@@ -13963,21 +14000,46 @@ end)()
 
 April._mods["game.inventory"] = (function()
 local env = April.require("core.env")
-local items = April.require("game.items")
 local item_catalog = April.require("game.item_catalog")
 local M = {}
-function M.get_local_inventory()
+local CACHE_MS = 120
+local cached_inventory = nil
+local cached_at = -CACHE_MS
+local function tick_ms()
+    return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+function M.get_local_inventory(force)
+    local now = tick_ms()
+    if not force and cached_inventory and now - cached_at < CACHE_MS then
+        return cached_inventory
+    end
     local lp = env.get_local_player()
-    if not lp or not lp.character then return nil end
-    local char = lp.character
+    local char = lp and (lp.character or lp.Character)
+    if not char then return nil end
     if not env.is_valid(char) then return nil end
     local ic = env.safe_call(function() return char:find_first_child("InventoryController") end)
     if not ic then return nil end
     local fetch = env.safe_call(function() return ic:find_first_child("Fetch") end)
     if not fetch or not fetch.Invoke then return nil end
-    local ok, inv, toolbar, armor = pcall(function() return fetch:Invoke() end)
-    if not ok or not inv then return nil end
-    return { inventory = inv, toolbar = toolbar, armor = armor }
+    local ok, data, toolbar, armor = pcall(function() return fetch:Invoke() end)
+    if not ok or not data then return nil end
+    if type(data) == "table" and (data.Inventory or data.inventory or data.Toolbar or data.toolbar) then
+        cached_inventory = {
+            inventory = data.Inventory or data.inventory,
+            toolbar = data.Toolbar or data.toolbar,
+            armor = data.Armor or data.armor,
+            raw = data,
+        }
+        cached_at = now
+        return cached_inventory
+    end
+    cached_inventory = { inventory = data, toolbar = toolbar, armor = armor }
+    cached_at = now
+    return cached_inventory
+end
+function M.invalidate()
+    cached_inventory = nil
+    cached_at = -CACHE_MS
 end
 function M.resolve_item_name(id)
     if type(id) ~= "number" then return tostring(id) end
@@ -14022,40 +14084,13 @@ function M.get_toolbar_entry(char)
         slot = read_attribute(find_child(char, "ViewmodelController"), "Equipped")
     end
     if type(slot) ~= "number" or slot <= 0 then return nil, nil end
-    local ok, data = pcall(function() return fetch:Invoke() end)
-    if not ok or type(data) ~= "table" then return nil, nil end
-    local toolbar = data.Toolbar or data.toolbar
+    local data = M.get_local_inventory()
+    local toolbar = data and data.toolbar
     if type(toolbar) ~= "table" then return nil, nil end
     local entry = toolbar[slot]
     if not entry or entry == 0 then return nil, nil end
     if type(entry) == "table" and entry.Amount and entry.Amount <= 0 then return nil, nil end
     return entry, slot
-end
-function M.get_equipped_ammo_stats()
-    local lp = env.get_local_player()
-    local char = lp and lp.character
-    if not char or not env.is_valid(char) then return nil end
-    local entry = M.get_toolbar_entry(char)
-    if not entry or type(entry) ~= "table" then return nil end
-    local ammo = entry.Ammo
-    if not ammo or type(ammo) ~= "table" then return nil end
-    local ammo_id = ammo.ID
-    if type(ammo_id) ~= "number" then return nil end
-    items.load()
-    local row = items.get_by_id and items.get_by_id(ammo_id)
-    if row and row.AmmoStats then return row.AmmoStats end
-    local rep = env.get_replicated_storage()
-    if rep then
-        local modules = env.safe_call(function() return rep:find_first_child("Modules") end)
-        local items_mod = modules and env.safe_call(function() return modules:find_first_child("Items") end)
-        if items_mod then
-            local ok, data = pcall(function() return require(items_mod) end)
-            if ok and data and data[ammo_id] and data[ammo_id].AmmoStats then
-                return data[ammo_id].AmmoStats
-            end
-        end
-    end
-    return nil
 end
 function M.get_toolbar_held_name(char)
     local entry = M.get_toolbar_entry(char)
@@ -14068,7 +14103,7 @@ function M.get_held_tool_name()
     local lp = env.get_local_player()
     if not lp then return nil end
     if lp.tool_name and lp.tool_name ~= "" then return lp.tool_name end
-    local char = lp.character
+    local char = lp.character or lp.Character
     if not char or not env.is_valid(char) then return nil end
     local toolbar_name = M.get_toolbar_held_name(char)
     if toolbar_name and toolbar_name ~= "" then return toolbar_name end
@@ -14892,6 +14927,8 @@ M.NPC_NAMES = {
 }
 local EVENT_REFRESH_MS = 750
 local entity_entries = {}
+local entity_seen = {}
+local heli_seen = {}
 local event_entries = {}
 local last_event_refresh = -EVENT_REFRESH_MS
 local function tick_ms()
@@ -14967,7 +15004,8 @@ end
 function M.collect_heli_weak_points(model)
     if not model or not env.is_valid(model) then return {} end
     local out = {}
-    local seen = {}
+    local seen = heli_seen
+    for key in pairs(seen) do seen[key] = nil end
     local function add(part, score)
         if not part or not env.is_valid(part) then return end
         local key = address(part)
@@ -15215,7 +15253,8 @@ function M.refresh_cache(workspace_entities)
     local cache = April.require("core.cache")
     local out = cache.npcs
     clear_array(out)
-    local seen = {}
+    local seen = entity_seen
+    for key in pairs(seen) do seen[key] = nil end
     for i = 1, #(workspace_entities or {}) do
         local player = workspace_entities[i]
         local character = player and (player.Character or player.character)
@@ -18100,8 +18139,6 @@ local silent_ray = April.require("core.silent_ray")
 local manip_math = April.require("core.manip_math")
 local targeting = April.require("features.combat.targeting")
 local bullet_tp_ray = April.require("features.combat.bullet_tp_ray")
-local weapons = April.require("game.weapons")
-local ballistic = April.require("core.ballistic")
 local M = {}
 local OFF_INFO = {
 state = "off",
@@ -18254,29 +18291,13 @@ end
 end
 return nil, extra
 end
-local function apply_drop_aim(origin, hitpart, weapon, state, manip_extra, flags)
-local muzzle = origin or combat_origin.get_muzzle_origin()
-local curve = ballistic.curve_for_weapon(muzzle, hitpart, weapon, 24)
-local info = merge_info({
-state = state or "curve",
-peek = nil,
-radius = manip_extra and manip_extra.radius or 0,
-use_curve = true,
-weapon = weapon,
-hitpart = hitpart,
-curve_path = curve and curve.path or nil,
-launch_dir = curve and curve.launch_dir or nil,
-}, manip_extra, flags)
-return muzzle, hitpart, info
-end
-local function apply_ray_aim(origin, aim, hitpart, weapon, state, manip_extra, meta, flags)
+local function apply_ray_aim(origin, aim, hitpart, state, manip_extra, meta, flags)
 meta = meta or {}
 local info = merge_info({
 state = state,
 peek = manip_extra and manip_extra.peek or nil,
 radius = manip_extra and manip_extra.radius or 0,
 use_curve = false,
-weapon = weapon,
 hitpart = hitpart,
 tp_path = meta.tp_path,
 tp_method = meta.method,
@@ -18306,7 +18327,6 @@ if not target then return nil, nil, OFF_INFO end
 local camera = silent_ray.get_camera_origin()
 if not camera then return nil, nil, OFF_INFO end
 local flags = feature_flags()
-local weapon = weapons.cached_held_ranged() or weapons.get_held_ranged_weapon_name()
 local bone = targeting.bone_name(prefix)
 local hitpart = targeting.resolve_bone_world(target, bone, cx, cy, { prefix = prefix })
 if not hitpart then return nil, nil, OFF_INFO end
@@ -18343,7 +18363,7 @@ local path = tp.tp_path or bullet_tp_ray.build_path(tp.origin, tp.aim, muzzle)
 if manip_extra.peek and manip_fire then
 path = bullet_tp_ray.build_path(manip_fire, head, muzzle) or path
 end
-return apply_ray_aim(tp.origin, tp.aim, tp.hitpart or head, weapon, "tp", manip_extra, {
+return apply_ray_aim(tp.origin, tp.aim, tp.hitpart or head, "tp", manip_extra, {
 tp_path = path,
 method = tp.method,
 tp_scan_visible = tp.tp_scan_visible,
@@ -18353,20 +18373,17 @@ head_scale = tp.head_scale or flags.hitbox_mult,
 end
 end
 if manip_extra.state == "ready" and manip_fire then
-return apply_ray_aim(manip_fire, hitpart, hitpart, weapon, "ready", manip_extra, {
+return apply_ray_aim(manip_fire, hitpart, hitpart, "ready", manip_extra, {
 tp_path = bullet_tp_ray.build_path(manip_fire, hitpart, muzzle),
 method = "Manip",
 }, flags)
 end
 if hitscan_on then
-return apply_ray_aim(muzzle or fire, hitpart, hitpart, weapon, "hitscan", manip_extra, {
+return apply_ray_aim(muzzle or fire, hitpart, hitpart, "hitscan", manip_extra, {
 head_scale = flags.hitbox_on and flags.hitbox_mult or 1,
 }, flags)
 end
-if manip_extra.state == "direct" then
-return apply_drop_aim(muzzle, hitpart, weapon, "direct", manip_extra, flags)
-end
-return apply_drop_aim(muzzle, hitpart, weapon, "curve", manip_extra, flags)
+return apply_ray_aim(muzzle or fire, hitpart, hitpart, "direct", manip_extra, nil, flags)
 end
 function M.any_bullet_feature()
 return bullet_flag("hitscan", false)
@@ -19227,6 +19244,8 @@ local BASE = { x = 1.15, y = 1.16, z = 1.16 }
 local TRANSP = 0.99
 local APPLY_MS = 100
 local tracked = {}
+local update_seen = {}
+local fallback_bounds_opts = { body_h = 5.0, top_pad = 0.55, bot_pad = 0.12, width_mul = 0.52 }
 local was_on = false
 local function tick_ms_local()
 local fn = utility and (utility.get_tick_count or utility.GetTickCount)
@@ -19462,12 +19481,8 @@ or player.Position or player.position
 )
 if not hx then return nil end
 local px, py, pz = esp_util.vec3_pos(player.Position or player.position)
-local opts = {
-body_h = 5.0,
-top_pad = 0.55,
-bot_pad = 0.12,
-width_mul = 0.52,
-}
+local opts = fallback_bounds_opts
+opts.fx, opts.fy, opts.fz = nil, nil, nil
 if px then
 opts.fx, opts.fy, opts.fz = px, py - 3.05, pz
 end
@@ -19487,7 +19502,8 @@ local mult = thickness()
 local players = cache.players
 if type(players) ~= "table" then return end
 local now = tick_ms_local()
-local seen = {}
+local seen = update_seen
+for key in pairs(seen) do seen[key] = nil end
 for i = 1, #players do
 local p = players[i]
 if not p or ep.is_local(p) then goto continue end
@@ -19797,25 +19813,9 @@ local track_aim = aim
 local ok_set = false
 local ok_track = false
 if use_silent_fov then
-if info.use_curve and silent_ray.track_curve then
-ok_set = silent_ray.set_target(origin, hit, hit) == true
-if firing then
-ok_track = silent_ray.track_curve(
-origin, hit, info.weapon, SHOOT_VK, hit
-) == true
-ok_set = ok_set or silent_ray.last_ok() == true
-end
-if not info.curve_path and silent_ray.last_curve then
-local curve = silent_ray.last_curve()
-if curve and curve.path then
-info.curve_path = curve.path
-end
-end
-else
 ok_set = silent_ray.set_target(origin, track_aim, hit) == true
 if firing then
 ok_track = silent_ray.track(origin, track_aim, SHOOT_VK, hit) == true
-end
 end
 else
 ok_set = silent_ray.set_target(origin, track_aim, hit) == true
@@ -20089,8 +20089,6 @@ function M.draw()
     if not draw then return end
     local fov = flag_fov_radius()
     if not fov then return end
-    local target = resolve_target()
-    if not target then return end
     local sw, sh = targeting.screen_center()
     local cx, cy = sw * 0.5, sh * 0.5
     local y = cy + fov + 8
@@ -20103,10 +20101,11 @@ function M.draw()
     local function t(s)
         return (i18n_mod and i18n_mod.t and i18n_mod.t(s)) or s
     end
-    if settings.bool(P_VISIBLE, true) and target_is_visible(target) then
+    local target = resolve_target()
+    if target and settings.bool(P_VISIBLE, true) and target_is_visible(target) then
         y = y + draw_flag(cx, y, t("VISIBLE"), theme.GREEN or { 0.35, 1, 0.45, 1 })
     end
-    if settings.bool(P_DIST, true) then
+    if target and settings.bool(P_DIST, true) then
         local dist = target_distance(target)
         if dist then
             local col = theme.TEXT or { 0.9, 0.92, 0.95, 1 }
@@ -22307,14 +22306,16 @@ function M.draw()
     if not settings.enabled(P) then return end
     if not draw then return end
     local now = tick_ms()
-    local keep = {}
-    for i = 1, #tracers do
-        local tr = tracers[i]
+    local count = #tracers
+    local write = 1
+    for read = 1, count do
+        local tr = tracers[read]
         if tr and draw_one(tr, now) then
-            keep[#keep + 1] = tr
+            tracers[write] = tr
+            write = write + 1
         end
     end
-    tracers = keep
+    for i = write, count do tracers[i] = nil end
 end
 M.STYLE_NAMES = STYLE_NAMES
 M.ANIM_NAMES = ANIM_NAMES
@@ -22753,11 +22754,13 @@ local draw_util = April.require("core.draw_util")
 local panel_drag = April.require("core.panel_drag")
 local overlay_theme = April.require("core.overlay_theme")
 local theme = April.require("core.ui_theme")
+local notify = April.require("core.notify")
+local esp_util = April.require("core.esp_util")
 local M = {}
 local P = "april_event_status_enabled"
 local X_ID = "april_event_status_x"
 local Y_ID = "april_event_status_y"
-local PANEL_W = 314
+local PANEL_W = 350
 local TITLE_H = 30
 local ROW_H = 36
 local REFRESH_MS = 1000
@@ -22777,8 +22780,19 @@ local session_token = nil
 local btr_was_destroyed = false
 local btr_loot_until = nil
 local btr_crate_seen_at = nil
+local known_active = {}
+local initial_event_scan = true
 local function tick_ms()
 return utility and utility.get_tick_count and utility.get_tick_count() or 0
+end
+local function local_position()
+local me = cache.local_player
+if not me then return nil end
+local x, y, z = esp_util.vec3_pos(
+me.Position or me.position or me.HeadPosition or me.head_position
+)
+if not x then return nil end
+return x, y, z
 end
 local function session_id()
 if not game then return "none" end
@@ -22795,6 +22809,8 @@ last_refresh = -REFRESH_MS
 btr_was_destroyed = false
 btr_loot_until = nil
 btr_crate_seen_at = nil
+known_active = {}
+initial_event_scan = true
 end
 local function tick_session()
 local sid = session_id()
@@ -22856,6 +22872,7 @@ return count, timer
 end
 local function npc_event_state()
 local state = {}
+local local_x, local_y, local_z = local_position()
 for _, entry in ipairs(cache.npcs or {}) do
 local id = entry and entry.kind
 if id == "heli" then id = "attack_heli" end
@@ -22864,7 +22881,16 @@ or id == "boris" or id == "brutus"
 then
 local item = state[id] or { count = 0 }
 item.count = item.count + 1
-item.location = item.location or entry.location
+local dist = nil
+if local_x and entry.lx and entry.ly and entry.lz then
+local dx, dy, dz = entry.lx - local_x, entry.ly - local_y, entry.lz - local_z
+dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+if not item.distance or (dist and dist < item.distance) then
+item.distance = dist or item.distance
+item.location = entry.location or item.location
+item.x, item.y, item.z = entry.lx, entry.ly, entry.lz
+end
 if entry.entity then
 item.hp = tonumber(entry.entity.Health or entry.entity.health) or item.hp
 item.max_hp = tonumber(entry.entity.MaxHealth or entry.entity.max_health) or item.max_hp
@@ -22972,6 +22998,17 @@ local next_rows = {}
 for _, definition in ipairs(DEFINITIONS) do
 local item = active[definition.id]
 local is_active = item ~= nil and (item.count or 0) > 0
+if not initial_event_scan and known_active[definition.id] ~= is_active and settings.bool("april_event_status_notify", true) then
+local detail = ""
+if is_active and item then
+if item.location and item.location ~= "" then detail = " at " .. tostring(item.location) end
+if settings.bool("april_event_status_distance", true) and item.distance then
+detail = detail .. string.format(" (%dm)", math.floor(item.distance + 0.5))
+end
+end
+notify.info(definition.label .. (is_active and " event active" or " event ended") .. detail, 3500)
+end
+known_active[definition.id] = is_active
 local loot_left = nil
 if definition.id == "btr" and btr_loot_until then
 loot_left = btr_loot_until - now
@@ -22998,7 +23035,9 @@ local elapsed = is_active and format_elapsed(now - (first_seen[definition.id] or
 local meta = elapsed
 if item and item.timer then
 meta = item.timer
-elseif item and item.hp and item.max_hp and item.max_hp > 0 and not loot_cooling then
+elseif settings.bool("april_event_status_health", true)
+and item and item.hp and item.max_hp and item.max_hp > 0 and not loot_cooling
+then
 meta = string.format(
 "%d / %d HP  |  %s",
 math.floor(item.hp + 0.5),
@@ -23020,6 +23059,9 @@ end
 if item and item.location and not loot_cooling then
 meta = tostring(item.location) .. "  |  " .. meta
 end
+if settings.bool("april_event_status_distance", true) and item and item.distance and not loot_cooling then
+meta = string.format("%dm  |  %s", math.floor(item.distance + 0.5), meta)
+end
 if item and (item.count or 0) > 1 then
 meta = tostring(item.count) .. " active  |  " .. meta
 end
@@ -23029,10 +23071,23 @@ color = definition.color,
 active = is_active or loot_cooling or loot_ready,
 status = status,
 meta = meta,
+distance = item and item.distance or nil,
+order = #next_rows + 1,
 }
 end
 end
+local sort_mode = math.floor(settings.num("april_event_status_sort", 1))
+if sort_mode ~= 0 then
+table.sort(next_rows, function(a, b)
+if sort_mode == 1 and a.active ~= b.active then return a.active end
+local ad, bd = a.distance or math.huge, b.distance or math.huge
+if ad ~= bd then return ad < bd end
+if a.active ~= b.active then return a.active end
+return a.order < b.order
+end)
+end
 rows = next_rows
+initial_event_scan = false
 end
 function M.register_menu()
 local G = menu_util.G
@@ -23040,7 +23095,15 @@ local T = menu_util.group(G.MISC)
 local root = menu_util.parent(P)
 menu.add_checkbox(T, G.MISC, P, "Event Status", false)
 menu.add_checkbox(T, G.MISC, "april_event_status_active_only", "Only Show Active Events", false, root)
-menu_util.bind_master(P, { "april_event_status_active_only" })
+menu.add_checkbox(T, G.MISC, "april_event_status_notify", "Event Notifications", true, root)
+menu.add_checkbox(T, G.MISC, "april_event_status_distance", "Show Event Distance", true, root)
+menu.add_checkbox(T, G.MISC, "april_event_status_health", "Show Event Health", true, root)
+menu.add_combo(T, G.MISC, "april_event_status_sort", "Event Sorting",
+{ "Game Order", "Active First", "Nearest First" }, 1, root)
+menu_util.bind_master(P, {
+"april_event_status_active_only", "april_event_status_notify",
+"april_event_status_distance", "april_event_status_health", "april_event_status_sort",
+})
 end
 function M.update(_dt)
 tick_session()
@@ -23147,6 +23210,8 @@ local last_anim_prune_ms = 0
 local HELD_TTL_MS = 300
 local HELD_PRUNE_MS = 2000
 local ANIM_PRUNE_MS = 2500
+local frame_flags = {}
+local frame_flag_cols = {}
 local function tick_ms()
 return utility and utility.get_tick_count and utility.get_tick_count() or 0
 end
@@ -23363,16 +23428,15 @@ local show_dist = settings.bool(ID_DIST, true)
 local filter_team = settings.multi(FILTERS, F_TEAM, true)
 local filter_sz = settings.multi(FILTERS, F_SAFEZONE, false)
 local skip_downed = settings.multi(FILTERS, F_SKIP_DOWNED, false)
-local flags = {
-[FL_DOWNED] = settings.multi(FLAGS, FL_DOWNED, false),
-[FL_SAFEZONE] = settings.multi(FLAGS, FL_SAFEZONE, false),
-[FL_STAFF] = settings.multi(FLAGS, FL_STAFF, false),
-[FL_REVIVING] = settings.multi(FLAGS, FL_REVIVING, false),
-[FL_MOVEMENT] = settings.multi(FLAGS, FL_MOVEMENT, false),
-[FL_VIP] = settings.multi(FLAGS, FL_VIP, false),
-[FL_CHEATER] = settings.multi(FLAGS, FL_CHEATER, false),
-[FL_ANIM] = settings.multi(FLAGS, FL_ANIM, false),
-}
+local flags = frame_flags
+flags[FL_DOWNED] = settings.multi(FLAGS, FL_DOWNED, false)
+flags[FL_SAFEZONE] = settings.multi(FLAGS, FL_SAFEZONE, false)
+flags[FL_STAFF] = settings.multi(FLAGS, FL_STAFF, false)
+flags[FL_REVIVING] = settings.multi(FLAGS, FL_REVIVING, false)
+flags[FL_MOVEMENT] = settings.multi(FLAGS, FL_MOVEMENT, false)
+flags[FL_VIP] = settings.multi(FLAGS, FL_VIP, false)
+flags[FL_CHEATER] = settings.multi(FLAGS, FL_CHEATER, false)
+flags[FL_ANIM] = settings.multi(FLAGS, FL_ANIM, false)
 if flags[FL_CHEATER] then
 cheater_detect.tick()
 end
@@ -23408,16 +23472,15 @@ local clan_menu_col = settings.color(ID_CLAN, DEFAULT_CLAN)
 local held_col = settings.color(ID_HELD, DEFAULT_HELD)
 local dist_col = settings.color(ID_DIST, DEFAULT_MUTED)
 local box_col = settings.color(ID_BOX_COLOR, DEFAULT_BOX)
-local flag_cols = {
-down = settings.color(ID_FLAG_DOWN, DEFAULT_FLAG.DOWN),
-sz = settings.color(ID_FLAG_SZ, DEFAULT_FLAG.SZ),
-staff = settings.color(ID_FLAG_STAFF, DEFAULT_FLAG.STAFF),
-revive = settings.color(ID_FLAG_REVIVE, DEFAULT_FLAG.REVIVE),
-move = settings.color(ID_FLAG_MOVE, DEFAULT_FLAG.MOVE),
-vip = settings.color(ID_FLAG_VIP, DEFAULT_FLAG.VIP),
-cheater = settings.color(ID_FLAG_CHEATER, DEFAULT_FLAG.CHEATER),
-anim = settings.color(ID_FLAG_ANIM, DEFAULT_FLAG.ANIM),
-}
+local flag_cols = frame_flag_cols
+flag_cols.down = settings.color(ID_FLAG_DOWN, DEFAULT_FLAG.DOWN)
+flag_cols.sz = settings.color(ID_FLAG_SZ, DEFAULT_FLAG.SZ)
+flag_cols.staff = settings.color(ID_FLAG_STAFF, DEFAULT_FLAG.STAFF)
+flag_cols.revive = settings.color(ID_FLAG_REVIVE, DEFAULT_FLAG.REVIVE)
+flag_cols.move = settings.color(ID_FLAG_MOVE, DEFAULT_FLAG.MOVE)
+flag_cols.vip = settings.color(ID_FLAG_VIP, DEFAULT_FLAG.VIP)
+flag_cols.cheater = settings.color(ID_FLAG_CHEATER, DEFAULT_FLAG.CHEATER)
+flag_cols.anim = settings.color(ID_FLAG_ANIM, DEFAULT_FLAG.ANIM)
 local base_ts = esp_util.text_size()
 local me = cache.local_player
 local mx, my, mz = nil, nil, nil
@@ -23510,6 +23573,9 @@ local ep = April.require("core.entity_props")
 local rbx_offsets = April.require("core.rbx_offsets")
 local player_state = April.require("game.player_state")
 local M = {}
+local draw_cells = {}
+local touched_cells = {}
+local gather_seen = {}
 local P = "april_sound_esp"
 local ID_FADE_IN = P .. "_fade_in"
 local ID_FADE_OUT = P .. "_fade_out"
@@ -23766,7 +23832,8 @@ local function read_sound_id(child, addr, off)
 end
 local function gather_sounds(character, hrp, prev_entry)
     local sounds = {}
-    local seen = {}
+    local seen = gather_seen
+    for addr in pairs(seen) do seen[addr] = nil end
     local deep_done = prev_entry and prev_entry.deep_done == true
     local char_addr = character and tonumber(character.Address or character.address) or nil
     local function push(child)
@@ -24201,21 +24268,30 @@ function M.draw()
     local chip = settings.bool(ID_CHIP, false)
     local base = settings.color(ID_COLOR, { 0.78, 0.9, 1.0, 0.92 })
     local br, bg, bb, ba = base[1] or 0.78, base[2] or 0.9, base[3] or 1, base[4] or 0.92
-    local drawn = {}
+    for i = 1, #touched_cells do
+        draw_cells[touched_cells[i]] = nil
+        touched_cells[i] = nil
+    end
     for _, ind in pairs(indicators) do
         local a = (ind.alpha or 0) * ba
         if a > 0.02 and ind.x then
             local sx, sy, vis = esp_util.w2s(ind.x, ind.y, ind.z)
             if vis and esp_util.screen_point_ok(sx, sy, 64) then
                 local key = math.floor(sx / 10) .. ":" .. math.floor(sy / 10)
-                local slot = drawn[key] or 0
-                drawn[key] = slot + 1
+                local slot = draw_cells[key] or 0
+                if slot == 0 then touched_cells[#touched_cells + 1] = key end
+                draw_cells[key] = slot + 1
                 local y = sy + screen_y + slot * (size + 2)
-                local col = ind.color
-                if type(col) ~= "table" then
-                    col = { br, bg, bb, a }
+                local source = ind.color
+                local col = ind._draw_color
+                if not col then
+                    col = {}
+                    ind._draw_color = col
+                end
+                if type(source) ~= "table" then
+                    col[1], col[2], col[3], col[4] = br, bg, bb, a
                 else
-                    col = { col[1] or br, col[2] or bg, col[3] or bb, a }
+                    col[1], col[2], col[3], col[4] = source[1] or br, source[2] or bg, source[3] or bb, a
                 end
                 draw_label(sx, y, ind.text or ind.cat or ind.name or "Sound", col, size, chip)
             end
@@ -25029,11 +25105,23 @@ local esp_scan = April.require("game.esp_scan")
 local gpu_chams = April.require("core.gpu_chams")
 local M = {}
 local P = "april_world_enabled"
+local CHAMS_MASTER = "april_world_chams_enabled"
 local CHAMS_ID = "april_world_chams"
 local CHAMS_MODE = "april_world_chams_mode"
 local CHAMS_COLOR = "april_world_chams_color"
 local draw_candidates = {}
 local chams_candidates = {}
+local toggle_index = {}
+local toggle_enabled = {}
+local toggle_colors = {}
+for i, t in ipairs(maps.WORLD_TOGGLES) do toggle_index[t.id] = i end
+local function refresh_toggle_state(with_colors)
+for i = 1, #maps.WORLD_TOGGLES do
+local t = maps.WORLD_TOGGLES[i]
+toggle_enabled[t.id] = settings.enabled(t.id)
+if with_colors then toggle_colors[t.id] = settings.color(t.id, t.color) end
+end
+end
 local function world_chams_labels()
 local labels = {}
 for i, t in ipairs(maps.WORLD_TOGGLES) do
@@ -25042,14 +25130,12 @@ end
 return labels
 end
 local function world_chams_index_for(toggle_id)
-for i, t in ipairs(maps.WORLD_TOGGLES) do
-if t.id == toggle_id then return i end
-end
-return nil
+return toggle_index[toggle_id]
 end
 local function world_chams_active()
 if not gpu_chams.available() then return false end
 if not settings.enabled(P) then return false end
+if not settings.enabled(CHAMS_MASTER) then return false end
 for i = 1, #maps.WORLD_TOGGLES do
 if gpu_chams.multicombo_selected(CHAMS_ID, i) then
 return true
@@ -25064,6 +25150,7 @@ if not me_pos then return end
 local range = settings.num("april_world_range", 500)
 local range_sq = range * range
 local entries = cache.world
+refresh_toggle_state(false)
 if me_pos then
 entries = cache.query_spatial(
 cache.spatial.world, me_pos.x, me_pos.z, range, chams_candidates
@@ -25073,7 +25160,7 @@ for _, entry in ipairs(entries) do
 if not env.is_valid(entry.inst) then goto continue end
 local idx = world_chams_index_for(entry.toggle_id)
 if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
-if not settings.enabled(entry.toggle_id) then goto continue end
+if not toggle_enabled[entry.toggle_id] then goto continue end
 local lx, ly, lz = esp_scan.entry_coords(entry)
 if not lx then goto continue end
 local dx = lx - me_pos.x
@@ -25126,16 +25213,18 @@ end
 local chams_ids = {}
 if gpu_chams.available() then
 menu_util.section(T, G.WORLD, "Resource Mesh Chams")
+menu.add_checkbox(T, G.WORLD, CHAMS_MASTER, "Enable Mesh Chams", false, { parent = P })
+child_ids[#child_ids + 1] = CHAMS_MASTER
 chams_ids = gpu_chams.wire_esp_chams({
 tab = T,
 group = G.WORLD,
-parent = P,
+parent = CHAMS_MASTER,
 chams_id = CHAMS_ID,
 mode_id = CHAMS_MODE,
 color_id = CHAMS_COLOR,
 labels = world_chams_labels(),
 owner_id = "world",
-master_id = P,
+master_id = CHAMS_MASTER,
 is_active = world_chams_active,
 collect = collect_world_chams,
 rescan_ms = 900,
@@ -25222,6 +25311,7 @@ local show_dist = settings.bool("april_world_show_distance", true)
 local me = env.get_local_player()
 local me_pos = me and me.position
 local text_size = esp_util.text_size()
+refresh_toggle_state(true)
 local entries = cache.world
 if me_pos then
 entries = cache.query_spatial(
@@ -25229,7 +25319,7 @@ cache.spatial.world, me_pos.x, me_pos.z, range, draw_candidates
 )
 end
 for _, entry in ipairs(entries) do
-if not settings.enabled(entry.toggle_id) then goto continue end
+if not toggle_enabled[entry.toggle_id] then goto continue end
 if not env.is_valid(entry.inst) then goto continue end
 local lx, ly, lz = esp_scan.entry_coords(entry)
 if not lx then goto continue end
@@ -25241,7 +25331,7 @@ local dz = lz - me_pos.z
 dist_sq = dx * dx + dy * dy + dz * dz
 if dist_sq > range_sq then goto continue end
 end
-local col = settings.color(entry.toggle_id, maps.toggle_color(maps.WORLD_TOGGLES, entry.toggle_id))
+local col = toggle_colors[entry.toggle_id]
 if draw_boxes then
 esp_util.draw_entry_boxes(entry, col, 1)
 end
@@ -25281,6 +25371,7 @@ local esp_scan = April.require("game.esp_scan")
 local gpu_chams = April.require("core.gpu_chams")
 local M = {}
 local P = "april_loot_enabled"
+local CHAMS_MASTER = "april_loot_chams_enabled"
 local CHAMS_ID = "april_loot_chams"
 local CHAMS_MODE = "april_loot_chams_mode"
 local CHAMS_COLOR = "april_loot_chams_color"
@@ -25290,6 +25381,17 @@ M._unlimited = {}
 local draw_candidates = {}
 local chams_candidates = {}
 local candidate_seen = {}
+local toggle_index = {}
+local toggle_enabled = {}
+local toggle_colors = {}
+for i, t in ipairs(maps.LOOT_TOGGLES) do toggle_index[t.id] = i end
+local function refresh_toggle_state(with_colors)
+for i = 1, #maps.LOOT_TOGGLES do
+local t = maps.LOOT_TOGGLES[i]
+toggle_enabled[t.id] = settings.enabled(t.id)
+if with_colors then toggle_colors[t.id] = settings.color(t.id, t.color) end
+end
+end
 local UNLIMITED_RANGE = {
 april_timed_crate = true,
 april_care_package = true,
@@ -25312,14 +25414,12 @@ end
 return labels
 end
 local function loot_chams_index_for(toggle_id)
-for i, t in ipairs(maps.LOOT_TOGGLES) do
-if t.id == toggle_id then return i end
-end
-return nil
+return toggle_index[toggle_id]
 end
 local function loot_chams_active()
 if not gpu_chams.available() then return false end
 if not settings.enabled(P) then return false end
+if not settings.enabled(CHAMS_MASTER) then return false end
 for i = 1, #maps.LOOT_TOGGLES do
 if gpu_chams.multicombo_selected(CHAMS_ID, i) then
 return true
@@ -25333,12 +25433,13 @@ local me_pos = me and me.position
 if not me_pos then return end
 local range = settings.num("april_loot_range", 300)
 local range_sq = range * range
+refresh_toggle_state(false)
 local entries = nearby_with_unlimited(me_pos, range, chams_candidates)
 for _, entry in ipairs(entries) do
 if not env.is_valid(entry.inst) then goto continue end
 local idx = loot_chams_index_for(entry.toggle_id)
 if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
-if not settings.enabled(entry.toggle_id) then goto continue end
+if not toggle_enabled[entry.toggle_id] then goto continue end
 local lx, ly, lz = esp_scan.entry_coords(entry)
 if not lx then goto continue end
 if not UNLIMITED_RANGE[entry.toggle_id] then
@@ -25564,16 +25665,18 @@ end
 local chams_ids = {}
 if gpu_chams.available() then
 menu_util.section(T, G.WORLD, "Loot Mesh Chams")
+menu.add_checkbox(T, G.WORLD, CHAMS_MASTER, "Enable Mesh Chams", false, { parent = P })
+child_ids[#child_ids + 1] = CHAMS_MASTER
 chams_ids = gpu_chams.wire_esp_chams({
 tab = T,
 group = G.WORLD,
-parent = P,
+parent = CHAMS_MASTER,
 chams_id = CHAMS_ID,
 mode_id = CHAMS_MODE,
 color_id = CHAMS_COLOR,
 labels = loot_chams_labels(),
 owner_id = "loot",
-master_id = P,
+master_id = CHAMS_MASTER,
 is_active = loot_chams_active,
 collect = collect_loot_chams,
 rescan_ms = 1200,
@@ -25618,12 +25721,13 @@ local show_dist = settings.bool("april_loot_show_distance", true)
 local me = env.get_local_player()
 local me_pos = me and me.position
 local text_size = esp_util.text_size()
+refresh_toggle_state(true)
 local entries = cache.loot
 if me_pos then
 entries = nearby_with_unlimited(me_pos, range, draw_candidates)
 end
 for _, entry in ipairs(entries) do
-if not settings.enabled(entry.toggle_id) then goto continue end
+if not toggle_enabled[entry.toggle_id] then goto continue end
 if not env.is_valid(entry.inst) then goto continue end
 local lx, ly, lz = esp_scan.entry_coords(entry)
 if not lx then goto continue end
@@ -25635,7 +25739,7 @@ local dz = lz - me_pos.z
 dist_sq = dx * dx + dy * dy + dz * dz
 if not UNLIMITED_RANGE[entry.toggle_id] and dist_sq > range_sq then goto continue end
 end
-local col = settings.color(entry.toggle_id, maps.toggle_color(maps.LOOT_TOGGLES, entry.toggle_id))
+local col = toggle_colors[entry.toggle_id]
 if draw_boxes then
 esp_util.draw_entry_boxes(entry, col, 1)
 end
@@ -25683,6 +25787,17 @@ local CHAMS_COLOR = "april_base_chams_color"
 M._static = {}
 local draw_candidates = {}
 local chams_candidates = {}
+local toggle_index = {}
+local toggle_enabled = {}
+local toggle_colors = {}
+for i, t in ipairs(maps.BASE_TOGGLES) do toggle_index[t.id] = i end
+local function refresh_toggle_state(with_colors)
+    for i = 1, #maps.BASE_TOGGLES do
+        local t = maps.BASE_TOGGLES[i]
+        toggle_enabled[t.id] = settings.enabled(t.id)
+        if with_colors then toggle_colors[t.id] = settings.color(t.id, t.color) end
+    end
+end
 local function base_chams_labels()
     local labels = {}
     for i, t in ipairs(maps.BASE_TOGGLES) do
@@ -25691,10 +25806,7 @@ local function base_chams_labels()
     return labels
 end
 local function base_chams_index_for(toggle_id)
-    for i, t in ipairs(maps.BASE_TOGGLES) do
-        if t.id == toggle_id then return i end
-    end
-    return nil
+    return toggle_index[toggle_id]
 end
 local function base_chams_active()
     if not gpu_chams.available() then return false end
@@ -25712,6 +25824,7 @@ local function collect_base_chams(applied)
     if not me_pos then return end
     local range = settings.num("april_base_range", 150)
     local range_sq = range * range
+    refresh_toggle_state(false)
     local entries = cache.query_spatial(
         cache.spatial.base, me_pos.x, me_pos.z, range, chams_candidates
     )
@@ -25719,7 +25832,7 @@ local function collect_base_chams(applied)
         if not env.is_valid(entry.inst) then goto continue end
         local idx = base_chams_index_for(entry.toggle_id)
         if not idx or not gpu_chams.multicombo_selected(CHAMS_ID, idx) then goto continue end
-        if not settings.enabled(entry.toggle_id) then goto continue end
+        if not toggle_enabled[entry.toggle_id] then goto continue end
         local lx, ly, lz = esp_scan.entry_coords(entry)
         if not lx then goto continue end
         local dx = lx - me_pos.x
@@ -25956,6 +26069,7 @@ function M.draw()
     local me = env.get_local_player()
     local me_pos = me and me.position
     local text_size = esp_util.text_size()
+    refresh_toggle_state(true)
     local entries = cache.base
     if me_pos then
         entries = cache.query_spatial(
@@ -25963,7 +26077,7 @@ function M.draw()
         )
     end
     for _, entry in ipairs(entries) do
-        if not settings.enabled(entry.toggle_id) then goto continue end
+        if not toggle_enabled[entry.toggle_id] then goto continue end
         if not env.is_valid(entry.inst) then goto continue end
         local lx, ly, lz = esp_scan.entry_coords(entry)
         if not lx then goto continue end
@@ -25975,7 +26089,7 @@ function M.draw()
             dist_sq = dx * dx + dy * dy + dz * dz
             if dist_sq > range_sq then goto continue end
         end
-        local col = settings.color(entry.toggle_id, maps.toggle_color(maps.BASE_TOGGLES, entry.toggle_id))
+        local col = toggle_colors[entry.toggle_id]
         if draw_boxes then
             esp_util.draw_entry_boxes(entry, col, 1)
         end
@@ -28345,6 +28459,7 @@ local cache = April.require("core.cache")
 local move = April.require("core.cframe_move")
 local runservice = April.require("core.runservice")
 local M = {}
+local update_seen = {}
 local P = "april_antifling_enabled"
 local REAPPLY_MS = 125
 local installed = false
@@ -28424,7 +28539,8 @@ local function tick()
     end
     was_enabled = true
     local now = now_ms()
-    local seen = {}
+    local seen = update_seen
+    for id in pairs(seen) do seen[id] = nil end
     for i = 1, #cache.players do
         local player = cache.players[i]
         local id = player_key(player)
@@ -28553,6 +28669,7 @@ local panel_drag = April.require("core.panel_drag")
 local map_image = April.require("game.map_image")
 local math_util = April.require("core.math_util")
 local npcs = April.require("game.npcs")
+local debug = April.require("core.debug")
 local M = {}
 local P = "april_map_enabled"
 local X_ID = "april_map_x"
@@ -29037,7 +29154,6 @@ end
 function M.draw()
 if not settings.enabled(P) then return end
 if not draw then return end
-local debug = April.require("core.debug")
 debug.guard("radar:draw", M.draw_inner)
 end
 function M.draw_inner()
@@ -30124,6 +30240,10 @@ local menu_util = April.require("core.menu_util")
 local store = April.require("core.config_store")
 local notify = April.require("core.notify")
 local M = {}
+local function invalidate_config_catalog()
+local ok, catalog = pcall(April.require, "ui.catalog")
+if ok and catalog and catalog.invalidate then catalog.invalidate("config") end
+end
 local function profile_label()
 return settings.str("april_cfg_profile_name", "Default")
 end
@@ -30138,6 +30258,7 @@ store.migrate_legacy()
 local ok, stem, path = store.save_config(name or profile_label())
 if ok then
 store.save_meta()
+invalidate_config_catalog()
 local file = path and path:match("([^\\]+)$") or (tostring(stem) .. ".cfg")
 local folder = (path and path:find("April_configs", 1, true)) and "April_configs\\" or ""
 notify.success(string.format('Saved "%s" -> %s%s', profile_label(), folder, file), 3500)
@@ -30152,6 +30273,7 @@ local stem = name or selected_stem()
 local ok = store.load_config(stem)
 if ok then
 store.save_meta()
+invalidate_config_catalog()
 notify.success(string.format('Loaded "%s"', store.display_name(stem)), 3500)
 return true
 end
@@ -30164,6 +30286,7 @@ local stem = name or selected_stem()
 local ok = store.delete_config(stem)
 if ok then
 store.save_meta()
+invalidate_config_catalog()
 notify.warning(string.format('Deleted "%s"', store.display_name(stem)), 3500)
 return true
 end
@@ -30204,6 +30327,7 @@ end)
 menu_util.button(T, G.CONFIG, "april_cfg_refresh", "Refresh List", function()
 store.migrate_legacy()
 store.refresh_index()
+invalidate_config_catalog()
 notify.info("Config list refreshed", 2000)
 end)
 menu_util.gap(T, G.CONFIG)
@@ -30242,6 +30366,8 @@ end)()
 
 April._mods["ui.gs_theme"] = (function()
 local M = {}
+local settings_ref = April.require("core.settings")
+local last_sync_frame = -1
 M.DENSITY_NAMES = { "Compact", "Balanced", "Comfortable" }
 M.CORNER_NAMES = { "Sharp", "Soft", "Rounded" }
 local PRESETS = {
@@ -30340,9 +30466,7 @@ local function mix_rgb(a, b, t, alpha)
     }
 end
 local function setting(id, fallback)
-    local ok, value = pcall(function()
-        return April.require("core.settings").get(id, fallback)
-    end)
+    local ok, value = pcall(settings_ref.get, id, fallback)
     if ok and value ~= nil then return value end
     return fallback
 end
@@ -30356,7 +30480,30 @@ M.RAINBOW = {
     { 0.95, 0.35, 0.55, 1 },
     { 0.35, 0.95, 0.45, 1 },
 }
+local ALPHA_KEYS = {
+    "BG", "BG_INNER", "PANEL", "PANEL_ALT", "PANEL_RAISED", "OVERLAY",
+    "SHADOW", "SHADOW_DEEP", "GLASS_HIGHLIGHT", "BORDER", "BORDER_SOFT",
+    "BORDER_HOT", "SIDEBAR", "SIDEBAR_ACTIVE", "TEXT", "TEXT_DIM",
+    "TEXT_ACTIVE", "TEXT_TITLE", "ACCENT", "ACCENT_DIM", "CHECK_OFF",
+    "SLIDER_BG", "BUTTON", "BUTTON_HOVER", "HOVER", "FOCUS", "HEADER_BG",
+    "NAV_BG", "NAV_IDLE", "NAV_HOVER", "NAV_ACTIVE", "NAV_INDICATOR", "DOCK_BG",
+    "DOCK_HOVER", "DOCK_ACTIVE", "DOCK_BORDER", "DOCK_BADGE",
+}
+local base_alpha = {}
+local last_sync = {}
+local function restore_base_alpha()
+    for i = 1, #ALPHA_KEYS do
+        local key = ALPHA_KEYS[i]
+        local c = M[key]
+        local a = base_alpha[key]
+        if c and a ~= nil then c[4] = a end
+    end
+    M.GLOBAL_ALPHA = 1
+end
 function M.sync()
+    local frame = settings_ref.frame and settings_ref.frame() or 0
+    if frame > 0 and frame == last_sync_frame then return false end
+    last_sync_frame = frame
     local preset_idx = math.floor(clamp(setting("april_ui_theme_preset", 0), 0, #PRESETS - 1)) + 1
     local p = PRESETS[preset_idx] or PRESETS[1]
     local scale = clamp(setting("april_ui_scale", 100), 80, 125) * 0.01
@@ -30367,6 +30514,24 @@ function M.sync()
     local border_alpha = clamp(setting("april_ui_border_strength", 58), 10, 100) * 0.01
     local corner_style = math.floor(clamp(setting("april_ui_corner_style", 2), 0, 2))
     local corner_base = ({ 2, 6, 10 })[corner_style + 1]
+    if last_sync.preset == preset_idx
+        and last_sync.scale == scale
+        and last_sync.density == density
+        and last_sync.window_alpha == window_alpha
+        and last_sync.panel_alpha == panel_alpha
+        and last_sync.border_alpha == border_alpha
+        and last_sync.corner_style == corner_style
+    then
+        restore_base_alpha()
+        return false
+    end
+    last_sync.preset = preset_idx
+    last_sync.scale = scale
+    last_sync.density = density
+    last_sync.window_alpha = window_alpha
+    last_sync.panel_alpha = panel_alpha
+    last_sync.border_alpha = border_alpha
+    last_sync.corner_style = corner_style
     M.SCALE = scale
     M.DENSITY = density
     M.GLOBAL_ALPHA = 1
@@ -30461,6 +30626,12 @@ function M.sync()
     M.SLIDER_ROW_H = M.LABEL_H + M.LABEL_GAP + M.SLIDER_H + scaled(10, scale) + M.CTRL_PAD
     M.CORNER = scaled(corner_base, scale)
     M.CORNER_SMALL = math.max(2, scaled(corner_base * 0.60, scale))
+    for i = 1, #ALPHA_KEYS do
+        local key = ALPHA_KEYS[i]
+        local c = M[key]
+        if c then base_alpha[key] = c[4] or 1 end
+    end
+    return true
 end
 function M.alpha(col, a)
     return { col[1], col[2], col[3], a }
@@ -30484,21 +30655,20 @@ end
 function M.apply_global_alpha(a)
     a = clamp(a, 0, 1)
     M.GLOBAL_ALPHA = a
-    local keys = {
-        "BG", "BG_INNER", "PANEL", "PANEL_ALT", "PANEL_RAISED", "OVERLAY",
-        "SHADOW", "SHADOW_DEEP", "GLASS_HIGHLIGHT", "BORDER", "BORDER_SOFT",
-        "BORDER_HOT", "SIDEBAR", "SIDEBAR_ACTIVE", "TEXT", "TEXT_DIM",
-        "TEXT_ACTIVE", "TEXT_TITLE", "ACCENT", "ACCENT_DIM", "CHECK_OFF",
-        "SLIDER_BG", "BUTTON", "BUTTON_HOVER", "HOVER", "FOCUS", "HEADER_BG",
-        "NAV_BG", "NAV_IDLE", "NAV_HOVER", "NAV_ACTIVE", "NAV_INDICATOR", "DOCK_BG",
-        "DOCK_HOVER", "DOCK_ACTIVE", "DOCK_BORDER", "DOCK_BADGE",
-    }
-    for _, key in ipairs(keys) do
+    for i = 1, #ALPHA_KEYS do
+        local key = ALPHA_KEYS[i]
         local c = M[key]
         if c then
-            M[key] = { c[1], c[2], c[3], (c[4] or 1) * a }
+            c[4] = (base_alpha[key] or c[4] or 1) * a
         end
     end
+end
+function M.restore_global_alpha()
+    restore_base_alpha()
+end
+function M.capture_alpha(key)
+    local c = M[key]
+    if c then base_alpha[key] = c[4] or 1 end
 end
 M.sync()
 return M
@@ -30788,24 +30958,38 @@ end
 function M.clicked(x, y, w, h)
 return M.lmb_click and M.hover(x, y, w, h)
 end
+local cursor_settings = nil
+local cursor_theme = nil
+local cursor_anim = nil
 function M.draw_cursor()
 if not draw then return end
+if not cursor_settings then
+local ok, mod = pcall(April.require, "core.settings")
+if ok then cursor_settings = mod end
+end
+if not cursor_theme then
+local ok, mod = pcall(April.require, "ui.gs_theme")
+if ok then cursor_theme = mod end
+end
+if not cursor_anim then
+local ok, mod = pcall(April.require, "ui.gs_anim")
+if ok then cursor_anim = mod end
+end
+if not cursor_settings or not cursor_theme or not cursor_anim then return end
 local show = true
 pcall(function()
-show = April.require("core.settings").bool("april_ui_show_cursor_dot", true)
+show = cursor_settings.bool("april_ui_show_cursor_dot", true)
 end)
 if not show then return end
 local x, y = M.mx, M.my
-local theme = April.require("ui.gs_theme")
-local anim = April.require("ui.gs_anim")
-local col = theme.ACCENT or { 0.75, 0.15, 0.83, 1 }
-local press = anim.transition("cursor:press", M.lmb, anim.motion_rate(26))
+local col = cursor_theme.ACCENT or { 0.75, 0.15, 0.83, 1 }
+local press = cursor_anim.transition("cursor:press", M.lmb, cursor_anim.motion_rate(26))
 local inner = 3.5 + press * 1.5
 if draw.circle_filled then
 draw.circle_filled(x, y, inner, col, 14)
 end
 if draw.circle then
-draw.circle(x, y, 5.5 + press, theme.TEXT_ACTIVE, 16, 1.2)
+draw.circle(x, y, 5.5 + press, cursor_theme.TEXT_ACTIVE, 16, 1.2)
 end
 end
 return M
@@ -30938,6 +31122,7 @@ end)()
 
 April._mods["ui.gs_anim"] = (function()
 local theme = April.require("ui.gs_theme")
+local settings_ref = April.require("core.settings")
 local M = {}
 M.MODES = { "Static", "Rainbow", "Pulse", "Wave", "Flow" }
 M.MODES_UI = { "Default", "Static", "Rainbow", "Pulse", "Wave", "Flow" }
@@ -30964,6 +31149,7 @@ M.COL_SIDEBAR = "april_ui_col_sidebar"
 M.COL_CHECKBOX = "april_ui_col_checkbox"
 M.COL_OVERLAY = "april_ui_col_overlay"
 local transitions = {}
+local last_accent = {}
 local function clamp(v, a, b)
 if v < a then return a end
 if v > b then return b end
@@ -31040,7 +31226,7 @@ function M.mix(a, b, t)
 return theme.lerp_color(a, b, clamp(t or 0, 0, 1))
 end
 local function settings()
-return April.require("core.settings")
+return settings_ref
 end
 local function hsv_to_rgb(h, s, v)
 h = (h % 1) * 6
@@ -31125,16 +31311,29 @@ end
 return settings().multi("april_ui_anim_targets", target_index, true)
 end
 function M.sync_theme()
-theme.sync()
+local theme_changed = theme.sync() == true
 local col = M.base_accent()
-theme.ACCENT = { col[1], col[2], col[3], col[4] or 1 }
+local r, g, b, a = col[1], col[2], col[3], col[4] or 1
+local accent_changed = last_accent[1] ~= r or last_accent[2] ~= g
+or last_accent[3] ~= b or last_accent[4] ~= a
+last_accent[1], last_accent[2], last_accent[3], last_accent[4] = r, g, b, a
+local accent = theme.ACCENT
+if not accent then
+accent = { r, g, b, a }
+theme.ACCENT = accent
+else
+accent[1], accent[2], accent[3], accent[4] = r, g, b, a
+end
+if theme.capture_alpha then theme.capture_alpha("ACCENT") end
 local pulse = 0.62 + 0.38 * math.sin(M.phase() * 2.2)
-theme.ACCENT_DIM = {
-col[1] * pulse * 0.55,
-col[2] * pulse * 0.55,
-col[3] * pulse * 0.55,
-1,
-}
+local dim = theme.ACCENT_DIM
+if not dim then
+dim = { 0, 0, 0, 1 }
+theme.ACCENT_DIM = dim
+end
+dim[1], dim[2], dim[3], dim[4] = r * pulse * 0.55, g * pulse * 0.55, b * pulse * 0.55, 1
+if theme.capture_alpha then theme.capture_alpha("ACCENT_DIM") end
+return theme_changed or accent_changed
 end
 function M.accent_at_mode(mode, base, t, alpha)
 alpha = alpha or 1
@@ -32534,9 +32733,11 @@ april_ui_radar_layers = "Choose what appears on the tactical map.",
 april_map_opacity = "Panel and map transparency for the tactical radar overlay.",
 april_waypoints_enabled = "Place and navigate to saved world waypoints.",
 april_world_chams = "GPU mesh chams on selected resource types (in-range only).",
+april_world_chams_enabled = "Master switch for resource mesh chams.",
 april_world_chams_mode = "Fill, Wireframe, Fill Glow, or Wireframe Glow.",
 april_world_chams_color = "Glow preset color (Fill Glow / Wireframe Glow only).",
 april_loot_chams = "GPU mesh chams on selected loot types (in-range only).",
+april_loot_chams_enabled = "Master switch for loot mesh chams.",
 april_loot_chams_mode = "Fill, Wireframe, Fill Glow, or Wireframe Glow.",
 april_loot_chams_color = "Glow preset color (Fill Glow / Wireframe Glow only).",
 april_base_chams = "GPU mesh chams on selected base structures (in-range only).",
@@ -34835,14 +35036,16 @@ return labels
 end
 local function mesh_chams_block(prefix, toggle_list, master)
 local chams_id = prefix .. "_chams"
+local chams_master = prefix .. "_chams_enabled"
 local mode_id = prefix .. "_chams_mode"
 local color_id = prefix .. "_chams_color"
 return {
 sep(master),
 label("Mesh Chams (GPU)", false, master),
-multi(chams_id, "Cham Types", toggle_labels(toggle_list), {}, master),
-combo(mode_id, "Chams Mode", gpu_chams.MODE_LABELS, 0, master),
-combo(color_id, "Glow Preset", gpu_chams.COLOR_LABELS, 0, master, {
+cb(chams_master, "Enable Mesh Chams", false, nil, master),
+multi(chams_id, "Cham Types", toggle_labels(toggle_list), {}, chams_master),
+combo(mode_id, "Chams Mode", gpu_chams.MODE_LABELS, 0, chams_master),
+combo(color_id, "Glow Preset", gpu_chams.COLOR_LABELS, 0, chams_master, {
 gate_any_combo = {
 { mode_id, { 2, 3 } },
 },
@@ -35292,6 +35495,15 @@ sl("april_farm_radius", "Farm Range (studs)", 1, 10, 7, false, "april_farm_helpe
 sep(),
 cb("april_anti_afk", "Anti AFK", false),
 kb("april_antifling_enabled", "Anti Fling", false),
+sep(),
+kb("april_event_status_enabled", "Event Status", false),
+cb("april_event_status_active_only", "Only Show Active Events", false, nil, "april_event_status_enabled"),
+cb("april_event_status_notify", "Event Notifications", true, nil, "april_event_status_enabled"),
+cb("april_event_status_distance", "Show Event Distance", true, nil, "april_event_status_enabled"),
+cb("april_event_status_health", "Show Event Health", true, nil, "april_event_status_enabled"),
+combo("april_event_status_sort", "Event Sorting", {
+"Game Order", "Active First", "Nearest First",
+}, 1, "april_event_status_enabled"),
 label("HUD panels are managed from the top dock."),
 },
 },
@@ -35496,15 +35708,29 @@ btn("april_reload_modules", "Reload Game Modules"),
 }
 return { appearance, motion, accent, anime_baddie, config_group }
 end
+local group_cache = {}
+local EMPTY_GROUPS = {}
+function M.invalidate(tab_id)
+if tab_id then
+group_cache[tab_id] = nil
+else
+for key in pairs(group_cache) do group_cache[key] = nil end
+end
+end
 function M.groups_for(tab_id)
-if tab_id == "aim" then return build_aim() end
-if tab_id == "visuals" then return build_visuals() end
-if tab_id == "world" then return build_world() end
-if tab_id == "guns" then return build_guns() end
-if tab_id == "misc" then return build_misc() end
-if tab_id == "radar" then return build_radar() end
-if tab_id == "config" then return build_config() end
-return {}
+local cached = group_cache[tab_id]
+if cached then return cached end
+local groups
+if tab_id == "aim" then groups = build_aim()
+elseif tab_id == "visuals" then groups = build_visuals()
+elseif tab_id == "world" then groups = build_world()
+elseif tab_id == "guns" then groups = build_guns()
+elseif tab_id == "misc" then groups = build_misc()
+elseif tab_id == "radar" then groups = build_radar()
+elseif tab_id == "config" then groups = build_config()
+else return EMPTY_GROUPS end
+group_cache[tab_id] = groups
+return groups
 end
 return M
 end)()
@@ -35522,6 +35748,13 @@ local popup_rect = nil
 local dock_rect = nil
 local settings_opened_this_frame = false
 local visible_settings = {}
+local panel_widths = {}
+local SETTINGS_SEPARATOR = { type = "separator" }
+local SETTINGS_EMPTY = {
+type = "label",
+label = "Enable Binds, Staff, Events, Map, or April above.",
+dim = true,
+}
 local PANELS = {
 { id = "april_keybinds_enabled", icon = "keybinds", label = "Binds" },
 { id = "april_mod_checker_enabled", icon = "staff", label = "Staff" },
@@ -35549,11 +35782,19 @@ local MAP_SETTINGS = {
 local EVENT_SETTINGS = {
 { type = "label", label = "EVENTS", dim = true },
 { type = "checkbox", id = "april_event_status_active_only", label = "Only active events", default = false },
+{ type = "checkbox", id = "april_event_status_notify", label = "Event notifications", default = true },
+{ type = "checkbox", id = "april_event_status_distance", label = "Show distance", default = true },
+{ type = "checkbox", id = "april_event_status_health", label = "Show health", default = true },
+{
+type = "combo", id = "april_event_status_sort", label = "Sorting",
+options = { "Game Order", "Active First", "Nearest First" }, default = 1,
+},
 }
 local function build_visible_settings()
-local out = {}
+local out = visible_settings
+for i = #out, 1, -1 do out[i] = nil end
 local function append_group(group)
-if #out > 0 then out[#out + 1] = { type = "separator" } end
+if #out > 0 then out[#out + 1] = SETTINGS_SEPARATOR end
 for _, item in ipairs(group) do out[#out + 1] = item end
 end
 local binds = state.get("april_keybinds_enabled", false) == true
@@ -35565,17 +35806,17 @@ state.set_visible("april_keybinds_show_unbound", binds)
 state.set_visible("april_keybinds_show_mode", binds)
 state.set_visible("april_mod_checker_interval", staff)
 state.set_visible("april_event_status_active_only", events)
+state.set_visible("april_event_status_notify", events)
+state.set_visible("april_event_status_distance", events)
+state.set_visible("april_event_status_health", events)
+state.set_visible("april_event_status_sort", events)
 state.set_visible("april_map_reset_position", map)
 if binds then append_group(BIND_SETTINGS) end
 if staff then append_group(STAFF_SETTINGS) end
 if events then append_group(EVENT_SETTINGS) end
 if map then append_group(MAP_SETTINGS) end
 if #out == 0 then
-out[1] = {
-type = "label",
-label = "Enable Binds, Staff, Events, Map, or April above.",
-dim = true,
-}
+out[1] = SETTINGS_EMPTY
 end
 return out
 end
@@ -35602,6 +35843,10 @@ state.define("april_mod_checker_x", -1)
 state.define("april_mod_checker_y", -1)
 state.define("april_event_status_enabled", false)
 state.define("april_event_status_active_only", false)
+state.define("april_event_status_notify", true)
+state.define("april_event_status_distance", true)
+state.define("april_event_status_health", true)
+state.define("april_event_status_sort", 1)
 state.define("april_map_enabled", false)
 state.define("april_anime_baddie_enabled", false)
 end
@@ -35623,7 +35868,8 @@ local count = #PANELS + 1
 local bar_w = pad * 2 + count * item + (count - 1) * gap
 local x = math.floor((sw - bar_w) * 0.5)
 local y = math.max(8, math.floor(10 * scale))
-dock_rect = { x = x, y = y, w = bar_w, h = bar_h }
+if not dock_rect then dock_rect = {} end
+dock_rect.x, dock_rect.y, dock_rect.w, dock_rect.h = x, y, bar_w, bar_h
 widgets.rect(x, y, bar_w, bar_h, theme.alpha(theme.NAV_BG, 0.97), true, theme.CORNER)
 widgets.rect(x, y, bar_w, bar_h, theme.BORDER, false, theme.CORNER)
 local cursor_x = x + pad
@@ -35676,13 +35922,12 @@ widgets.open_color = nil
 widgets.open_bind_mode = nil
 widgets.interacted = true
 end
-visible_settings = build_visible_settings()
-popup_rect = {
-x = math.min(x + bar_w - (theme.DOCK_POPUP_W or 270), sw - (theme.DOCK_POPUP_W or 270) - 6),
-y = y + bar_h + 9,
-w = theme.DOCK_POPUP_W or 270,
-h = settings_height(visible_settings),
-}
+build_visible_settings()
+if not popup_rect then popup_rect = {} end
+popup_rect.x = math.min(x + bar_w - (theme.DOCK_POPUP_W or 270), sw - (theme.DOCK_POPUP_W or 270) - 6)
+popup_rect.y = y + bar_h + 9
+popup_rect.w = theme.DOCK_POPUP_W or 270
+popup_rect.h = settings_height(visible_settings)
 return dock_rect
 end
 function M.rect()
@@ -35693,7 +35938,7 @@ local gap = theme.DOCK_GAP or 6
 local chip_h = theme.DOCK_CHIP_H or math.max(22, h - 8)
 local icon_w = chip_h
 local settings_w = chip_h
-local widths = {}
+local widths = panel_widths
 local total = settings_w
 local i18n = April.require("ui.i18n")
 for i, panel in ipairs(PANELS) do
@@ -35744,12 +35989,11 @@ widgets.open_color = nil
 widgets.open_bind_mode = nil
 widgets.interacted = true
 end
-popup_rect = {
-x = x + w - (theme.DOCK_POPUP_W or 270),
-y = y + h + 7,
-w = theme.DOCK_POPUP_W or 270,
-h = theme.DOCK_POPUP_H or 250,
-}
+if not popup_rect then popup_rect = {} end
+popup_rect.x = x + w - (theme.DOCK_POPUP_W or 270)
+popup_rect.y = y + h + 7
+popup_rect.w = theme.DOCK_POPUP_W or 270
+popup_rect.h = theme.DOCK_POPUP_H or 250
 return dock_left
 end
 function M.draw_overlay()
@@ -36141,6 +36385,7 @@ local scroll_visual = { left = 0, right = 0 }
 local middle_scroll = nil
 local collapsed_groups = {}
 local last_menu_rect = nil
+local group_layout_cache = {}
 local SCROLL_EDGE = 36
 local SCROLL_SPEED = 5
 local WHEEL_STEP = 48
@@ -36513,39 +36758,37 @@ handle_column_scroll(x, y, w, h, scroll_key, total)
 draw_scrollbar(x + w - 5, y + pad, h - pad * 2, total, scroll_key, h)
 end
 local function split_groups(groups, tab_id)
+local cached = group_layout_cache[tab_id]
+if cached and cached.source == groups then return cached.left, cached.right end
+local left, right
 if tab_id == "guns" and #groups >= 2 then
-local right = {}
+right = {}
 for i = 2, #groups do
 right[#right + 1] = groups[i]
 end
-return { groups[1] }, right
+left = { groups[1] }
 end
+if not left then
 if tab_id == "aim" and #groups >= 4 then
-return { groups[1], groups[2] }, { groups[3], groups[4] }
-end
-if tab_id == "aim" and #groups >= 3 then
-return { groups[1] }, { groups[2], groups[3] }
-end
-if tab_id == "config" and #groups >= 5 then
-return { groups[1], groups[2], groups[3], groups[4] }, { groups[5] }
-end
-if tab_id == "config" and #groups >= 4 then
-return { groups[1], groups[2], groups[3] }, { groups[4] }
-end
-if tab_id == "config" and #groups >= 2 then
-return { groups[1] }, { groups[2] }
-end
-if #groups == 2 then
-return { groups[1] }, { groups[2] }
-end
-local left, right = {}, {}
-for i, g in ipairs(groups) do
-if i % 2 == 1 then
-left[#left + 1] = g
+left, right = { groups[1], groups[2] }, { groups[3], groups[4] }
+elseif tab_id == "aim" and #groups >= 3 then
+left, right = { groups[1] }, { groups[2], groups[3] }
+elseif tab_id == "config" and #groups >= 5 then
+left, right = { groups[1], groups[2], groups[3], groups[4] }, { groups[5] }
+elseif tab_id == "config" and #groups >= 4 then
+left, right = { groups[1], groups[2], groups[3] }, { groups[4] }
+elseif tab_id == "config" and #groups >= 2 then
+left, right = { groups[1] }, { groups[2] }
+elseif #groups == 2 then
+left, right = { groups[1] }, { groups[2] }
 else
-right[#right + 1] = g
+left, right = {}, {}
+for i, g in ipairs(groups) do
+if i % 2 == 1 then left[#left + 1] = g else right[#right + 1] = g end
 end
 end
+end
+group_layout_cache[tab_id] = { source = groups, left = left, right = right }
 return left, right
 end
 function M.init()
@@ -36657,7 +36900,8 @@ clamp_window()
 local x = win_x
 local y = win_y + math.floor((1 - open_progress) * 10 * (theme.SCALE or 1))
 local w, h = theme.WINDOW_W, theme.WINDOW_H
-last_menu_rect = { x = x, y = y, w = w, h = h }
+if not last_menu_rect then last_menu_rect = {} end
+last_menu_rect.x, last_menu_rect.y, last_menu_rect.w, last_menu_rect.h = x, y, w, h
 widgets.clip = nil
 local sw, sh = screen_size()
 pcall(menu_fx.draw_backdrop, sw, sh, open_progress)
@@ -36746,9 +36990,12 @@ local player_state = April.require("game.player_state")
 local weapons = April.require("game.weapons")
 local runservice = April.require("core.runservice")
 local incremental_scan = April.require("core.incremental_scan")
+local rbx_offsets = April.require("core.rbx_offsets")
 local M = {}
 M.features = {}
 M._menu_registered = false
+M._update_dispatch = {}
+M._draw_dispatch = {}
 M.FEATURE_ORDER = {
     "features.combat.camera_aimbot",
     "features.combat.thick_bullet",
@@ -36789,10 +37036,24 @@ function M.register_all()
     if M._menu_registered then return end
     menu_util.ensure_groups()
     M.features = {}
+    M._update_dispatch = {}
+    M._draw_dispatch = {}
     local registered = 0
     for _, path in ipairs(M.FEATURE_ORDER) do
         local feat = April.require(path)
         table.insert(M.features, feat)
+        if type(feat.update) == "function" then
+            M._update_dispatch[#M._update_dispatch + 1] = {
+                name = "update:" .. path,
+                fn = feat.update,
+            }
+        end
+        if type(feat.draw) == "function" then
+            M._draw_dispatch[#M._draw_dispatch + 1] = {
+                name = "draw:" .. path,
+                fn = feat.draw,
+            }
+        end
         if feat.register_menu then
             local ok = pcall(feat.register_menu)
             if ok then
@@ -36852,22 +37113,16 @@ function M.update(dt)
     weapons.tick()
     runservice.dispatch(dt)
     incremental_scan.tick()
-    pcall(function()
-        April.require("core.rbx_offsets").tick_fps()
-    end)
-    for i, feat in ipairs(M.features) do
-        if feat.update then
-            local name = M.FEATURE_ORDER[i] or ("#" .. i)
-            debug.guard_fast("update:" .. name, feat.update, dt)
-        end
+    pcall(rbx_offsets.tick_fps)
+    for i = 1, #M._update_dispatch do
+        local call = M._update_dispatch[i]
+        debug.guard_fast(call.name, call.fn, dt)
     end
 end
 function M.draw()
-    for i, feat in ipairs(M.features) do
-        if feat.draw then
-            local name = M.FEATURE_ORDER[i] or ("#" .. i)
-            debug.guard_fast("draw:" .. name, feat.draw)
-        end
+    for i = 1, #M._draw_dispatch do
+        local call = M._draw_dispatch[i]
+        debug.guard_fast(call.name, call.fn)
     end
 end
 function M.init()
@@ -36912,6 +37167,7 @@ local api_aliases = April.require("core.api_aliases")
 local feature_bind = April.require("core.feature_bind")
 local aim_key = April.require("core.aim_key")
 local overlay_theme = April.require("core.overlay_theme")
+local settings = April.require("core.settings")
 local M = {}
 local initialized = false
 local alias_refresh_elapsed = 0
@@ -36930,6 +37186,7 @@ end
 function M.on_frame()
     if not initialized then return end
     debug.tick_frame()
+    settings.begin_frame(debug.frame_count())
     pcall(feature_bind.tick)
     pcall(aim_key.tick, "april_aim_key", "april_aim_key_mode")
     if startup_intro.is_active() then
